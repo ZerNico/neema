@@ -35,6 +35,8 @@ export const messages = pgTable(
       .default("complete"),
     // final assembled text; for streaming messages this is written on completion
     content: text().notNull().default(""),
+    // final assembled reasoning/thinking text; empty for non-reasoning models
+    reasoning: text().notNull().default(""),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     usage: jsonb().$type<{ inputTokens?: number; outputTokens?: number }>(),
     error: jsonb().$type<{ tag: string; message: string }>(),
@@ -53,6 +55,10 @@ export const messageChunks = pgTable(
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
     seq: bigint({ mode: "number" }).notNull(),
+    // what the delta belongs to: the visible answer or the reasoning trace
+    kind: text({ enum: ["text", "reasoning"] })
+      .notNull()
+      .default("text"),
     delta: text().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

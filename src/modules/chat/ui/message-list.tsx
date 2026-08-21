@@ -1,10 +1,14 @@
 import { Streamdown } from "streamdown";
+import { ReasoningBlock } from "./reasoning-block.tsx";
 import { cn } from "~/ui/utils";
 
 export interface DisplayMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning: string;
+  /** A reasoning phase happened/is happening (even if its content is hidden). */
+  reasoningSeen: boolean;
   status: string;
 }
 
@@ -22,12 +26,20 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
   }
 
   const streaming = message.status === "streaming";
+  // "Thinking" is the phase before any visible answer text arrives.
+  const reasoningActive = streaming && message.content.length === 0;
+  const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
 
   return (
     <div className="flex w-full justify-start">
       <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
+        {showReasoning ? (
+          <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
+        ) : null}
         {streaming && message.content.length === 0 ? (
-          <span className="text-muted-foreground animate-pulse">Thinking…</span>
+          showReasoning ? null : (
+            <span className="text-muted-foreground animate-pulse">Thinking…</span>
+          )
         ) : (
           <Streamdown
             mode={streaming ? "streaming" : "static"}

@@ -18,7 +18,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   streamChat: () =>
     Stream.fromIterable(["alpha ", "beta ", "gamma ", "delta ", "epsilon"]).pipe(
-      Stream.map((text) => ({ text })),
+      Stream.map((text) => ({ kind: "text" as const, text })),
       Stream.tap(() => Effect.sleep("30 millis")),
     ),
 });

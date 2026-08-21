@@ -9,6 +9,7 @@ import { ChatRepo } from "./repo.ts";
 export interface ChunkEvent {
   readonly messageId: string;
   readonly seq: number;
+  readonly chunkKind: "text" | "reasoning";
   readonly delta: string;
 }
 
@@ -60,7 +61,8 @@ export class StreamEngine extends Context.Service<
 
         let seq = 0;
         let assembled = "";
-        let buffer: Array<{ seq: number; delta: string }> = [];
+        let assembledReasoning = "";
+        let buffer: Array<{ seq: number; kind: "text" | "reasoning"; delta: string }> = [];
 
         const flush = Effect.suspend(() => {
           if (buffer.length === 0) return Effect.void;
@@ -69,8 +71,14 @@ export class StreamEngine extends Context.Service<
           return repo.appendChunks(input.messageId, batch);
         });
 
-        const publishChunk = (chunk: { seq: number; delta: string }) =>
-          PubSub.publish(pubsub, { kind: "chunk", messageId: input.messageId, ...chunk });
+        const publishChunk = (chunk: { seq: number; kind: "text" | "reasoning"; delta: string }) =>
+          PubSub.publish(pubsub, {
+            kind: "chunk",
+            messageId: input.messageId,
+            seq: chunk.seq,
+            chunkKind: chunk.kind,
+            delta: chunk.delta,
+          });
 
         const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
@@ -79,6 +87,7 @@ export class StreamEngine extends Context.Service<
               messageId: input.messageId,
               status,
               content: assembled,
+              reasoning: assembledReasoning,
               ...(error ? { error: { tag: "GenerationFailed", message: String(error) } } : {}),
             });
             yield* repo.updateConversation(input.conversationId, { lastMessageAt: new Date() });
@@ -95,8 +104,9 @@ export class StreamEngine extends Context.Service<
           Stream.mapEffect((delta) =>
             Effect.gen(function* () {
               seq += 1;
-              assembled += delta.text;
-              const chunk = { seq, delta: delta.text };
+              if (delta.kind === "reasoning") assembledReasoning += delta.text;
+              else assembled += delta.text;
+              const chunk = { seq, kind: delta.kind, delta: delta.text };
               buffer.push(chunk);
               yield* publishChunk(chunk);
               // Flush to Postgres in small batches to bound loss on crash
@@ -147,6 +157,7 @@ export class StreamEngine extends Context.Service<
                 kind: "chunk" as const,
                 messageId,
                 seq: c.seq,
+                chunkKind: c.kind,
                 delta: c.delta,
               })),
             );

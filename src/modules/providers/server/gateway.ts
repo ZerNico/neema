@@ -17,6 +17,7 @@ export interface CatalogModel {
 }
 
 export interface ChatDelta {
+  readonly kind: "text" | "reasoning";
   readonly text: string;
 }
 
@@ -118,11 +119,45 @@ export class AiGateway extends Context.Service<
                 model: model.modelKey,
                 messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
               });
+              // Providers with hidden reasoning (e.g. OpenAI o-series) still
+              // stream reasoning_details entries — just encrypted/redacted.
+              // Emit a single empty "reasoning" marker for those so the UI can
+              // show a thinking indicator without any readable trace.
+              let signaledHiddenReasoning = false;
               return chunks.pipe(
-                Stream.map((chunk) => ({
-                  text: chunk.choices.map((c) => c.delta.content ?? "").join(""),
-                })),
-                Stream.filter((delta) => delta.text.length > 0),
+                Stream.map((chunk): ChatDelta[] => {
+                  const deltas: ChatDelta[] = [];
+
+                  let reasoning = chunk.choices.map((c) => c.delta.reasoning ?? "").join("");
+                  let sawHidden = false;
+                  for (const choice of chunk.choices) {
+                    for (const detail of choice.delta.reasoning_details ?? []) {
+                      if (detail.type === "reasoning.text" && detail.text) {
+                        if (!choice.delta.reasoning) reasoning += detail.text;
+                      } else if (detail.type === "reasoning.summary" && detail.summary) {
+                        if (!choice.delta.reasoning) reasoning += detail.summary;
+                      } else if (detail.type === "reasoning.encrypted") {
+                        sawHidden = true;
+                      }
+                    }
+                  }
+                  if (reasoning === "[REDACTED]") {
+                    reasoning = "";
+                    sawHidden = true;
+                  }
+
+                  if (reasoning.length > 0) {
+                    deltas.push({ kind: "reasoning", text: reasoning });
+                  } else if (sawHidden && !signaledHiddenReasoning) {
+                    signaledHiddenReasoning = true;
+                    deltas.push({ kind: "reasoning", text: "" });
+                  }
+
+                  const text = chunk.choices.map((c) => c.delta.content ?? "").join("");
+                  if (text.length > 0) deltas.push({ kind: "text", text });
+                  return deltas;
+                }),
+                Stream.flattenIterable,
               );
             });
 

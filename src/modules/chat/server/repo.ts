@@ -7,7 +7,7 @@ import { ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
-export type ChunkRow = { seq: number; delta: string };
+export type ChunkRow = { seq: number; kind: "text" | "reasoning"; delta: string };
 
 export class ChatRepo extends Context.Service<
   ChatRepo,
@@ -34,13 +34,14 @@ export class ChatRepo extends Context.Service<
     getMessage(messageId: string): Effect.Effect<MessageRow | null>;
     appendChunks(
       messageId: string,
-      chunks: ReadonlyArray<{ seq: number; delta: string }>,
+      chunks: ReadonlyArray<{ seq: number; kind: "text" | "reasoning"; delta: string }>,
     ): Effect.Effect<void>;
     chunksAfter(messageId: string, afterSeq: number): Effect.Effect<ChunkRow[]>;
     finalizeMessage(input: {
       messageId: string;
       status: "complete" | "error" | "aborted";
       content: string;
+      reasoning?: string;
       usage?: { inputTokens?: number; outputTokens?: number };
       error?: { tag: string; message: string };
     }): Effect.Effect<void>;
@@ -139,13 +140,17 @@ export class ChatRepo extends Context.Service<
           if (chunks.length === 0) return;
           yield* db
             .insert(messageChunks)
-            .values(chunks.map((c) => ({ messageId, seq: c.seq, delta: c.delta })))
+            .values(chunks.map((c) => ({ messageId, seq: c.seq, kind: c.kind, delta: c.delta })))
             .pipe(Effect.orDie);
         }),
 
         chunksAfter: Effect.fn("ChatRepo.chunksAfter")(function* (messageId, afterSeq) {
           return yield* db
-            .select({ seq: messageChunks.seq, delta: messageChunks.delta })
+            .select({
+              seq: messageChunks.seq,
+              kind: messageChunks.kind,
+              delta: messageChunks.delta,
+            })
             .from(messageChunks)
             .where(and(eq(messageChunks.messageId, messageId), gt(messageChunks.seq, afterSeq)))
             .orderBy(asc(messageChunks.seq))
@@ -158,6 +163,7 @@ export class ChatRepo extends Context.Service<
             .set({
               status: input.status,
               content: input.content,
+              reasoning: input.reasoning ?? "",
               usage: input.usage,
               error: input.error,
               completedAt: new Date(),

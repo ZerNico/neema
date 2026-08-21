@@ -16,9 +16,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   const initialStream = useMemo(() => {
     if (!streamingMessage) return null;
-    const text = data.pendingChunks.map((c) => c.delta).join("");
+    const text = data.pendingChunks
+      .filter((c) => c.kind !== "reasoning")
+      .map((c) => c.delta)
+      .join("");
+    const reasoningChunks = data.pendingChunks.filter((c) => c.kind === "reasoning");
+    const reasoning = reasoningChunks.map((c) => c.delta).join("");
     const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
-    return { text, lastSeq };
+    return { text, reasoning, reasoningSeen: reasoningChunks.length > 0, lastSeq };
     // pendingChunks are a snapshot for this streaming message id
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamingMessage?.id]);
@@ -37,18 +42,30 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   const display: DisplayMessage[] = data.messages
     .filter((m) => m.role !== "system")
-    .map((m) =>
-      m.id === streamingMessage?.id && stream.status === "streaming"
-        ? { ...m, content: stream.text }
-        : m.id === streamingMessage?.id && stream.text.length > m.content.length
-          ? { ...m, content: stream.text, status: stream.status }
-          : m,
-    );
+    .map((m) => {
+      const reasoning = m.reasoning ?? "";
+      const base = { ...m, reasoning, reasoningSeen: reasoning.length > 0 };
+      if (m.id !== streamingMessage?.id) return base;
+      // Overlay live stream state onto the streaming message row.
+      const live = {
+        ...base,
+        reasoning: stream.reasoning,
+        reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
+      };
+      if (stream.status === "streaming") return { ...live, content: stream.text };
+      if (stream.text.length > m.content.length) {
+        return { ...live, content: stream.text, status: stream.status };
+      }
+      return live;
+    });
 
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1">
-        <VirtualMessageList messages={display} followKey={stream.text.length} />
+        <VirtualMessageList
+          messages={display}
+          followKey={stream.text.length + stream.reasoning.length}
+        />
       </div>
       <div className="px-4 pb-4 pt-2">
         <Composer

@@ -5,14 +5,32 @@ import { MessageBubble } from "./message-list.tsx";
 describe("MessageBubble", () => {
   it("renders user content right-aligned", () => {
     render(
-      <MessageBubble message={{ id: "1", role: "user", content: "Hello!", status: "complete" }} />,
+      <MessageBubble
+        message={{
+          id: "1",
+          role: "user",
+          content: "Hello!",
+          reasoning: "",
+          reasoningSeen: false,
+          status: "complete",
+        }}
+      />,
     );
     expect(screen.getByText("Hello!")).toBeInTheDocument();
   });
 
   it("shows thinking indicator for empty streaming messages", () => {
     render(
-      <MessageBubble message={{ id: "2", role: "assistant", content: "", status: "streaming" }} />,
+      <MessageBubble
+        message={{
+          id: "2",
+          role: "assistant",
+          content: "",
+          reasoning: "",
+          reasoningSeen: false,
+          status: "streaming",
+        }}
+      />,
     );
     expect(screen.getByText("Thinking…")).toBeInTheDocument();
   });
@@ -20,7 +38,14 @@ describe("MessageBubble", () => {
   it("shows an error note for failed generations", () => {
     render(
       <MessageBubble
-        message={{ id: "3", role: "assistant", content: "partial", status: "error" }}
+        message={{
+          id: "3",
+          role: "assistant",
+          content: "partial",
+          reasoning: "",
+          reasoningSeen: false,
+          status: "error",
+        }}
       />,
     );
     expect(screen.getByText("Generation failed.")).toBeInTheDocument();
