@@ -110,4 +110,32 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+
+  /* Thin, theme-aware scrollbars (ChatGPT/Claude style): trackless with a
+     subtle thumb that strengthens on hover. Firefox via scrollbar-width/color,
+     WebKit via the pseudo-elements. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    /* Inset the thumb from the edge for a floating look */
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
