@@ -32,6 +32,19 @@ export const PageStatus = Schema.Struct({
 });
 export type PageStatus = typeof PageStatus.Type;
 
+// A citable source. `index` is assigned per assistant message (not per call), so
+// a second search continues the numbering and a repeated URL keeps its first
+// number — the model cites these as [^index].
+export const Source = Schema.Struct({
+  index: Schema.Int,
+  url: Schema.String,
+  title: Schema.String,
+  snippet: Schema.String,
+  /** true when we fetched and extracted the page, false for snippet-only hits. */
+  read: Schema.Boolean,
+});
+export type Source = typeof Source.Type;
+
 // Envelope persisted in message_chunks.delta for kind:"tool" markers.
 export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
@@ -65,6 +78,7 @@ export const ToolChunkEnvelope = Schema.Union([
       pagesFetched: Schema.optionalKey(Schema.Number),
     }),
     pages: Schema.optionalKey(Schema.Array(PageStatus)),
+    sources: Schema.optionalKey(Schema.Array(Source)),
     error: Schema.optionalKey(Schema.String),
   }),
 ]);

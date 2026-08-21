@@ -7,6 +7,16 @@ export interface ToolPageStatus {
   status: "pending" | "reading" | "done" | "error";
 }
 
+// A citable source. `index` is message-global, so chips and the sources panel
+// can key off it directly across multiple searches.
+export interface ToolSource {
+  index: number;
+  url: string;
+  title: string;
+  snippet: string;
+  read: boolean;
+}
+
 // Live view of one tool call, upserted by callId from tool chunk envelopes.
 export interface ToolActivity {
   callId: string;
@@ -16,6 +26,7 @@ export interface ToolActivity {
   resultCount?: number;
   pagesFetched?: number;
   pages?: ToolPageStatus[];
+  sources?: ToolSource[];
   error?: string;
 }
 
@@ -61,6 +72,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
     ok?: boolean;
     summary?: { query?: string; resultCount?: number; pagesFetched?: number };
     pages?: ToolPageStatus[];
+    sources?: ToolSource[];
     error?: string;
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
@@ -99,6 +111,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
       ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
       ...(e.summary?.pagesFetched !== undefined ? { pagesFetched: e.summary.pagesFetched } : {}),
       ...(e.pages !== undefined ? { pages: e.pages } : {}),
+      ...(e.sources !== undefined ? { sources: e.sources } : {}),
       ...(e.error !== undefined ? { error: e.error } : {}),
     });
   }

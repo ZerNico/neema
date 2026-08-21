@@ -6,6 +6,7 @@ import {
   useMessageStream,
   type ToolActivity,
   type ToolPageStatus,
+  type ToolSource,
 } from "../client/use-message-stream.ts";
 import { sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
@@ -27,6 +28,7 @@ function toActivity(row: {
     resultCount?: number;
     pagesFetched?: number;
     pages?: ToolPageStatus[];
+    sources?: ToolSource[];
   };
   return {
     callId: row.id,
@@ -36,6 +38,7 @@ function toActivity(row: {
     ...(result.resultCount !== undefined ? { resultCount: result.resultCount } : {}),
     ...(result.pagesFetched !== undefined ? { pagesFetched: result.pagesFetched } : {}),
     ...(result.pages !== undefined ? { pages: result.pages } : {}),
+    ...(result.sources !== undefined ? { sources: result.sources } : {}),
     ...(row.error ? { error: row.error.message } : {}),
   };
 }

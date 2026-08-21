@@ -4,6 +4,7 @@ import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
 export const Route = createFileRoute("/_app")({
@@ -28,12 +29,19 @@ function AppLayout() {
       <SidebarProvider>
         <AppSidebar user={user} />
         <SidebarInset className="h-svh overflow-hidden">
-          <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-            <SidebarTrigger />
-          </header>
-          <main className="min-h-0 flex-1">
-            <Outlet />
-          </main>
+          <DetailPanelProvider>
+            <header className="flex h-12 shrink-0 items-center gap-2 px-3">
+              <SidebarTrigger />
+            </header>
+            {/* The detail rail is a sibling of the content, not an overlay:
+                opening it shrinks the chat column instead of covering it. */}
+            <div className="flex min-h-0 flex-1">
+              <main className="min-w-0 flex-1">
+                <Outlet />
+              </main>
+              <DetailPanelRail />
+            </div>
+          </DetailPanelProvider>
         </SidebarInset>
       </SidebarProvider>
     </ConfirmProvider>

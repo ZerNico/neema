@@ -3,7 +3,7 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend } from "./search.ts";
 import { PageExtractor } from "./extraction.ts";
-import { WebSearchParams, type PageStatus } from "../schema.ts";
+import { WebSearchParams, type PageStatus, type Source } from "../schema.ts";
 
 export class ToolUnavailable extends Schema.TaggedError<ToolUnavailable>()("ToolUnavailable", {
   tool: Schema.String,
@@ -20,6 +20,14 @@ const PageStatusSchema = Schema.Struct({
   status: Schema.Literals(["pending", "reading", "done", "error"]),
 });
 
+const SourceSchema = Schema.Struct({
+  index: Schema.Int,
+  url: Schema.String,
+  title: Schema.String,
+  snippet: Schema.String,
+  read: Schema.Boolean,
+});
+
 const WebSearchResult = Schema.Struct({
   ok: Schema.Boolean,
   query: Schema.String,
@@ -27,6 +35,8 @@ const WebSearchResult = Schema.Struct({
   pagesFetched: Schema.Number,
   results: Schema.Array(
     Schema.Struct({
+      // The citation number the model must use for this source: [^index].
+      index: Schema.Int,
       title: Schema.String,
       url: Schema.String,
       snippet: Schema.String,
@@ -38,6 +48,8 @@ const WebSearchResult = Schema.Struct({
   // Per-page fetch status; drives the live activity UI (preliminary results)
   // and the durable source list. Not meaningful to the model.
   pages: Schema.optionalKey(Schema.Array(PageStatusSchema)),
+  // Citable sources (no page bodies) — persisted and rendered as chips/panel.
+  sources: Schema.optionalKey(Schema.Array(SourceSchema)),
   error: Schema.optionalKey(Schema.String),
 });
 export type WebSearchResult = typeof WebSearchResult.Type;
@@ -82,6 +94,19 @@ export class WebSearchExecutor extends Context.Service<
         }
         const { config, secret } = tool;
         const connection = { baseUrl: config.baseUrl, secret };
+
+        // Citation numbering is per assistant message: prepare() runs once per
+        // generation, so a second search continues the sequence rather than
+        // restarting at 1, and a URL seen twice keeps its original number.
+        let nextIndex = 1;
+        const indexByUrl = new Map<string, number>();
+        const indexFor = (url: string): number => {
+          const existing = indexByUrl.get(url);
+          if (existing !== undefined) return existing;
+          const assigned = nextIndex++;
+          indexByUrl.set(url, assigned);
+          return assigned;
+        };
 
         const handler = Effect.fnUntraced(function* (
           params: WebSearchParams,
@@ -162,9 +187,19 @@ export class WebSearchExecutor extends Context.Service<
           );
 
           let total = 0;
+          const sources: Source[] = [];
           const results = hits.map((hit) => {
             const fetched = extracted.find((e) => e.hit.url === hit.url);
-            const base = { title: hit.title, url: hit.url, snippet: hit.snippet };
+            const index = indexFor(hit.url);
+            const read = fetched?.page != null;
+            sources.push({
+              index,
+              url: hit.url,
+              title: hit.title,
+              snippet: hit.snippet,
+              read,
+            });
+            const base = { index, title: hit.title, url: hit.url, snippet: hit.snippet };
             if (!fetched) return base;
             if (fetched.error !== null) return { ...base, fetchError: fetched.error };
             const page = fetched.page!;
@@ -189,6 +224,7 @@ export class WebSearchExecutor extends Context.Service<
             pagesFetched: extracted.filter((e) => e.error === null).length,
             results,
             pages,
+            sources,
           } satisfies WebSearchResult;
         });
 

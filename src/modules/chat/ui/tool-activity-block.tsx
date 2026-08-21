@@ -7,35 +7,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { ToolActivity, ToolPageStatus } from "../client/use-message-stream.ts";
+import { Favicon, hostOf } from "./favicon.tsx";
 import { cn } from "~/ui/utils";
-
-const hostOf = (url: string): string => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-};
-
-// Favicon via Google's s2 service — no extra fetch/persistence on our side and
-// it gracefully serves a globe placeholder for unknown hosts.
-function Favicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return (
-      <HugeiconsIcon icon={GlobalSearchIcon} className="text-muted-foreground size-4 shrink-0" />
-    );
-  }
-  return (
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostOf(url))}&sz=32`}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="size-4 shrink-0 rounded-[4px]"
-    />
-  );
-}
 
 function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
   const reading = page.status === "reading" || page.status === "pending";

@@ -39,6 +39,21 @@ See README.md for architecture; this file records the sharp edges.
 - Tool page bodies are never persisted. `message_tool_calls.result` holds the summary
   plus the source list (url/title/status) only.
 
+## Citations / streamdown
+
+- Citations ride on GFM footnotes (`[^N]`), not markdown links: a half-streamed
+  `[text](htt` renders as an unoverridable `[blocked]` span (streamdown rejects an
+  undefined href *before* consulting `components.a`), while `[^1` is just literal text.
+- The model writes markers only. We synthesize the `[^N]: url` definitions from the tool's
+  own source list (`prepareCitedMarkdown`, `src/modules/chat/ui/citations.ts`) — without
+  them GFM leaves `[^1]` as raw text until the definitions arrive, i.e. never mid-stream.
+- Two streamdown 2.5.0 output details are load-bearing: the `#user-content-fn-N` href on a
+  footnote ref, and the `data-footnotes` attribute on the appended section. hast gives that
+  attribute the *empty string*, so suppress on `!== undefined` — a truthiness check silently
+  renders the list. Both are pinned by `message-list.test.tsx`; re-probe on upgrade.
+- Citation numbers are per assistant message: `WebSearchExecutor.prepare()` runs once per
+  generation and closes over the counter, so a second search continues the sequence.
+
 ## Invariants
 
 - One `ManagedRuntime` per process (`src/server/runtime.ts`, HMR-safe via globalThis).
