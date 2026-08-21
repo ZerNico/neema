@@ -17,6 +17,7 @@ export interface CatalogPick {
   name: string;
   type: "chat" | "embedding" | "image" | "audio";
   contextLength: number | null;
+  capabilities?: { reasoning: boolean; tools: boolean; vision: boolean };
   /** True when the entry was typed by the user rather than picked from the catalog. */
   custom?: boolean;
 }

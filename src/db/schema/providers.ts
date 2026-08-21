@@ -35,6 +35,11 @@ export const models = pgTable(
     displayName: text("display_name").notNull(),
     type: text({ enum: ["chat", "embedding", "image", "audio"] }).notNull(),
     contextLength: integer("context_length"),
+    // Auto-detected from the provider catalog where possible, admin-overridable.
+    capabilities: jsonb()
+      .$type<{ reasoning: boolean; tools: boolean; vision: boolean }>()
+      .notNull()
+      .default({ reasoning: false, tools: false, vision: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     enabled: boolean().notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

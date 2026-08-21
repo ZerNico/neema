@@ -1,0 +1,1 @@
+ALTER TABLE "models" ADD COLUMN "capabilities" jsonb DEFAULT '{"reasoning":false,"tools":false,"vision":false}' NOT NULL;

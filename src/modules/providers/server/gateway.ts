@@ -3,6 +3,7 @@ import { Context, Effect, Layer, Schema, Stream } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import { ProviderRepo } from "./repo.ts";
+import { extractThinkTags } from "./think-extractor.ts";
 
 export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>()(
   "ProviderUnreachable",
@@ -14,6 +15,13 @@ export interface CatalogModel {
   readonly name: string;
   readonly type: "chat" | "embedding" | "image" | "audio";
   readonly contextLength: number | null;
+  readonly capabilities: ModelCapabilities;
+}
+
+export interface ModelCapabilities {
+  readonly reasoning: boolean;
+  readonly tools: boolean;
+  readonly vision: boolean;
 }
 
 export interface ChatDelta {
@@ -32,8 +40,10 @@ const ModelsResponse = Schema.Struct({
       id: Schema.String,
       name: Schema.optionalKey(Schema.String),
       context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+      supported_parameters: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
       architecture: Schema.optionalKey(
         Schema.Struct({
+          input_modalities: Schema.optionalKey(Schema.Array(Schema.String)),
           output_modalities: Schema.optionalKey(Schema.Array(Schema.String)),
         }),
       ),
@@ -46,6 +56,21 @@ const inferType = (outputModalities: ReadonlyArray<string> | undefined): Catalog
   if (outputModalities.includes("image")) return "image";
   if (outputModalities.includes("audio")) return "audio";
   return "chat";
+};
+
+// OpenRouter-style capability signals; plain OpenAI-compatible endpoints
+// usually return neither field, in which case everything stays false and the
+// admin toggles capabilities manually.
+const inferCapabilities = (m: {
+  supported_parameters?: ReadonlyArray<string> | null;
+  architecture?: { input_modalities?: ReadonlyArray<string> };
+}): ModelCapabilities => {
+  const params = m.supported_parameters ?? [];
+  return {
+    reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
+    tools: params.includes("tools"),
+    vision: (m.architecture?.input_modalities ?? []).includes("image"),
+  };
 };
 
 // Talks to configured AI providers: model catalog for admin autocomplete, and
@@ -94,6 +119,7 @@ export class AiGateway extends Context.Service<
           name: m.name ?? m.id,
           type: inferType(m.architecture?.output_modalities),
           contextLength: m.context_length ?? null,
+          capabilities: inferCapabilities(m),
         }));
       });
 
@@ -161,7 +187,9 @@ export class AiGateway extends Context.Service<
               );
             });
 
-            return Stream.unwrap(raw).pipe(
+            // Always-on extractor: models emitting raw <think> blocks in text
+            // (R1 distills, QwQ, local models) still feed the reasoning track.
+            return extractThinkTags(Stream.unwrap(raw)).pipe(
               Stream.provide(clientLayer),
               Stream.mapError(
                 (cause) =>

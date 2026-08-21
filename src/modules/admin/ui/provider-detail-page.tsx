@@ -18,6 +18,12 @@ import {
 } from "../server/functions.ts";
 import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
+import {
+  CAPABILITY_META,
+  type Capabilities,
+  CapabilityIcons,
+  ContextBadge,
+} from "~/modules/providers/ui/capability-icons.tsx";
 import { modelsQuery, PROVIDER_PRESETS, providersQuery } from "./providers-page.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -193,11 +199,10 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                     {model.displayName}
                     <Badge variant="secondary">{model.type}</Badge>
                   </span>
-                  <span className="text-muted-foreground truncate text-xs">
-                    {model.modelKey}
-                    {model.contextLength
-                      ? ` · ${Math.round(model.contextLength / 1000)}k context`
-                      : ""}
+                  <span className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
+                    <span className="truncate">{model.modelKey}</span>
+                    <ContextBadge contextLength={model.contextLength} />
+                    <CapabilityIcons capabilities={model.capabilities} />
                   </span>
                 </div>
                 <Switch
@@ -251,6 +256,11 @@ function AddModelDialog({
   const [typed, setTyped] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [customType, setCustomType] = useState<CatalogPick["type"]>("chat");
+  const [capabilities, setCapabilities] = useState<Capabilities>({
+    reasoning: false,
+    tools: false,
+    vision: false,
+  });
 
   // Selecting from the popup (incl. the creatable row) is the primary path;
   // raw typed text works as a manual entry even without an explicit selection.
@@ -270,6 +280,7 @@ function AddModelDialog({
           modelKey: input.pick.id,
           displayName: input.displayName || input.pick.name,
           type: input.pick.custom ? customType : input.pick.type,
+          capabilities,
           ...(input.pick.contextLength ? { contextLength: input.pick.contextLength } : {}),
         },
       }),
@@ -280,6 +291,7 @@ function AddModelDialog({
       setTyped("");
       setDisplayName("");
       setCustomType("chat");
+      setCapabilities({ reasoning: false, tools: false, vision: false });
       void queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
   });
@@ -302,6 +314,10 @@ function AddModelDialog({
                 setPick(picked);
                 setTyped(picked.id);
                 setDisplayName(picked.custom ? "" : picked.name);
+                // Auto-detected from the catalog; still editable below.
+                setCapabilities(
+                  picked.capabilities ?? { reasoning: false, tools: false, vision: false },
+                );
               }}
               onInput={setTyped}
             />
@@ -335,6 +351,28 @@ function AddModelDialog({
               placeholder={effective?.id ?? "Shown in the model picker"}
             />
           </Field>
+          {effective ? (
+            <Field>
+              <FieldLabel>Capabilities</FieldLabel>
+              <div className="flex flex-col gap-2">
+                {CAPABILITY_META.map((cap) => (
+                  <label key={cap.key} className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={capabilities[cap.key]}
+                      onCheckedChange={(checked) =>
+                        setCapabilities((c) => ({ ...c, [cap.key]: checked }))
+                      }
+                    />
+                    <HugeiconsIcon icon={cap.icon} className="text-muted-foreground size-4" />
+                    {cap.label}
+                  </label>
+                ))}
+              </div>
+              {!isCustom ? (
+                <p className="text-muted-foreground text-xs">Detected from the catalog.</p>
+              ) : null}
+            </Field>
+          ) : null}
           {effective ? (
             <p className="text-muted-foreground text-xs">
               {effective.id} · {isCustom ? customType : effective.type}

@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { chatModelsQuery } from "../client/queries.ts";
+import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "~/ui/primitives/select";
 import { cn } from "~/ui/utils";
@@ -107,7 +108,11 @@ export function Composer({
           <SelectContent>
             {models.map((model) => (
               <SelectItem key={model.id} value={model.id}>
-                {model.displayName}
+                <span className="flex w-full items-center gap-2">
+                  <span className="flex-1 truncate">{model.displayName}</span>
+                  <CapabilityIcons capabilities={model.capabilities} />
+                  <ContextBadge contextLength={model.contextLength} />
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

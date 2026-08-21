@@ -19,12 +19,19 @@ export const ProviderIdInput = Schema.Struct({
   providerId: Schema.String,
 });
 
+const CapabilitiesSchema = Schema.Struct({
+  reasoning: Schema.Boolean,
+  tools: Schema.Boolean,
+  vision: Schema.Boolean,
+});
+
 export const CreateModelInput = Schema.Struct({
   providerId: Schema.String,
   modelKey: Schema.String.check(Schema.isMinLength(1)),
   displayName: Schema.String.check(Schema.isMinLength(1)),
   type: Schema.Literals(["chat", "embedding", "image", "audio"]),
   contextLength: Schema.optionalKey(Schema.Number),
+  capabilities: Schema.optionalKey(CapabilitiesSchema),
 });
 
 export const UpdateModelInput = Schema.Struct({
@@ -32,6 +39,7 @@ export const UpdateModelInput = Schema.Struct({
   displayName: Schema.optionalKey(Schema.String),
   type: Schema.optionalKey(Schema.Literals(["chat", "embedding", "image", "audio"])),
   contextLength: Schema.optionalKey(Schema.Number),
+  capabilities: Schema.optionalKey(CapabilitiesSchema),
   enabled: Schema.optionalKey(Schema.Boolean),
 });
 
