@@ -3,7 +3,7 @@ import { getSession } from "~/modules/auth/server/functions.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/shared/ui/primitives/sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async () => {

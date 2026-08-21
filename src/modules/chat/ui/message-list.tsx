@@ -1,4 +1,4 @@
-import { cn } from "~/shared/ui/utils";
+import { cn } from "~/ui/utils";
 
 export interface DisplayMessage {
   id: string;

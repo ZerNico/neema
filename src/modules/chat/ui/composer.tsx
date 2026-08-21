@@ -3,15 +3,15 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { chatModelsQuery } from "../client/queries.ts";
-import { Button } from "~/shared/ui/primitives/button";
+import { Button } from "~/ui/primitives/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "~/shared/ui/primitives/select";
-import { Textarea } from "~/shared/ui/primitives/textarea";
+} from "~/ui/primitives/select";
+import { Textarea } from "~/ui/primitives/textarea";
 
 export function Composer({
   onSend,

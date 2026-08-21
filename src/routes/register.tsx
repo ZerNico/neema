@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
-import { useAppForm } from "~/shared/ui/form/app-form.tsx";
-import { Card, CardContent, CardHeader, CardTitle } from "~/shared/ui/primitives/card";
+import { useAppForm } from "~/ui/form/app-form.tsx";
+import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 
 const RegisterSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),

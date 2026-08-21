@@ -14,23 +14,23 @@ import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { conversationsQuery } from "../client/queries.ts";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
-import { Avatar, AvatarFallback } from "~/shared/ui/primitives/avatar";
-import { Button } from "~/shared/ui/primitives/button";
+import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
+import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "~/shared/ui/primitives/dialog";
+} from "~/ui/primitives/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "~/shared/ui/primitives/dropdown-menu";
-import { Input } from "~/shared/ui/primitives/input";
+} from "~/ui/primitives/dropdown-menu";
+import { Input } from "~/ui/primitives/input";
 import {
   Sidebar,
   SidebarContent,
@@ -43,7 +43,7 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "~/shared/ui/primitives/sidebar";
+} from "~/ui/primitives/sidebar";
 
 export function AppSidebar({
   user,

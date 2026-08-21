@@ -1,7 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { Config, Context, Effect, Layer } from "effect";
-import { relations } from "~/shared/db/relations.ts";
+import { relations } from "~/db/relations.ts";
 
 // Effect-native Postgres client (pooled). Also powers LISTEN/NOTIFY for sync.
 export const PgLive = PgClient.layerConfig({

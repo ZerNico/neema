@@ -5,20 +5,20 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 
-import { useIsMobile } from "~/shared/ui/use-mobile";
-import { cn } from "~/shared/ui/utils";
-import { Button } from "~/shared/ui/primitives/button";
-import { Input } from "~/shared/ui/primitives/input";
-import { Separator } from "~/shared/ui/primitives/separator";
+import { useIsMobile } from "~/ui/use-mobile";
+import { cn } from "~/ui/utils";
+import { Button } from "~/ui/primitives/button";
+import { Input } from "~/ui/primitives/input";
+import { Separator } from "~/ui/primitives/separator";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "~/shared/ui/primitives/sheet";
-import { Skeleton } from "~/shared/ui/primitives/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "~/shared/ui/primitives/tooltip";
+} from "~/ui/primitives/sheet";
+import { Skeleton } from "~/ui/primitives/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
 

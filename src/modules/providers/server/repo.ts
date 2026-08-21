@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer, type Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { models, providers } from "~/shared/db/schema/index.ts";
+import { models, providers } from "~/db/schema/index.ts";
 import { KeyCipher } from "./crypto.ts";
 
 export type ProviderKind = "openrouter" | "openai-compatible";
@@ -41,7 +41,7 @@ export class ProviderRepo extends Context.Service<
       displayName: string;
       type: ModelType;
       contextLength?: number;
-      metadata?: Record<string, import("~/shared/db/schema/providers.ts").JsonValue>;
+      metadata?: Record<string, import("~/db/schema/providers.ts").JsonValue>;
     }): Effect.Effect<ModelRow>;
     updateModel(
       modelId: string,

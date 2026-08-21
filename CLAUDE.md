@@ -30,7 +30,7 @@ See README.md for architecture; this file records the sharp edges.
   Server functions/routes run effects with `runtime.runPromise`.
 - `message_chunks.seq` starts at 1 and is contiguous per message; resume protocol relies
   on it (`?after=<seq>` replays from Postgres, then live tail dedupes by seq).
-- Better Auth owns its tables' columns — `src/shared/db/schema/auth.ts` must mirror what
+- Better Auth owns its tables' columns — `src/db/schema/auth.ts` must mirror what
   the installed better-auth version expects (1.7 added `account.issuer`). After a
   better-auth upgrade, verify against a fresh signup before shipping.
 - Provider API keys are AES-256-GCM encrypted at rest (`PROVIDER_KEY_SECRET`, base64
@@ -43,5 +43,5 @@ See README.md for architecture; this file records the sharp edges.
 - Schema change → `pnpm db:generate` → commit the `drizzle/` folder → `pnpm db:migrate`.
 - `pnpm typecheck && pnpm lint && pnpm test` before considering work done.
   Integration tests need Docker (Testcontainers).
-- UI primitives in `src/shared/ui/primitives` are shadcn-generated (Base UI, style
+- UI primitives in `src/ui/primitives` are shadcn-generated (Base UI, style
   `base-luma`) — regenerate via `pnpm dlx shadcn@latest add <component>`, don't hand-roll.

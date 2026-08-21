@@ -39,16 +39,15 @@ src/
     providers/       provider/model registry, API-key crypto, AI gateway
     admin/           admin server functions + panel UI
     sync/            user-scoped event bus (PubSub + LISTEN/NOTIFY), SSE plumbing
-  shared/
-    db/              drizzle schema, relations, plain client (for Better Auth)
-    ui/              shadcn-generated primitives + app form kit
+  db/                drizzle schema, relations, plain client (Better Auth only)
+  ui/                shadcn-generated primitives + app form kit
   routes/            TanStack file routes (thin; delegate into modules)
 ```
 
 Modules own their domain end to end (`server/`, `client/`, `ui/`, schemas, errors).
-`shared/` holds only cross-module infrastructure: the DB schema (shared by design —
-relations span modules) and the generated UI kit (the paths shadcn's CLI is configured
-to target in `components.json`).
+The only cross-module code sits at the top level: `db/` (the schema is shared by
+design — relations span modules) and `ui/` (the design system; shadcn's CLI is
+configured to generate into it via `components.json`).
 
 ### Resumable streams
 

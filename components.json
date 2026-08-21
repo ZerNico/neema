@@ -13,11 +13,11 @@
   "iconLibrary": "hugeicons",
   "rtl": false,
   "aliases": {
-    "components": "~/shared/ui",
-    "utils": "~/shared/ui/utils",
-    "ui": "~/shared/ui/primitives",
-    "lib": "~/shared",
-    "hooks": "~/shared/ui"
+    "components": "~/ui",
+    "utils": "~/ui/utils",
+    "ui": "~/ui/primitives",
+    "lib": "~/ui",
+    "hooks": "~/ui"
   },
   "menuColor": "default",
   "menuAccent": "subtle",

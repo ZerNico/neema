@@ -4,8 +4,8 @@ import { admin } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { count } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { getDb } from "~/shared/db/client.ts";
-import * as schema from "~/shared/db/schema/index.ts";
+import { getDb } from "~/db/client.ts";
+import * as schema from "~/db/schema/index.ts";
 
 async function isFirstUser() {
   const [row] = await getDb().select({ n: count() }).from(schema.user);

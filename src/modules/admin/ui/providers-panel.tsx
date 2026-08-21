@@ -14,26 +14,26 @@ import {
   updateProvider,
 } from "../server/functions.ts";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
-import { Badge } from "~/shared/ui/primitives/badge";
-import { Button } from "~/shared/ui/primitives/button";
-import { Card, CardContent, CardHeader, CardTitle } from "~/shared/ui/primitives/card";
+import { Badge } from "~/ui/primitives/badge";
+import { Button } from "~/ui/primitives/button";
+import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "~/shared/ui/primitives/dialog";
-import { Field, FieldLabel } from "~/shared/ui/primitives/field";
-import { Input } from "~/shared/ui/primitives/input";
+} from "~/ui/primitives/dialog";
+import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Input } from "~/ui/primitives/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "~/shared/ui/primitives/select";
-import { Separator } from "~/shared/ui/primitives/separator";
+} from "~/ui/primitives/select";
+import { Separator } from "~/ui/primitives/separator";
 
 export const providersQuery = queryOptions({
   queryKey: ["admin", "providers"],

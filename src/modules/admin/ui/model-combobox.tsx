@@ -7,7 +7,7 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from "~/shared/ui/primitives/combobox";
+} from "~/ui/primitives/combobox";
 
 export interface CatalogPick {
   id: string;

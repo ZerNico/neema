@@ -1,14 +1,14 @@
 import * as React from "react";
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 
-import { cn } from "~/shared/ui/utils";
-import { Button } from "~/shared/ui/primitives/button";
+import { cn } from "~/ui/utils";
+import { Button } from "~/ui/primitives/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "~/shared/ui/primitives/input-group";
+} from "~/ui/primitives/input-group";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 

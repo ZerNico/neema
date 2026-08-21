@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { authClient } from "~/modules/auth/client.ts";
-import { Badge } from "~/shared/ui/primitives/badge";
+import { Badge } from "~/ui/primitives/badge";
 
 export const Route = createFileRoute("/_app/admin/users")({
   component: UsersPanel,

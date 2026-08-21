@@ -1,7 +1,7 @@
 import { createFormHook, createFormHookContexts } from "@tanstack/react-form";
-import { Button } from "~/shared/ui/primitives/button";
-import { Field, FieldError, FieldLabel } from "~/shared/ui/primitives/field";
-import { Input } from "~/shared/ui/primitives/input";
+import { Button } from "~/ui/primitives/button";
+import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
+import { Input } from "~/ui/primitives/input";
 
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();

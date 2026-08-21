@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { conversations, messageChunks, messages } from "~/shared/db/schema/index.ts";
+import { conversations, messageChunks, messages } from "~/db/schema/index.ts";
 import { ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
