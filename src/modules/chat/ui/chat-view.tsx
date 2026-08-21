@@ -1,17 +1,17 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
 import { useMessageStream } from "../client/use-message-stream.ts";
 import { sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
-import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
+import type { DisplayMessage } from "./message-list.tsx";
+import { VirtualMessageList } from "./virtual-message-list.tsx";
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
   const { data } = useSuspenseQuery(conversationQuery(conversationId));
   const [modelId, setModelId] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   const initialStream = useMemo(() => {
@@ -45,21 +45,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           : m,
     );
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [display.length, stream.text.length]);
-
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
-          {display.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
-          <div ref={bottomRef} />
-        </div>
+      <div className="min-h-0 flex-1">
+        <VirtualMessageList messages={display} followKey={stream.text.length} />
       </div>
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 pt-2">
         <Composer
           onSend={(content) => sendMutation.mutate(content)}
           disabled={sendMutation.isPending || stream.status === "streaming"}

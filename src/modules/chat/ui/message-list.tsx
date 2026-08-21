@@ -1,3 +1,4 @@
+import { Streamdown } from "streamdown";
 import { cn } from "~/ui/utils";
 
 export interface DisplayMessage {
@@ -9,23 +10,37 @@ export interface DisplayMessage {
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === "user";
+
+  if (isUser) {
+    return (
+      <div className="flex w-full justify-end">
+        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  const streaming = message.status === "streaming";
+
   return (
-    <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
-        )}
-      >
-        {message.content}
-        {message.status === "streaming" && message.content.length === 0 ? (
+    <div className="flex w-full justify-start">
+      <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
+        {streaming && message.content.length === 0 ? (
           <span className="text-muted-foreground animate-pulse">Thinking…</span>
-        ) : null}
-        {message.status === "streaming" && message.content.length > 0 ? (
-          <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-current align-text-bottom" />
-        ) : null}
+        ) : (
+          <Streamdown
+            mode={streaming ? "streaming" : "static"}
+            parseIncompleteMarkdown
+            isAnimating={streaming}
+            {...(streaming ? { caret: "block" as const } : {})}
+            className={cn("space-y-3 [&_pre]:overflow-x-auto")}
+          >
+            {message.content}
+          </Streamdown>
+        )}
         {message.status === "error" ? (
-          <span className="text-destructive block text-xs">Generation failed.</span>
+          <p className="text-destructive mt-1 text-xs">Generation failed.</p>
         ) : null}
       </div>
     </div>
