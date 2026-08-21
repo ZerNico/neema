@@ -113,10 +113,20 @@ export interface DisplayMessage {
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   if (message.role === "user") {
     return (
-      <div className="flex w-full justify-end">
+      <div className="group/user flex w-full flex-col items-end">
         <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
           {message.content}
         </div>
+        {/* Hover-revealed on pointer devices; always visible on touch, where
+            there is no hover. focus-within keeps them keyboard-reachable. */}
+        <MessageActions
+          messageId={message.id}
+          content={message.content}
+          sources={[]}
+          onRetry={message.onRetry}
+          retryDisabled={message.retryDisabled ?? false}
+          className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
+        />
       </div>
     );
   }

@@ -149,6 +149,14 @@ describe("MessageBubble actions", () => {
     expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
   });
 
+  it("gives user messages copy and (when wired) retry too", () => {
+    const onRetry = vi.fn();
+    renderPlain({ id: "u1", role: "user", content: "hi there", onRetry });
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    screen.getByRole("button", { name: "Retry" }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
   it("shows retry only when the message offers it", () => {
     renderPlain();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();

@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
+import { cn } from "~/ui/utils";
 
 function ActionButton({
   label,
@@ -83,13 +84,15 @@ export function MessageActions({
   sources,
   onRetry,
   retryDisabled,
+  className,
 }: {
   messageId: string;
   content: string;
   sources: ToolSource[];
-  /** Absent when this message can't be retried (e.g. user messages). */
+  /** Absent when nothing can be regenerated from this message. */
   onRetry?: (() => void) | undefined;
   retryDisabled?: boolean;
+  className?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -101,7 +104,7 @@ export function MessageActions({
   };
 
   return (
-    <div className="mt-2 flex items-center gap-1">
+    <div className={cn("mt-2 flex items-center gap-1", className)}>
       <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
         <HugeiconsIcon
           icon={copied ? Tick02Icon : Copy01Icon}

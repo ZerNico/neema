@@ -120,19 +120,27 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryMutation.mutate(messageId);
   };
 
+  // Retrying a user message regenerates the assistant response that follows
+  // it (the retry target is always an assistant message server-side).
+  const responseAfter = (messageId: string) => {
+    const index = data.messages.findIndex((m) => m.id === messageId);
+    return data.messages.slice(index + 1).find((m) => m.role === "assistant")?.id;
+  };
+
   const display: DisplayMessage[] = data.messages
     .filter((m) => m.role !== "system")
     .map((m) => {
       const reasoning = m.reasoning ?? "";
       const toolActivities = data.toolCalls.filter((t) => t.messageId === m.id).map(toActivity);
+      const retryTarget = m.role === "assistant" ? m.id : responseAfter(m.id);
       const base: DisplayMessage = {
         ...m,
         reasoning,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
-        ...(m.role === "assistant"
+        ...(retryTarget !== undefined
           ? {
-              onRetry: () => void retry(m.id),
+              onRetry: () => void retry(retryTarget),
               retryDisabled: generating || retryMutation.isPending,
             }
           : {}),
