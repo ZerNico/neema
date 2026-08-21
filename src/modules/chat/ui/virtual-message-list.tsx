@@ -78,17 +78,22 @@ export function VirtualMessageList({
 
   return (
     <div className="relative h-full min-h-0">
-      <div ref={scrollRef} className="h-full overflow-y-auto">
+      {/* stable both-edges keeps centered content aligned with the composer,
+          which sits outside this scroll container (no scrollbar offset). */}
+      <div ref={scrollRef} className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]">
         <div
-          className="relative mx-auto w-full max-w-3xl px-4"
+          className="relative mx-auto w-full max-w-3xl"
           style={{ height: virtualizer.getTotalSize() }}
         >
           {items.map((item) => (
+            // Padding lives on the absolute row itself: absolute positioning
+            // ignores the container's padding, which previously let messages
+            // span wider than the composer and touch the viewport edge.
             <div
               key={item.key}
               ref={virtualizer.measureElement}
               data-index={item.index}
-              className="absolute left-0 top-0 w-full py-2"
+              className="absolute left-0 top-0 w-full px-4 py-2"
               style={{ transform: `translateY(${item.start}px)` }}
             >
               <MessageBubble message={messages[item.index]!} />

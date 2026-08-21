@@ -67,13 +67,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           followKey={stream.text.length + stream.reasoning.length}
         />
       </div>
-      <div className="px-4 pb-4 pt-2">
-        <Composer
-          onSend={(content) => sendMutation.mutate(content)}
-          disabled={sendMutation.isPending || stream.status === "streaming"}
-          modelId={effectiveModelId}
-          onModelChange={setModelId}
-        />
+      {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
+          composer edges align exactly with message content above. */}
+      <div className="pb-4 pt-2 [scrollbar-gutter:stable_both-edges]">
+        <div className="mx-auto w-full max-w-3xl px-4">
+          <Composer
+            onSend={(content) => sendMutation.mutate(content)}
+            disabled={sendMutation.isPending || stream.status === "streaming"}
+            modelId={effectiveModelId}
+            onModelChange={setModelId}
+          />
+        </div>
       </div>
     </div>
   );
@@ -101,7 +105,7 @@ export function NewChatView() {
       <div className="flex flex-1 items-center justify-center">
         <h1 className="text-muted-foreground text-2xl font-medium">What can I help with?</h1>
       </div>
-      <div className="px-4 pb-4">
+      <div className="mx-auto w-full max-w-3xl px-4 pb-4">
         <Composer
           onSend={(content) => sendMutation.mutate(content)}
           disabled={sendMutation.isPending}
