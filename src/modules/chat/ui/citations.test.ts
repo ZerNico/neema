@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectSources, prepareCitedMarkdown } from "./citations.ts";
+import { collectSources, prepareCitedMarkdown, stripCitationMarkers } from "./citations.ts";
 import type { ToolSource } from "../client/use-message-stream.ts";
 
 const source = (index: number, url: string): ToolSource => ({
@@ -44,6 +44,18 @@ describe("prepareCitedMarkdown", () => {
   it("drops markers with no matching source", () => {
     const out = prepareCitedMarkdown("Claim[^9] and claim[^1].", [source(1, "https://a.dev")]);
     expect(out).toContain("Claim and claim[^1].");
+  });
+});
+
+describe("stripCitationMarkers", () => {
+  it("removes markers wherever they sit", () => {
+    expect(stripCitationMarkers("Fact[^1]. More[^2][^12], done[^3].")).toBe("Fact. More, done.");
+  });
+
+  it("leaves marker-free text alone", () => {
+    expect(stripCitationMarkers("Nothing to see [here](https://a.dev).")).toBe(
+      "Nothing to see [here](https://a.dev).",
+    );
   });
 });
 

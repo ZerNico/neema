@@ -14,7 +14,7 @@ export function CitationChip({ source, onOpen }: { source: ToolSource; onOpen: (
             type="button"
             onClick={onOpen}
             aria-label={`Source ${source.index}: ${source.title}`}
-            className="bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground mx-0.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full py-0.5 pr-1.5 pl-1 align-middle text-[0.7rem] leading-none font-medium transition-colors"
+            className="bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground mx-0.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full py-0.5 pr-1.5 pl-1 align-middle text-[0.7rem] leading-none font-medium transition-colors select-none"
           >
             <Favicon url={source.url} className="size-3" />
             {source.index}

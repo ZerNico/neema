@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
+import { stripCitationMarkers } from "./citations.ts";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -97,7 +98,7 @@ export function MessageActions({
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
-    void navigator.clipboard.writeText(content).then(() => {
+    void navigator.clipboard.writeText(stripCitationMarkers(content)).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
