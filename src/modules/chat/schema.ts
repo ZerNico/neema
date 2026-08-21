@@ -11,6 +11,11 @@ export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
 });
 
+export const RetryMessageInput = Schema.Struct({
+  conversationId: Schema.String,
+  messageId: Schema.String,
+});
+
 export const RenameConversationInput = Schema.Struct({
   conversationId: Schema.String,
   title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),

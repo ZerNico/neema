@@ -8,7 +8,7 @@ import {
   type ToolPageStatus,
   type ToolSource,
 } from "../client/use-message-stream.ts";
-import { sendMessage } from "../server/functions.ts";
+import { retryMessage, sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
@@ -48,6 +48,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const { data } = useSuspenseQuery(conversationQuery(conversationId));
   const [modelId, setModelId] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
+  // Bumped on retry: the message id stays the same, so the stream hook needs
+  // a separate signal to drop old state and resubscribe from seq 0.
+  const [retryEpoch, setRetryEpoch] = useState(0);
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   const initialStream = useMemo(() => {
@@ -62,11 +65,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     // Seed tool activity from durable rows; live envelopes upsert on top.
     const tools = data.toolCalls.filter((t) => t.messageId === streamingMessage.id).map(toActivity);
     return { text, reasoning, reasoningSeen: reasoningChunks.length > 0, tools, lastSeq };
-    // pendingChunks are a snapshot for this streaming message id
+    // pendingChunks are a snapshot for this streaming generation
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamingMessage?.id]);
+  }, [streamingMessage?.id, retryEpoch]);
 
-  const stream = useMessageStream(streamingMessage?.id ?? null, initialStream, conversationId);
+  const stream = useMessageStream(
+    streamingMessage?.id ?? null,
+    initialStream,
+    conversationId,
+    retryEpoch,
+  );
 
   const effectiveModelId = modelId ?? data.conversation.modelId;
 
@@ -81,12 +89,39 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
   });
 
+  const retryMutation = useMutation({
+    mutationFn: (messageId: string) => retryMessage({ data: { conversationId, messageId } }),
+    onSuccess: async () => {
+      // Refetch BEFORE bumping the epoch: the retried generation restarts at
+      // seq 1, so the new subscription must be seeded from the wiped message
+      // (after=0), not from the previous generation's chunk cursor.
+      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      setRetryEpoch((e) => e + 1);
+    },
+  });
+
+  // Retry is offered only on the last assistant message — regenerating an
+  // earlier one would orphan the turns that answered it (server enforces too).
+  const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
+  const generating = sendMutation.isPending || stream.status === "streaming";
+
   const display: DisplayMessage[] = data.messages
     .filter((m) => m.role !== "system")
     .map((m) => {
       const reasoning = m.reasoning ?? "";
       const toolActivities = data.toolCalls.filter((t) => t.messageId === m.id).map(toActivity);
-      const base = { ...m, reasoning, reasoningSeen: reasoning.length > 0, toolActivities };
+      const base: DisplayMessage = {
+        ...m,
+        reasoning,
+        reasoningSeen: reasoning.length > 0,
+        toolActivities,
+        ...(m.id === lastAssistantId
+          ? {
+              onRetry: () => retryMutation.mutate(m.id),
+              retryDisabled: generating || retryMutation.isPending,
+            }
+          : {}),
+      };
       if (m.id !== streamingMessage?.id) return base;
       // Overlay live stream state onto the streaming message row.
       const live = {

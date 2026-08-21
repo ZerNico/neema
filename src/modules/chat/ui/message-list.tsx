@@ -104,6 +104,10 @@ export interface DisplayMessage {
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
+  /** Regenerate this message; only set on the message that may be retried. */
+  onRetry?: () => void;
+  /** Disables the retry button (e.g. while another generation runs). */
+  retryDisabled?: boolean;
 }
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
@@ -154,9 +158,15 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {message.status === "error" ? (
           <p className="text-destructive mt-1 text-xs">Generation failed.</p>
         ) : null}
-        {!streaming && sources.length > 0 ? (
-          <MessageActions messageId={message.id} sources={sources} />
-        ) : null}
+        {streaming ? null : (
+          <MessageActions
+            messageId={message.id}
+            content={message.content}
+            sources={sources}
+            onRetry={message.onRetry}
+            retryDisabled={message.retryDisabled ?? false}
+          />
+        )}
       </div>
     </div>
   );

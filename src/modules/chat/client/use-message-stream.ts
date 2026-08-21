@@ -168,6 +168,11 @@ export function useMessageStream(
   messageId: string | null,
   initial: InitialStream | null,
   conversationId: string | null,
+  /**
+   * Bump to force a fresh subscription for the SAME message id — retry reuses
+   * the row, so the id alone can't signal "this is a new generation".
+   */
+  epoch = 0,
 ) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
@@ -178,13 +183,15 @@ export function useMessageStream(
     lastSeq: initial?.lastSeq ?? 0,
     status: messageId ? "streaming" : "idle",
   });
-  // Reset when the target message changes (e.g. navigation between chats).
+  // Reset when the target generation changes (navigation between chats, or a
+  // retry of the same message).
   const activeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!messageId) return;
-    if (activeRef.current !== messageId) {
-      activeRef.current = messageId;
+    const generationKey = `${messageId}:${epoch}`;
+    if (activeRef.current !== generationKey) {
+      activeRef.current = generationKey;
       dispatch({
         kind: "reset",
         text: initial?.text ?? "",
@@ -225,9 +232,9 @@ export function useMessageStream(
     };
 
     return () => source.close();
-    // initial is intentionally captured only when messageId changes
+    // initial is intentionally captured only when the generation changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageId, conversationId, queryClient]);
+  }, [messageId, epoch, conversationId, queryClient]);
 
   return state;
 }

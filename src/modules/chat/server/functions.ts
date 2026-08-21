@@ -3,7 +3,12 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
-import { ConversationIdInput, RenameConversationInput, SendMessageInput } from "../schema.ts";
+import {
+  ConversationIdInput,
+  RenameConversationInput,
+  RetryMessageInput,
+  SendMessageInput,
+} from "../schema.ts";
 import { ChatRepo } from "./repo.ts";
 import { ChatService } from "./service.ts";
 
@@ -63,6 +68,28 @@ export const sendMessage = createServerFn({ method: "POST" })
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ToolUnavailable: (e) =>
             Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
+        }),
+      ),
+    ),
+  );
+
+export const retryMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(RetryMessageInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.retryMessage({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+          RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
         }),
       ),
     ),

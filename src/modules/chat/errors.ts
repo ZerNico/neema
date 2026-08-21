@@ -13,6 +13,11 @@ export class ModelNotFound extends Schema.TaggedError<ModelNotFound>()("ModelNot
   modelId: Schema.String,
 }) {}
 
+export class RetryNotAllowed extends Schema.TaggedError<RetryNotAllowed>()("RetryNotAllowed", {
+  messageId: Schema.String,
+  reason: Schema.String,
+}) {}
+
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
   messageId: Schema.String,
   message: Schema.String,

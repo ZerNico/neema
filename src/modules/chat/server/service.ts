@@ -1,5 +1,10 @@
 import { Context, Effect, Layer } from "effect";
-import { ConversationNotFound, ModelNotFound } from "~/modules/chat/errors.ts";
+import {
+  ConversationNotFound,
+  MessageNotFound,
+  ModelNotFound,
+  RetryNotAllowed,
+} from "~/modules/chat/errors.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -19,6 +24,15 @@ export class ChatService extends Context.Service<
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
       ModelNotFound | ConversationNotFound | ToolUnavailable
+    >;
+    // Regenerates an assistant message in place (same id, fresh stream).
+    retryMessage(input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }): Effect.Effect<
+      { assistantMessageId: string },
+      ConversationNotFound | MessageNotFound | ModelNotFound | RetryNotAllowed
     >;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     renameConversation(input: {
@@ -113,6 +127,85 @@ function makeChatService() {
       return { conversationId: conversation.id, assistantMessageId: assistant.id };
     });
 
+    // Reuses the message row so ids stay stable for subscribers and the
+    // sidebar; chunks/tool calls are wiped and the stream starts over.
+    const retryMessage = Effect.fn("ChatService.retryMessage")(function* (input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }) {
+      // ownership check
+      yield* repo.getConversation(input.userId, input.conversationId);
+
+      const message = yield* repo.getMessage(input.messageId);
+      if (!message || message.conversationId !== input.conversationId) {
+        return yield* new MessageNotFound({ messageId: input.messageId });
+      }
+      if (message.role !== "assistant") {
+        return yield* new RetryNotAllowed({
+          messageId: input.messageId,
+          reason: "only assistant messages can be retried",
+        });
+      }
+      if (message.status === "streaming") {
+        return yield* new RetryNotAllowed({
+          messageId: input.messageId,
+          reason: "message is still generating",
+        });
+      }
+      // Retrying an earlier message would leave later turns answering a
+      // response that no longer exists.
+      const all = yield* repo.listMessages(input.conversationId);
+      const lastAssistant = [...all].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant?.id !== input.messageId) {
+        return yield* new RetryNotAllowed({
+          messageId: input.messageId,
+          reason: "only the last response can be retried",
+        });
+      }
+
+      const modelId = message.modelId;
+      if (!modelId) {
+        return yield* new RetryNotAllowed({
+          messageId: input.messageId,
+          reason: "original model is no longer known",
+        });
+      }
+      const model = yield* providers.getModel(modelId);
+      if (!model || !model.enabled || model.type !== "chat") {
+        return yield* new ModelNotFound({ modelId });
+      }
+
+      // Re-enable search iff the original generation actually used it and it
+      // is still available — a degraded retry beats a failing one.
+      const usedSearch = (yield* repo.listToolCalls([message.id])).length > 0;
+      const availability = usedSearch ? yield* webSearch.availability() : null;
+      const searchEnabled =
+        usedSearch &&
+        availability !== null &&
+        availability.configured &&
+        availability.enabled &&
+        model.capabilities.tools;
+
+      yield* repo.resetMessageForRetry(message.id);
+      yield* sync.publish(input.userId, {
+        type: "message.status",
+        conversationId: input.conversationId,
+        messageId: message.id,
+        status: "streaming",
+      });
+
+      yield* engine.startGeneration({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        messageId: message.id,
+        modelId,
+        searchEnabled,
+      });
+
+      return { assistantMessageId: message.id };
+    });
+
     const deleteConversation = Effect.fn("ChatService.deleteConversation")(function* (input: {
       userId: string;
       conversationId: string;
@@ -138,6 +231,6 @@ function makeChatService() {
       });
     });
 
-    return ChatService.of({ sendMessage, deleteConversation, renameConversation });
+    return ChatService.of({ sendMessage, retryMessage, deleteConversation, renameConversation });
   });
 }

@@ -122,5 +122,47 @@ describe("MessageBubble citations", () => {
   it("hides the actions row while still streaming", () => {
     renderCited("Effect 4.0 is out[^1", "streaming");
     expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+  });
+});
+
+describe("MessageBubble actions", () => {
+  const renderPlain = (overrides: Partial<Parameters<typeof MessageBubble>[0]["message"]> = {}) =>
+    render(
+      <MessageBubble
+        message={{
+          id: "plain",
+          role: "assistant",
+          content: "Hello there.",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+          ...overrides,
+        }}
+      />,
+    );
+
+  it("shows copy on completed messages without sources, but no 3-dot menu", () => {
+    renderPlain();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
+  });
+
+  it("shows retry only when the message offers it", () => {
+    renderPlain();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("wires the retry button to the callback", () => {
+    const onRetry = vi.fn();
+    renderPlain({ onRetry });
+    screen.getByRole("button", { name: "Retry" }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("disables retry while another generation runs", () => {
+    renderPlain({ onRetry: vi.fn(), retryDisabled: true });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
   });
 });
