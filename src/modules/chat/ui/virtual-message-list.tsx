@@ -82,10 +82,12 @@ export function VirtualMessageList({
           which sits outside this scroll container (no scrollbar offset).
           The mask fades the last bit of content out right above the composer
           instead of hard-clipping it. */}
+      {/* pb-8 lets the last message scroll fully above the fade zone, so
+          nothing stays faded when scrolled to the end. */}
       <div
         ref={scrollRef}
         className={cn(
-          "h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]",
+          "h-full overflow-y-auto pb-8 [scrollbar-gutter:stable_both-edges]",
           "[mask-image:linear-gradient(to_bottom,black_calc(100%-1.5rem),transparent)]",
         )}
       >

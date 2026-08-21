@@ -14,14 +14,25 @@ export interface AdminNavItem {
   matchPrefix: string;
 }
 
-// Secondary sidebar layout for the admin area. On >=md it renders nav + content
-// side by side. On mobile the nav is its own full screen; detail pages take
-// over the viewport and get a back button via AdminPage.
-export function AdminShell({ items, children }: { items: AdminNavItem[]; children: ReactNode }) {
+// Secondary sidebar layout for sectioned areas (admin, settings). On >=md it
+// renders nav + content side by side. On mobile the nav is its own full
+// screen; detail pages take over the viewport and get a back button via
+// AdminPage.
+export function AdminShell({
+  title = "Admin",
+  rootPath = "/admin",
+  items,
+  children,
+}: {
+  title?: string;
+  rootPath?: string;
+  items: AdminNavItem[];
+  children: ReactNode;
+}) {
   const matches = useMatches();
   const path = matches.at(-1)?.pathname ?? "";
-  // On mobile, show the nav screen only at the admin root.
-  const atRoot = path.replace(/\/$/, "") === "/admin";
+  // On mobile, show the nav screen only at the section root.
+  const atRoot = path.replace(/\/$/, "") === rootPath;
 
   return (
     <div className="flex h-full min-h-0">
@@ -41,7 +52,7 @@ export function AdminShell({ items, children }: { items: AdminNavItem[]; childre
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
           </Button>
-          <span className="text-sm font-semibold">Admin</span>
+          <span className="text-sm font-semibold">{title}</span>
         </div>
         <div className="mt-2 flex flex-col gap-0.5">
           {items.map((item) => {
@@ -79,6 +90,8 @@ export function AdminPage({
   description,
   backTo,
   backLabel,
+  rootPath = "/admin",
+  rootLabel = "Admin",
   actions,
   children,
 }: {
@@ -86,6 +99,9 @@ export function AdminPage({
   description?: string;
   backTo?: string;
   backLabel?: string;
+  /** Mobile-only back target when no explicit backTo is given. */
+  rootPath?: string;
+  rootLabel?: string;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -103,11 +119,11 @@ export function AdminPage({
         ) : (
           // Mobile-only back to the admin nav screen
           <Link
-            to="/admin"
+            to={rootPath}
             className="text-muted-foreground hover:text-foreground -ml-1 mb-1 flex w-fit items-center gap-1 text-sm transition-colors md:hidden"
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
-            Admin
+            {rootLabel}
           </Link>
         )}
         <div className="flex items-center justify-between gap-4">

@@ -4,6 +4,7 @@ import {
   PencilEdit02Icon,
   PlusSignIcon,
   Settings02Icon,
+  UserCircleIcon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -153,15 +154,17 @@ export function AppSidebar({
                 </div>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="w-56">
+                <DropdownMenuItem render={<Link to="/settings" />}>
+                  <HugeiconsIcon icon={UserCircleIcon} className="size-4" />
+                  Settings
+                </DropdownMenuItem>
                 {isAdmin ? (
-                  <>
-                    <DropdownMenuItem render={<Link to="/admin" />}>
-                      <HugeiconsIcon icon={Settings02Icon} className="size-4" />
-                      Admin
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
+                  <DropdownMenuItem render={<Link to="/admin" />}>
+                    <HugeiconsIcon icon={Settings02Icon} className="size-4" />
+                    Admin
+                  </DropdownMenuItem>
                 ) : null}
+                <DropdownMenuSeparator />
                 <div
                   className="flex items-center px-2 py-1.5"
                   // Keep the menu open while switching themes.
