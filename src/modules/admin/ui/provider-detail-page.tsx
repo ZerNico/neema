@@ -2,6 +2,7 @@ import {
   AiBrain01Icon,
   Delete02Icon,
   MoreVerticalIcon,
+  PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -36,7 +37,16 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
+
+const MODEL_TYPES = ["chat", "embedding", "image", "audio"] as const;
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const navigate = useNavigate();
@@ -44,6 +54,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const { data: providers } = useSuspenseQuery(providersQuery);
   const { data: allModels } = useSuspenseQuery(modelsQuery);
   const [addingModel, setAddingModel] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const provider = providers.find((p) => p.id === providerId);
@@ -103,6 +114,10 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
               <HugeiconsIcon icon={MoreVerticalIcon} className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setEditing(true)}>
+                <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+                Edit provider
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
                 <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                 Delete provider
@@ -127,7 +142,11 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           </ListRow>
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">API key</span>
-            <span className="text-muted-foreground text-sm">•••••••• (encrypted)</span>
+            <span className="text-muted-foreground flex-1 text-sm">•••••••• (encrypted)</span>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+              <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+              Edit
+            </Button>
           </ListRow>
         </ListCard>
       </section>
@@ -191,6 +210,8 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
 
       <AddModelDialog providerId={providerId} open={addingModel} onOpenChange={setAddingModel} />
 
+      <EditProviderDialog provider={provider} open={editing} onOpenChange={setEditing} />
+
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
           <DialogHeader>
@@ -229,15 +250,19 @@ function AddModelDialog({
 }) {
   const queryClient = useQueryClient();
   const [pick, setPick] = useState<CatalogPick | null>(null);
-  const [freeText, setFreeText] = useState("");
+  const [typed, setTyped] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [customType, setCustomType] = useState<CatalogPick["type"]>("chat");
 
-  // Catalog pick wins; otherwise fall back to whatever id was typed.
+  // Selecting from the popup (incl. the creatable row) is the primary path;
+  // raw typed text works as a manual entry even without an explicit selection.
   const effective: CatalogPick | null =
-    pick ??
-    (freeText.trim()
-      ? { id: freeText.trim(), name: freeText.trim(), type: "chat", contextLength: null }
-      : null);
+    pick && (typed === "" || typed === pick.id)
+      ? pick
+      : typed.trim()
+        ? { id: typed.trim(), name: typed.trim(), type: "chat", contextLength: null, custom: true }
+        : null;
+  const isCustom = effective?.custom ?? false;
 
   const add = useMutation({
     mutationFn: (input: { pick: CatalogPick; displayName: string }) =>
@@ -246,7 +271,7 @@ function AddModelDialog({
           providerId,
           modelKey: input.pick.id,
           displayName: input.displayName || input.pick.name,
-          type: input.pick.type,
+          type: input.pick.custom ? customType : input.pick.type,
           ...(input.pick.contextLength ? { contextLength: input.pick.contextLength } : {}),
         },
       }),
@@ -254,8 +279,9 @@ function AddModelDialog({
       // Close immediately; the list refreshes in the background.
       onOpenChange(false);
       setPick(null);
-      setFreeText("");
+      setTyped("");
       setDisplayName("");
+      setCustomType("chat");
       void queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
   });
@@ -276,30 +302,48 @@ function AddModelDialog({
               providerId={providerId}
               onPick={(picked) => {
                 setPick(picked);
-                setDisplayName(picked.name);
+                setTyped(picked.id);
+                setDisplayName(picked.custom ? "" : picked.name);
               }}
-              onFreeText={(text) => {
-                setFreeText(text);
-                // Typing again invalidates a previous selection unless it matches.
-                if (pick && text !== pick.id) setPick(null);
-              }}
+              onInput={setTyped}
             />
           </Field>
+          {isCustom ? (
+            <Field>
+              <FieldLabel>Type</FieldLabel>
+              <Select
+                value={customType}
+                onValueChange={(t) => t && setCustomType(t as CatalogPick["type"])}
+                items={MODEL_TYPES.map((t) => ({ value: t, label: t }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : null}
           <Field>
             <FieldLabel>Display name</FieldLabel>
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={pick?.name ?? "Shown in the model picker"}
+              placeholder={effective?.id ?? "Shown in the model picker"}
             />
           </Field>
           {effective ? (
             <p className="text-muted-foreground text-xs">
-              {effective.id} · {effective.type}
+              {effective.id} · {isCustom ? customType : effective.type}
               {effective.contextLength
                 ? ` · ${Math.round(effective.contextLength / 1000)}k context`
                 : ""}
-              {!pick ? " · manual entry" : ""}
+              {isCustom ? " · custom model" : ""}
             </p>
           ) : null}
         </div>
@@ -312,6 +356,83 @@ function AddModelDialog({
             onClick={() => effective && add.mutate({ pick: effective, displayName })}
           >
             {add.isPending ? "Adding…" : "Add model"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditProviderDialog({
+  provider,
+  open,
+  onOpenChange,
+}: {
+  provider: { id: string; name: string; baseUrl: string };
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(provider.name);
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
+  // Empty means "keep the current key" — the stored key can't be shown.
+  const [apiKey, setApiKey] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateProvider({
+        data: {
+          providerId: provider.id,
+          name,
+          baseUrl,
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        },
+      }),
+    onSuccess: () => {
+      onOpenChange(false);
+      setApiKey("");
+      void queryClient.invalidateQueries({ queryKey: ["admin"] });
+      // Base URL or key changes invalidate the cached model catalog too.
+      void queryClient.invalidateQueries({ queryKey: ["provider-catalog", provider.id] });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit provider</DialogTitle>
+          <DialogDescription>Leave the API key empty to keep the current one.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel>Name</FieldLabel>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Base URL</FieldLabel>
+            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>API key</FieldLabel>
+            <Input
+              type="password"
+              autoComplete="off"
+              placeholder="•••••••• (unchanged)"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!name.trim() || !baseUrl.trim() || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Saving…" : "Save changes"}
           </Button>
         </DialogFooter>
       </DialogContent>
