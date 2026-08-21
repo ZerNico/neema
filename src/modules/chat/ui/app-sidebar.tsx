@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
+import { useConfirm } from "~/ui/confirm.tsx";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import {
   Sidebar,
@@ -57,6 +58,7 @@ export function AppSidebar({
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const confirm = useConfirm();
 
   const removeMutation = useMutation({
     mutationFn: (conversationId: string) => deleteConversation({ data: { conversationId } }),
@@ -122,7 +124,17 @@ export function AppSidebar({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
-                        onClick={() => removeMutation.mutate(conversation.id)}
+                        onClick={async () => {
+                          if (
+                            await confirm({
+                              title: `Delete "${conversation.title}"?`,
+                              description: "The chat and all its messages are removed permanently.",
+                              confirmLabel: "Delete chat",
+                            })
+                          ) {
+                            removeMutation.mutate(conversation.id);
+                          }
+                        }}
                       >
                         <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                         Delete

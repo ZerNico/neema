@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { useConfirm } from "~/ui/confirm.tsx";
 import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import {
@@ -55,7 +56,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const { data: allModels } = useSuspenseQuery(modelsQuery);
   const [addingModel, setAddingModel] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const confirm = useConfirm();
 
   const provider = providers.find((p) => p.id === providerId);
   const models = allModels.filter((m) => m.providerId === providerId);
@@ -118,7 +119,21 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                 <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
                 Edit provider
               </DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: `Delete ${provider?.name}?`,
+                      description:
+                        "This removes the provider and all its models. Conversations that used them keep their history but can no longer generate with these models.",
+                      confirmLabel: "Delete provider",
+                    })
+                  ) {
+                    removeProvider.mutate();
+                  }
+                }}
+              >
                 <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                 Delete provider
               </DropdownMenuItem>
@@ -194,7 +209,18 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Delete ${model.displayName}`}
-                  onClick={() => removeModel.mutate(model.id)}
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        title: `Delete ${model.displayName}?`,
+                        description:
+                          "The model disappears from the chat picker. Existing conversations keep their history.",
+                        confirmLabel: "Delete model",
+                      })
+                    ) {
+                      removeModel.mutate(model.id);
+                    }
+                  }}
                 >
                   <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                 </Button>
@@ -207,30 +233,6 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       <AddModelDialog providerId={providerId} open={addingModel} onOpenChange={setAddingModel} />
 
       <EditProviderDialog provider={provider} open={editing} onOpenChange={setEditing} />
-
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {provider.name}?</DialogTitle>
-            <DialogDescription>
-              This removes the provider and all its models. Conversations that used them keep their
-              history but can no longer generate with these models.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={removeProvider.isPending}
-              onClick={() => removeProvider.mutate()}
-            >
-              {removeProvider.isPending ? "Deleting…" : "Delete provider"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </AdminPage>
   );
 }
