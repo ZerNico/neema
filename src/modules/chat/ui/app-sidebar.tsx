@@ -1,7 +1,6 @@
 import {
   Delete02Icon,
   Logout03Icon,
-  Moon02Icon,
   PencilEdit02Icon,
   PlusSignIcon,
   Settings02Icon,
@@ -31,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
+import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import {
   Sidebar,
   SidebarContent,
@@ -162,10 +162,14 @@ export function AppSidebar({
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
-                <DropdownMenuItem onClick={() => document.documentElement.classList.toggle("dark")}>
-                  <HugeiconsIcon icon={Moon02Icon} className="size-4" />
-                  Toggle theme
-                </DropdownMenuItem>
+                <div
+                  className="flex items-center px-2 py-1.5"
+                  // Keep the menu open while switching themes.
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ThemeSwitch className="w-full" />
+                </div>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={async () => {
                     await authClient.signOut();

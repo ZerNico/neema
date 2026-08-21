@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { HeadContent, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import appCss from "~/styles/app.css?url";
+import { themeInitScript } from "~/ui/theme.tsx";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -23,6 +24,8 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Applies the stored theme before first paint to avoid flashing */}
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <HeadContent />
       </head>
       <body>

@@ -15,7 +15,7 @@ export const Route = createFileRoute("/api/sync")({
         if (!session) return new Response("Unauthorized", { status: 401 });
 
         const stream = await runtime.runPromise(
-          SyncBus.useSync((bus) => bus.subscribe(session.user.id)),
+          Effect.map(SyncBus, (bus) => bus.subscribe(session.user.id)),
         );
 
         return sseResponse(stream, (event) => sseFrame("sync", event));
