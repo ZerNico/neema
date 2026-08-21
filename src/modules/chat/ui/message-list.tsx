@@ -113,6 +113,12 @@ export interface DisplayMessage {
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
+  /**
+   * Sources from earlier messages in the conversation. Citation numbering is
+   * conversation-scoped, so a message may cite a source it didn't search for
+   * itself; markers resolve against these plus the message's own sources.
+   */
+  inheritedSources?: ToolSource[];
   /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
   /** Disables the retry button (e.g. while another generation runs). */
@@ -149,14 +155,27 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
-  // Kept referentially stable across text chunks — it feeds the memoized
-  // markdown `components`, and a fresh array there would re-render the whole
-  // answer on every delta.
-  const sourceKey = message.toolActivities
-    .map((a) => (a.sources ?? []).map((s) => s.index).join(","))
-    .join("|");
+
+  // The message's citable set: its own searched sources (always shown, even
+  // uncited — they were consulted) plus inherited sources it actually cites.
+  // Numbering is conversation-scoped, so indexes never collide across the two.
+  // Memo key covers both inputs that can change while streaming: own sources
+  // arriving and new markers appearing in the text.
+  const citedIndexes = [...message.content.matchAll(/\[\^(\d+)\]/g)].map((m) => Number(m[1]));
+  const sourceKey =
+    message.toolActivities.map((a) => (a.sources ?? []).map((s) => s.index).join(",")).join("|") +
+    `:${[...new Set(citedIndexes)].join(",")}:${message.inheritedSources?.length ?? 0}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const sources = useMemo(() => collectSources(message.toolActivities), [sourceKey]);
+  const sources = useMemo(() => {
+    const own = collectSources(message.toolActivities);
+    const ownIndexes = new Set(own.map((s) => s.index));
+    const cited = new Set(citedIndexes);
+    const inherited = (message.inheritedSources ?? []).filter(
+      (s) => cited.has(s.index) && !ownIndexes.has(s.index),
+    );
+    // oxlint-disable-next-line no-array-sort -- fresh array
+    return [...own, ...inherited].sort((a, b) => a.index - b.index);
+  }, [sourceKey]);
 
   return (
     <div className="flex w-full justify-start">

@@ -127,17 +127,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     return data.messages.slice(index + 1).find((m) => m.role === "assistant")?.id;
   };
 
+  // Citation numbering is conversation-scoped: markers in a message may point
+  // at sources searched by an earlier one, so each message inherits everything
+  // discovered before it (in message order, dedup by index).
+  const inheritedByIndex = new Map<number, ToolSource>();
+
   const display: DisplayMessage[] = data.messages
     .filter((m) => m.role !== "system")
     .map((m) => {
       const reasoning = m.reasoning ?? "";
       const toolActivities = data.toolCalls.filter((t) => t.messageId === m.id).map(toActivity);
       const retryTarget = m.role === "assistant" ? m.id : responseAfter(m.id);
+      const inheritedSources = [...inheritedByIndex.values()];
+      for (const activity of toolActivities) {
+        for (const source of activity.sources ?? []) {
+          if (!inheritedByIndex.has(source.index)) inheritedByIndex.set(source.index, source);
+        }
+      }
       const base: DisplayMessage = {
         ...m,
         reasoning,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
+        inheritedSources,
         ...(retryTarget !== undefined
           ? {
               onRetry: () => void retry(retryTarget),

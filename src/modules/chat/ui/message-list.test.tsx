@@ -149,6 +149,37 @@ describe("MessageBubble actions", () => {
     expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
   });
 
+  it("resolves markers against inherited sources from earlier messages", () => {
+    render(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            id: "follow-up",
+            role: "assistant",
+            content: "As covered before[^2].",
+            reasoning: "",
+            reasoningSeen: false,
+            toolActivities: [],
+            status: "complete",
+            inheritedSources: [
+              {
+                index: 2,
+                url: "https://effect.website",
+                title: "Effect docs",
+                snippet: "",
+                read: true,
+              },
+              // Uncited inherited sources stay out of the chip set entirely.
+              { index: 3, url: "https://other.dev", title: "Other", snippet: "", read: false },
+            ],
+          }}
+        />
+      </DetailPanelProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Source 2: Effect docs" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Source 3: Other" })).toBeNull();
+  });
+
   it("hides imitated citation markers on messages without sources", () => {
     const { container } = renderPlain({
       content: "Effect 4 is out[^1][^2]. In short: tighter APIs[^1].",

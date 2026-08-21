@@ -72,7 +72,12 @@ export type WebSearchToolkitWithHandler = Toolkit.WithHandler<typeof webSearchTo
 export class WebSearchExecutor extends Context.Service<
   WebSearchExecutor,
   {
-    prepare(): Effect.Effect<WebSearchToolkitWithHandler, ToolUnavailable>;
+    prepare(seed?: {
+      // Citation numbering is conversation-scoped (Onyx-style): the caller
+      // seeds the counter and URL map from sources persisted on earlier
+      // messages so numbers stay stable and unique across the conversation.
+      sources: ReadonlyArray<{ index: number; url: string }>;
+    }): Effect.Effect<WebSearchToolkitWithHandler, ToolUnavailable>;
     // Cheap check used by ChatService validation + composer availability.
     availability(): Effect.Effect<{ configured: boolean; enabled: boolean }>;
   }
@@ -84,7 +89,9 @@ export class WebSearchExecutor extends Context.Service<
       const backend = yield* SearchBackend;
       const extractor = yield* PageExtractor;
 
-      const prepare = Effect.fn("WebSearchExecutor.prepare")(function* () {
+      const prepare = Effect.fn("WebSearchExecutor.prepare")(function* (seed?: {
+        sources: ReadonlyArray<{ index: number; url: string }>;
+      }) {
         const tool = yield* repo.getWebSearch();
         if (!tool) {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not configured" });
@@ -95,11 +102,12 @@ export class WebSearchExecutor extends Context.Service<
         const { config, secret } = tool;
         const connection = { baseUrl: config.baseUrl, secret };
 
-        // Citation numbering is per assistant message: prepare() runs once per
-        // generation, so a second search continues the sequence rather than
-        // restarting at 1, and a URL seen twice keeps its original number.
-        let nextIndex = 1;
-        const indexByUrl = new Map<string, number>();
+        // Conversation-scoped citation numbering: seeded from earlier
+        // messages' sources, so a URL cited before keeps its number and new
+        // sources continue the sequence instead of colliding with old indexes.
+        const seedSources = seed?.sources ?? [];
+        let nextIndex = Math.max(0, ...seedSources.map((s) => s.index)) + 1;
+        const indexByUrl = new Map<string, number>(seedSources.map((s) => [s.url, s.index]));
         const indexFor = (url: string): number => {
           const existing = indexByUrl.get(url);
           if (existing !== undefined) return existing;

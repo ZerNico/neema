@@ -88,6 +88,26 @@ describe("WebSearchExecutor citation numbering", () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
+  it.effect("continues numbering from a conversation seed and reuses seeded URLs", () =>
+    Effect.gen(function* () {
+      const executor = yield* WebSearchExecutor;
+      // A later generation in the same conversation: earlier messages already
+      // used indexes 1–5, and effect.website was index 2.
+      const toolkit = yield* executor.prepare({
+        sources: [
+          { index: 2, url: "https://effect.website" },
+          { index: 5, url: "https://old.example" },
+        ],
+      });
+
+      const result = yield* runQuery(toolkit, "first");
+      expect(result.sources?.map((s) => [s.index, s.url])).toEqual([
+        [2, "https://effect.website"],
+        [6, "https://drizzle.team"],
+      ]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
   it.effect("marks fetched pages as read and the rest as snippet-only", () =>
     Effect.gen(function* () {
       const executor = yield* WebSearchExecutor;
