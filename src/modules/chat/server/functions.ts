@@ -31,7 +31,11 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
         // persisted so far; ship them inline so the first paint is complete.
         const streaming = messages.find((m) => m.status === "streaming");
         const pendingChunks = streaming ? yield* repo.chunksAfter(streaming.id, 0) : [];
-        return { conversation, messages, pendingChunks };
+        // Durable tool activity for all assistant messages (summaries only).
+        const toolCalls = yield* repo.listToolCalls(
+          messages.filter((m) => m.role === "assistant").map((m) => m.id),
+        );
+        return { conversation, messages, pendingChunks, toolCalls };
       }).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),
@@ -51,11 +55,14 @@ export const sendMessage = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           modelId: data.modelId,
           content: data.content,
+          searchEnabled: data.searchEnabled,
         }),
       ).pipe(
         Effect.catchTags({
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ToolUnavailable: (e) =>
+            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
         }),
       ),
     ),

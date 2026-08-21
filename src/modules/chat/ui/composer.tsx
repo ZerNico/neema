@@ -1,8 +1,13 @@
-import { ArrowDown01Icon, ArrowUp02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  ArrowUp02Icon,
+  GlobalSearchIcon,
+  PlusSignIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { chatModelsQuery } from "../client/queries.ts";
+import { chatModelsQuery, webSearchAvailabilityQuery } from "../client/queries.ts";
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "~/ui/primitives/select";
@@ -13,13 +18,18 @@ export function Composer({
   disabled,
   modelId,
   onModelChange,
+  searchEnabled,
+  onSearchEnabledChange,
 }: {
   onSend: (content: string) => void;
   disabled: boolean;
   modelId: string | null;
   onModelChange: (modelId: string) => void;
+  searchEnabled: boolean;
+  onSearchEnabledChange: (enabled: boolean) => void;
 }) {
   const { data: models } = useSuspenseQuery(chatModelsQuery);
+  const { data: searchAvailability } = useQuery(webSearchAvailabilityQuery);
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -48,6 +58,17 @@ export function Composer({
 
   const noModels = models.length === 0;
   const selectedModel = models.find((m) => m.id === modelId);
+
+  // Globe toggle only when the tool is admin-enabled AND the model can call it.
+  const searchAvailable =
+    (searchAvailability?.enabled ?? false) && (selectedModel?.capabilities.tools ?? false);
+
+  // Model switched to one without tool support: drop the active toggle.
+  useEffect(() => {
+    if (searchEnabled && selectedModel && !selectedModel.capabilities.tools) {
+      onSearchEnabledChange(false);
+    }
+  }, [searchEnabled, selectedModel, onSearchEnabledChange]);
 
   return (
     // Width/centering comes from the parent wrapper, which mirrors the
@@ -87,6 +108,24 @@ export function Composer({
         >
           <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
         </Button>
+        {searchAvailable ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Search the web"
+            aria-pressed={searchEnabled}
+            onClick={() => onSearchEnabledChange(!searchEnabled)}
+            className={cn(
+              "h-8 gap-1.5 rounded-full px-2.5",
+              searchEnabled
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" />
+            <span className="text-sm">Search</span>
+          </Button>
+        ) : null}
         <Select
           value={modelId}
           onValueChange={(value) => value && onModelChange(value)}
@@ -105,14 +144,14 @@ export function Composer({
             </span>
             <HugeiconsIcon icon={ArrowDown01Icon} className="size-3.5 shrink-0 opacity-60" />
           </SelectTrigger>
-          <SelectContent>
+          {/* min-w so rows have room; icons trail the name naturally instead
+              of being pushed under the absolutely-positioned check mark. */}
+          <SelectContent className="min-w-64">
             {models.map((model) => (
               <SelectItem key={model.id} value={model.id}>
-                <span className="flex w-full items-center gap-2">
-                  <span className="flex-1 truncate">{model.displayName}</span>
-                  <CapabilityIcons capabilities={model.capabilities} />
-                  <ContextBadge contextLength={model.contextLength} />
-                </span>
+                <span className="max-w-52 truncate">{model.displayName}</span>
+                <CapabilityIcons capabilities={model.capabilities} />
+                <ContextBadge contextLength={model.contextLength} />
               </SelectItem>
             ))}
           </SelectContent>

@@ -20,9 +20,24 @@ See README.md for architecture; this file records the sharp edges.
   `.validator()` / Form `validators`.
 - `Effect.forkDetach` (was forkDaemon), `Fiber.join`, `PubSub.subscribe` needs a Scope,
   `Stream.fromEffectSchedule`, `Stream.toReadableStreamWith(stream, context)`.
+- `Effect.catch` (not `catchAll`); `Effect.timeout` takes a `Duration`, not a string.
 - Drizzle Effect client: `makeWithDefaults({ relations })` from `drizzle-orm/effect-postgres`;
   requires `PgClient` provided at the composition root (`src/server/runtime.ts`) so the
   SyncBus LISTEN/NOTIFY shares the same pool.
+
+## Tool calling (`effect/unstable/ai`)
+
+- `LanguageModel.streamText` is ONE model turn. The multi-turn tool loop is ours
+  (`src/modules/chat/server/streaming.ts`): re-run while `finish.reason === "tool-calls"`,
+  feeding the previous turn back with `Prompt.concat(prompt, Prompt.fromResponseParts(parts))`.
+- `OpenRouterLanguageModel` only emits the `finish` part when a chunk carries `usage`.
+  A provider (or mock) that omits usage hangs the loop forever — real OpenRouter always
+  sends it because the client forces `stream_options: { include_usage: true }`.
+- A handler's second arg is `Toolkit.HandlerContext`: `ctx.preliminary(result)` streams
+  progress as `tool-result` parts with `preliminary: true`. Those are UI-only — the
+  stream loop must keep them out of the continuation transcript.
+- Tool page bodies are never persisted. `message_tool_calls.result` holds the summary
+  plus the source list (url/title/status) only.
 
 ## Invariants
 

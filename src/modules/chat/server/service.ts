@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { ConversationNotFound, ModelNotFound } from "~/modules/chat/errors.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ChatRepo } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
 
@@ -14,9 +15,10 @@ export class ChatService extends Context.Service<
       conversationId: string | null;
       modelId: string;
       content: string;
+      searchEnabled: boolean;
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
-      ModelNotFound | ConversationNotFound
+      ModelNotFound | ConversationNotFound | ToolUnavailable
     >;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     renameConversation(input: {
@@ -35,6 +37,7 @@ function makeChatService() {
     const providers = yield* ProviderRepo;
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
+    const webSearch = yield* WebSearchExecutor;
 
     // Sends a user message; creates the conversation on first message.
     // Returns ids the client needs to subscribe to the assistant stream.
@@ -43,10 +46,25 @@ function makeChatService() {
       conversationId: string | null;
       modelId: string;
       content: string;
+      searchEnabled: boolean;
     }) {
       const model = yield* providers.getModel(input.modelId);
       if (!model || !model.enabled || model.type !== "chat") {
         return yield* new ModelNotFound({ modelId: input.modelId });
+      }
+
+      // The server stays authoritative even when the composer hides the toggle.
+      if (input.searchEnabled) {
+        if (!model.capabilities.tools) {
+          return yield* new ToolUnavailable({
+            tool: "web_search",
+            reason: "model does not support tool calling",
+          });
+        }
+        const availability = yield* webSearch.availability();
+        if (!availability.configured || !availability.enabled) {
+          return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
+        }
       }
 
       const conversation = input.conversationId
@@ -89,6 +107,7 @@ function makeChatService() {
         conversationId: conversation.id,
         messageId: assistant.id,
         modelId: input.modelId,
+        searchEnabled: input.searchEnabled,
       });
 
       return { conversationId: conversation.id, assistantMessageId: assistant.id };

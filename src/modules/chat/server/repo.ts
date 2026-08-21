@@ -1,13 +1,17 @@
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { conversations, messageChunks, messages } from "~/db/schema/index.ts";
+import { conversations, messageChunks, messages, messageToolCalls } from "~/db/schema/index.ts";
+import type { JsonValue } from "~/db/schema/providers.ts";
 import { ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
-export type ChunkRow = { seq: number; kind: "text" | "reasoning"; delta: string };
+export type ChunkKind = "text" | "reasoning" | "tool";
+export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
+// Durable tool-call projection safe for clients (summaries only, no page bodies).
+export type ToolCallRow = typeof messageToolCalls.$inferSelect;
 
 export class ChatRepo extends Context.Service<
   ChatRepo,
@@ -34,9 +38,27 @@ export class ChatRepo extends Context.Service<
     getMessage(messageId: string): Effect.Effect<MessageRow | null>;
     appendChunks(
       messageId: string,
-      chunks: ReadonlyArray<{ seq: number; kind: "text" | "reasoning"; delta: string }>,
+      chunks: ReadonlyArray<{ seq: number; kind: ChunkKind; delta: string }>,
     ): Effect.Effect<void>;
     chunksAfter(messageId: string, afterSeq: number): Effect.Effect<ChunkRow[]>;
+    insertToolCall(input: {
+      id: string;
+      messageId: string;
+      turnIndex: number;
+      callIndex: number;
+      providerCallId: string;
+      toolName: string;
+      arguments: JsonValue;
+    }): Effect.Effect<void>;
+    completeToolCall(input: {
+      id: string;
+      result: JsonValue;
+      status: "complete" | "error";
+      error?: { code: string; message: string };
+    }): Effect.Effect<void>;
+    // Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
+    failRunningToolCalls(messageId: string, message: string): Effect.Effect<void>;
+    listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
     finalizeMessage(input: {
       messageId: string;
       status: "complete" | "error" | "aborted";
@@ -154,6 +176,59 @@ export class ChatRepo extends Context.Service<
             .from(messageChunks)
             .where(and(eq(messageChunks.messageId, messageId), gt(messageChunks.seq, afterSeq)))
             .orderBy(asc(messageChunks.seq))
+            .pipe(Effect.orDie);
+        }),
+
+        insertToolCall: Effect.fn("ChatRepo.insertToolCall")(function* (input) {
+          yield* db
+            .insert(messageToolCalls)
+            .values({ ...input, status: "running" })
+            .pipe(Effect.orDie);
+        }),
+
+        completeToolCall: Effect.fn("ChatRepo.completeToolCall")(function* (input) {
+          yield* db
+            .update(messageToolCalls)
+            .set({
+              result: input.result,
+              status: input.status,
+              error: input.error,
+              completedAt: new Date(),
+            })
+            .where(eq(messageToolCalls.id, input.id))
+            .pipe(Effect.orDie);
+        }),
+
+        failRunningToolCalls: Effect.fn("ChatRepo.failRunningToolCalls")(
+          function* (messageId, message) {
+            yield* db
+              .update(messageToolCalls)
+              .set({
+                status: "error",
+                error: { code: "GenerationFailed", message },
+                completedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(messageToolCalls.messageId, messageId),
+                  eq(messageToolCalls.status, "running"),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        listToolCalls: Effect.fn("ChatRepo.listToolCalls")(function* (messageIds) {
+          if (messageIds.length === 0) return [];
+          return yield* db
+            .select()
+            .from(messageToolCalls)
+            .where(inArray(messageToolCalls.messageId, [...messageIds]))
+            .orderBy(
+              asc(messageToolCalls.messageId),
+              asc(messageToolCalls.turnIndex),
+              asc(messageToolCalls.callIndex),
+            )
             .pipe(Effect.orDie);
         }),
 

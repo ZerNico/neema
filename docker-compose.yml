@@ -15,5 +15,14 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local search backend for the web_search tool (admin → Tools points at
+  # http://localhost:8081). JSON output + disabled limiter via mounted config.
+  searxng:
+    image: docker.io/searxng/searxng
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
 volumes:
   pgdata:

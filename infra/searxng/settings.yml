@@ -1,0 +1,14 @@
+# Development-only SearXNG configuration.
+# The json format is required for the chat app's web_search tool; the limiter
+# is off and the secret is checked in because this instance is local-only.
+# Rotate secret_key and re-enable the limiter before exposing this anywhere.
+use_default_settings: true
+
+server:
+  limiter: false
+  secret_key: "dev-only-change-before-exposing-searxng"
+
+search:
+  formats:
+    - html
+    - json

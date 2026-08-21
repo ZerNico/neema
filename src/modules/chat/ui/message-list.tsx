@@ -1,5 +1,7 @@
 import { Streamdown } from "streamdown";
+import type { ToolActivity } from "../client/use-message-stream.ts";
 import { ReasoningBlock } from "./reasoning-block.tsx";
+import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import { cn } from "~/ui/utils";
 
 export interface DisplayMessage {
@@ -9,6 +11,7 @@ export interface DisplayMessage {
   reasoning: string;
   /** A reasoning phase happened/is happening (even if its content is hidden). */
   reasoningSeen: boolean;
+  toolActivities: ToolActivity[];
   status: string;
 }
 
@@ -26,8 +29,10 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
   }
 
   const streaming = message.status === "streaming";
-  // "Thinking" is the phase before any visible answer text arrives.
-  const reasoningActive = streaming && message.content.length === 0;
+  const toolRunning = message.toolActivities.some((a) => a.status === "running");
+  // "Thinking" is the phase before any visible answer text arrives — but not
+  // while a tool is running (the tool block carries the progress feedback).
+  const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
 
   return (
@@ -36,8 +41,9 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}
+        <ToolActivityBlock activities={message.toolActivities} />
         {streaming && message.content.length === 0 ? (
-          showReasoning ? null : (
+          showReasoning || toolRunning ? null : (
             <span className="text-muted-foreground animate-pulse">Thinking…</span>
           )
         ) : (

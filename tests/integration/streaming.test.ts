@@ -6,8 +6,9 @@ import { Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
-import { AiGateway } from "~/modules/providers/server/gateway.ts";
+import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 
 let container: StartedPostgreSqlContainer;
@@ -18,9 +19,22 @@ const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   streamChat: () =>
     Stream.fromIterable(["alpha ", "beta ", "gamma ", "delta ", "epsilon"]).pipe(
-      Stream.map((text) => ({ kind: "text" as const, text })),
+      Stream.map((delta): ChatStreamPart => ({ type: "text-delta", id: "t", delta }) as never),
       Stream.tap(() => Effect.sleep("30 millis")),
+      Stream.concat(
+        Stream.make({
+          type: "finish",
+          reason: "stop",
+          usage: { inputTokens: {}, outputTokens: {} },
+        } as never as ChatStreamPart),
+      ),
     ),
+});
+
+// Search is not exercised in these tests; a stub satisfies the layer graph.
+const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
+  prepare: () => Effect.die("not available in tests"),
+  availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 
 beforeAll(async () => {
@@ -37,7 +51,9 @@ beforeAll(async () => {
   const ReposLayer = ChatRepo.layer.pipe(Layer.provideMerge(InfraLayer));
   const AppLayer = StreamEngine.layer.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(FakeGateway, SyncBus.layer).pipe(Layer.provideMerge(ReposLayer)),
+      Layer.mergeAll(FakeGateway, FakeWebSearch, SyncBus.layer).pipe(
+        Layer.provideMerge(ReposLayer),
+      ),
     ),
   );
   runtime = ManagedRuntime.make(AppLayer);
@@ -80,6 +96,7 @@ describe("resumable streaming pipeline", () => {
           conversationId: conversation.id,
           messageId: assistant.id,
           modelId: "fake",
+          searchEnabled: false,
         });
 
         // Live subscriber from the start

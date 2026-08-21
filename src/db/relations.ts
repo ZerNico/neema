@@ -36,10 +36,18 @@ export const relations = defineRelations(schema, (r) => ({
       to: r.models.id,
     }),
     chunks: r.many.messageChunks(),
+    toolCalls: r.many.messageToolCalls(),
   },
   messageChunks: {
     message: r.one.messages({
       from: r.messageChunks.messageId,
+      to: r.messages.id,
+      optional: false,
+    }),
+  },
+  messageToolCalls: {
+    message: r.one.messages({
+      from: r.messageToolCalls.messageId,
       to: r.messages.id,
       optional: false,
     }),

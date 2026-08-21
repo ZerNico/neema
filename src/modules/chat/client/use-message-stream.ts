@@ -1,6 +1,24 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef } from "react";
 
+export interface ToolPageStatus {
+  url: string;
+  title?: string;
+  status: "pending" | "reading" | "done" | "error";
+}
+
+// Live view of one tool call, upserted by callId from tool chunk envelopes.
+export interface ToolActivity {
+  callId: string;
+  name: string;
+  query: string;
+  status: "running" | "complete" | "error";
+  resultCount?: number;
+  pagesFetched?: number;
+  pages?: ToolPageStatus[];
+  error?: string;
+}
+
 export interface StreamState {
   /** Visible answer text accumulated from chunks. */
   text: string;
@@ -8,14 +26,84 @@ export interface StreamState {
   reasoning: string;
   /** True once any reasoning chunk arrived (even empty hidden markers). */
   reasoningSeen: boolean;
+  tools: ToolActivity[];
   lastSeq: number;
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
 }
 
 type Action =
-  | { kind: "reset"; text: string; reasoning: string; reasoningSeen: boolean; lastSeq: number }
-  | { kind: "chunk"; seq: number; chunkKind: "text" | "reasoning"; delta: string }
+  | {
+      kind: "reset";
+      text: string;
+      reasoning: string;
+      reasoningSeen: boolean;
+      tools: ToolActivity[];
+      lastSeq: number;
+    }
+  | { kind: "chunk"; seq: number; chunkKind: "text" | "reasoning" | "tool"; delta: string }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
+
+// Parses a tool chunk envelope defensively: malformed rows must not crash the
+// stream; the chunk still advances lastSeq so resume cursors stay correct.
+export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivity[] {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(delta);
+  } catch {
+    return tools;
+  }
+  const e = envelope as {
+    v?: number;
+    phase?: string;
+    callId?: string;
+    name?: string;
+    args?: { query?: string };
+    ok?: boolean;
+    summary?: { query?: string; resultCount?: number; pagesFetched?: number };
+    pages?: ToolPageStatus[];
+    error?: string;
+  };
+  if (e.v !== 1 || !e.callId || !e.name) return tools;
+
+  const upsert = (next: Partial<ToolActivity> & { callId: string; name: string }) => {
+    const idx = tools.findIndex((t) => t.callId === next.callId);
+    if (idx === -1) {
+      return [...tools, { query: "", status: "running" as const, ...next }];
+    }
+    return tools.map((t, i) => (i === idx ? { ...t, ...next } : t));
+  };
+
+  if (e.phase === "start") {
+    if (tools.some((t) => t.callId === e.callId)) return tools;
+    return [
+      ...tools,
+      { callId: e.callId, name: e.name, query: e.args?.query ?? "", status: "running" },
+    ];
+  }
+  if (e.phase === "progress") {
+    return upsert({
+      callId: e.callId,
+      name: e.name,
+      status: "running",
+      ...(e.summary?.query ? { query: e.summary.query } : {}),
+      ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
+      ...(e.pages !== undefined ? { pages: e.pages } : {}),
+    });
+  }
+  if (e.phase === "result") {
+    return upsert({
+      callId: e.callId,
+      name: e.name,
+      query: e.summary?.query ?? "",
+      status: e.ok ? "complete" : "error",
+      ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
+      ...(e.summary?.pagesFetched !== undefined ? { pagesFetched: e.summary.pagesFetched } : {}),
+      ...(e.pages !== undefined ? { pages: e.pages } : {}),
+      ...(e.error !== undefined ? { error: e.error } : {}),
+    });
+  }
+  return tools;
+}
 
 function reducer(state: StreamState, action: Action): StreamState {
   switch (action.kind) {
@@ -24,6 +112,7 @@ function reducer(state: StreamState, action: Action): StreamState {
         text: action.text,
         reasoning: action.reasoning,
         reasoningSeen: action.reasoningSeen,
+        tools: action.tools,
         lastSeq: action.lastSeq,
         status: "streaming",
       };
@@ -34,6 +123,13 @@ function reducer(state: StreamState, action: Action): StreamState {
           ...state,
           reasoning: state.reasoning + action.delta,
           reasoningSeen: true,
+          lastSeq: action.seq,
+        };
+      }
+      if (action.chunkKind === "tool") {
+        return {
+          ...state,
+          tools: applyToolChunk(state.tools, action.delta),
           lastSeq: action.seq,
         };
       }
@@ -48,6 +144,7 @@ export interface InitialStream {
   text: string;
   reasoning: string;
   reasoningSeen: boolean;
+  tools: ToolActivity[];
   lastSeq: number;
 }
 
@@ -64,6 +161,7 @@ export function useMessageStream(
     text: initial?.text ?? "",
     reasoning: initial?.reasoning ?? "",
     reasoningSeen: initial?.reasoningSeen ?? false,
+    tools: initial?.tools ?? [],
     lastSeq: initial?.lastSeq ?? 0,
     status: messageId ? "streaming" : "idle",
   });
@@ -79,6 +177,7 @@ export function useMessageStream(
         text: initial?.text ?? "",
         reasoning: initial?.reasoning ?? "",
         reasoningSeen: initial?.reasoningSeen ?? false,
+        tools: initial?.tools ?? [],
         lastSeq: initial?.lastSeq ?? 0,
       });
     }
@@ -89,7 +188,7 @@ export function useMessageStream(
     source.addEventListener("chunk", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         seq: number;
-        kind?: "text" | "reasoning";
+        kind?: "text" | "reasoning" | "tool";
         delta: string;
       };
       dispatch({ kind: "chunk", seq: data.seq, chunkKind: data.kind ?? "text", delta: data.delta });

@@ -1,5 +1,6 @@
-import { OpenRouterClient } from "@effect/ai-openrouter";
+import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
 import { Context, Effect, Layer, Schema, Stream } from "effect";
+import { LanguageModel, type Prompt, type Response, type Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import { ProviderRepo } from "./repo.ts";
@@ -24,15 +25,9 @@ export interface ModelCapabilities {
   readonly vision: boolean;
 }
 
-export interface ChatDelta {
-  readonly kind: "text" | "reasoning";
-  readonly text: string;
-}
-
-export interface ChatTurnMessage {
-  readonly role: "user" | "assistant" | "system";
-  readonly content: string;
-}
+// Streamed response parts from effect/unstable/ai: text/reasoning deltas,
+// tool-call + tool-result parts (handlers run by the library), finish, etc.
+export type ChatStreamPart = Response.AnyPart;
 
 const ModelsResponse = Schema.Struct({
   data: Schema.Array(
@@ -82,11 +77,16 @@ export class AiGateway extends Context.Service<
     fetchCatalog(
       providerId: string,
     ): Effect.Effect<ReadonlyArray<CatalogModel>, ProviderUnreachable | ModelNotFound>;
-    // Stream a chat completion for a stored model id
+    // Stream one model turn for a stored model id. When a toolkit is passed,
+    // the library resolves tool calls (runs handlers) within the turn and
+    // emits tool-call/tool-result parts; the caller drives the multi-turn
+    // loop by feeding the parts back in as prompt history.
     streamChat(input: {
       modelId: string;
-      messages: ReadonlyArray<ChatTurnMessage>;
-    }): Stream.Stream<ChatDelta, ProviderUnreachable | ModelNotFound>;
+      prompt: Prompt.Prompt;
+      toolkit?: Toolkit.WithHandler<any>;
+      toolChoice?: "auto" | "none" | "required";
+    }): Stream.Stream<ChatStreamPart, ProviderUnreachable | ModelNotFound>;
   }
 >()("chat/providers/AiGateway") {
   static readonly layer = Layer.effect(
@@ -125,8 +125,10 @@ export class AiGateway extends Context.Service<
 
       const streamChat = (input: {
         modelId: string;
-        messages: ReadonlyArray<ChatTurnMessage>;
-      }): Stream.Stream<ChatDelta, ProviderUnreachable | ModelNotFound> =>
+        prompt: Prompt.Prompt;
+        toolkit?: Toolkit.WithHandler<any>;
+        toolChoice?: "auto" | "none" | "required";
+      }): Stream.Stream<ChatStreamPart, ProviderUnreachable | ModelNotFound> =>
         Stream.unwrap(
           Effect.gen(function* () {
             const model = yield* repo.getModel(input.modelId);
@@ -134,63 +136,32 @@ export class AiGateway extends Context.Service<
             const provider = yield* repo.getProviderWithKey(model.providerId);
             if (!provider) return yield* new ModelNotFound({ modelId: input.modelId });
 
-            const clientLayer = OpenRouterClient.layer({
-              apiKey: provider.apiKey,
-              apiUrl: provider.baseUrl,
-            }).pipe(Layer.provide(FetchHttpClient.layer));
-
-            const raw = Effect.gen(function* () {
-              const client = yield* OpenRouterClient.OpenRouterClient;
-              const [, chunks] = yield* client.createChatCompletionStream({
-                model: model.modelKey,
-                messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
-              });
-              // Providers with hidden reasoning (e.g. OpenAI o-series) still
-              // stream reasoning_details entries — just encrypted/redacted.
-              // Emit a single empty "reasoning" marker for those so the UI can
-              // show a thinking indicator without any readable trace.
-              let signaledHiddenReasoning = false;
-              return chunks.pipe(
-                Stream.map((chunk): ChatDelta[] => {
-                  const deltas: ChatDelta[] = [];
-
-                  let reasoning = chunk.choices.map((c) => c.delta.reasoning ?? "").join("");
-                  let sawHidden = false;
-                  for (const choice of chunk.choices) {
-                    for (const detail of choice.delta.reasoning_details ?? []) {
-                      if (detail.type === "reasoning.text" && detail.text) {
-                        if (!choice.delta.reasoning) reasoning += detail.text;
-                      } else if (detail.type === "reasoning.summary" && detail.summary) {
-                        if (!choice.delta.reasoning) reasoning += detail.summary;
-                      } else if (detail.type === "reasoning.encrypted") {
-                        sawHidden = true;
-                      }
-                    }
-                  }
-                  if (reasoning === "[REDACTED]") {
-                    reasoning = "";
-                    sawHidden = true;
-                  }
-
-                  if (reasoning.length > 0) {
-                    deltas.push({ kind: "reasoning", text: reasoning });
-                  } else if (sawHidden && !signaledHiddenReasoning) {
-                    signaledHiddenReasoning = true;
-                    deltas.push({ kind: "reasoning", text: "" });
-                  }
-
-                  const text = chunk.choices.map((c) => c.delta.content ?? "").join("");
-                  if (text.length > 0) deltas.push({ kind: "text", text });
-                  return deltas;
+            // OpenRouterLanguageModel maps deltas/reasoning_details (incl.
+            // encrypted → "[REDACTED]"), fragmented tool calls, and usage to
+            // Response.StreamParts, and replays reasoning signatures on
+            // continuation turns.
+            const modelLayer = OpenRouterLanguageModel.model(model.modelKey).pipe(
+              Layer.provide(
+                OpenRouterClient.layer({
+                  apiKey: provider.apiKey,
+                  apiUrl: provider.baseUrl,
                 }),
-                Stream.flattenIterable,
-              );
-            });
+              ),
+              Layer.provide(FetchHttpClient.layer),
+            );
+
+            const parts = input.toolkit
+              ? LanguageModel.streamText({
+                  prompt: input.prompt,
+                  toolkit: input.toolkit,
+                  toolChoice: input.toolChoice ?? "auto",
+                })
+              : LanguageModel.streamText({ prompt: input.prompt });
 
             // Always-on extractor: models emitting raw <think> blocks in text
             // (R1 distills, QwQ, local models) still feed the reasoning track.
-            return extractThinkTags(Stream.unwrap(raw)).pipe(
-              Stream.provide(clientLayer),
+            const provided = extractThinkTags(parts).pipe(
+              Stream.provide(modelLayer),
               Stream.mapError(
                 (cause) =>
                   new ProviderUnreachable({
@@ -199,6 +170,9 @@ export class AiGateway extends Context.Service<
                   }),
               ),
             );
+            // Toolkit handlers are fully provided by the executor before they
+            // reach the gateway, so no requirements remain at runtime.
+            return provided as Stream.Stream<ChatStreamPart, ProviderUnreachable, never>;
           }),
         );
 

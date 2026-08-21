@@ -4,6 +4,7 @@ export const SendMessageInput = Schema.Struct({
   conversationId: Schema.NullOr(Schema.String),
   modelId: Schema.String,
   content: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32_000)),
+  searchEnabled: Schema.Boolean,
 });
 
 export const ConversationIdInput = Schema.Struct({

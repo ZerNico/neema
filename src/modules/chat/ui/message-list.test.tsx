@@ -12,6 +12,7 @@ describe("MessageBubble", () => {
           content: "Hello!",
           reasoning: "",
           reasoningSeen: false,
+          toolActivities: [],
           status: "complete",
         }}
       />,
@@ -28,6 +29,7 @@ describe("MessageBubble", () => {
           content: "",
           reasoning: "",
           reasoningSeen: false,
+          toolActivities: [],
           status: "streaming",
         }}
       />,
@@ -44,6 +46,7 @@ describe("MessageBubble", () => {
           content: "partial",
           reasoning: "",
           reasoningSeen: false,
+          toolActivities: [],
           status: "error",
         }}
       />,
