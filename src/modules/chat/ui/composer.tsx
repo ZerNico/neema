@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, ArrowUp02Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowUp02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -75,7 +75,17 @@ export function Composer({
           "bg-transparent px-4 pb-1 pt-3.5 text-sm leading-6 outline-none disabled:opacity-60",
         )}
       />
-      <div className="flex items-center justify-between gap-2 p-2 pt-0">
+      <div className="flex items-center gap-1 p-2 pt-0">
+        {/* Placeholder for attachments (files, images) — wired up later. */}
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="Add attachment"
+          disabled
+          className="text-muted-foreground size-8 rounded-full"
+        >
+          <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+        </Button>
         <Select
           value={modelId}
           onValueChange={(value) => value && onModelChange(value)}
@@ -107,7 +117,7 @@ export function Composer({
           onClick={send}
           disabled={disabled || !draft.trim() || !modelId}
           aria-label="Send"
-          className="size-8 rounded-full"
+          className="ml-auto size-8 rounded-full"
         >
           <HugeiconsIcon icon={ArrowUp02Icon} className="size-4" />
         </Button>

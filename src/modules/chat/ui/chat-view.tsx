@@ -68,8 +68,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         />
       </div>
       {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
-          composer edges align exactly with message content above. */}
-      <div className="pb-4 pt-2 [scrollbar-gutter:stable_both-edges]">
+          composer edges align exactly with message content above. No top
+          padding: the scroller's fade mask handles the visual transition. */}
+      <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             onSend={(content) => sendMutation.mutate(content)}

@@ -79,8 +79,16 @@ export function VirtualMessageList({
   return (
     <div className="relative h-full min-h-0">
       {/* stable both-edges keeps centered content aligned with the composer,
-          which sits outside this scroll container (no scrollbar offset). */}
-      <div ref={scrollRef} className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          which sits outside this scroll container (no scrollbar offset).
+          The mask fades the last bit of content out right above the composer
+          instead of hard-clipping it. */}
+      <div
+        ref={scrollRef}
+        className={cn(
+          "h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]",
+          "[mask-image:linear-gradient(to_bottom,black_calc(100%-1.5rem),transparent)]",
+        )}
+      >
         <div
           className="relative mx-auto w-full max-w-3xl"
           style={{ height: virtualizer.getTotalSize() }}
