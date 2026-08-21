@@ -12,6 +12,7 @@ import { retryMessage, sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
+import { useConfirm } from "~/ui/confirm.tsx";
 
 // Durable message_tool_calls row → the client-side activity shape.
 function toActivity(row: {
@@ -45,6 +46,7 @@ function toActivity(row: {
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const { data } = useSuspenseQuery(conversationQuery(conversationId));
   const [modelId, setModelId] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
@@ -100,10 +102,23 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
   });
 
-  // Retry is offered only on the last assistant message — regenerating an
-  // earlier one would orphan the turns that answered it (server enforces too).
+  // Retry rewinds the conversation to that response: retrying anything but
+  // the last one deletes the messages after it, so it asks first.
   const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
   const generating = sendMutation.isPending || stream.status === "streaming";
+  const retry = async (messageId: string) => {
+    if (
+      messageId !== lastAssistantId &&
+      !(await confirm({
+        title: "Retry this response?",
+        description: "All messages after it will be removed.",
+        confirmLabel: "Retry",
+      }))
+    ) {
+      return;
+    }
+    retryMutation.mutate(messageId);
+  };
 
   const display: DisplayMessage[] = data.messages
     .filter((m) => m.role !== "system")
@@ -115,9 +130,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         reasoning,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
-        ...(m.id === lastAssistantId
+        ...(m.role === "assistant"
           ? {
-              onRetry: () => retryMutation.mutate(m.id),
+              onRetry: () => void retry(m.id),
               retryDisabled: generating || retryMutation.isPending,
             }
           : {}),

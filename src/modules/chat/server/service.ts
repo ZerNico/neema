@@ -25,7 +25,8 @@ export class ChatService extends Context.Service<
       { conversationId: string; assistantMessageId: string },
       ModelNotFound | ConversationNotFound | ToolUnavailable
     >;
-    // Regenerates an assistant message in place (same id, fresh stream).
+    // Regenerates an assistant message in place (same id, fresh stream),
+    // deleting every message after it — retry rewinds the conversation.
     retryMessage(input: {
       userId: string;
       conversationId: string;
@@ -128,7 +129,8 @@ function makeChatService() {
     });
 
     // Reuses the message row so ids stay stable for subscribers and the
-    // sidebar; chunks/tool calls are wiped and the stream starts over.
+    // sidebar; chunks/tool calls are wiped, later messages deleted, and the
+    // stream starts over.
     const retryMessage = Effect.fn("ChatService.retryMessage")(function* (input: {
       userId: string;
       conversationId: string;
@@ -153,14 +155,17 @@ function makeChatService() {
           reason: "message is still generating",
         });
       }
-      // Retrying an earlier message would leave later turns answering a
-      // response that no longer exists.
+      // Retrying rewinds the conversation to this response: everything after
+      // it is deleted (a later turn answering a response that no longer
+      // exists would be nonsense). Refuse while any later message still
+      // streams — its generation fiber would keep writing to deleted rows.
       const all = yield* repo.listMessages(input.conversationId);
-      const lastAssistant = [...all].reverse().find((m) => m.role === "assistant");
-      if (lastAssistant?.id !== input.messageId) {
+      const index = all.findIndex((m) => m.id === input.messageId);
+      const after = all.slice(index + 1);
+      if (after.some((m) => m.status === "streaming")) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "only the last response can be retried",
+          reason: "a later message is still generating",
         });
       }
 
@@ -187,6 +192,7 @@ function makeChatService() {
         availability.enabled &&
         model.capabilities.tools;
 
+      yield* repo.deleteMessages(after.map((m) => m.id));
       yield* repo.resetMessageForRetry(message.id);
       yield* sync.publish(input.userId, {
         type: "message.status",

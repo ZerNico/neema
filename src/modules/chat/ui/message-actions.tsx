@@ -87,7 +87,7 @@ export function MessageActions({
   messageId: string;
   content: string;
   sources: ToolSource[];
-  /** Absent when this message can't be retried (not the last response). */
+  /** Absent when this message can't be retried (e.g. user messages). */
   onRetry?: (() => void) | undefined;
   retryDisabled?: boolean;
 }) {

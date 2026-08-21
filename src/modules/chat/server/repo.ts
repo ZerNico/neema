@@ -70,6 +70,8 @@ export class ChatRepo extends Context.Service<
     // Wipes a finished assistant message back to a fresh streaming state
     // (chunks, tool calls, content) so a retry can regenerate in place.
     resetMessageForRetry(messageId: string): Effect.Effect<void>;
+    // Removes messages entirely (chunks/tool calls go via FK cascade).
+    deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<void>;
   }
 >()("chat/chat/ChatRepo") {
   static readonly layer = Layer.effect(
@@ -270,6 +272,14 @@ export class ChatRepo extends Context.Service<
               completedAt: null,
             })
             .where(eq(messages.id, messageId))
+            .pipe(Effect.orDie);
+        }),
+
+        deleteMessages: Effect.fn("ChatRepo.deleteMessages")(function* (messageIds) {
+          if (messageIds.length === 0) return;
+          yield* db
+            .delete(messages)
+            .where(inArray(messages.id, [...messageIds]))
             .pipe(Effect.orDie);
         }),
       });

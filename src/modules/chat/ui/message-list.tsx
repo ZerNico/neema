@@ -104,7 +104,7 @@ export interface DisplayMessage {
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
-  /** Regenerate this message; only set on the message that may be retried. */
+  /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
   /** Disables the retry button (e.g. while another generation runs). */
   retryDisabled?: boolean;
