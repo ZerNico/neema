@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
+import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { CitationChip } from "./citation-chip.tsx";
 import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations.ts";
 import { MessageActions } from "./message-actions.tsx";
@@ -73,7 +74,7 @@ function CitedAnswer({
 }
 
 function AssistantMarkdown({
-  content,
+  content: rawContent,
   components,
   streaming,
 }: {
@@ -81,6 +82,14 @@ function AssistantMarkdown({
   components?: MarkdownComponents;
   streaming: boolean;
 }) {
+  // No source list (no components override) means any `[^N]` the model wrote
+  // has nothing to resolve against and would render as literal text — the
+  // model sometimes imitates cited turns earlier in the conversation. Markers
+  // it backed with its own definitions are real footnotes and stay.
+  const content = useMemo(
+    () => (components ? rawContent : stripUndefinedCitationMarkers(rawContent)),
+    [components, rawContent],
+  );
   return (
     <Streamdown
       mode={streaming ? "streaming" : "static"}

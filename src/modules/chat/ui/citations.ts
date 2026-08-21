@@ -33,14 +33,6 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
   return `${body}${openFence}\n\n${definitions}`;
 }
 
-/**
- * Markdown → clipboard text: citation markers are rendering syntax, not
- * content, so copying should not include `[^1][^2]` litter.
- */
-export function stripCitationMarkers(content: string): string {
-  return content.replace(/\[\^\d+\]/g, "");
-}
-
 /** Deduplicates sources by citation index, lowest first. */
 export function collectSources(
   activities: ReadonlyArray<{ sources?: ToolSource[] }>,

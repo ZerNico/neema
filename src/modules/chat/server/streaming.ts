@@ -6,6 +6,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
+import { stripCitationMarkers } from "../citation-markers.ts";
 
 // Live chunk events fanned out to SSE subscribers on this instance.
 // Replay across instances/reloads always comes from Postgres, so this PubSub
@@ -78,9 +79,15 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
       }) {
         const history = yield* repo.listMessages(input.conversationId);
+        // Markers are stripped from history: they reference source lists the
+        // model can't see, and a transcript full of `[^N]` teaches it to emit
+        // markers even in turns where no search ran (imitating earlier turns).
         const historyMessages = history
           .filter((m) => m.id !== input.messageId && m.status === "complete")
-          .map((m) => ({ role: m.role, content: m.content }));
+          .map((m) => ({
+            role: m.role,
+            content: m.role === "assistant" ? stripCitationMarkers(m.content) : m.content,
+          }));
 
         let seq = 0;
         let assembled = "";

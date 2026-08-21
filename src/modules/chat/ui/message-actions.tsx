@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
-import { stripCitationMarkers } from "./citations.ts";
+import { stripCitationMarkers } from "../citation-markers.ts";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import { Button } from "~/ui/primitives/button";
 import {

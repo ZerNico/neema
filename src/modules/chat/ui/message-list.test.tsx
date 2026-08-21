@@ -149,6 +149,14 @@ describe("MessageBubble actions", () => {
     expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
   });
 
+  it("hides imitated citation markers on messages without sources", () => {
+    const { container } = renderPlain({
+      content: "Effect 4 is out[^1][^2]. In short: tighter APIs[^1].",
+    });
+    expect(container.textContent).not.toContain("[^");
+    expect(container.textContent).toContain("Effect 4 is out. In short: tighter APIs.");
+  });
+
   it("gives user messages copy and (when wired) retry too", () => {
     const onRetry = vi.fn();
     renderPlain({ id: "u1", role: "user", content: "hi there", onRetry });
