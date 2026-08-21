@@ -65,11 +65,14 @@ export function VirtualMessageList({
     if (pinnedRef.current) scrollToBottom();
   }, [messages.length, followKey, scrollToBottom]);
 
-  // Land at the bottom on first mount (opening an existing chat).
+  // Land at the bottom on first mount — and stay there while the virtualizer
+  // replaces its initial size estimates with real measured heights. Rows are
+  // measured as they render, so the total size keeps growing for a few frames
+  // after mount; a single mount-time scroll would end up mid-list.
+  const totalSize = virtualizer.getTotalSize();
   useEffect(() => {
-    scrollToBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (pinnedRef.current) scrollToBottom();
+  }, [totalSize, scrollToBottom]);
 
   const items = virtualizer.getVirtualItems();
 
