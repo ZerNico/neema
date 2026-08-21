@@ -142,11 +142,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           </ListRow>
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">API key</span>
-            <span className="text-muted-foreground flex-1 text-sm">•••••••• (encrypted)</span>
-            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-              <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
-              Edit
-            </Button>
+            <span className="text-muted-foreground text-sm">•••••••• (encrypted)</span>
           </ListRow>
         </ListCard>
       </section>
