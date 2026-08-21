@@ -16,14 +16,17 @@ export interface CatalogPick {
   contextLength: number | null;
 }
 
-// Autocomplete over the provider's live /models catalog. Falls back to free
-// text when the provider does not expose a model list.
+// Autocomplete over the provider's live /models catalog. `onFreeText` fires as
+// the user types so callers can fall back to a manual model id when the
+// catalog is unavailable or has no match.
 export function ModelCombobox({
   providerId,
   onPick,
+  onFreeText,
 }: {
   providerId: string;
   onPick: (model: CatalogPick) => void;
+  onFreeText?: (text: string) => void;
 }) {
   const catalog = useQuery({
     queryKey: ["provider-catalog", providerId],
@@ -40,6 +43,7 @@ export function ModelCombobox({
       onValueChange={(value: CatalogPick | null) => {
         if (value) onPick(value);
       }}
+      onInputValueChange={(text: string) => onFreeText?.(text)}
     >
       <ComboboxInput
         placeholder={
@@ -51,7 +55,7 @@ export function ModelCombobox({
         }
       />
       <ComboboxContent>
-        <ComboboxEmpty>No models found.</ComboboxEmpty>
+        <ComboboxEmpty>No models found — the typed id will be used as-is.</ComboboxEmpty>
         <ComboboxList>
           {(item: CatalogPick) => (
             <ComboboxItem key={item.id} value={item}>
