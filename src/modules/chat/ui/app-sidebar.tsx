@@ -13,6 +13,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { conversationsQuery } from "../client/queries.ts";
+import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
@@ -58,6 +59,9 @@ export function AppSidebar({
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  // One registry for the whole shell: rows come and go with refetches, the
+  // record of which titles already played their reveal must not.
+  const [revealRegistry] = useState(createTitleRevealRegistry);
   const confirm = useConfirm();
 
   const removeMutation = useMutation({
@@ -105,7 +109,11 @@ export function AppSidebar({
                       />
                     }
                   >
-                    <span className="truncate">{conversation.title}</span>
+                    <ConversationTitle
+                      conversationId={conversation.id}
+                      title={conversation.title}
+                      registry={revealRegistry}
+                    />
                   </SidebarMenuButton>
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -116,7 +124,7 @@ export function AppSidebar({
                     <DropdownMenuContent side="right" align="start">
                       <DropdownMenuItem
                         onClick={() =>
-                          setRenaming({ id: conversation.id, title: conversation.title })
+                          setRenaming({ id: conversation.id, title: conversation.title ?? "" })
                         }
                       >
                         <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
@@ -127,7 +135,7 @@ export function AppSidebar({
                         onClick={async () => {
                           if (
                             await confirm({
-                              title: `Delete "${conversation.title}"?`,
+                              title: `Delete "${conversation.title ?? "New chat"}"?`,
                               description: "The chat and all its messages are removed permanently.",
                               confirmLabel: "Delete chat",
                             })

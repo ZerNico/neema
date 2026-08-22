@@ -25,6 +25,8 @@ let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | StreamEngine | SyncBus | D
 // Deterministic fake AI provider: streams 5 words with a small delay.
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  // Titles are not exercised here; the stream engine never calls this.
+  generateText: () => Effect.die("no title generation in these tests"),
   streamChat: () =>
     Stream.fromIterable(["alpha ", "beta ", "gamma ", "delta ", "epsilon"]).pipe(
       Stream.map((delta): ChatStreamPart => ({ type: "text-delta", id: "t", delta }) as never),

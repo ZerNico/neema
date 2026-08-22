@@ -20,7 +20,9 @@ export const conversations = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    title: text().notNull().default("New chat"),
+    // Null until the first turn's generated title lands; the sidebar shows a
+    // pending placeholder for it. Never reset to null once resolved.
+    title: text(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

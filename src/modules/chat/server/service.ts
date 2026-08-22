@@ -12,11 +12,13 @@ import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachm
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ChatRepo } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
+import { generateConversationTitle, type TitleDeps } from "./title.ts";
 
 // Orchestrates the chat use-cases on top of repo + stream engine + sync bus.
 export class ChatService extends Context.Service<
@@ -92,6 +94,8 @@ function makeChatService() {
     const attachmentRepo = yield* AttachmentRepo;
     const attachmentService = yield* AttachmentService;
     const documentParser = yield* DocumentParser;
+    const gateway = yield* AiGateway;
+    const titleDeps: TitleDeps = { gateway, repo, sync };
 
     const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
       function* (input: {
@@ -129,30 +133,39 @@ function makeChatService() {
           }
         }
 
-        yield* validateAttachments(input.userId, model.capabilities, input.attachmentIds);
+        const attachmentFileNames = yield* validateAttachments(
+          input.userId,
+          model.capabilities,
+          input.attachmentIds,
+        );
 
-        return model;
+        return { model, attachmentFileNames };
       },
     );
 
     // Rejects attachments the model cannot read before anything is written, so
     // the user gets a 400 instead of a generation that fails halfway through.
+    // Returns their file names in the caller's order — the title generator
+    // needs them and the rows are already loaded here.
     const validateAttachments = Effect.fn("ChatService.validateAttachments")(function* (
       userId: string,
       capabilities: { vision: boolean; files: boolean },
       attachmentIds: ReadonlyArray<string>,
     ) {
-      if (attachmentIds.length === 0) return;
+      if (attachmentIds.length === 0) return [] as ReadonlyArray<string>;
 
       const rows = yield* attachmentRepo.listWithBlobsByIds(userId, attachmentIds);
       const byId = new Map(rows.map((row) => [row.id, row]));
       // Parsing availability is only consulted once, and only if a PDF meets a
       // model that cannot read files natively.
       let parsing: { configured: boolean; enabled: boolean } | null = null;
+      const fileNames: string[] = [];
 
       for (const attachmentId of attachmentIds) {
         const row = byId.get(attachmentId);
         if (!row) return yield* new AttachmentNotAvailable({ attachmentId });
+
+        fileNames.push(row.fileName);
 
         const kind = attachmentKind(row.mediaType);
         if (kind === "image" && !capabilities.vision) {
@@ -172,6 +185,8 @@ function makeChatService() {
           }
         }
       }
+
+      return fileNames;
     });
 
     // Sends a user message; creates the conversation on first message.
@@ -185,7 +200,7 @@ function makeChatService() {
       attachmentIds: ReadonlyArray<string>;
     }) {
       // The server stays authoritative even when the composer hides the toggle.
-      yield* validateGenerationOptions(input);
+      const { attachmentFileNames } = yield* validateGenerationOptions(input);
 
       // One transaction: a lost attachment claim must not leave behind an
       // empty conversation or a user message nobody will answer.
@@ -217,6 +232,21 @@ function makeChatService() {
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
       });
+
+      // Only a brand-new conversation has a pending title. Forked after the
+      // answer so the reply never waits on it, and detached so it survives the
+      // response ending.
+      if (turn.conversationCreated) {
+        yield* Effect.forkDetach(
+          generateConversationTitle(titleDeps, {
+            userId: input.userId,
+            conversationId: turn.conversation.id,
+            modelId: input.modelId,
+            content: input.content,
+            attachmentFileNames,
+          }),
+        );
+      }
 
       return { conversationId: turn.conversation.id, assistantMessageId: turn.assistant.id };
     });

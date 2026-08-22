@@ -89,6 +89,12 @@ export class AiGateway extends Context.Service<
       toolkit?: Toolkit.WithHandler<any>;
       toolChoice?: "auto" | "none" | "required";
     }): Stream.Stream<ChatStreamPart, ProviderUnreachable | ModelNotFound>;
+    // One bounded, tool-free model turn returning just the text. Used for
+    // side generations (conversation titles), never for the answer itself.
+    generateText(input: {
+      modelId: string;
+      prompt: Prompt.Prompt;
+    }): Effect.Effect<string, ProviderUnreachable | ModelNotFound>;
   }
 >()("chat/providers/AiGateway") {
   static readonly layer = Layer.effect(
@@ -125,6 +131,30 @@ export class AiGateway extends Context.Service<
         }));
       });
 
+      // Streaming and one-shot must not drift apart on credentials, base url
+      // or model key, so both resolve the provider layer through here.
+      // OpenRouterLanguageModel maps deltas/reasoning_details (incl. encrypted
+      // → "[REDACTED]"), fragmented tool calls, and usage to
+      // Response.StreamParts, and replays reasoning signatures on
+      // continuation turns.
+      const resolveModel = Effect.fn("AiGateway.resolveModel")(function* (modelId: string) {
+        const model = yield* repo.getModel(modelId);
+        if (!model) return yield* new ModelNotFound({ modelId });
+        const provider = yield* repo.getProviderWithKey(model.providerId);
+        if (!provider) return yield* new ModelNotFound({ modelId });
+
+        const layer = OpenRouterLanguageModel.model(model.modelKey).pipe(
+          Layer.provide(
+            OpenRouterClient.layer({
+              apiKey: provider.apiKey,
+              apiUrl: provider.baseUrl,
+            }),
+          ),
+          Layer.provide(FetchHttpClient.layer),
+        );
+        return { providerId: model.providerId, layer };
+      });
+
       const streamChat = (input: {
         modelId: string;
         prompt: Prompt.Prompt;
@@ -133,24 +163,7 @@ export class AiGateway extends Context.Service<
       }): Stream.Stream<ChatStreamPart, ProviderUnreachable | ModelNotFound> =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const model = yield* repo.getModel(input.modelId);
-            if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
-            const provider = yield* repo.getProviderWithKey(model.providerId);
-            if (!provider) return yield* new ModelNotFound({ modelId: input.modelId });
-
-            // OpenRouterLanguageModel maps deltas/reasoning_details (incl.
-            // encrypted → "[REDACTED]"), fragmented tool calls, and usage to
-            // Response.StreamParts, and replays reasoning signatures on
-            // continuation turns.
-            const modelLayer = OpenRouterLanguageModel.model(model.modelKey).pipe(
-              Layer.provide(
-                OpenRouterClient.layer({
-                  apiKey: provider.apiKey,
-                  apiUrl: provider.baseUrl,
-                }),
-              ),
-              Layer.provide(FetchHttpClient.layer),
-            );
+            const { providerId, layer: modelLayer } = yield* resolveModel(input.modelId);
 
             const parts = input.toolkit
               ? LanguageModel.streamText({
@@ -165,11 +178,7 @@ export class AiGateway extends Context.Service<
             const provided = extractThinkTags(parts).pipe(
               Stream.provide(modelLayer),
               Stream.mapError(
-                (cause) =>
-                  new ProviderUnreachable({
-                    providerId: model.providerId,
-                    message: String(cause),
-                  }),
+                (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
               ),
             );
             // Toolkit handlers are fully provided by the executor before they
@@ -178,7 +187,24 @@ export class AiGateway extends Context.Service<
           }),
         );
 
-      return AiGateway.of({ fetchCatalog, streamChat });
+      const generateText = Effect.fn("AiGateway.generateText")(function* (input: {
+        modelId: string;
+        prompt: Prompt.Prompt;
+      }) {
+        const { providerId, layer: modelLayer } = yield* resolveModel(input.modelId);
+        const response = yield* LanguageModel.generateText({
+          prompt: input.prompt,
+          toolChoice: "none",
+        }).pipe(
+          Effect.provide(modelLayer),
+          Effect.mapError(
+            (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
+          ),
+        );
+        return response.text;
+      });
+
+      return AiGateway.of({ fetchCatalog, streamChat, generateText });
     }),
   ).pipe(Layer.provide(FetchHttpClient.layer));
 }

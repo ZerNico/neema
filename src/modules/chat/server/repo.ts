@@ -49,6 +49,11 @@ export class ChatRepo extends Context.Service<
       conversationId: string,
       patch: Partial<{ title: string; modelId: string; lastMessageAt: Date }>,
     ): Effect.Effect<void>;
+    /**
+     * Resolves a pending title. False when the row is gone or already titled —
+     * a manual rename that landed first must not be overwritten.
+     */
+    setTitleIfPending(conversationId: string, title: string): Effect.Effect<boolean>;
     // Returns storage keys the caller must delete after the commit.
     deleteConversation(
       userId: string,
@@ -160,7 +165,8 @@ export class ChatRepo extends Context.Service<
         createConversation: Effect.fn("ChatRepo.createConversation")(function* (input) {
           const rows = yield* db
             .insert(conversations)
-            .values({ id: uuidv7(), userId: input.userId, modelId: input.modelId })
+            // title stays null until generation resolves it.
+            .values({ id: uuidv7(), userId: input.userId, modelId: input.modelId, title: null })
             .returning()
             .pipe(Effect.orDie);
           return rows[0]!;
@@ -193,7 +199,13 @@ export class ChatRepo extends Context.Service<
                 } else {
                   const rows = yield* tx
                     .insert(conversations)
-                    .values({ id: uuidv7(), userId: input.userId, modelId: input.modelId })
+                    // title stays null until generation resolves it.
+                    .values({
+                      id: uuidv7(),
+                      userId: input.userId,
+                      modelId: input.modelId,
+                      title: null,
+                    })
                     .returning()
                     .pipe(Effect.orDie);
                   conversation = rows[0]!;
@@ -255,6 +267,18 @@ export class ChatRepo extends Context.Service<
               .set({ ...patch, updatedAt: new Date() })
               .where(eq(conversations.id, conversationId))
               .pipe(Effect.orDie);
+          },
+        ),
+
+        setTitleIfPending: Effect.fn("ChatRepo.setTitleIfPending")(
+          function* (conversationId, title) {
+            const rows = yield* db
+              .update(conversations)
+              .set({ title, updatedAt: new Date() })
+              .where(and(eq(conversations.id, conversationId), isNull(conversations.title)))
+              .returning({ id: conversations.id })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
           },
         ),
 
