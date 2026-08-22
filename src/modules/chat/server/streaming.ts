@@ -12,6 +12,7 @@ import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
 import { MAX_PRIOR_SOURCES, SEARCH_SYSTEM_HINT, withSearchReminder } from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
+import type { JsonValue } from "~/db/schema/providers.ts";
 
 // Live chunk events fanned out to SSE subscribers on this instance.
 // Replay across instances/reloads always comes from Postgres, so this PubSub
@@ -313,7 +314,7 @@ export class StreamEngine extends Context.Service<
                           callIndex: callIndex++,
                           providerCallId: part.id,
                           toolName: part.name,
-                          arguments: args as never,
+                          arguments: args as JsonValue,
                         });
                         yield* pushToolChunk({
                           v: 1,
@@ -379,11 +380,14 @@ export class StreamEngine extends Context.Service<
                         };
                         yield* repo.completeToolCall({
                           id: rowId,
+                          // Schema-validated tool output — plain JSON at runtime,
+                          // but readonly arrays and optional keys keep TS from
+                          // proving it against the recursive JsonValue type.
                           result: {
                             ...summary,
                             ...(pages.length > 0 ? { pages } : {}),
                             ...(sources.length > 0 ? { sources } : {}),
-                          } as never,
+                          } as unknown as JsonValue,
                           status: ok ? "complete" : "error",
                           ...(ok
                             ? {}

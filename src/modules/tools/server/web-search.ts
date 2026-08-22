@@ -186,7 +186,7 @@ export class WebSearchExecutor extends Context.Service<
                   .pipe(
                     Effect.map((page) => {
                       setStatus(hit.url, "done");
-                      return { hit, page, error: null as string | null };
+                      return { hit, page, error: null };
                     }),
                     Effect.catchTag("PageExtractionError", (e) => {
                       setStatus(hit.url, "error");
@@ -214,7 +214,7 @@ export class WebSearchExecutor extends Context.Service<
             const base = { index, title: hit.title, url: hit.url, snippet: hit.snippet };
             if (!fetched) return base;
             if (fetched.error !== null) return { ...base, fetchError: fetched.error };
-            const page = fetched.page!;
+            const page = fetched.page;
             // Enforce the global ceiling across pages.
             const room = Math.max(0, MAX_TOTAL_CHARS - total);
             const content =
