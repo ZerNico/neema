@@ -3,9 +3,12 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { count } from "drizzle-orm";
+import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import { getDb } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
+import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { runtime } from "~/server/runtime.ts";
 
 async function isFirstUser() {
   const [row] = await getDb().select({ n: count() }).from(schema.user);
@@ -34,6 +37,19 @@ export const auth = betterAuth({
         before: async (userData) => ({
           data: { ...userData, role: (await isFirstUser()) ? "admin" : "user" },
         }),
+      },
+      delete: {
+        // Attachment rows cascade off the user FK; the stored bytes do not.
+        // Any future deletion path (admin removeUser, self-service) goes
+        // through this hook, so the purge cannot be forgotten.
+        after: async (deleted) => {
+          await runtime.runPromise(
+            Effect.gen(function* () {
+              const attachments = yield* AttachmentService;
+              yield* attachments.purgeUserFiles(deleted.id);
+            }),
+          );
+        },
       },
     },
   },

@@ -4,6 +4,8 @@ import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { conversations, messageChunks, messages, messageToolCalls } from "~/db/schema/index.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
+import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
@@ -22,11 +24,36 @@ export class ChatRepo extends Context.Service<
       conversationId: string,
     ): Effect.Effect<ConversationRow, ConversationNotFound>;
     createConversation(input: { userId: string; modelId: string }): Effect.Effect<ConversationRow>;
+    /**
+     * One atomic turn: resolve (or create) the conversation, write the user
+     * message, claim its attachments, and open the assistant row. Claiming has
+     * to share the transaction — an attachment another tab grabbed first must
+     * take the whole turn down rather than leave a half-written one.
+     */
+    createTurn(input: {
+      userId: string;
+      conversationId: string | null;
+      modelId: string;
+      content: string;
+      attachmentIds: ReadonlyArray<string>;
+    }): Effect.Effect<
+      {
+        conversation: ConversationRow;
+        conversationCreated: boolean;
+        userMessage: MessageRow;
+        assistant: MessageRow;
+      },
+      ConversationNotFound | AttachmentNotAvailable
+    >;
     updateConversation(
       conversationId: string,
       patch: Partial<{ title: string; modelId: string; lastMessageAt: Date }>,
     ): Effect.Effect<void>;
-    deleteConversation(userId: string, conversationId: string): Effect.Effect<void>;
+    // Returns storage keys the caller must delete after the commit.
+    deleteConversation(
+      userId: string,
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<string>>;
     listMessages(conversationId: string): Effect.Effect<MessageRow[]>;
     insertMessage(input: {
       conversationId: string;
@@ -70,6 +97,7 @@ export class ChatRepo extends Context.Service<
     // Claims and wipes a finished assistant back to a fresh streaming state.
     // The claim, rewind deletes, and optional user edit commit atomically.
     resetMessageForRetry(input: {
+      userId: string;
       messageId: string;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
@@ -77,24 +105,35 @@ export class ChatRepo extends Context.Service<
         messageId: string;
         conversationId: string;
         content: string;
+        attachmentIds: ReadonlyArray<string>;
       };
-    }): Effect.Effect<boolean>;
+    }): Effect.Effect<
+      { claimed: boolean; orphanedKeys: ReadonlyArray<string> },
+      AttachmentNotAvailable
+    >;
     createAssistantForEdit(input: {
+      userId: string;
       conversationId: string;
       userMessageId: string;
       expectedEditedAt: Date | null;
       content: string;
+      attachmentIds: ReadonlyArray<string>;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
-    }): Effect.Effect<MessageRow | null>;
+    }): Effect.Effect<
+      { message: MessageRow; orphanedKeys: ReadonlyArray<string> } | null,
+      AttachmentNotAvailable
+    >;
     // Removes messages entirely (chunks/tool calls go via FK cascade).
-    deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<void>;
+    // Returns storage keys to delete after the commit.
+    deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>>;
   }
 >()("chat/chat/ChatRepo") {
   static readonly layer = Layer.effect(
     ChatRepo,
     Effect.gen(function* () {
       const db = yield* Db;
+      const attachments = yield* AttachmentRepo;
 
       return ChatRepo.of({
         listConversations: Effect.fn("ChatRepo.listConversations")(function* (userId) {
@@ -127,6 +166,88 @@ export class ChatRepo extends Context.Service<
           return rows[0]!;
         }),
 
+        createTurn: Effect.fn("ChatRepo.createTurn")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                let conversationCreated = false;
+                let conversation: ConversationRow;
+                if (input.conversationId) {
+                  const rows = yield* tx
+                    .select()
+                    .from(conversations)
+                    .where(
+                      and(
+                        eq(conversations.id, input.conversationId),
+                        eq(conversations.userId, input.userId),
+                      ),
+                    )
+                    .pipe(Effect.orDie);
+                  const row = rows[0];
+                  if (!row) {
+                    return yield* new ConversationNotFound({
+                      conversationId: input.conversationId,
+                    });
+                  }
+                  conversation = row;
+                } else {
+                  const rows = yield* tx
+                    .insert(conversations)
+                    .values({ id: uuidv7(), userId: input.userId, modelId: input.modelId })
+                    .returning()
+                    .pipe(Effect.orDie);
+                  conversation = rows[0]!;
+                  conversationCreated = true;
+                }
+
+                const userRows = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: conversation.id,
+                    role: "user",
+                    status: "complete",
+                    content: input.content,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                const userMessage = userRows[0]!;
+
+                yield* attachments.reconcile(tx, {
+                  userId: input.userId,
+                  messageId: userMessage.id,
+                  attachmentIds: input.attachmentIds,
+                });
+
+                const assistantRows = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: conversation.id,
+                    role: "assistant",
+                    status: "streaming",
+                    modelId: input.modelId,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+
+                yield* tx
+                  .update(conversations)
+                  .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })
+                  .where(eq(conversations.id, conversation.id))
+                  .pipe(Effect.orDie);
+
+                return {
+                  conversation,
+                  conversationCreated,
+                  userMessage,
+                  assistant: assistantRows[0]!,
+                };
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
         updateConversation: Effect.fn("ChatRepo.updateConversation")(
           function* (conversationId, patch) {
             yield* db
@@ -139,9 +260,27 @@ export class ChatRepo extends Context.Service<
 
         deleteConversation: Effect.fn("ChatRepo.deleteConversation")(
           function* (userId, conversationId) {
-            yield* db
-              .delete(conversations)
-              .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+            return yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  const rows = yield* tx
+                    .select({ id: messages.id })
+                    .from(messages)
+                    .where(eq(messages.conversationId, conversationId));
+                  // message_attachments cascades, but the attachment rows it
+                  // points at do not — release them explicitly.
+                  const keys = yield* attachments.releaseForMessages(
+                    tx,
+                    rows.map((row) => row.id),
+                  );
+                  yield* tx
+                    .delete(conversations)
+                    .where(
+                      and(eq(conversations.id, conversationId), eq(conversations.userId, userId)),
+                    );
+                  return keys;
+                }),
+              )
               .pipe(Effect.orDie);
           },
         ),
@@ -285,34 +424,56 @@ export class ChatRepo extends Context.Service<
                     modelId: input.modelId,
                   })
                   .where(and(eq(messages.id, input.messageId), ne(messages.status, "streaming")))
-                  .returning({ id: messages.id });
-                if (claimed.length === 0) return false;
+                  .returning({ id: messages.id })
+                  .pipe(Effect.orDie);
+                if (claimed.length === 0) {
+                  return { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
+                }
+
+                const orphanedKeys: string[] = [];
 
                 if (input.edit) {
                   yield* tx
                     .update(messages)
                     .set({ content: input.edit.content, editedAt: new Date() })
-                    .where(eq(messages.id, input.edit.messageId));
+                    .where(eq(messages.id, input.edit.messageId))
+                    .pipe(Effect.orDie);
+                  orphanedKeys.push(
+                    ...(yield* attachments.reconcile(tx, {
+                      userId: input.userId,
+                      messageId: input.edit.messageId,
+                      attachmentIds: input.edit.attachmentIds,
+                    })),
+                  );
                   yield* tx
                     .update(conversations)
                     .set({ modelId: input.modelId, updatedAt: new Date() })
-                    .where(eq(conversations.id, input.edit.conversationId));
+                    .where(eq(conversations.id, input.edit.conversationId))
+                    .pipe(Effect.orDie);
                 }
 
                 if (input.deleteMessageIds.length > 0) {
+                  orphanedKeys.push(
+                    ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),
+                  );
                   yield* tx
                     .delete(messages)
-                    .where(inArray(messages.id, [...input.deleteMessageIds]));
+                    .where(inArray(messages.id, [...input.deleteMessageIds]))
+                    .pipe(Effect.orDie);
                 }
-                yield* tx.delete(messageChunks).where(eq(messageChunks.messageId, input.messageId));
+                yield* tx
+                  .delete(messageChunks)
+                  .where(eq(messageChunks.messageId, input.messageId))
+                  .pipe(Effect.orDie);
                 yield* tx
                   .delete(messageToolCalls)
-                  .where(eq(messageToolCalls.messageId, input.messageId));
+                  .where(eq(messageToolCalls.messageId, input.messageId))
+                  .pipe(Effect.orDie);
 
-                return true;
+                return { claimed: true, orphanedKeys: orphanedKeys as ReadonlyArray<string> };
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(Effect.catchTag("SqlError", Effect.die));
         }),
 
         createAssistantForEdit: Effect.fn("ChatRepo.createAssistantForEdit")(function* (input) {
@@ -333,18 +494,32 @@ export class ChatRepo extends Context.Service<
                         : eq(messages.editedAt, input.expectedEditedAt),
                     ),
                   )
-                  .returning({ id: messages.id });
+                  .returning({ id: messages.id })
+                  .pipe(Effect.orDie);
                 if (claimed.length === 0) return null;
 
+                const orphanedKeys: string[] = [
+                  ...(yield* attachments.reconcile(tx, {
+                    userId: input.userId,
+                    messageId: input.userMessageId,
+                    attachmentIds: input.attachmentIds,
+                  })),
+                ];
+
                 if (input.deleteMessageIds.length > 0) {
+                  orphanedKeys.push(
+                    ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),
+                  );
                   yield* tx
                     .delete(messages)
-                    .where(inArray(messages.id, [...input.deleteMessageIds]));
+                    .where(inArray(messages.id, [...input.deleteMessageIds]))
+                    .pipe(Effect.orDie);
                 }
                 yield* tx
                   .update(conversations)
                   .set({ modelId: input.modelId, updatedAt: new Date() })
-                  .where(eq(conversations.id, input.conversationId));
+                  .where(eq(conversations.id, input.conversationId))
+                  .pipe(Effect.orDie);
 
                 const created = yield* tx
                   .insert(messages)
@@ -355,18 +530,27 @@ export class ChatRepo extends Context.Service<
                     status: "streaming",
                     modelId: input.modelId,
                   })
-                  .returning();
-                return created[0]!;
+                  .returning()
+                  .pipe(Effect.orDie);
+                return {
+                  message: created[0]!,
+                  orphanedKeys: orphanedKeys as ReadonlyArray<string>,
+                };
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(Effect.catchTag("SqlError", Effect.die));
         }),
 
         deleteMessages: Effect.fn("ChatRepo.deleteMessages")(function* (messageIds) {
-          if (messageIds.length === 0) return;
-          yield* db
-            .delete(messages)
-            .where(inArray(messages.id, [...messageIds]))
+          if (messageIds.length === 0) return [] as ReadonlyArray<string>;
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const keys = yield* attachments.releaseForMessages(tx, messageIds);
+                yield* tx.delete(messages).where(inArray(messages.id, [...messageIds]));
+                return keys;
+              }),
+            )
             .pipe(Effect.orDie);
         }),
       });

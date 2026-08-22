@@ -1,12 +1,16 @@
 import { Context, Duration, Effect, Layer, PubSub, Stream } from "effect";
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
+import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
-import { stripCitationMarkers } from "../citation-markers.ts";
 
 // Live chunk events fanned out to SSE subscribers on this instance.
 // Replay across instances/reloads always comes from Postgres, so this PubSub
@@ -86,6 +90,12 @@ export class StreamEngine extends Context.Service<
       const gateway = yield* AiGateway;
       const sync = yield* SyncBus;
       const webSearch = yield* WebSearchExecutor;
+      const providers = yield* ProviderRepo;
+      const promptDeps: PromptDeps = {
+        attachments: yield* AttachmentRepo,
+        store: yield* BlobStore,
+        parser: yield* DocumentParser,
+      };
       const pubsub = yield* PubSub.unbounded<StreamEvent>();
 
       const runGeneration = Effect.fn("StreamEngine.runGeneration")(function* (input: {
@@ -123,16 +133,6 @@ export class StreamEngine extends Context.Service<
         const priorSources = [...priorByIndex.values()]
           // oxlint-disable-next-line no-array-sort -- fresh array from Map values
           .sort((a, b) => a.index - b.index);
-
-        const historyMessages = completed.map((m) => ({
-          role: m.role,
-          content:
-            // Without search there is no recap block, so history markers would
-            // teach the model to emit unresolvable citations — strip them.
-            m.role === "assistant" && !input.searchEnabled
-              ? stripCitationMarkers(m.content)
-              : m.content,
-        }));
 
         let seq = 0;
         let assembled = "";
@@ -205,6 +205,16 @@ export class StreamEngine extends Context.Service<
           });
 
         const generate = Effect.gen(function* () {
+          // Attachments resolve here, inside the generation: a missing blob or
+          // an unparseable PDF then finalizes the message as an error like any
+          // other generation failure.
+          const model = yield* providers.getModel(input.modelId);
+          const historyMessages = yield* buildHistoryMessages(promptDeps, {
+            messages: completed,
+            searchEnabled: input.searchEnabled,
+            modelSupportsFiles: model?.capabilities.files ?? false,
+          });
+
           const toolkit = input.searchEnabled
             ? yield* webSearch.prepare({ sources: priorSources })
             : undefined;

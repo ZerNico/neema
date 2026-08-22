@@ -3,7 +3,7 @@ import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
-import { WebSearchConfig } from "../schema.ts";
+import { DocumentParserConfig, WebSearchConfig } from "../schema.ts";
 
 type ToolRow = typeof tools.$inferSelect;
 // Tool rows safe for admin clients: ciphertext replaced by a boolean.
@@ -15,6 +15,7 @@ const toPublic = ({ secretCiphertext, ...rest }: ToolRow): PublicTool => ({
 });
 
 const decodeWebSearchConfig = Schema.decodeUnknownEffect(WebSearchConfig);
+const decodeDocumentParserConfig = Schema.decodeUnknownEffect(DocumentParserConfig);
 
 export class ToolsRepo extends Context.Service<
   ToolsRepo,
@@ -25,6 +26,12 @@ export class ToolsRepo extends Context.Service<
       enabled: boolean;
       config: WebSearchConfig;
       secret: Redacted.Redacted<string> | null;
+    } | null>;
+    // Internal: decoded document_parser row (no secret) for the parser service.
+    getDocumentParser(): Effect.Effect<{
+      enabled: boolean;
+      kind: string;
+      config: DocumentParserConfig;
     } | null>;
     updateTool(
       name: string,
@@ -65,6 +72,13 @@ export class ToolsRepo extends Context.Service<
           const config = yield* decodeWebSearchConfig(row.config).pipe(Effect.orDie);
           const secret = row.secretCiphertext ? yield* cipher.decrypt(row.secretCiphertext) : null;
           return { enabled: row.enabled, config, secret };
+        }),
+
+        getDocumentParser: Effect.fn("ToolsRepo.getDocumentParser")(function* () {
+          const row = yield* getRow("document_parser");
+          if (!row) return null;
+          const config = yield* decodeDocumentParserConfig(row.config).pipe(Effect.orDie);
+          return { enabled: row.enabled, kind: row.kind, config };
         }),
 
         updateTool: Effect.fn("ToolsRepo.updateTool")(function* (name, patch) {

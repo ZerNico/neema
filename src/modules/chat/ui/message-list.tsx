@@ -10,6 +10,10 @@ import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
+import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { MessageAttachment } from "~/modules/attachments/schema.ts";
+import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { cn } from "~/ui/utils";
 
 type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
@@ -121,6 +125,8 @@ export interface DisplayMessage {
    * itself; markers resolve against these plus the message's own sources.
    */
   inheritedSources?: ToolSource[];
+  /** Files sent with this message, in position order. */
+  attachments?: ReadonlyArray<MessageAttachment>;
   /** Edit this completed user message. */
   onEdit?: () => void;
   editDisabled?: boolean;
@@ -135,6 +141,8 @@ export interface DisplayMessage {
     onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
+    /** The view-level upload state, seeded with the message's own files. */
+    attachments: AttachmentUploads;
   };
   /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
@@ -206,15 +214,36 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           onModelChange={message.editState.onModelChange}
           searchEnabled={message.editState.searchEnabled}
           onSearchEnabledChange={message.editState.onSearchEnabledChange}
+          attachments={message.editState.attachments}
           placeholder="Edit message…"
           autoFocus
           submitLabel="Save edit"
         />
       ) : (
         <div className="group/user flex w-full flex-col items-end">
-          <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
-            {message.content}
-          </div>
+          {message.attachments && message.attachments.length > 0 ? (
+            <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
+              {message.attachments.map((attachment) => (
+                <AttachmentChip
+                  key={attachment.id}
+                  item={{
+                    fileName: attachment.fileName,
+                    size: attachment.size,
+                    kind: attachment.kind,
+                    previewUrl: attachment.kind === "image" ? attachmentUrl(attachment.id) : null,
+                  }}
+                  href={attachmentUrl(attachment.id)}
+                  preview={attachmentUrl(attachment.id)}
+                />
+              ))}
+            </AttachmentChipRow>
+          ) : null}
+          {/* An attachment-only turn has no text bubble to draw. */}
+          {message.content ? (
+            <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+              {message.content}
+            </div>
+          ) : null}
           {message.editedAt ? (
             <span className="text-muted-foreground mr-1 mt-1 text-[0.6875rem]">edited</span>
           ) : null}

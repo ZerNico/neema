@@ -1,15 +1,16 @@
 import { Schema } from "effect";
+import { AttachmentIds } from "~/modules/attachments/schema.ts";
 
-const MessageContent = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(32_000),
-  Schema.isPattern(/\S/),
-);
+// Blank content is allowed when the turn carries attachments; the service
+// rejects the turn that has neither.
+const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 
 const generationFields = {
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
+  // Ordered: index = position in the message.
+  attachmentIds: AttachmentIds,
 };
 
 export const SendMessageInput = Schema.Struct({

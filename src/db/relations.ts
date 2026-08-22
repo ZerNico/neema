@@ -5,6 +5,8 @@ export const relations = defineRelations(schema, (r) => ({
   user: {
     conversations: r.many.conversations(),
     sessions: r.many.session(),
+    attachments: r.many.attachments(),
+    attachmentBlobs: r.many.attachmentBlobs(),
   },
   session: {
     user: r.one.user({
@@ -37,6 +39,7 @@ export const relations = defineRelations(schema, (r) => ({
     }),
     chunks: r.many.messageChunks(),
     toolCalls: r.many.messageToolCalls(),
+    attachments: r.many.messageAttachments(),
   },
   messageChunks: {
     message: r.one.messages({
@@ -49,6 +52,42 @@ export const relations = defineRelations(schema, (r) => ({
     message: r.one.messages({
       from: r.messageToolCalls.messageId,
       to: r.messages.id,
+      optional: false,
+    }),
+  },
+  attachmentBlobs: {
+    user: r.one.user({
+      from: r.attachmentBlobs.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+    attachments: r.many.attachments(),
+  },
+  attachments: {
+    user: r.one.user({
+      from: r.attachments.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+    blob: r.one.attachmentBlobs({
+      from: r.attachments.blobId,
+      to: r.attachmentBlobs.id,
+      optional: false,
+    }),
+    messageLink: r.one.messageAttachments({
+      from: r.attachments.id,
+      to: r.messageAttachments.attachmentId,
+    }),
+  },
+  messageAttachments: {
+    message: r.one.messages({
+      from: r.messageAttachments.messageId,
+      to: r.messages.id,
+      optional: false,
+    }),
+    attachment: r.one.attachments({
+      from: r.messageAttachments.attachmentId,
+      to: r.attachments.id,
       optional: false,
     }),
   },

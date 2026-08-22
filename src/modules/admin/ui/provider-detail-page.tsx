@@ -260,6 +260,7 @@ function AddModelDialog({
     reasoning: false,
     tools: false,
     vision: false,
+    files: false,
   });
 
   // Selecting from the popup (incl. the creatable row) is the primary path;
@@ -291,7 +292,7 @@ function AddModelDialog({
       setTyped("");
       setDisplayName("");
       setCustomType("chat");
-      setCapabilities({ reasoning: false, tools: false, vision: false });
+      setCapabilities({ reasoning: false, tools: false, vision: false, files: false });
       void queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
   });
@@ -316,7 +317,12 @@ function AddModelDialog({
                 setDisplayName(picked.custom ? "" : picked.name);
                 // Auto-detected from the catalog; still editable below.
                 setCapabilities(
-                  picked.capabilities ?? { reasoning: false, tools: false, vision: false },
+                  picked.capabilities ?? {
+                    reasoning: false,
+                    tools: false,
+                    vision: false,
+                    files: false,
+                  },
                 );
               }}
               onInput={setTyped}

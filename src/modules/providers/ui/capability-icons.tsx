@@ -1,4 +1,4 @@
-import { AiBrain01Icon, ToolsIcon, ViewIcon } from "@hugeicons/core-free-icons";
+import { AiBrain01Icon, Attachment01Icon, ToolsIcon, ViewIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "~/ui/utils";
 
@@ -6,12 +6,14 @@ export interface Capabilities {
   reasoning: boolean;
   tools: boolean;
   vision: boolean;
+  files: boolean;
 }
 
 export const CAPABILITY_META = [
   { key: "reasoning" as const, label: "Reasoning", icon: AiBrain01Icon },
   { key: "tools" as const, label: "Tool calling", icon: ToolsIcon },
   { key: "vision" as const, label: "Vision", icon: ViewIcon },
+  { key: "files" as const, label: "File input", icon: Attachment01Icon },
 ];
 
 // Compact icon row for a model's capabilities (picker, admin lists).

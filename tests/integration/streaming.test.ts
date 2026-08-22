@@ -4,12 +4,20 @@ import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { KeyCipher } from "~/modules/providers/server/crypto.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
+
+// ProviderRepo decrypts stored keys through KeyCipher, which reads this.
+process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
 
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | StreamEngine | SyncBus | Db, unknown>;
@@ -31,6 +39,21 @@ const FakeGateway = Layer.succeed(AiGateway, {
     ),
 });
 
+// No message in these tests carries an attachment, so the prompt builder never
+// touches storage or the parser; stubs satisfy the layer graph.
+const FakeBlobStore = Layer.succeed(BlobStore, {
+  put: () => Effect.die("no blobs in these tests"),
+  get: () => Effect.die("no blobs in these tests"),
+  delete: () => Effect.void,
+  exists: () => Effect.succeed(false),
+  deletePrefix: () => Effect.void,
+});
+
+const FakeDocumentParser = Layer.succeed(DocumentParser, {
+  parsePdf: () => Effect.die("no documents in these tests"),
+  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+});
+
 // Search is not exercised in these tests; a stub satisfies the layer graph.
 const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
   prepare: () => Effect.die("not available in tests"),
@@ -48,12 +71,20 @@ beforeAll(async () => {
 
   const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 5 });
   const InfraLayer = Db.layer.pipe(Layer.provideMerge(PgLive));
-  const ReposLayer = ChatRepo.layer.pipe(Layer.provideMerge(InfraLayer));
+  // ChatRepo reconciles attachment claims, so AttachmentRepo sits under it.
+  const ReposLayer = Layer.mergeAll(ChatRepo.layer, ProviderRepo.layer).pipe(
+    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(InfraLayer),
+  );
   const AppLayer = StreamEngine.layer.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(FakeGateway, FakeWebSearch, SyncBus.layer).pipe(
-        Layer.provideMerge(ReposLayer),
-      ),
+      Layer.mergeAll(
+        FakeGateway,
+        FakeWebSearch,
+        FakeBlobStore,
+        FakeDocumentParser,
+        SyncBus.layer,
+      ).pipe(Layer.provideMerge(ReposLayer)),
     ),
   );
   runtime = ManagedRuntime.make(AppLayer);
@@ -141,7 +172,7 @@ describe("resumable streaming pipeline", () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
-        const { conversation, userMessage, assistant } = yield* setupConversation;
+        const { userId, conversation, userMessage, assistant } = yield* setupConversation;
         yield* repo.finalizeMessage({
           messageId: assistant.id,
           status: "complete",
@@ -155,6 +186,7 @@ describe("resumable streaming pipeline", () => {
         });
 
         const restart = {
+          userId,
           messageId: assistant.id,
           modelId: null as never,
           deleteMessageIds: [later.id],
@@ -162,6 +194,7 @@ describe("resumable streaming pipeline", () => {
             messageId: userMessage.id,
             conversationId: conversation.id,
             content: "edited prompt",
+            attachmentIds: [],
           },
         };
         const firstClaim = yield* repo.resetMessageForRetry(restart);
@@ -178,8 +211,8 @@ describe("resumable streaming pipeline", () => {
       }),
     );
 
-    expect(result.firstClaim).toBe(true);
-    expect(result.secondClaim).toBe(false);
+    expect(result.firstClaim.claimed).toBe(true);
+    expect(result.secondClaim.claimed).toBe(false);
     expect(result.user?.content).toBe("edited prompt");
     expect(result.user?.editedAt).toBeInstanceOf(Date);
     expect(result.assistant).toMatchObject({ status: "streaming", content: "" });
@@ -191,7 +224,7 @@ describe("resumable streaming pipeline", () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
-        const { conversation, userMessage, assistant } = yield* setupConversation;
+        const { userId, conversation, userMessage, assistant } = yield* setupConversation;
         yield* repo.deleteMessages([assistant.id]);
         const later = yield* repo.insertMessage({
           conversationId: conversation.id,
@@ -200,10 +233,12 @@ describe("resumable streaming pipeline", () => {
         });
 
         const edit = {
+          userId,
           conversationId: conversation.id,
           userMessageId: userMessage.id,
           expectedEditedAt: userMessage.editedAt,
           content: "edited prompt",
+          attachmentIds: [],
           modelId: null as never,
           deleteMessageIds: [later.id],
         };
@@ -221,7 +256,7 @@ describe("resumable streaming pipeline", () => {
       }),
     );
 
-    expect(result.created).toMatchObject({ role: "assistant", status: "streaming" });
+    expect(result.created?.message).toMatchObject({ role: "assistant", status: "streaming" });
     expect(result.secondClaim).toBeNull();
     expect(result.user?.content).toBe("edited prompt");
     expect(result.user?.editedAt).toBeInstanceOf(Date);
@@ -229,7 +264,7 @@ describe("resumable streaming pipeline", () => {
     expect(result.later).toBeNull();
     expect(result.messages.map((message) => message.id)).toEqual([
       result.user?.id,
-      result.created?.id,
+      result.created?.message.id,
     ]);
   });
 

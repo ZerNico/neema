@@ -23,6 +23,7 @@ const CapabilitiesSchema = Schema.Struct({
   reasoning: Schema.Boolean,
   tools: Schema.Boolean,
   vision: Schema.Boolean,
+  files: Schema.Boolean,
 });
 
 export const CreateModelInput = Schema.Struct({

@@ -1,12 +1,33 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "./message-list.tsx";
 import type { ToolActivity } from "../client/use-message-stream.ts";
+import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
 
 // The panel closes on navigation; the citation tests render outside a router.
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
+
+// The editor needs an upload handle; these tests only exercise the empty state.
+const idleUploads = (): AttachmentUploads => ({
+  items: [],
+  attachmentIds: [],
+  uploading: false,
+  hasError: false,
+  isFull: false,
+  notice: null,
+  queued: false,
+  addFiles: vi.fn(),
+  remove: vi.fn(),
+  seed: vi.fn(),
+  submit: (send) => send([]),
+  cancelQueue: vi.fn(),
+  markClaimed: vi.fn(),
+  reset: vi.fn(),
+  dismissNotice: vi.fn(),
+});
 
 describe("MessageBubble", () => {
   it("renders user content right-aligned", () => {
@@ -58,6 +79,79 @@ describe("MessageBubble", () => {
       />,
     );
     expect(screen.getByText("Generation failed.")).toBeInTheDocument();
+  });
+});
+
+describe("MessageBubble attachments", () => {
+  const attachment = (overrides: Partial<MessageAttachment> = {}): MessageAttachment => ({
+    id: "a-1",
+    fileName: "notes.txt",
+    size: 2048,
+    mediaType: "text/plain",
+    kind: "text",
+    messageId: "1",
+    position: 0,
+    ...overrides,
+  });
+
+  const userMessage = (content: string, attachments: ReadonlyArray<MessageAttachment>) => ({
+    id: "1",
+    role: "user" as const,
+    content,
+    reasoning: "",
+    reasoningSeen: false,
+    toolActivities: [],
+    status: "complete" as const,
+    attachments,
+  });
+
+  it("links a sent attachment to the authenticated bytes route", () => {
+    render(<MessageBubble message={userMessage("look at this", [attachment()])} />);
+
+    const link = screen.getByRole("link", { name: /notes\.txt/ });
+    expect(link).toHaveAttribute("href", "/api/files/a-1");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.getByText("2 KB")).toBeInTheDocument();
+    // Read-only: the composer's remove button must not appear on a sent turn.
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+  });
+
+  it("renders an image chip with its thumbnail", () => {
+    const { container } = render(
+      <MessageBubble
+        message={userMessage("", [
+          attachment({ id: "a-img", fileName: "shot.png", mediaType: "image/png", kind: "image" }),
+        ])}
+      />,
+    );
+    // Decorative (alt=""), so it has no accessible role to query by.
+    expect(container.querySelector("img")).toHaveAttribute("src", "/api/files/a-img");
+  });
+
+  it("opens an in-app preview on a plain click instead of navigating", () => {
+    render(
+      <MessageBubble
+        message={userMessage("", [
+          attachment({ id: "a-img", fileName: "shot.png", mediaType: "image/png", kind: "image" }),
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /shot\.png/ }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByAltText("shot.png")).toHaveAttribute("src", "/api/files/a-img");
+    expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
+      "href",
+      "/api/files/a-img",
+    );
+  });
+
+  it("draws no text bubble for an attachment-only turn", () => {
+    const { container } = render(<MessageBubble message={userMessage("", [attachment()])} />);
+
+    expect(screen.getByRole("link", { name: /notes\.txt/ })).toBeInTheDocument();
+    expect(container.querySelector(".bg-primary")).toBeNull();
   });
 });
 
@@ -137,7 +231,7 @@ describe("MessageBubble actions", () => {
           id: "model-1",
           displayName: "Test Model",
           contextLength: 128_000,
-          capabilities: { reasoning: false, tools: true, vision: false },
+          capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
       ],
     );
@@ -257,6 +351,7 @@ describe("MessageBubble actions", () => {
         onModelChange: vi.fn(),
         searchEnabled: false,
         onSearchEnabledChange: vi.fn(),
+        attachments: idleUploads(),
       },
     });
 
@@ -287,6 +382,7 @@ describe("MessageBubble actions", () => {
         onModelChange: vi.fn(),
         searchEnabled: false,
         onSearchEnabledChange: vi.fn(),
+        attachments: idleUploads(),
       },
     });
     expect(screen.getByRole("button", { name: "Save edit" })).toBeDisabled();

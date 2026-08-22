@@ -37,9 +37,9 @@ export const models = pgTable(
     contextLength: integer("context_length"),
     // Auto-detected from the provider catalog where possible, admin-overridable.
     capabilities: jsonb()
-      .$type<{ reasoning: boolean; tools: boolean; vision: boolean }>()
+      .$type<{ reasoning: boolean; tools: boolean; vision: boolean; files: boolean }>()
       .notNull()
-      .default({ reasoning: false, tools: false, vision: false }),
+      .default({ reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     enabled: boolean().notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

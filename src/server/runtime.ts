@@ -1,4 +1,8 @@
 import { Layer, ManagedRuntime } from "effect";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
@@ -16,16 +20,25 @@ import { Db, PgLive } from "./db.ts";
 // this shared runtime; its resources (pg pool, pubsub relays, in-flight
 // generation fibers) live for the process lifetime.
 // NOTE: server layers don't HMR — restart `pnpm dev` after changing this graph.
-const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(Layer.provideMerge(PgLive));
+const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).pipe(
+  Layer.provideMerge(PgLive),
+);
+// ChatRepo claims attachments inside its own transactions, so AttachmentRepo
+// has to be provided to it rather than merged beside it.
 const ReposLayer = Layer.mergeAll(ChatRepo.layer, ProviderRepo.layer, ToolsRepo.layer).pipe(
+  Layer.provideMerge(AttachmentRepo.layer),
   Layer.provideMerge(InfraLayer),
 );
 const ToolsLayer = WebSearchExecutor.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
 );
-const CoreLayer = Layer.mergeAll(AiGateway.layer, SyncBus.layer, ToolsLayer).pipe(
-  Layer.provideMerge(ReposLayer),
-);
+const CoreLayer = Layer.mergeAll(
+  AiGateway.layer,
+  SyncBus.layer,
+  ToolsLayer,
+  AttachmentService.layer,
+  DocumentParser.layer,
+).pipe(Layer.provideMerge(ReposLayer));
 const AppLayer = ChatService.layer.pipe(
   Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(CoreLayer))),
 );

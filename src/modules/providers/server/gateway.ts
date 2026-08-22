@@ -23,6 +23,7 @@ export interface ModelCapabilities {
   readonly reasoning: boolean;
   readonly tools: boolean;
   readonly vision: boolean;
+  readonly files: boolean;
 }
 
 // Streamed response parts from effect/unstable/ai: text/reasoning deltas,
@@ -65,6 +66,7 @@ const inferCapabilities = (m: {
     reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
     tools: params.includes("tools"),
     vision: (m.architecture?.input_modalities ?? []).includes("image"),
+    files: (m.architecture?.input_modalities ?? []).includes("file"),
   };
 };
 

@@ -27,3 +27,8 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
   messageId: Schema.String,
   message: Schema.String,
 }) {}
+
+// A turn that carries neither text nor attachments has nothing to send.
+export class InvalidMessage extends Schema.TaggedError<InvalidMessage>()("InvalidMessage", {
+  reason: Schema.String,
+}) {}

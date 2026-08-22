@@ -67,6 +67,10 @@ See README.md for architecture; this file records the sharp edges.
   32 bytes); ciphertext never leaves the server (`toPublic` strips it).
 - First registered user becomes admin via the `user.create.before` database hook — do not
   bypass Better Auth for user creation.
+- Nitro's Vite **dev** middleware guesses static assets from `sec-fetch-dest`: anything
+  that is neither `empty` nor a document dest never reaches the app, so
+  `<img src="/api/files/:id">` 404s while `fetch()` on the same URL works. `vite.config.ts`
+  strips that header for `/api/*` (dev only — the built server routes them directly).
 
 ## Workflow
 

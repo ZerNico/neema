@@ -16,6 +16,17 @@ export const WebSearchConfig = Schema.Struct({
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
 
+// Non-secret configuration for the document_parser tool row. `kind` on the
+// row selects the backend; "local" is the in-process unpdf extractor.
+export const DocumentParserConfig = Schema.Struct({
+  maxChars: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1000),
+    Schema.isLessThanOrEqualTo(500_000),
+  ),
+  maxPages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(2000)),
+});
+export type DocumentParserConfig = typeof DocumentParserConfig.Type;
+
 // Parameters the model supplies when calling web_search.
 export const WebSearchParams = Schema.Struct({
   query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
@@ -96,6 +107,13 @@ export const UpdateWebSearchToolInput = Schema.Struct({
   perPageCharCap: Schema.optionalKey(WebSearchConfig.fields.perPageCharCap),
 });
 export type UpdateWebSearchToolInput = typeof UpdateWebSearchToolInput.Type;
+
+export const UpdateDocumentParserToolInput = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  maxChars: Schema.optionalKey(DocumentParserConfig.fields.maxChars),
+  maxPages: Schema.optionalKey(DocumentParserConfig.fields.maxPages),
+});
+export type UpdateDocumentParserToolInput = typeof UpdateDocumentParserToolInput.Type;
 
 export const TestSearchConnectionInput = Schema.Struct({
   baseUrl: Schema.String.check(Schema.isMinLength(1)),

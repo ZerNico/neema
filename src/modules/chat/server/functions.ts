@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -28,6 +29,7 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
     runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
         const conversation = yield* repo.getConversation(
           context.session.user.id,
           data.conversationId,
@@ -41,7 +43,11 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
         const toolCalls = yield* repo.listToolCalls(
           messages.filter((m) => m.role === "assistant").map((m) => m.id),
         );
-        return { conversation, messages, pendingChunks, toolCalls };
+        // Flat, like tool calls — the view groups by messageId.
+        const attachments = yield* attachmentRepo.listForMessages(
+          messages.filter((m) => m.role === "user").map((m) => m.id),
+        );
+        return { conversation, messages, pendingChunks, toolCalls, attachments };
       }).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),
@@ -62,6 +68,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           modelId: data.modelId,
           content: data.content,
           searchEnabled: data.searchEnabled,
+          attachmentIds: data.attachmentIds,
         }),
       ).pipe(
         Effect.catchTags({
@@ -69,6 +76,12 @@ export const sendMessage = createServerFn({ method: "POST" })
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ToolUnavailable: (e) =>
             Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AttachmentUnsupported: (e) =>
+            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          // Claimed by another message, or gone — the chip is stale either way.
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
         }),
       ),
     ),
@@ -91,6 +104,8 @@ export const retryMessage = createServerFn({ method: "POST" })
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
         }),
       ),
     ),
@@ -109,6 +124,7 @@ export const editMessage = createServerFn({ method: "POST" })
           content: data.content,
           modelId: data.modelId,
           searchEnabled: data.searchEnabled,
+          attachmentIds: data.attachmentIds,
         }),
       ).pipe(
         Effect.catchTags({
@@ -118,6 +134,11 @@ export const editMessage = createServerFn({ method: "POST" })
           ToolUnavailable: (e) =>
             Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
           EditNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AttachmentUnsupported: (e) =>
+            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
         }),
       ),
     ),

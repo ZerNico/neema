@@ -2,10 +2,16 @@ import { Context, Effect, Layer } from "effect";
 import {
   ConversationNotFound,
   EditNotAllowed,
+  InvalidMessage,
   MessageNotFound,
   ModelNotFound,
   RetryNotAllowed,
 } from "~/modules/chat/errors.ts";
+import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
+import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -22,9 +28,15 @@ export class ChatService extends Context.Service<
       modelId: string;
       content: string;
       searchEnabled: boolean;
+      attachmentIds: ReadonlyArray<string>;
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
-      ModelNotFound | ConversationNotFound | ToolUnavailable
+      | ModelNotFound
+      | ConversationNotFound
+      | ToolUnavailable
+      | InvalidMessage
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
     >;
     // Regenerates an assistant message in place (same id, fresh stream),
     // deleting every message after it — retry rewinds the conversation.
@@ -34,7 +46,11 @@ export class ChatService extends Context.Service<
       messageId: string;
     }): Effect.Effect<
       { assistantMessageId: string },
-      ConversationNotFound | MessageNotFound | ModelNotFound | RetryNotAllowed
+      | ConversationNotFound
+      | MessageNotFound
+      | ModelNotFound
+      | RetryNotAllowed
+      | AttachmentNotAvailable
     >;
     editMessage(input: {
       userId: string;
@@ -43,9 +59,17 @@ export class ChatService extends Context.Service<
       content: string;
       modelId: string;
       searchEnabled: boolean;
+      attachmentIds: ReadonlyArray<string>;
     }): Effect.Effect<
       { assistantMessageId: string },
-      ConversationNotFound | MessageNotFound | ModelNotFound | EditNotAllowed | ToolUnavailable
+      | ConversationNotFound
+      | MessageNotFound
+      | ModelNotFound
+      | EditNotAllowed
+      | ToolUnavailable
+      | InvalidMessage
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
     >;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     renameConversation(input: {
@@ -65,30 +89,89 @@ function makeChatService() {
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
+    const attachmentRepo = yield* AttachmentRepo;
+    const attachmentService = yield* AttachmentService;
+    const documentParser = yield* DocumentParser;
 
-    const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(function* (
-      modelId: string,
-      searchEnabled: boolean,
-    ) {
-      const model = yield* providers.getModel(modelId);
-      if (!model || !model.enabled || model.type !== "chat") {
-        return yield* new ModelNotFound({ modelId });
-      }
-
-      if (searchEnabled) {
-        if (!model.capabilities.tools) {
-          return yield* new ToolUnavailable({
-            tool: "web_search",
-            reason: "model does not support tool calling",
+    const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
+      function* (input: {
+        userId: string;
+        modelId: string;
+        searchEnabled: boolean;
+        content: string;
+        attachmentIds: ReadonlyArray<string>;
+      }) {
+        // A turn with neither text nor files has nothing for the model to read.
+        if (input.content.trim() === "" && input.attachmentIds.length === 0) {
+          return yield* new InvalidMessage({ reason: "message is empty" });
+        }
+        if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+          return yield* new InvalidMessage({
+            reason: `at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`,
           });
         }
-        const availability = yield* webSearch.availability();
-        if (!availability.configured || !availability.enabled) {
-          return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
+
+        const model = yield* providers.getModel(input.modelId);
+        if (!model || !model.enabled || model.type !== "chat") {
+          return yield* new ModelNotFound({ modelId: input.modelId });
+        }
+
+        if (input.searchEnabled) {
+          if (!model.capabilities.tools) {
+            return yield* new ToolUnavailable({
+              tool: "web_search",
+              reason: "model does not support tool calling",
+            });
+          }
+          const availability = yield* webSearch.availability();
+          if (!availability.configured || !availability.enabled) {
+            return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
+          }
+        }
+
+        yield* validateAttachments(input.userId, model.capabilities, input.attachmentIds);
+
+        return model;
+      },
+    );
+
+    // Rejects attachments the model cannot read before anything is written, so
+    // the user gets a 400 instead of a generation that fails halfway through.
+    const validateAttachments = Effect.fn("ChatService.validateAttachments")(function* (
+      userId: string,
+      capabilities: { vision: boolean; files: boolean },
+      attachmentIds: ReadonlyArray<string>,
+    ) {
+      if (attachmentIds.length === 0) return;
+
+      const rows = yield* attachmentRepo.listWithBlobsByIds(userId, attachmentIds);
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      // Parsing availability is only consulted once, and only if a PDF meets a
+      // model that cannot read files natively.
+      let parsing: { configured: boolean; enabled: boolean } | null = null;
+
+      for (const attachmentId of attachmentIds) {
+        const row = byId.get(attachmentId);
+        if (!row) return yield* new AttachmentNotAvailable({ attachmentId });
+
+        const kind = attachmentKind(row.mediaType);
+        if (kind === "image" && !capabilities.vision) {
+          return yield* new AttachmentUnsupported({
+            fileName: row.fileName,
+            reason: "this model cannot read images",
+          });
+        }
+        if (kind === "pdf" && !capabilities.files) {
+          parsing ??= yield* documentParser.availability();
+          if (!parsing.configured || !parsing.enabled) {
+            return yield* new AttachmentUnsupported({
+              fileName: row.fileName,
+              reason:
+                "this model cannot read PDFs and document parsing is disabled — enable it in admin settings or pick a model that accepts files",
+            });
+          }
         }
       }
-
-      return model;
     });
 
     // Sends a user message; creates the conversation on first message.
@@ -99,54 +182,43 @@ function makeChatService() {
       modelId: string;
       content: string;
       searchEnabled: boolean;
+      attachmentIds: ReadonlyArray<string>;
     }) {
       // The server stays authoritative even when the composer hides the toggle.
-      yield* validateGenerationOptions(input.modelId, input.searchEnabled);
+      yield* validateGenerationOptions(input);
 
-      const conversation = input.conversationId
-        ? yield* repo.getConversation(input.userId, input.conversationId)
-        : yield* repo.createConversation({ userId: input.userId, modelId: input.modelId });
+      // One transaction: a lost attachment claim must not leave behind an
+      // empty conversation or a user message nobody will answer.
+      const turn = yield* repo.createTurn({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        modelId: input.modelId,
+        content: input.content,
+        attachmentIds: input.attachmentIds,
+      });
 
-      if (!input.conversationId) {
+      if (turn.conversationCreated) {
         yield* sync.publish(input.userId, {
           type: "conversation.created",
-          conversationId: conversation.id,
+          conversationId: turn.conversation.id,
         });
       }
 
-      yield* repo.insertMessage({
-        conversationId: conversation.id,
-        role: "user",
-        content: input.content,
-      });
-
-      const assistant = yield* repo.insertMessage({
-        conversationId: conversation.id,
-        role: "assistant",
-        status: "streaming",
-        modelId: input.modelId,
-      });
-
-      yield* repo.updateConversation(conversation.id, {
-        modelId: input.modelId,
-        lastMessageAt: new Date(),
-      });
-
       yield* sync.publish(input.userId, {
         type: "message.created",
-        conversationId: conversation.id,
-        messageId: assistant.id,
+        conversationId: turn.conversation.id,
+        messageId: turn.assistant.id,
       });
 
       yield* engine.startGeneration({
         userId: input.userId,
-        conversationId: conversation.id,
-        messageId: assistant.id,
+        conversationId: turn.conversation.id,
+        messageId: turn.assistant.id,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
       });
 
-      return { conversationId: conversation.id, assistantMessageId: assistant.id };
+      return { conversationId: turn.conversation.id, assistantMessageId: turn.assistant.id };
     });
 
     const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (input: {
@@ -159,9 +231,11 @@ function makeChatService() {
       edit?: {
         messageId: string;
         content: string;
+        attachmentIds: ReadonlyArray<string>;
       };
     }) {
-      const claimed = yield* repo.resetMessageForRetry({
+      const { claimed, orphanedKeys } = yield* repo.resetMessageForRetry({
+        userId: input.userId,
         messageId: input.assistantMessageId,
         modelId: input.modelId,
         deleteMessageIds: input.deleteMessageIds,
@@ -174,6 +248,8 @@ function makeChatService() {
             }
           : {}),
       });
+      // Only after the commit: a rollback must never orphan live rows' bytes.
+      yield* attachmentService.deleteBlobs(orphanedKeys);
       if (!claimed) return null;
 
       yield* sync.publish(input.userId, {
@@ -282,6 +358,7 @@ function makeChatService() {
       content: string;
       modelId: string;
       searchEnabled: boolean;
+      attachmentIds: ReadonlyArray<string>;
     }) {
       yield* repo.getConversation(input.userId, input.conversationId);
       const message = yield* repo.getMessage(input.messageId);
@@ -306,7 +383,7 @@ function makeChatService() {
       }
 
       const assistant = after.find((candidate) => candidate.role === "assistant");
-      yield* validateGenerationOptions(input.modelId, input.searchEnabled);
+      yield* validateGenerationOptions(input);
 
       if (assistant) {
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
@@ -320,6 +397,7 @@ function makeChatService() {
           edit: {
             messageId: message.id,
             content: input.content,
+            attachmentIds: input.attachmentIds,
           },
         });
         if (!restarted) {
@@ -332,10 +410,12 @@ function makeChatService() {
       }
 
       const created = yield* repo.createAssistantForEdit({
+        userId: input.userId,
         conversationId: input.conversationId,
         userMessageId: message.id,
         expectedEditedAt: message.editedAt,
         content: input.content,
+        attachmentIds: input.attachmentIds,
         modelId: input.modelId,
         deleteMessageIds: after.map((candidate) => candidate.id),
       });
@@ -345,27 +425,29 @@ function makeChatService() {
           reason: "message changed while it was being edited",
         });
       }
+      yield* attachmentService.deleteBlobs(created.orphanedKeys);
       yield* sync.publish(input.userId, {
         type: "message.created",
         conversationId: input.conversationId,
-        messageId: created.id,
+        messageId: created.message.id,
       });
       yield* engine.startGeneration({
         userId: input.userId,
         conversationId: input.conversationId,
-        messageId: created.id,
+        messageId: created.message.id,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
       });
 
-      return { assistantMessageId: created.id };
+      return { assistantMessageId: created.message.id };
     });
 
     const deleteConversation = Effect.fn("ChatService.deleteConversation")(function* (input: {
       userId: string;
       conversationId: string;
     }) {
-      yield* repo.deleteConversation(input.userId, input.conversationId);
+      const orphanedKeys = yield* repo.deleteConversation(input.userId, input.conversationId);
+      yield* attachmentService.deleteBlobs(orphanedKeys);
       yield* sync.publish(input.userId, {
         type: "conversation.deleted",
         conversationId: input.conversationId,

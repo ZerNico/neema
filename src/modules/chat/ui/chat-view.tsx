@@ -12,6 +12,8 @@ import { editMessage, retryMessage, sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
+import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 
 // Durable message_tool_calls row → the client-side activity shape.
@@ -51,6 +53,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const [modelId, setModelId] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
   const [editState, setEditState] = useState<{ messageId: string; draft: string } | null>(null);
+  // One instance, mounted for the whole view: an edit opens by seeding it, so
+  // the chips survive the ChatInput remount that swapping the bubble causes.
+  const editUploads = useAttachmentUploads();
   const activeEditState =
     editState && data.messages.some((message) => message.id === editState.messageId)
       ? editState
@@ -86,9 +91,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const effectiveModelId = modelId ?? data.conversation.modelId;
 
   const sendMutation = useMutation({
-    mutationFn: (content: string) =>
+    mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
       sendMessage({
-        data: { conversationId, modelId: effectiveModelId!, content, searchEnabled },
+        data: {
+          conversationId,
+          modelId: effectiveModelId!,
+          content: input.content,
+          searchEnabled,
+          attachmentIds: input.attachmentIds,
+        },
       }),
     onSuccess: () => {
       setSearchEnabled(false); // per-message choice
@@ -113,9 +124,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       content: string;
       modelId: string;
       searchEnabled: boolean;
+      attachmentIds: ReadonlyArray<string>;
     }) => editMessage({ data: { conversationId, ...input } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      // Claimed by the edited message now — dropping the chips must not delete
+      // the very attachments the message just took ownership of.
+      editUploads.markClaimed();
       setEditState(null);
       setSearchEnabled(false);
       setRetryEpoch((epoch) => epoch + 1);
@@ -144,6 +159,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryMutation.mutate(messageId);
   };
 
+  const attachmentsByMessage = useMemo(() => {
+    const grouped = new Map<string, MessageAttachment[]>();
+    for (const attachment of data.attachments) {
+      const list = grouped.get(attachment.messageId);
+      if (list) list.push(attachment);
+      else grouped.set(attachment.messageId, [attachment]);
+    }
+    return grouped;
+  }, [data.attachments]);
+
+  const openEdit = (message: { id: string; content: string }) => {
+    setEditState({ messageId: message.id, draft: message.content });
+    // Seeded as existing/claimed: removing one only drops it from the
+    // replacement set, it is released by the save itself.
+    editUploads.seed(attachmentsByMessage.get(message.id) ?? []);
+  };
+
+  const closeEdit = () => {
+    setEditState(null);
+    // Anything uploaded for this edit and never sent is deleted here.
+    editUploads.reset();
+  };
+
   // Retrying a user message regenerates the assistant response that follows
   // it (the retry target is always an assistant message server-side).
   const responseAfter = (messageId: string) => {
@@ -154,7 +192,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const saveEdit = async () => {
     if (!activeEditState) return;
     const content = activeEditState.draft.trim();
-    if (!content || !effectiveModelId || editMutation.isPending) return;
+    if (!effectiveModelId || editMutation.isPending) return;
+    if (!content && editUploads.items.length === 0) return;
 
     const messageIndex = data.messages.findIndex(
       (message) => message.id === activeEditState.messageId,
@@ -174,11 +213,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       return;
     }
 
-    editMutation.mutate({
-      messageId: activeEditState.messageId,
-      content,
-      modelId: effectiveModelId,
-      searchEnabled,
+    // Queues behind any upload still in flight, then sends the full ordered
+    // replacement set — omitted ids are released server-side.
+    editUploads.submit((attachmentIds) => {
+      if (!content && attachmentIds.length === 0) return;
+      editMutation.mutate({
+        messageId: activeEditState.messageId,
+        content,
+        modelId: effectiveModelId,
+        searchEnabled,
+        attachmentIds,
+      });
     });
   };
 
@@ -205,9 +250,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
+        ...(attachmentsByMessage.has(m.id) ? { attachments: attachmentsByMessage.get(m.id)! } : {}),
         ...(m.role === "user" && m.status === "complete"
           ? {
-              onEdit: () => setEditState({ messageId: m.id, draft: m.content }),
+              onEdit: () => openEdit(m),
               editDisabled: actionsDisabled,
             }
           : {}),
@@ -218,13 +264,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 onDraftChange: (draft: string) =>
                   setEditState((current) => (current ? { ...current, draft } : null)),
                 onSave: () => void saveEdit(),
-                onCancel: () => setEditState(null),
+                onCancel: closeEdit,
                 saveDisabled: editMutation.isPending,
                 controlsDisabled: editMutation.isPending,
                 modelId: effectiveModelId,
                 onModelChange: setModelId,
                 searchEnabled,
                 onSearchEnabledChange: setSearchEnabled,
+                attachments: editUploads,
               },
             }
           : {}),
@@ -262,7 +309,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
-            onSend={(content) => sendMutation.mutate(content)}
+            onSend={(content, attachmentIds) =>
+              sendMutation.mutateAsync({ content, attachmentIds })
+            }
             disabled={actionsDisabled}
             textareaDisabled={activeEditState !== null}
             controlsDisabled={mutationPending}
@@ -284,8 +333,16 @@ export function NewChatView() {
   const [searchEnabled, setSearchEnabled] = useState(false);
 
   const sendMutation = useMutation({
-    mutationFn: (content: string) =>
-      sendMessage({ data: { conversationId: null, modelId: modelId!, content, searchEnabled } }),
+    mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
+      sendMessage({
+        data: {
+          conversationId: null,
+          modelId: modelId!,
+          content: input.content,
+          searchEnabled,
+          attachmentIds: input.attachmentIds,
+        },
+      }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       await navigate({
@@ -302,7 +359,7 @@ export function NewChatView() {
       </div>
       <div className="mx-auto w-full max-w-3xl px-4 pb-4">
         <Composer
-          onSend={(content) => sendMutation.mutate(content)}
+          onSend={(content, attachmentIds) => sendMutation.mutateAsync({ content, attachmentIds })}
           disabled={sendMutation.isPending}
           modelId={modelId}
           onModelChange={setModelId}

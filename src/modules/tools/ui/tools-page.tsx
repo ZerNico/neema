@@ -7,14 +7,21 @@ import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import {
+  getDocumentParserTool,
   getWebSearchTool,
   testSearchConnection,
+  updateDocumentParserTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
 
 export const webSearchToolQuery = queryOptions({
   queryKey: ["admin", "tools", "web-search"],
   queryFn: () => getWebSearchTool(),
+});
+
+export const documentParserToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "document-parser"],
+  queryFn: () => getDocumentParserTool(),
 });
 
 type TestResult =
@@ -235,6 +242,128 @@ export function ToolsPage() {
           </ListRow>
         </ListCard>
       </section>
+
+      <DocumentParserSection />
     </AdminPage>
+  );
+}
+
+// Local PDF text extraction, used when a model cannot take a PDF natively.
+// Kept local on purpose — the alternative would ship the user's document to a
+// third-party parser.
+function DocumentParserSection() {
+  const queryClient = useQueryClient();
+  const { data: tool } = useSuspenseQuery(documentParserToolQuery);
+
+  const [maxChars, setMaxChars] = useState<string | null>(null);
+  const [maxPages, setMaxPages] = useState<string | null>(null);
+
+  const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
+  const effectiveMaxChars = maxChars ?? String(config.maxChars ?? 120000);
+  const effectiveMaxPages = maxPages ?? String(config.maxPages ?? 200);
+
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
+      queryClient.invalidateQueries({ queryKey: ["tools", "document-parsing", "availability"] }),
+    ]);
+
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => updateDocumentParserTool({ data: { enabled } }),
+    onSuccess: invalidate,
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateDocumentParserTool({
+        data: { maxChars: Number(effectiveMaxChars), maxPages: Number(effectiveMaxPages) },
+      }),
+    onSuccess: async () => {
+      setMaxChars(null);
+      setMaxPages(null);
+      await invalidate();
+    },
+  });
+
+  if (!tool) {
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          Document parsing
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          The document_parser tool row is missing — run database migrations.
+        </p>
+      </section>
+    );
+  }
+
+  const numbersValid =
+    Number(effectiveMaxChars) >= 1000 &&
+    Number(effectiveMaxChars) <= 500000 &&
+    Number(effectiveMaxPages) >= 1 &&
+    Number(effectiveMaxPages) <= 2000;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        Document parsing
+      </h2>
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">PDF text extraction</span>
+            <span className="text-muted-foreground text-xs">
+              Extracts text in-process so PDFs still work on models that cannot read files natively.
+              Nothing leaves this server. Scanned PDFs without embedded text are not supported.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+          />
+        </ListRow>
+
+        <ListRow className="flex-col items-stretch gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">Backend</span>
+            <Badge>{tool.kind === "local" ? "Local (unpdf)" : tool.kind}</Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field>
+              <FieldLabel>Max characters</FieldLabel>
+              <Input
+                type="number"
+                min={1000}
+                max={500000}
+                step={1000}
+                value={effectiveMaxChars}
+                onChange={(e) => setMaxChars(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Max pages</FieldLabel>
+              <Input
+                type="number"
+                min={1}
+                max={2000}
+                value={effectiveMaxPages}
+                onChange={(e) => setMaxPages(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => save.mutate()}
+              disabled={!numbersValid || save.isPending}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </ListRow>
+      </ListCard>
+    </section>
   );
 }
