@@ -230,12 +230,14 @@ describe("MessageBubble actions", () => {
         {
           id: "model-1",
           displayName: "Test Model",
+          providerName: "Anthropic",
           contextLength: 128_000,
           capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
         {
           id: "model-2",
           displayName: "Other Model",
+          providerName: "OpenAI",
           contextLength: 1_000_000,
           capabilities: { reasoning: true, tools: false, vision: true, files: false },
         },
@@ -335,22 +337,22 @@ describe("MessageBubble actions", () => {
 
   it("offers the model chevron only when retry-with is wired", () => {
     renderPlain({ onRetry: vi.fn() });
-    expect(screen.queryByRole("button", { name: "Retry with another model" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Retry with another model" })).toBeNull();
   });
 
-  it("picks a different model from the retry menu", async () => {
+  it("picks a different model from the retry picker", async () => {
     const onRetry = vi.fn();
     const onRetryWith = vi.fn();
     renderPlain({ onRetry, onRetryWith, retryModelId: "model-1" });
 
-    screen.getByRole("button", { name: "Retry with another model" }).click();
+    screen.getByRole("combobox", { name: "Retry with another model" }).click();
 
     // The model that wrote the answer is marked, so "same again" is visible.
-    const current = await screen.findByRole("menuitemradio", { name: /Test Model/ });
-    expect(current).toHaveAttribute("aria-checked", "true");
+    const current = await screen.findByRole("option", { name: /Test Model/ });
+    expect(current).toHaveAttribute("aria-selected", "true");
 
-    const other = screen.getByRole("menuitemradio", { name: /Other Model/ });
-    expect(other).toHaveAttribute("aria-checked", "false");
+    const other = screen.getByRole("option", { name: /Other Model/ });
+    expect(other).toHaveAttribute("aria-selected", "false");
     other.click();
 
     expect(onRetryWith).toHaveBeenCalledWith("model-2");

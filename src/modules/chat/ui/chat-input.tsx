@@ -1,5 +1,4 @@
 import {
-  ArrowDown01Icon,
   ArrowUp02Icon,
   Attachment01Icon,
   GlobalSearchIcon,
@@ -12,6 +11,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { chatModelsQuery, webSearchAvailabilityQuery } from "../client/queries.ts";
 import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
+import { ModelPicker } from "./model-picker.tsx";
 import { ATTACHMENT_ACCEPT } from "~/modules/attachments/constants.ts";
 import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
@@ -22,7 +22,6 @@ import {
   shouldPasteAsFile,
 } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
-import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -30,7 +29,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "~/ui/primitives/select";
 import { cn } from "~/ui/utils";
 
 export const ChatInput = forwardRef<
@@ -298,33 +296,25 @@ export const ChatInput = forwardRef<
             <span className="text-sm max-[420px]:sr-only">Search</span>
           </Button>
         ) : null}
-        <Select
+        <ModelPicker
+          models={models}
           value={modelId}
-          onValueChange={(nextModelId) => nextModelId && onModelChange(nextModelId)}
-          items={models.map((model) => ({ value: model.id, label: model.displayName }))}
+          onChange={onModelChange}
           disabled={noModels || controlsDisabled}
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Change model"
+              className={cn(
+                "text-muted-foreground hover:text-foreground hover:bg-accent h-8 min-w-0 max-w-52 gap-1.5",
+                "rounded-full px-2.5",
+              )}
+            />
+          }
         >
-          <SelectTrigger
-            size="sm"
-            className={cn(
-              "text-muted-foreground hover:text-foreground hover:bg-accent h-8 min-w-0 max-w-52 gap-1.5",
-              "rounded-full border-0 bg-transparent px-2.5 shadow-none",
-              "[&_svg:last-child]:hidden",
-            )}
-          >
-            <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
-            <HugeiconsIcon icon={ArrowDown01Icon} className="size-3.5 shrink-0 opacity-60" />
-          </SelectTrigger>
-          <SelectContent className="min-w-64">
-            {models.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                <span className="max-w-52 truncate">{model.displayName}</span>
-                <CapabilityIcons capabilities={model.capabilities} />
-                <ContextBadge contextLength={model.contextLength} />
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
+        </ModelPicker>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {onCancel ? (
             <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>

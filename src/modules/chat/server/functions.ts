@@ -236,7 +236,16 @@ export const listChatModels = createServerFn({ method: "GET" })
       Effect.gen(function* () {
         const repo = yield* ProviderRepo;
         const models = yield* repo.listModels({ enabledOnly: true });
-        return models.filter((m) => m.type === "chat");
+        // The picker groups by provider, so each model carries its provider's
+        // display name — the id alone means nothing to the person choosing.
+        const providers = yield* repo.listProviders();
+        const nameOf = new Map(providers.map((provider) => [provider.id, provider.name]));
+        return models
+          .filter((m) => m.type === "chat")
+          .map((model) => ({
+            ...model,
+            providerName: nameOf.get(model.providerId) ?? "Other",
+          }));
       }),
     ),
   );

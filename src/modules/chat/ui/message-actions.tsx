@@ -1,5 +1,4 @@
 import {
-  ArrowDown01Icon,
   ArrowReloadHorizontalIcon,
   BookOpen01Icon,
   Copy01Icon,
@@ -11,6 +10,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { chatModelsQuery } from "../client/queries.ts";
+import { ModelPicker } from "./model-picker.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import type { MessageTime } from "./timestamps.ts";
 import { stripCitationMarkers } from "../citation-markers.ts";
@@ -19,14 +19,9 @@ import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
@@ -63,46 +58,39 @@ function ActionButton({
 }
 
 // Deliberately not useSuspenseQuery: the composer already suspends on this
-// list, so the cache is warm by the time a menu opens — and a message row that
-// suspends would blank the conversation around it. A cold cache (a menu opened
-// before the composer mounted) just shows the pending item for a moment.
-function RetryModelMenu({
+// list, so the cache is warm by the time the picker opens — and a message row
+// that suspends would blank the conversation around it.
+function RetryModelPicker({
   currentModelId,
   onPick,
+  disabled,
 }: {
   currentModelId?: string | null | undefined;
   onPick: (modelId: string) => void;
+  disabled: boolean;
 }) {
-  const { data: models, isPending } = useQuery(chatModelsQuery);
+  const { data: models } = useQuery(chatModelsQuery);
 
-  // The heading has to live inside the group it names — Base UI resolves it
-  // through the group context, so a bare label outside one throws.
-  if (isPending || !models || models.length === 0) {
-    return (
-      <DropdownMenuGroup>
-        <DropdownMenuLabel>Retry with</DropdownMenuLabel>
-        <DropdownMenuItem disabled>
-          {isPending ? "Loading models…" : "No models available"}
-        </DropdownMenuItem>
-      </DropdownMenuGroup>
-    );
-  }
   return (
-    // The radio marks whichever model wrote the answer being replaced, so
-    // "same again" and "something else" are one glance apart.
-    <DropdownMenuRadioGroup
-      value={currentModelId ?? ""}
-      onValueChange={(value) => onPick(String(value))}
-    >
-      <DropdownMenuLabel>Retry with</DropdownMenuLabel>
-      {models.map((model) => (
-        <DropdownMenuRadioItem key={model.id} value={model.id}>
-          <span className="min-w-0 flex-1 truncate">{model.displayName}</span>
-          <CapabilityIcons capabilities={model.capabilities} />
-          <ContextBadge contextLength={model.contextLength} />
-        </DropdownMenuRadioItem>
-      ))}
-    </DropdownMenuRadioGroup>
+    <ModelPicker
+      models={models ?? []}
+      // Marks whichever model wrote the answer being replaced, so "same again"
+      // and "something else" are one glance apart.
+      value={currentModelId}
+      onChange={onPick}
+      disabled={disabled}
+      side="bottom"
+      emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+      trigger={
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Retry with another model"
+          disabled={disabled}
+          className="text-muted-foreground w-5 rounded-l-none px-0 [&>svg]:size-3.5"
+        />
+      }
+    />
   );
 }
 
@@ -140,24 +128,7 @@ function RetryControl({
         <TooltipContent>Retry</TooltipContent>
       </Tooltip>
       {onRetryWith ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Retry with another model"
-                disabled={disabled}
-                className="text-muted-foreground w-5 rounded-l-none px-0"
-              />
-            }
-          >
-            <HugeiconsIcon icon={ArrowDown01Icon} className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
-            <RetryModelMenu currentModelId={retryModelId} onPick={onRetryWith} />
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <RetryModelPicker currentModelId={retryModelId} onPick={onRetryWith} disabled={disabled} />
       ) : null}
     </div>
   );

@@ -31,6 +31,7 @@ const model = (overrides: {
 }) => ({
   id: overrides.id,
   providerId: "provider-1",
+  providerName: "Provider One",
   modelKey: overrides.id,
   displayName: overrides.displayName,
   type: "chat" as const,
