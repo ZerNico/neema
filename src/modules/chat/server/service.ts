@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import {
   ConversationNotFound,
+  EditNotAllowed,
   MessageNotFound,
   ModelNotFound,
   RetryNotAllowed,
@@ -35,6 +36,17 @@ export class ChatService extends Context.Service<
       { assistantMessageId: string },
       ConversationNotFound | MessageNotFound | ModelNotFound | RetryNotAllowed
     >;
+    editMessage(input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      content: string;
+      modelId: string;
+      searchEnabled: boolean;
+    }): Effect.Effect<
+      { assistantMessageId: string },
+      ConversationNotFound | MessageNotFound | ModelNotFound | EditNotAllowed | ToolUnavailable
+    >;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     renameConversation(input: {
       userId: string;
@@ -54,22 +66,16 @@ function makeChatService() {
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
 
-    // Sends a user message; creates the conversation on first message.
-    // Returns ids the client needs to subscribe to the assistant stream.
-    const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: {
-      userId: string;
-      conversationId: string | null;
-      modelId: string;
-      content: string;
-      searchEnabled: boolean;
-    }) {
-      const model = yield* providers.getModel(input.modelId);
+    const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(function* (
+      modelId: string,
+      searchEnabled: boolean,
+    ) {
+      const model = yield* providers.getModel(modelId);
       if (!model || !model.enabled || model.type !== "chat") {
-        return yield* new ModelNotFound({ modelId: input.modelId });
+        return yield* new ModelNotFound({ modelId });
       }
 
-      // The server stays authoritative even when the composer hides the toggle.
-      if (input.searchEnabled) {
+      if (searchEnabled) {
         if (!model.capabilities.tools) {
           return yield* new ToolUnavailable({
             tool: "web_search",
@@ -81,6 +87,21 @@ function makeChatService() {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
         }
       }
+
+      return model;
+    });
+
+    // Sends a user message; creates the conversation on first message.
+    // Returns ids the client needs to subscribe to the assistant stream.
+    const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: {
+      userId: string;
+      conversationId: string | null;
+      modelId: string;
+      content: string;
+      searchEnabled: boolean;
+    }) {
+      // The server stays authoritative even when the composer hides the toggle.
+      yield* validateGenerationOptions(input.modelId, input.searchEnabled);
 
       const conversation = input.conversationId
         ? yield* repo.getConversation(input.userId, input.conversationId)
@@ -126,6 +147,51 @@ function makeChatService() {
       });
 
       return { conversationId: conversation.id, assistantMessageId: assistant.id };
+    });
+
+    const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (input: {
+      userId: string;
+      conversationId: string;
+      assistantMessageId: string;
+      modelId: string;
+      searchEnabled: boolean;
+      deleteMessageIds: ReadonlyArray<string>;
+      edit?: {
+        messageId: string;
+        content: string;
+      };
+    }) {
+      const claimed = yield* repo.resetMessageForRetry({
+        messageId: input.assistantMessageId,
+        modelId: input.modelId,
+        deleteMessageIds: input.deleteMessageIds,
+        ...(input.edit
+          ? {
+              edit: {
+                ...input.edit,
+                conversationId: input.conversationId,
+              },
+            }
+          : {}),
+      });
+      if (!claimed) return null;
+
+      yield* sync.publish(input.userId, {
+        type: "message.status",
+        conversationId: input.conversationId,
+        messageId: input.assistantMessageId,
+        status: "streaming",
+      });
+
+      yield* engine.startGeneration({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        messageId: input.assistantMessageId,
+        modelId: input.modelId,
+        searchEnabled: input.searchEnabled,
+      });
+
+      return { assistantMessageId: input.assistantMessageId };
     });
 
     // Reuses the message row so ids stay stable for subscribers and the
@@ -192,24 +258,107 @@ function makeChatService() {
         availability.enabled &&
         model.capabilities.tools;
 
-      yield* repo.deleteMessages(after.map((m) => m.id));
-      yield* repo.resetMessageForRetry(message.id);
-      yield* sync.publish(input.userId, {
-        type: "message.status",
+      const restarted = yield* restartAssistant({
+        userId: input.userId,
         conversationId: input.conversationId,
-        messageId: message.id,
-        status: "streaming",
+        assistantMessageId: message.id,
+        modelId,
+        searchEnabled,
+        deleteMessageIds: after.map((m) => m.id),
       });
+      if (!restarted) {
+        return yield* new RetryNotAllowed({
+          messageId: input.messageId,
+          reason: "message is already generating",
+        });
+      }
+      return restarted;
+    });
 
+    const editMessage = Effect.fn("ChatService.editMessage")(function* (input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      content: string;
+      modelId: string;
+      searchEnabled: boolean;
+    }) {
+      yield* repo.getConversation(input.userId, input.conversationId);
+      const message = yield* repo.getMessage(input.messageId);
+      if (!message || message.conversationId !== input.conversationId) {
+        return yield* new MessageNotFound({ messageId: input.messageId });
+      }
+      if (message.role !== "user" || message.status !== "complete") {
+        return yield* new EditNotAllowed({
+          messageId: input.messageId,
+          reason: "only completed user messages can be edited",
+        });
+      }
+
+      const all = yield* repo.listMessages(input.conversationId);
+      const index = all.findIndex((candidate) => candidate.id === input.messageId);
+      const after = all.slice(index + 1);
+      if (after.some((candidate) => candidate.status === "streaming")) {
+        return yield* new EditNotAllowed({
+          messageId: input.messageId,
+          reason: "a later message is still generating",
+        });
+      }
+
+      const assistant = after.find((candidate) => candidate.role === "assistant");
+      yield* validateGenerationOptions(input.modelId, input.searchEnabled);
+
+      if (assistant) {
+        const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
+        const restarted = yield* restartAssistant({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          assistantMessageId: assistant.id,
+          modelId: input.modelId,
+          searchEnabled: input.searchEnabled,
+          deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
+          edit: {
+            messageId: message.id,
+            content: input.content,
+          },
+        });
+        if (!restarted) {
+          return yield* new EditNotAllowed({
+            messageId: input.messageId,
+            reason: "response is already generating",
+          });
+        }
+        return restarted;
+      }
+
+      const created = yield* repo.createAssistantForEdit({
+        conversationId: input.conversationId,
+        userMessageId: message.id,
+        expectedEditedAt: message.editedAt,
+        content: input.content,
+        modelId: input.modelId,
+        deleteMessageIds: after.map((candidate) => candidate.id),
+      });
+      if (!created) {
+        return yield* new EditNotAllowed({
+          messageId: input.messageId,
+          reason: "message changed while it was being edited",
+        });
+      }
+      yield* sync.publish(input.userId, {
+        type: "message.created",
+        conversationId: input.conversationId,
+        messageId: created.id,
+      });
       yield* engine.startGeneration({
         userId: input.userId,
         conversationId: input.conversationId,
-        messageId: message.id,
-        modelId,
-        searchEnabled,
+        messageId: created.id,
+        modelId: input.modelId,
+        searchEnabled: input.searchEnabled,
       });
 
-      return { assistantMessageId: message.id };
+      return { assistantMessageId: created.id };
     });
 
     const deleteConversation = Effect.fn("ChatService.deleteConversation")(function* (input: {
@@ -237,6 +386,12 @@ function makeChatService() {
       });
     });
 
-    return ChatService.of({ sendMessage, retryMessage, deleteConversation, renameConversation });
+    return ChatService.of({
+      sendMessage,
+      retryMessage,
+      editMessage,
+      deleteConversation,
+      renameConversation,
+    });
   });
 }

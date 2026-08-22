@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "./message-list.tsx";
 import type { ToolActivity } from "../client/use-message-stream.ts";
@@ -127,21 +128,40 @@ describe("MessageBubble citations", () => {
 });
 
 describe("MessageBubble actions", () => {
-  const renderPlain = (overrides: Partial<Parameters<typeof MessageBubble>[0]["message"]> = {}) =>
-    render(
-      <MessageBubble
-        message={{
-          id: "plain",
-          role: "assistant",
-          content: "Hello there.",
-          reasoning: "",
-          reasoningSeen: false,
-          toolActivities: [],
-          status: "complete",
-          ...overrides,
-        }}
-      />,
+  const renderPlain = (overrides: Partial<Parameters<typeof MessageBubble>[0]["message"]> = {}) => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      ["chat-models"],
+      [
+        {
+          id: "model-1",
+          displayName: "Test Model",
+          contextLength: 128_000,
+          capabilities: { reasoning: false, tools: true, vision: false },
+        },
+      ],
     );
+    queryClient.setQueryData(["tools", "web-search", "availability"], {
+      configured: true,
+      enabled: true,
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MessageBubble
+          message={{
+            id: "plain",
+            role: "assistant",
+            content: "Hello there.",
+            reasoning: "",
+            reasoningSeen: false,
+            toolActivities: [],
+            status: "complete",
+            ...overrides,
+          }}
+        />
+      </QueryClientProvider>,
+    );
+  };
 
   it("shows copy on completed messages without sources, but no 3-dot menu", () => {
     renderPlain();
@@ -211,5 +231,85 @@ describe("MessageBubble actions", () => {
   it("disables retry while another generation runs", () => {
     renderPlain({ onRetry: vi.fn(), retryDisabled: true });
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+
+  it("offers edit only when a user message wires it", () => {
+    const onEdit = vi.fn();
+    renderPlain({ role: "user", onEdit });
+    screen.getByRole("button", { name: "Edit" }).click();
+    expect(onEdit).toHaveBeenCalledOnce();
+  });
+
+  it("renders the controlled inline editor and wires its actions", () => {
+    const onDraftChange = vi.fn();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    renderPlain({
+      role: "user",
+      editState: {
+        draft: "updated message",
+        onDraftChange,
+        onSave,
+        onCancel,
+        saveDisabled: false,
+        controlsDisabled: false,
+        modelId: "model-1",
+        onModelChange: vi.fn(),
+        searchEnabled: false,
+        onSearchEnabledChange: vi.fn(),
+      },
+    });
+
+    const editor = screen.getByRole("textbox");
+    expect(editor).toHaveValue("updated message");
+    fireEvent.change(editor, { target: { value: "new draft" } });
+    expect(onDraftChange).toHaveBeenCalledWith("new draft");
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search the web" })).toBeInTheDocument();
+    expect(screen.getByText("Test Model")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Save edit" }).click();
+    screen.getByRole("button", { name: "Cancel" }).click();
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("disables Save for an empty edit draft", () => {
+    renderPlain({
+      role: "user",
+      editState: {
+        draft: "   ",
+        onDraftChange: vi.fn(),
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        saveDisabled: false,
+        controlsDisabled: false,
+        modelId: "model-1",
+        onModelChange: vi.fn(),
+        searchEnabled: false,
+        onSearchEnabledChange: vi.fn(),
+      },
+    });
+    expect(screen.getByRole("button", { name: "Save edit" })).toBeDisabled();
+  });
+
+  it("shows the edited indicator only when editedAt is set", () => {
+    const { rerender } = renderPlain({ role: "user", editedAt: null });
+    expect(screen.queryByText("edited")).toBeNull();
+
+    rerender(
+      <MessageBubble
+        message={{
+          id: "edited",
+          role: "user",
+          content: "Hello there.",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+          editedAt: new Date(),
+        }}
+      />,
+    );
+    expect(screen.getByText("edited")).toBeInTheDocument();
   });
 });

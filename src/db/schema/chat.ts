@@ -53,6 +53,9 @@ export const messages = pgTable(
     error: jsonb().$type<{ tag: string; message: string }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // Set when a user edits their message; null means never edited. createdAt
+    // stays untouched so conversation ordering is stable.
+    editedAt: timestamp("edited_at", { withTimezone: true }),
   },
   (t) => [index("messages_conversation_id_idx").on(t.conversationId)],
 );

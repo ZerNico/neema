@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -67,9 +67,26 @@ export class ChatRepo extends Context.Service<
       usage?: { inputTokens?: number; outputTokens?: number };
       error?: { tag: string; message: string };
     }): Effect.Effect<void>;
-    // Wipes a finished assistant message back to a fresh streaming state
-    // (chunks, tool calls, content) so a retry can regenerate in place.
-    resetMessageForRetry(messageId: string): Effect.Effect<void>;
+    // Claims and wipes a finished assistant back to a fresh streaming state.
+    // The claim, rewind deletes, and optional user edit commit atomically.
+    resetMessageForRetry(input: {
+      messageId: string;
+      modelId: string;
+      deleteMessageIds: ReadonlyArray<string>;
+      edit?: {
+        messageId: string;
+        conversationId: string;
+        content: string;
+      };
+    }): Effect.Effect<boolean>;
+    createAssistantForEdit(input: {
+      conversationId: string;
+      userMessageId: string;
+      expectedEditedAt: Date | null;
+      content: string;
+      modelId: string;
+      deleteMessageIds: ReadonlyArray<string>;
+    }): Effect.Effect<MessageRow | null>;
     // Removes messages entirely (chunks/tool calls go via FK cascade).
     deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<void>;
   }
@@ -252,26 +269,96 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
-        resetMessageForRetry: Effect.fn("ChatRepo.resetMessageForRetry")(function* (messageId) {
-          yield* db
-            .delete(messageChunks)
-            .where(eq(messageChunks.messageId, messageId))
+        resetMessageForRetry: Effect.fn("ChatRepo.resetMessageForRetry")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const claimed = yield* tx
+                  .update(messages)
+                  .set({
+                    status: "streaming",
+                    content: "",
+                    reasoning: "",
+                    usage: null,
+                    error: null,
+                    completedAt: null,
+                    modelId: input.modelId,
+                  })
+                  .where(and(eq(messages.id, input.messageId), ne(messages.status, "streaming")))
+                  .returning({ id: messages.id });
+                if (claimed.length === 0) return false;
+
+                if (input.edit) {
+                  yield* tx
+                    .update(messages)
+                    .set({ content: input.edit.content, editedAt: new Date() })
+                    .where(eq(messages.id, input.edit.messageId));
+                  yield* tx
+                    .update(conversations)
+                    .set({ modelId: input.modelId, updatedAt: new Date() })
+                    .where(eq(conversations.id, input.edit.conversationId));
+                }
+
+                if (input.deleteMessageIds.length > 0) {
+                  yield* tx
+                    .delete(messages)
+                    .where(inArray(messages.id, [...input.deleteMessageIds]));
+                }
+                yield* tx.delete(messageChunks).where(eq(messageChunks.messageId, input.messageId));
+                yield* tx
+                  .delete(messageToolCalls)
+                  .where(eq(messageToolCalls.messageId, input.messageId));
+
+                return true;
+              }),
+            )
             .pipe(Effect.orDie);
-          yield* db
-            .delete(messageToolCalls)
-            .where(eq(messageToolCalls.messageId, messageId))
-            .pipe(Effect.orDie);
-          yield* db
-            .update(messages)
-            .set({
-              status: "streaming",
-              content: "",
-              reasoning: "",
-              usage: null,
-              error: null,
-              completedAt: null,
-            })
-            .where(eq(messages.id, messageId))
+        }),
+
+        createAssistantForEdit: Effect.fn("ChatRepo.createAssistantForEdit")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const claimed = yield* tx
+                  .update(messages)
+                  .set({ content: input.content, editedAt: new Date() })
+                  .where(
+                    and(
+                      eq(messages.id, input.userMessageId),
+                      eq(messages.conversationId, input.conversationId),
+                      eq(messages.role, "user"),
+                      eq(messages.status, "complete"),
+                      input.expectedEditedAt === null
+                        ? isNull(messages.editedAt)
+                        : eq(messages.editedAt, input.expectedEditedAt),
+                    ),
+                  )
+                  .returning({ id: messages.id });
+                if (claimed.length === 0) return null;
+
+                if (input.deleteMessageIds.length > 0) {
+                  yield* tx
+                    .delete(messages)
+                    .where(inArray(messages.id, [...input.deleteMessageIds]));
+                }
+                yield* tx
+                  .update(conversations)
+                  .set({ modelId: input.modelId, updatedAt: new Date() })
+                  .where(eq(conversations.id, input.conversationId));
+
+                const created = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: input.conversationId,
+                    role: "assistant",
+                    status: "streaming",
+                    modelId: input.modelId,
+                  })
+                  .returning();
+                return created[0]!;
+              }),
+            )
             .pipe(Effect.orDie);
         }),
 

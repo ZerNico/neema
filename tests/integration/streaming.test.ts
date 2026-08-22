@@ -74,13 +74,17 @@ const setupConversation = Effect.gen(function* () {
     `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
   );
   const conversation = yield* repo.createConversation({ userId, modelId: null as never });
-  yield* repo.insertMessage({ conversationId: conversation.id, role: "user", content: "hi" });
+  const userMessage = yield* repo.insertMessage({
+    conversationId: conversation.id,
+    role: "user",
+    content: "hi",
+  });
   const assistant = yield* repo.insertMessage({
     conversationId: conversation.id,
     role: "assistant",
     status: "streaming",
   });
-  return { userId, conversation, assistant };
+  return { userId, conversation, userMessage, assistant };
 });
 
 describe("resumable streaming pipeline", () => {
@@ -132,6 +136,102 @@ describe("resumable streaming pipeline", () => {
     expect(result.final?.content).toBe("alpha beta gamma delta epsilon");
     expect(result.chunks).toHaveLength(5);
   }, 60_000);
+
+  it("atomically claims an assistant restart and applies its edit", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const { conversation, userMessage, assistant } = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: assistant.id,
+          status: "complete",
+          content: "old response",
+        });
+        yield* repo.appendChunks(assistant.id, [{ seq: 1, kind: "text", delta: "old" }]);
+        const later = yield* repo.insertMessage({
+          conversationId: conversation.id,
+          role: "user",
+          content: "later turn",
+        });
+
+        const restart = {
+          messageId: assistant.id,
+          modelId: null as never,
+          deleteMessageIds: [later.id],
+          edit: {
+            messageId: userMessage.id,
+            conversationId: conversation.id,
+            content: "edited prompt",
+          },
+        };
+        const firstClaim = yield* repo.resetMessageForRetry(restart);
+        const secondClaim = yield* repo.resetMessageForRetry(restart);
+
+        return {
+          firstClaim,
+          secondClaim,
+          user: yield* repo.getMessage(userMessage.id),
+          assistant: yield* repo.getMessage(assistant.id),
+          later: yield* repo.getMessage(later.id),
+          chunks: yield* repo.chunksAfter(assistant.id, 0),
+        };
+      }),
+    );
+
+    expect(result.firstClaim).toBe(true);
+    expect(result.secondClaim).toBe(false);
+    expect(result.user?.content).toBe("edited prompt");
+    expect(result.user?.editedAt).toBeInstanceOf(Date);
+    expect(result.assistant).toMatchObject({ status: "streaming", content: "" });
+    expect(result.later).toBeNull();
+    expect(result.chunks).toEqual([]);
+  });
+
+  it("atomically edits and creates a missing assistant response", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const { conversation, userMessage, assistant } = yield* setupConversation;
+        yield* repo.deleteMessages([assistant.id]);
+        const later = yield* repo.insertMessage({
+          conversationId: conversation.id,
+          role: "user",
+          content: "later turn",
+        });
+
+        const edit = {
+          conversationId: conversation.id,
+          userMessageId: userMessage.id,
+          expectedEditedAt: userMessage.editedAt,
+          content: "edited prompt",
+          modelId: null as never,
+          deleteMessageIds: [later.id],
+        };
+        const created = yield* repo.createAssistantForEdit(edit);
+        const secondClaim = yield* repo.createAssistantForEdit(edit);
+
+        return {
+          created,
+          secondClaim,
+          originalCreatedAt: userMessage.createdAt,
+          user: yield* repo.getMessage(userMessage.id),
+          later: yield* repo.getMessage(later.id),
+          messages: yield* repo.listMessages(conversation.id),
+        };
+      }),
+    );
+
+    expect(result.created).toMatchObject({ role: "assistant", status: "streaming" });
+    expect(result.secondClaim).toBeNull();
+    expect(result.user?.content).toBe("edited prompt");
+    expect(result.user?.editedAt).toBeInstanceOf(Date);
+    expect(result.user?.createdAt).toEqual(result.originalCreatedAt);
+    expect(result.later).toBeNull();
+    expect(result.messages.map((message) => message.id)).toEqual([
+      result.user?.id,
+      result.created?.id,
+    ]);
+  });
 
   it("fans out sync events across the bus (LISTEN/NOTIFY roundtrip)", async () => {
     const events = await runtime.runPromise(

@@ -188,7 +188,10 @@ export function useMessageStream(
   const activeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!messageId) return;
+    if (!messageId) {
+      activeRef.current = null;
+      return;
+    }
     const generationKey = `${messageId}:${epoch}`;
     if (activeRef.current !== generationKey) {
       activeRef.current = generationKey;

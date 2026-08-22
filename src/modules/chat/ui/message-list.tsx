@@ -4,6 +4,7 @@ import { Streamdown } from "streamdown";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { CitationChip } from "./citation-chip.tsx";
+import { ChatInput } from "./chat-input.tsx";
 import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations.ts";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
@@ -113,12 +114,28 @@ export interface DisplayMessage {
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
+  editedAt?: Date | null;
   /**
    * Sources from earlier messages in the conversation. Citation numbering is
    * conversation-scoped, so a message may cite a source it didn't search for
    * itself; markers resolve against these plus the message's own sources.
    */
   inheritedSources?: ToolSource[];
+  /** Edit this completed user message. */
+  onEdit?: () => void;
+  editDisabled?: boolean;
+  editState?: {
+    draft: string;
+    onDraftChange: (draft: string) => void;
+    onSave: () => void;
+    onCancel: () => void;
+    saveDisabled: boolean;
+    controlsDisabled: boolean;
+    modelId: string | null;
+    onModelChange: (modelId: string) => void;
+    searchEnabled: boolean;
+    onSearchEnabledChange: (enabled: boolean) => void;
+  };
   /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
   /** Disables the retry button (e.g. while another generation runs). */
@@ -127,17 +144,44 @@ export interface DisplayMessage {
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   if (message.role === "user") {
+    if (message.editState) {
+      return (
+        <div className="w-full">
+          <ChatInput
+            value={message.editState.draft}
+            onValueChange={message.editState.onDraftChange}
+            onSubmit={message.editState.onSave}
+            onCancel={message.editState.onCancel}
+            disabled={message.editState.saveDisabled}
+            controlsDisabled={message.editState.controlsDisabled}
+            modelId={message.editState.modelId}
+            onModelChange={message.editState.onModelChange}
+            searchEnabled={message.editState.searchEnabled}
+            onSearchEnabledChange={message.editState.onSearchEnabledChange}
+            placeholder="Edit message…"
+            autoFocus
+            submitLabel="Save edit"
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="group/user flex w-full flex-col items-end">
         <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
           {message.content}
         </div>
+        {message.editedAt ? (
+          <span className="text-muted-foreground mr-1 mt-1 text-[0.6875rem]">edited</span>
+        ) : null}
         {/* Hover-revealed on pointer devices; always visible on touch, where
             there is no hover. focus-within keeps them keyboard-reachable. */}
         <MessageActions
           messageId={message.id}
           content={message.content}
           sources={[]}
+          onEdit={message.onEdit}
+          editDisabled={message.editDisabled ?? false}
           onRetry={message.onRetry}
           retryDisabled={message.retryDisabled ?? false}
           className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"

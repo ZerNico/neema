@@ -8,7 +8,7 @@ import {
   type ToolPageStatus,
   type ToolSource,
 } from "../client/use-message-stream.ts";
-import { retryMessage, sendMessage } from "../server/functions.ts";
+import { editMessage, retryMessage, sendMessage } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
@@ -50,8 +50,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const { data } = useSuspenseQuery(conversationQuery(conversationId));
   const [modelId, setModelId] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
-  // Bumped on retry: the message id stays the same, so the stream hook needs
-  // a separate signal to drop old state and resubscribe from seq 0.
+  const [editState, setEditState] = useState<{ messageId: string; draft: string } | null>(null);
+  const activeEditState =
+    editState && data.messages.some((message) => message.id === editState.messageId)
+      ? editState
+      : null;
+  // Bumped on retry/edit: the assistant id usually stays the same, so the
+  // stream hook needs a separate signal to resubscribe from seq 0.
   const [retryEpoch, setRetryEpoch] = useState(0);
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
@@ -102,10 +107,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
   });
 
+  const editMutation = useMutation({
+    mutationFn: (input: {
+      messageId: string;
+      content: string;
+      modelId: string;
+      searchEnabled: boolean;
+    }) => editMessage({ data: { conversationId, ...input } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      setEditState(null);
+      setSearchEnabled(false);
+      setRetryEpoch((epoch) => epoch + 1);
+    },
+  });
+
   // Retry rewinds the conversation to that response: retrying anything but
   // the last one deletes the messages after it, so it asks first.
   const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
   const generating = sendMutation.isPending || stream.status === "streaming";
+  const mutationPending =
+    sendMutation.isPending || retryMutation.isPending || editMutation.isPending;
+  const actionsDisabled =
+    generating || retryMutation.isPending || editMutation.isPending || activeEditState !== null;
   const retry = async (messageId: string) => {
     if (
       messageId !== lastAssistantId &&
@@ -125,6 +149,37 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const responseAfter = (messageId: string) => {
     const index = data.messages.findIndex((m) => m.id === messageId);
     return data.messages.slice(index + 1).find((m) => m.role === "assistant")?.id;
+  };
+
+  const saveEdit = async () => {
+    if (!activeEditState) return;
+    const content = activeEditState.draft.trim();
+    if (!content || !effectiveModelId || editMutation.isPending) return;
+
+    const messageIndex = data.messages.findIndex(
+      (message) => message.id === activeEditState.messageId,
+    );
+    const after = data.messages.slice(messageIndex + 1);
+    const responseIndex = after.findIndex((message) => message.role === "assistant");
+    const removesLaterTurns =
+      responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
+    if (
+      removesLaterTurns &&
+      !(await confirm({
+        title: "Edit this message?",
+        description: "All messages after its response will be removed.",
+        confirmLabel: "Save and regenerate",
+      }))
+    ) {
+      return;
+    }
+
+    editMutation.mutate({
+      messageId: activeEditState.messageId,
+      content,
+      modelId: effectiveModelId,
+      searchEnabled,
+    });
   };
 
   // Citation numbering is conversation-scoped: markers in a message may point
@@ -150,10 +205,33 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
+        ...(m.role === "user" && m.status === "complete"
+          ? {
+              onEdit: () => setEditState({ messageId: m.id, draft: m.content }),
+              editDisabled: actionsDisabled,
+            }
+          : {}),
+        ...(activeEditState?.messageId === m.id
+          ? {
+              editState: {
+                draft: activeEditState.draft,
+                onDraftChange: (draft: string) =>
+                  setEditState((current) => (current ? { ...current, draft } : null)),
+                onSave: () => void saveEdit(),
+                onCancel: () => setEditState(null),
+                saveDisabled: editMutation.isPending,
+                controlsDisabled: editMutation.isPending,
+                modelId: effectiveModelId,
+                onModelChange: setModelId,
+                searchEnabled,
+                onSearchEnabledChange: setSearchEnabled,
+              },
+            }
+          : {}),
         ...(retryTarget !== undefined
           ? {
               onRetry: () => void retry(retryTarget),
-              retryDisabled: generating || retryMutation.isPending,
+              retryDisabled: actionsDisabled,
             }
           : {}),
       };
@@ -185,7 +263,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             onSend={(content) => sendMutation.mutate(content)}
-            disabled={sendMutation.isPending || stream.status === "streaming"}
+            disabled={actionsDisabled}
+            textareaDisabled={activeEditState !== null}
+            controlsDisabled={mutationPending}
             modelId={effectiveModelId}
             onModelChange={setModelId}
             searchEnabled={searchEnabled}

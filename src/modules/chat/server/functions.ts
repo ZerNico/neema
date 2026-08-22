@@ -5,6 +5,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   ConversationIdInput,
+  EditMessageInput,
   RenameConversationInput,
   RetryMessageInput,
   SendMessageInput,
@@ -90,6 +91,33 @@ export const retryMessage = createServerFn({ method: "POST" })
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+        }),
+      ),
+    ),
+  );
+
+export const editMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(EditMessageInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.editMessage({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+          content: data.content,
+          modelId: data.modelId,
+          searchEnabled: data.searchEnabled,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+          ToolUnavailable: (e) =>
+            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
+          EditNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
         }),
       ),
     ),

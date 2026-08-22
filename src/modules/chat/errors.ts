@@ -18,6 +18,11 @@ export class RetryNotAllowed extends Schema.TaggedError<RetryNotAllowed>()("Retr
   reason: Schema.String,
 }) {}
 
+export class EditNotAllowed extends Schema.TaggedError<EditNotAllowed>()("EditNotAllowed", {
+  messageId: Schema.String,
+  reason: Schema.String,
+}) {}
+
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
   messageId: Schema.String,
   message: Schema.String,

@@ -3,6 +3,7 @@ import {
   BookOpen01Icon,
   Copy01Icon,
   MoreHorizontalIcon,
+  PencilEdit02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -23,10 +24,12 @@ import { cn } from "~/ui/utils";
 function ActionButton({
   label,
   onClick,
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -38,6 +41,7 @@ function ActionButton({
             size="icon-sm"
             aria-label={label}
             onClick={onClick}
+            disabled={disabled}
             className="text-muted-foreground"
           />
         }
@@ -83,6 +87,8 @@ export function MessageActions({
   messageId,
   content,
   sources,
+  onEdit,
+  editDisabled,
   onRetry,
   retryDisabled,
   className,
@@ -90,6 +96,9 @@ export function MessageActions({
   messageId: string;
   content: string;
   sources: ToolSource[];
+  /** Absent for messages that cannot be edited. */
+  onEdit?: (() => void) | undefined;
+  editDisabled?: boolean;
   /** Absent when nothing can be regenerated from this message. */
   onRetry?: (() => void) | undefined;
   retryDisabled?: boolean;
@@ -112,6 +121,11 @@ export function MessageActions({
           className={copied ? "size-4 text-emerald-500" : "size-4"}
         />
       </ActionButton>
+      {onEdit ? (
+        <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>
+          <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+        </ActionButton>
+      ) : null}
       {onRetry ? (
         <Tooltip>
           <TooltipTrigger
