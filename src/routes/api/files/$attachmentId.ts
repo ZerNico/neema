@@ -36,7 +36,9 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
         return new Response(file.bytes as BodyInit, {
           headers: {
             "Content-Type": kind === "text" ? `${file.mediaType}; charset=utf-8` : file.mediaType,
-            "Content-Length": String(file.size),
+            // From the bytes actually being sent, not the size column — if
+            // store and DB ever drift the response must not be malformed.
+            "Content-Length": String(file.bytes.byteLength),
             "Content-Disposition": contentDisposition(kind, file.fileName),
             // Content is addressed by an opaque id, so it never changes.
             "Cache-Control": "private, max-age=31536000, immutable",

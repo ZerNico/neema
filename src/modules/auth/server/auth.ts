@@ -47,7 +47,17 @@ export const auth = betterAuth({
             Effect.gen(function* () {
               const attachments = yield* AttachmentService;
               yield* attachments.purgeUserFiles(deleted.id);
-            }),
+            }).pipe(
+              // The user row is already gone — a store failure must be a log
+              // line (the bytes leak until fixed), not an error on a deletion
+              // that in fact succeeded.
+              Effect.catchCause((cause) =>
+                Effect.logError("attachment purge after user delete failed", {
+                  userId: deleted.id,
+                  cause: String(cause),
+                }),
+              ),
+            ),
           );
         },
       },

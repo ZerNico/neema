@@ -236,7 +236,6 @@ export function useMessageStream(
 
     return () => source.close();
     // initial is intentionally captured only when the generation changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageId, epoch, conversationId, queryClient]);
 
   return state;

@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import {
+  ConversationBusy,
   ConversationNotFound,
   EditNotAllowed,
   InvalidMessage,
@@ -35,6 +36,7 @@ export class ChatService extends Context.Service<
       { conversationId: string; assistantMessageId: string },
       | ModelNotFound
       | ConversationNotFound
+      | ConversationBusy
       | ToolUnavailable
       | InvalidMessage
       | AttachmentNotAvailable
@@ -46,6 +48,8 @@ export class ChatService extends Context.Service<
       userId: string;
       conversationId: string;
       messageId: string;
+      /** Regenerate with this model instead of the one that answered before. */
+      modelId?: string | undefined;
     }): Effect.Effect<
       { assistantMessageId: string },
       | ConversationNotFound
@@ -53,6 +57,7 @@ export class ChatService extends Context.Service<
       | ModelNotFound
       | RetryNotAllowed
       | AttachmentNotAvailable
+      | AttachmentUnsupported
     >;
     editMessage(input: {
       userId: string;
@@ -73,6 +78,13 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
     >;
+    // Winds a streaming assistant message down early, keeping the partial
+    // answer. `stopped: false` means there was nothing to stop here.
+    stopGeneration(input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }): Effect.Effect<{ stopped: boolean }, ConversationNotFound | MessageNotFound>;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     renameConversation(input: {
       userId: string;
@@ -307,6 +319,7 @@ function makeChatService() {
       userId: string;
       conversationId: string;
       messageId: string;
+      modelId?: string | undefined;
     }) {
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -341,7 +354,10 @@ function makeChatService() {
         });
       }
 
-      const modelId = message.modelId;
+      // An explicit choice also rescues a message whose model row has since
+      // been deleted — picking another one is the only way to retry it at all.
+      const switching = input.modelId !== undefined && input.modelId !== message.modelId;
+      const modelId = input.modelId ?? message.modelId;
       if (!modelId) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
@@ -351,6 +367,24 @@ function makeChatService() {
       const model = yield* providers.getModel(modelId);
       if (!model || !model.enabled || model.type !== "chat") {
         return yield* new ModelNotFound({ modelId });
+      }
+
+      // The history stays as it is, so a different model has to be able to
+      // read the files already in it. Checked before anything is wiped: a
+      // rejected switch leaves the existing answer untouched. Skipped for a
+      // plain retry, which by definition faces what it already handled.
+      if (switching) {
+        const priorAttachments = yield* attachmentRepo.listForMessages(
+          all
+            .slice(0, index)
+            .filter((m) => m.role === "user")
+            .map((m) => m.id),
+        );
+        yield* validateAttachments(
+          input.userId,
+          model.capabilities,
+          priorAttachments.map((a) => a.id),
+        );
       }
 
       // Re-enable search iff the original generation actually used it and it
@@ -472,6 +506,24 @@ function makeChatService() {
       return { assistantMessageId: created.message.id };
     });
 
+    const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }) {
+      // ownership check
+      yield* repo.getConversation(input.userId, input.conversationId);
+      const message = yield* repo.getMessage(input.messageId);
+      if (!message || message.conversationId !== input.conversationId) {
+        return yield* new MessageNotFound({ messageId: input.messageId });
+      }
+      // Already finished (or generating on another instance) — the client
+      // learns the real state from the `done` event either way.
+      if (message.status !== "streaming") return { stopped: false };
+      const stopped = yield* engine.stopGeneration(input.messageId);
+      return { stopped };
+    });
+
     const deleteConversation = Effect.fn("ChatService.deleteConversation")(function* (input: {
       userId: string;
       conversationId: string;
@@ -502,6 +554,7 @@ function makeChatService() {
       sendMessage,
       retryMessage,
       editMessage,
+      stopGeneration,
       deleteConversation,
       renameConversation,
     });

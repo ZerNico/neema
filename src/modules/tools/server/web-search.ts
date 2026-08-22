@@ -106,7 +106,7 @@ export class WebSearchExecutor extends Context.Service<
         // messages' sources, so a URL cited before keeps its number and new
         // sources continue the sequence instead of colliding with old indexes.
         const seedSources = seed?.sources ?? [];
-        let nextIndex = Math.max(0, ...seedSources.map((s) => s.index)) + 1;
+        let nextIndex = seedSources.reduce((max, s) => Math.max(max, s.index), 0) + 1;
         const indexByUrl = new Map<string, number>(seedSources.map((s) => [s.url, s.index]));
         const indexFor = (url: string): number => {
           const existing = indexByUrl.get(url);
@@ -120,7 +120,7 @@ export class WebSearchExecutor extends Context.Service<
           params: WebSearchParams,
           ctx: { preliminary: (result: WebSearchResult) => Effect.Effect<void> },
         ) {
-          const hits = yield* backend
+          const rawHits = yield* backend
             .search(connection, {
               query: params.query,
               maxResults: config.maxResults,
@@ -133,16 +133,20 @@ export class WebSearchExecutor extends Context.Service<
               ),
             );
 
-          if (!Array.isArray(hits)) {
+          if (!Array.isArray(rawHits)) {
             return {
               ok: false,
               query: params.query,
               resultCount: 0,
               pagesFetched: 0,
               results: [],
-              error: (hits as { error: string }).error,
+              error: (rawHits as { error: string }).error,
             } satisfies WebSearchResult;
           }
+          // Backend URLs are untrusted input: everything here is persisted,
+          // rendered as links, and fetched — admit only http(s) once, at the
+          // boundary, instead of validating at each of those sinks.
+          const hits = rawHits.filter((hit) => /^https?:\/\//i.test(hit.url));
 
           // Fetch + extract the first maxPagesFetched pages, bounded concurrency.
           // Per-page status is streamed to the UI via preliminary results on

@@ -32,3 +32,10 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
 export class InvalidMessage extends Schema.TaggedError<InvalidMessage>()("InvalidMessage", {
   reason: Schema.String,
 }) {}
+
+// A generation is still streaming in this conversation. Retry and edit refuse
+// this case explicitly; sending must too, or a second tab can start a
+// concurrent generation whose history misses the in-flight answer.
+export class ConversationBusy extends Schema.TaggedError<ConversationBusy>()("ConversationBusy", {
+  conversationId: Schema.String,
+}) {}

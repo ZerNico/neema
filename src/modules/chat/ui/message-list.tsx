@@ -1,3 +1,5 @@
+import { RefreshIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
@@ -9,11 +11,13 @@ import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
+import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 
 type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
@@ -118,6 +122,16 @@ export interface DisplayMessage {
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
+  /** Sanitized failure reason stored with the message, when it failed. */
+  error?: string | null;
+  /**
+   * Day heading to draw above this message. Set only on the message that opens
+   * a local calendar day, and absent entirely until hydration — the server
+   * cannot know where the visitor's days begin.
+   */
+  dayLabel?: string | null;
+  /** Local send time for the action row; absent until hydration. */
+  time?: MessageTime | null;
   editedAt?: Date | null;
   /**
    * Sources from earlier messages in the conversation. Citation numbering is
@@ -146,15 +160,40 @@ export interface DisplayMessage {
   };
   /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
+  /** Regenerate it with a different model. */
+  onRetryWith?: (modelId: string) => void;
+  /** Model behind the response a retry would replace; marked in that menu. */
+  retryModelId?: string | null;
   /** Disables the retry button (e.g. while another generation runs). */
   retryDisabled?: boolean;
 }
 
+// Separates two calendar days inside the conversation. Drawn as part of the
+// message row rather than as a row of its own, so the virtualizer measures it
+// along with the bubble it heads and needs no index remapping.
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div className="mb-3 mt-1 flex items-center gap-3" role="separator" aria-label={label}>
+      <span className="bg-border h-px flex-1" />
+      <span className="text-muted-foreground text-[0.6875rem] font-medium uppercase tracking-wider">
+        {label}
+      </span>
+      <span className="bg-border h-px flex-1" />
+    </div>
+  );
+}
+
 export function MessageBubble({ message }: { message: DisplayMessage }) {
-  if (message.role === "user") {
-    return <UserBubble message={message} />;
-  }
-  return <AssistantBubble message={message} />;
+  return (
+    <>
+      {message.dayLabel ? <DayDivider label={message.dayLabel} /> : null}
+      {message.role === "user" ? (
+        <UserBubble message={message} />
+      ) : (
+        <AssistantBubble message={message} />
+      )}
+    </>
+  );
 }
 
 // Tweens the wrapper's height when `editing` flips. The virtual list measures
@@ -253,9 +292,12 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             messageId={message.id}
             content={message.content}
             sources={[]}
+            time={message.time}
             onEdit={message.onEdit}
             editDisabled={message.editDisabled ?? false}
             onRetry={message.onRetry}
+            onRetryWith={message.onRetryWith}
+            retryModelId={message.retryModelId}
             retryDisabled={message.retryDisabled ?? false}
             className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
           />
@@ -281,8 +323,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const citedIndexes = [...message.content.matchAll(/\[\^(\d+)\]/g)].map((m) => Number(m[1]));
   const sourceKey =
     message.toolActivities.map((a) => (a.sources ?? []).map((s) => s.index).join(",")).join("|") +
-    `:${[...new Set(citedIndexes)].join(",")}:${message.inheritedSources?.length ?? 0}`;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    `:${[...new Set(citedIndexes)].join(",")}:${(message.inheritedSources ?? []).map((s) => s.index).join(",")}`;
+  // oxlint-disable-next-line react-hooks/exhaustive-deps, react/memo-dependencies -- sourceKey stands in for its inputs
   const sources = useMemo(() => {
     const own = collectSources(message.toolActivities);
     const ownIndexes = new Set(own.map((s) => s.index));
@@ -311,14 +353,37 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
           <AssistantMarkdown content={message.content} streaming={streaming} />
         )}
         {message.status === "error" ? (
-          <p className="text-destructive mt-1 text-xs">Generation failed.</p>
+          <div className="border-destructive/30 bg-destructive/5 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2">
+            <p className="text-destructive min-w-0 flex-1 text-xs">
+              {/* The stored message is already truncated and stripped of
+                  internals server-side (shortErrorMessage). */}
+              {message.error ? `Generation failed: ${message.error}` : "Generation failed."}
+            </p>
+            {message.onRetry ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={message.onRetry}
+                disabled={message.retryDisabled ?? false}
+                className="text-destructive hover:text-destructive h-7 shrink-0 px-2 text-xs"
+              >
+                <HugeiconsIcon icon={RefreshIcon} className="size-3.5" />
+                Try again
+              </Button>
+            ) : null}
+          </div>
+        ) : message.status === "aborted" ? (
+          <p className="text-muted-foreground mt-2 text-xs">Stopped.</p>
         ) : null}
         {streaming ? null : (
           <MessageActions
             messageId={message.id}
             content={message.content}
             sources={sources}
+            time={message.time}
             onRetry={message.onRetry}
+            onRetryWith={message.onRetryWith}
+            retryModelId={message.retryModelId}
             retryDisabled={message.retryDisabled ?? false}
           />
         )}

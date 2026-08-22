@@ -21,7 +21,10 @@ export class SyncBus extends Context.Service<
     SyncBus,
     Effect.gen(function* () {
       const pg = yield* PgClient.PgClient;
-      const pubsub = yield* PubSub.unbounded<UserSyncEnvelope>();
+      // Sliding: a stalled SSE consumer must not buffer events forever. Sync
+      // events are invalidation hints, so a dropped one costs a refetch at
+      // the next event, not correctness.
+      const pubsub = yield* PubSub.sliding<UserSyncEnvelope>(1024);
 
       // Relay: NOTIFY -> local PubSub. Runs for the lifetime of the layer scope.
       yield* pg.listen(CHANNEL).pipe(

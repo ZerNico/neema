@@ -5,6 +5,7 @@ import {
   GlobalSearchIcon,
   Loading03Icon,
   PlusSignIcon,
+  StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
@@ -39,6 +40,8 @@ export const ChatInput = forwardRef<
     onValueChange: (value: string) => void;
     onSubmit: () => void;
     onCancel?: (() => void) | undefined;
+    /** Replaces the send button while a response is generating. */
+    onStop?: (() => void) | undefined;
     disabled: boolean;
     textareaDisabled?: boolean;
     controlsDisabled?: boolean;
@@ -59,6 +62,7 @@ export const ChatInput = forwardRef<
     onValueChange,
     onSubmit,
     onCancel,
+    onStop,
     disabled,
     textareaDisabled = disabled,
     controlsDisabled = disabled,
@@ -327,19 +331,32 @@ export const ChatInput = forwardRef<
               Cancel
             </Button>
           ) : null}
-          <Button
-            size="icon"
-            onClick={submit}
-            disabled={!canSubmit}
-            aria-label={attachments?.queued ? "Sending after uploads finish" : submitLabel}
-            aria-busy={attachments?.queued || undefined}
-            className="size-8 rounded-full"
-          >
-            <HugeiconsIcon
-              icon={attachments?.queued ? Loading03Icon : ArrowUp02Icon}
-              className={cn("size-4", attachments?.queued ? "animate-spin" : "")}
-            />
-          </Button>
+          {onStop ? (
+            // Deliberately outside the `canSubmit` gate: the composer is
+            // disabled precisely while there is something to stop.
+            <Button
+              size="icon"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className="size-8 rounded-full"
+            >
+              <HugeiconsIcon icon={StopIcon} className="size-4" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              onClick={submit}
+              disabled={!canSubmit}
+              aria-label={attachments?.queued ? "Sending after uploads finish" : submitLabel}
+              aria-busy={attachments?.queued || undefined}
+              className="size-8 rounded-full"
+            >
+              <HugeiconsIcon
+                icon={attachments?.queued ? Loading03Icon : ArrowUp02Icon}
+                className={cn("size-4", attachments?.queued ? "animate-spin" : "")}
+              />
+            </Button>
+          )}
         </div>
       </div>
       {dragging ? (

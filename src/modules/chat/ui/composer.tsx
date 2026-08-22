@@ -4,6 +4,7 @@ import { useAttachmentUploads } from "~/modules/attachments/client/use-attachmen
 
 export function Composer({
   onSend,
+  onStop,
   disabled,
   modelId,
   onModelChange,
@@ -14,6 +15,8 @@ export function Composer({
 }: {
   /** Rejects on failure — the draft and chips survive so the user can retry. */
   onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
+  /** Present only while a response is generating; swaps send for stop. */
+  onStop?: (() => void) | undefined;
   disabled: boolean;
   textareaDisabled?: boolean;
   modelId: string | null;
@@ -56,6 +59,7 @@ export function Composer({
       value={draft}
       onValueChange={setDraft}
       onSubmit={send}
+      {...(onStop ? { onStop } : {})}
       disabled={disabled}
       textareaDisabled={textareaDisabled}
       {...(controlsDisabled !== undefined ? { controlsDisabled } : {})}

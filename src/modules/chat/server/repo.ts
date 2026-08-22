@@ -6,7 +6,7 @@ import { conversations, messageChunks, messages, messageToolCalls } from "~/db/s
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { ConversationNotFound } from "../errors.ts";
+import { ConversationBusy, ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
@@ -43,7 +43,7 @@ export class ChatRepo extends Context.Service<
         userMessage: MessageRow;
         assistant: MessageRow;
       },
-      ConversationNotFound | AttachmentNotAvailable
+      ConversationNotFound | ConversationBusy | AttachmentNotAvailable
     >;
     updateConversation(
       conversationId: string,
@@ -179,6 +179,8 @@ export class ChatRepo extends Context.Service<
                 let conversationCreated = false;
                 let conversation: ConversationRow;
                 if (input.conversationId) {
+                  // FOR UPDATE serializes turns per conversation, so two
+                  // concurrent sends cannot both pass the streaming check.
                   const rows = yield* tx
                     .select()
                     .from(conversations)
@@ -188,12 +190,26 @@ export class ChatRepo extends Context.Service<
                         eq(conversations.userId, input.userId),
                       ),
                     )
+                    .for("update")
                     .pipe(Effect.orDie);
                   const row = rows[0];
                   if (!row) {
                     return yield* new ConversationNotFound({
                       conversationId: input.conversationId,
                     });
+                  }
+                  // Same rule retry/edit enforce: one generation at a time.
+                  // A second tab sending mid-stream would otherwise start a
+                  // generation whose history misses the in-flight answer.
+                  const streaming = yield* tx
+                    .select({ id: messages.id })
+                    .from(messages)
+                    .where(
+                      and(eq(messages.conversationId, row.id), eq(messages.status, "streaming")),
+                    )
+                    .pipe(Effect.orDie);
+                  if (streaming.length > 0) {
+                    return yield* new ConversationBusy({ conversationId: row.id });
                   }
                   conversation = row;
                 } else {
@@ -287,6 +303,17 @@ export class ChatRepo extends Context.Service<
             return yield* db
               .transaction((tx) =>
                 Effect.gen(function* () {
+                  // Ownership gates everything below, not just the final
+                  // delete — the attachment release must never run for a
+                  // conversation the caller does not own.
+                  const owned = yield* tx
+                    .select({ id: conversations.id })
+                    .from(conversations)
+                    .where(
+                      and(eq(conversations.id, conversationId), eq(conversations.userId, userId)),
+                    );
+                  if (owned.length === 0) return [] as ReadonlyArray<string>;
+
                   const rows = yield* tx
                     .select({ id: messages.id })
                     .from(messages)
@@ -297,11 +324,7 @@ export class ChatRepo extends Context.Service<
                     tx,
                     rows.map((row) => row.id),
                   );
-                  yield* tx
-                    .delete(conversations)
-                    .where(
-                      and(eq(conversations.id, conversationId), eq(conversations.userId, userId)),
-                    );
+                  yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
                   return keys;
                 }),
               )

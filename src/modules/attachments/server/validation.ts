@@ -3,10 +3,10 @@ import {
   IMAGE_MEDIA_TYPES,
   MAX_ATTACHMENT_BYTES,
   PDF_MEDIA_TYPE,
-  TEXT_EXTENSIONS,
   TEXT_MEDIA_TYPE,
   attachmentKind,
   fileExtension,
+  isTextExtension,
   textLanguage,
 } from "../constants.ts";
 import type { AttachmentKind } from "../constants.ts";
@@ -109,7 +109,7 @@ export const validateAttachment = Effect.fn("attachments.validateAttachment")(fu
 
   const ext = fileExtension(fileName);
   const looksTextual =
-    ext === "" || ext in TEXT_EXTENSIONS || input.declaredMediaType.startsWith("text/");
+    ext === "" || isTextExtension(ext) || input.declaredMediaType.startsWith("text/");
   if (!looksTextual || !isValidUtf8(input.bytes)) {
     return yield* new AttachmentRejected({
       cause: "type",

@@ -196,6 +196,9 @@ describe("attachment claiming", () => {
         });
 
         const linked = yield* attachmentRepo.listForMessages([turn.userMessage.id]);
+        // Finish the first generation so the next turn passes the busy guard
+        // and fails on the claim itself — the thing this test is about.
+        yield* finish(turn.assistant.id);
         const reclaim = yield* repo
           .createTurn({
             userId,
@@ -388,6 +391,52 @@ describe("attachment replacement on edit", () => {
       goneAfterLastReference: true,
       blobRows: 0,
       attachmentRows: 0,
+    });
+  });
+
+  it("deleting someone else's conversation releases nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const store = yield* BlobStore;
+        const alice = yield* makeUser();
+        const mallory = yield* makeUser();
+
+        const hers = yield* upload(alice, "hers.txt", "alice bytes");
+        const turn = yield* repo.createTurn({
+          userId: alice,
+          conversationId: null,
+          modelId,
+          content: "mine",
+          attachmentIds: [hers.id],
+        });
+        const key = (yield* blobsOf(alice))[0]!.storageKey;
+
+        // The ownership check must gate the attachment release, not just the
+        // conversation delete — otherwise this destroys Alice's files.
+        const keys = yield* repo.deleteConversation(mallory, turn.conversation.id);
+
+        const db = yield* Db;
+        const stillThere = yield* db
+          .select()
+          .from(conversations)
+          .where(eq(conversations.id, turn.conversation.id));
+        return {
+          returnedKeys: keys.length,
+          conversationSurvives: stillThere.length,
+          attachmentRows: yield* attachmentCount(alice),
+          blobRows: (yield* blobsOf(alice)).length,
+          bytesSurvive: yield* store.exists(key),
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      returnedKeys: 0,
+      conversationSurvives: 1,
+      attachmentRows: 1,
+      blobRows: 1,
+      bytesSurvive: true,
     });
   });
 });

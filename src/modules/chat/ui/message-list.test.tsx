@@ -233,6 +233,12 @@ describe("MessageBubble actions", () => {
           contextLength: 128_000,
           capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
+        {
+          id: "model-2",
+          displayName: "Other Model",
+          contextLength: 1_000_000,
+          capabilities: { reasoning: true, tools: false, vision: true, files: false },
+        },
       ],
     );
     queryClient.setQueryData(["tools", "web-search", "availability"], {
@@ -327,6 +333,31 @@ describe("MessageBubble actions", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
   });
 
+  it("offers the model chevron only when retry-with is wired", () => {
+    renderPlain({ onRetry: vi.fn() });
+    expect(screen.queryByRole("button", { name: "Retry with another model" })).toBeNull();
+  });
+
+  it("picks a different model from the retry menu", async () => {
+    const onRetry = vi.fn();
+    const onRetryWith = vi.fn();
+    renderPlain({ onRetry, onRetryWith, retryModelId: "model-1" });
+
+    screen.getByRole("button", { name: "Retry with another model" }).click();
+
+    // The model that wrote the answer is marked, so "same again" is visible.
+    const current = await screen.findByRole("menuitemradio", { name: /Test Model/ });
+    expect(current).toHaveAttribute("aria-checked", "true");
+
+    const other = screen.getByRole("menuitemradio", { name: /Other Model/ });
+    expect(other).toHaveAttribute("aria-checked", "false");
+    other.click();
+
+    expect(onRetryWith).toHaveBeenCalledWith("model-2");
+    // The plain retry is a separate target and must not have fired.
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
   it("offers edit only when a user message wires it", () => {
     const onEdit = vi.fn();
     renderPlain({ role: "user", onEdit });
@@ -407,5 +438,43 @@ describe("MessageBubble actions", () => {
       />,
     );
     expect(screen.getByText("edited")).toBeInTheDocument();
+  });
+  it("renders the send time as a machine-readable <time> element", () => {
+    const { container } = renderPlain({
+      time: {
+        iso: "2026-08-22T12:32:00.000Z",
+        clock: "14:32",
+        absolute: "Saturday 22 August 2026 at 14:32",
+      },
+    });
+    const stamp = container.querySelector("time");
+    expect(stamp).toHaveAttribute("datetime", "2026-08-22T12:32:00.000Z");
+    expect(stamp).toHaveTextContent("14:32");
+  });
+
+  it("draws no timestamp before hydration has supplied one", () => {
+    const { container } = renderPlain();
+    expect(container.querySelector("time")).toBeNull();
+  });
+
+  it("heads a message that opens a new day, and only that one", () => {
+    const { container, rerender } = renderPlain({ dayLabel: "Yesterday" });
+    expect(screen.getByRole("separator", { name: "Yesterday" })).toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        message={{
+          id: "plain",
+          role: "assistant",
+          content: "Hello there.",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+          dayLabel: null,
+        }}
+      />,
+    );
+    expect(container.querySelector("[role='separator']")).toBeNull();
   });
 });

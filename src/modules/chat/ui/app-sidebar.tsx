@@ -10,10 +10,12 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { conversationsQuery } from "../client/queries.ts";
 import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
+import { groupConversationsByDate } from "./conversation-groups.ts";
+import { describeActivity } from "./timestamps.ts";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
@@ -34,6 +36,7 @@ import {
 import { Input } from "~/ui/primitives/input";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
+import { useHydrated } from "~/ui/use-hydrated.ts";
 import {
   Sidebar,
   SidebarContent,
@@ -63,6 +66,11 @@ export function AppSidebar({
   // record of which titles already played their reveal must not.
   const [revealRegistry] = useState(createTitleRevealRegistry);
   const confirm = useConfirm();
+  // The rows are already bucketed by recency, so an inline stamp would only
+  // repeat the group heading in a 16rem column. The exact time lives in the
+  // row's tooltip instead — held back until hydration, because formatting it
+  // on the server would produce an attribute in the wrong timezone.
+  const hydrated = useHydrated();
 
   const removeMutation = useMutation({
     mutationFn: (conversationId: string) => deleteConversation({ data: { conversationId } }),
@@ -80,6 +88,10 @@ export function AppSidebar({
 
   const isAdmin = user.role === "admin";
 
+  // Recomputed only when the list changes: the boundaries move at midnight,
+  // and any activity (or a navigation) refetches long before that matters.
+  const groups = useMemo(() => groupConversationsByDate(conversations), [conversations]);
+
   return (
     <Sidebar>
       <SidebarHeader>
@@ -94,69 +106,73 @@ export function AppSidebar({
         </Button>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Chats</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {conversations.map((conversation) => (
-                <SidebarMenuItem key={conversation.id}>
-                  <SidebarMenuButton
-                    isActive={conversation.id === activeId}
-                    render={
-                      <Link
-                        to="/chat/$conversationId"
-                        params={{ conversationId: conversation.id }}
-                      />
-                    }
-                  >
-                    <ConversationTitle
-                      conversationId={conversation.id}
-                      title={conversation.title}
-                      registry={revealRegistry}
-                    />
-                  </SidebarMenuButton>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
+        {groups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.conversations.map((conversation) => (
+                  <SidebarMenuItem key={conversation.id}>
+                    <SidebarMenuButton
+                      isActive={conversation.id === activeId}
+                      render={
+                        <Link
+                          to="/chat/$conversationId"
+                          params={{ conversationId: conversation.id }}
+                          {...(hydrated ? { title: describeActivity(conversation) } : {})}
+                        />
+                      }
                     >
-                      …
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="right" align="start">
-                      <DropdownMenuItem
-                        onClick={() =>
-                          setRenaming({ id: conversation.id, title: conversation.title ?? "" })
-                        }
+                      <ConversationTitle
+                        conversationId={conversation.id}
+                        title={conversation.title}
+                        registry={revealRegistry}
+                      />
+                    </SidebarMenuButton>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
                       >
-                        <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
-                        Rename
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={async () => {
-                          if (
-                            await confirm({
-                              title: `Delete "${conversation.title ?? "New chat"}"?`,
-                              description: "The chat and all its messages are removed permanently.",
-                              confirmLabel: "Delete chat",
-                            })
-                          ) {
-                            removeMutation.mutate(conversation.id);
+                        …
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent side="right" align="start">
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setRenaming({ id: conversation.id, title: conversation.title ?? "" })
                           }
-                        }}
-                      >
-                        <HugeiconsIcon icon={Delete02Icon} className="size-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </SidebarMenuItem>
-              ))}
-              {conversations.length === 0 ? (
-                <p className="text-muted-foreground px-2 py-1.5 text-sm">No chats yet</p>
-              ) : null}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+                        >
+                          <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `Delete "${conversation.title ?? "New chat"}"?`,
+                                description:
+                                  "The chat and all its messages are removed permanently.",
+                                confirmLabel: "Delete chat",
+                              })
+                            ) {
+                              removeMutation.mutate(conversation.id);
+                            }
+                          }}
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+        {conversations.length === 0 ? (
+          <p className="text-muted-foreground px-4 py-1.5 text-sm">No chats yet</p>
+        ) : null}
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>

@@ -1,4 +1,4 @@
-import { Duration, Effect } from "effect";
+import { Cause, Duration, Effect } from "effect";
 import { Prompt } from "effect/unstable/ai";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
@@ -105,6 +105,18 @@ export const generateConversationTitle = Effect.fn("chat.generateConversationTit
   deps: TitleDeps,
   input: TitleInput,
 ) {
+  yield* resolveTitle(deps, input).pipe(
+    // The fiber is detached — a dying write would be an unobserved fiber
+    // death, not a log line. Interruption (shutdown) stays silent.
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError("Title resolution failed", { cause: String(cause) }),
+    ),
+  );
+});
+
+const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, input: TitleInput) {
   const generated = yield* deps.gateway
     .generateText({
       modelId: input.modelId,

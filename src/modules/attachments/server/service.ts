@@ -56,7 +56,9 @@ export class AttachmentService extends Context.Service<
 
       // Physical deletion always trails the commit, so a rolled-back
       // transaction can never leave rows pointing at deleted bytes. The
-      // reverse drift (bytes with no row) is harmless and swept separately.
+      // reverse drift (bytes with no row — a put whose row insert then
+      // failed) is harmless but currently has no collector; the sweep below
+      // only follows rows.
       const deleteBlobs = (keys: ReadonlyArray<string>) =>
         Effect.forEach(
           keys,

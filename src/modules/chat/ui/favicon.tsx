@@ -11,9 +11,9 @@ export const hostOf = (url: string): string => {
   }
 };
 
-// Favicon via Google's s2 service — no extra fetch/persistence on our side and
-// it gracefully serves a globe placeholder for unknown hosts. Note this reveals
-// the visited host to a third party; swap the src if that matters.
+// Favicon via our own /api/favicon proxy: the browser never contacts a third
+// party, and the route falls back to 404 (→ the globe icon below) when the
+// upstream has nothing.
 export function Favicon({ url, className }: { url: string; className?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -26,7 +26,7 @@ export function Favicon({ url, className }: { url: string; className?: string })
   }
   return (
     <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostOf(url))}&sz=32`}
+      src={`/api/favicon?domain=${encodeURIComponent(hostOf(url))}`}
       alt=""
       loading="lazy"
       onError={() => setFailed(true)}

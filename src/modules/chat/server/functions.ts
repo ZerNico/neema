@@ -7,6 +7,7 @@ import { runtime } from "~/server/runtime.ts";
 import {
   ConversationIdInput,
   EditMessageInput,
+  MessageIdInput,
   RenameConversationInput,
   RetryMessageInput,
   SendMessageInput,
@@ -74,6 +75,8 @@ export const sendMessage = createServerFn({ method: "POST" })
         Effect.catchTags({
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("A response is still generating", { status: 409 })),
           ToolUnavailable: (e) =>
             Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
           InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
@@ -97,6 +100,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
+          modelId: data.modelId,
         }),
       ).pipe(
         Effect.catchTags({
@@ -106,6 +110,28 @@ export const retryMessage = createServerFn({ method: "POST" })
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
           AttachmentNotAvailable: () =>
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+          AttachmentUnsupported: (e) =>
+            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+        }),
+      ),
+    ),
+  );
+
+export const stopGeneration = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(MessageIdInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.stopGeneration({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
         }),
       ),
     ),

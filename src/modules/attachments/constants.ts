@@ -85,9 +85,15 @@ export const fileExtension = (fileName: string): string => {
   return fileName.slice(dot + 1).toLowerCase();
 };
 
+/** True when the extension is on the text allowlist. Own-property check —
+ * a file named `x.constructor` must not match via the prototype chain. */
+export const isTextExtension = (ext: string): boolean => Object.hasOwn(TEXT_EXTENSIONS, ext);
+
 /** Markdown language hint for a text attachment; "" when we have none. */
-export const textLanguage = (fileName: string): string =>
-  TEXT_EXTENSIONS[fileExtension(fileName)] ?? "";
+export const textLanguage = (fileName: string): string => {
+  const ext = fileExtension(fileName);
+  return isTextExtension(ext) ? TEXT_EXTENSIONS[ext]! : "";
+};
 
 export const attachmentKind = (mediaType: string): AttachmentKind =>
   mediaType.startsWith("image/") ? "image" : mediaType === PDF_MEDIA_TYPE ? "pdf" : "text";

@@ -22,9 +22,17 @@ export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
 });
 
+export const MessageIdInput = Schema.Struct({
+  conversationId: Schema.String,
+  messageId: Schema.String,
+});
+
+// Omitting `modelId` regenerates with whatever model produced the answer;
+// sending one switches models for the new attempt ("retry with").
 export const RetryMessageInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,
+  modelId: Schema.optionalKey(Schema.String),
 });
 
 export const EditMessageInput = Schema.Struct({

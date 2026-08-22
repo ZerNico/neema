@@ -61,6 +61,24 @@ const withBlobColumns = {
 // storage keys whose bytes the caller must remove after the commit. Physical
 // deletion is deliberately outside the transaction: a rolled-back transaction
 // must never leave the store missing bytes it still has rows for.
+// Postgres unique_violation, wherever the driver buried it in the cause
+// chain. Anything else raised during the claim insert is a real fault and
+// must not be dressed up as a user-level conflict.
+const isUniqueViolation = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
+    if ((current as { code?: unknown }).code === "23505") return true;
+    if (
+      typeof (current as { message?: unknown }).message === "string" &&
+      (current as { message: string }).message.includes("duplicate key value")
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
 const deleteAttachmentRows = (tx: DbTx, attachmentIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     if (attachmentIds.length === 0) return [] as string[];
@@ -337,9 +355,12 @@ export class AttachmentRepo extends Context.Service<
             .pipe(
               // The unique index on attachment_id is the real race guard: a
               // concurrent claim of the same upload loses here and rolls the
-              // whole transaction back.
-              Effect.catchTag("EffectDrizzleQueryError", () =>
-                Effect.fail(new AttachmentNotAvailable({ attachmentId: requested[0]! })),
+              // whole transaction back. Only that specific violation is a
+              // user-level conflict — any other query error stays a defect.
+              Effect.catchTag("EffectDrizzleQueryError", (error) =>
+                isUniqueViolation(error)
+                  ? Effect.fail(new AttachmentNotAvailable({ attachmentId: requested[0]! }))
+                  : Effect.die(error),
               ),
             );
         }

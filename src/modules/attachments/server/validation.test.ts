@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { MAX_ATTACHMENT_BYTES } from "../constants.ts";
+import { MAX_ATTACHMENT_BYTES, textLanguage } from "../constants.ts";
 import {
   buildTextFence,
   sanitizeFileName,
@@ -122,6 +122,21 @@ describe("validateAttachment", () => {
     );
     expect(result.kind).toBe("text");
   });
+
+  it("does not treat Object.prototype names as text extensions", async () => {
+    // `x.constructor` and `x.__proto__` would pass an `in` check through the
+    // prototype chain; the allowlist must only match its own entries.
+    for (const fileName of ["notes.constructor", "notes.__proto__"]) {
+      const error = await runError(
+        validateAttachment({
+          fileName,
+          declaredMediaType: "application/octet-stream",
+          bytes: text("plain enough"),
+        }),
+      );
+      expect(error.cause).toBe("type");
+    }
+  });
 });
 
 describe("buildTextFence", () => {
@@ -141,5 +156,11 @@ describe("buildTextFence", () => {
     expect(buildTextFence({ fileName: "paper.pdf", text: "body", label: "Extracted" })).toContain(
       "Extracted: paper.pdf",
     );
+  });
+
+  it("gives prototype-named files no language hint", () => {
+    expect(textLanguage("x.constructor")).toBe("");
+    expect(textLanguage("x.__proto__")).toBe("");
+    expect(textLanguage("x.ts")).toBe("typescript");
   });
 });

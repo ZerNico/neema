@@ -203,4 +203,15 @@ describe("generateConversationTitle", () => {
       expect(h.publish).not.toHaveBeenCalled();
     }),
   );
+
+  it.effect("survives a dying title write (the fiber is detached)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.setTitleIfPending.mockReturnValue(Effect.die("db went away") as never);
+      // Must complete rather than die: a defect here would be an unobserved
+      // fiber death in production, not a log line.
+      yield* generateConversationTitle(h.deps, input());
+      expect(h.publish).not.toHaveBeenCalled();
+    }),
+  );
 });
