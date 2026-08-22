@@ -18,8 +18,8 @@ import { Db, PgLive } from "./db.ts";
 
 // Application layer graph. Server functions and routes run effects against
 // this shared runtime; its resources (pg pool, pubsub relays, in-flight
-// generation fibers) live for the process lifetime.
-// NOTE: server layers don't HMR — restart `pnpm dev` after changing this graph.
+// generation fibers) live until the next dev reload replaces it — for the
+// process lifetime in production.
 const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).pipe(
   Layer.provideMerge(PgLive),
 );
@@ -45,7 +45,13 @@ const AppLayer = ChatService.layer.pipe(
 
 const memoMap = Layer.makeMemoMapUnsafe();
 
-// Vite dev server re-imports modules on HMR; keep one runtime per process.
+// Vite's dev server re-executes this module whenever anything in the layer
+// graph changes, but never runs import.meta.hot.dispose hooks for server
+// modules — so each evaluation replaces the previous generation itself:
+// dispose the old runtime (pg pool, LISTEN connection, generation fibers)
+// and take over. Serving the old graph instead would mean repo/service edits
+// silently don't apply until a manual restart. In production the module runs
+// once and there is nothing to dispose.
 const globalKey = Symbol.for("chat/server/runtime");
 type GlobalWithRuntime = typeof globalThis & {
   [globalKey]?: ManagedRuntime.ManagedRuntime<
@@ -56,4 +62,7 @@ type GlobalWithRuntime = typeof globalThis & {
 
 const g = globalThis as GlobalWithRuntime;
 
-export const runtime = (g[globalKey] ??= ManagedRuntime.make(AppLayer, { memoMap }));
+g[globalKey]?.dispose().catch((error: unknown) => {
+  console.error("disposing the previous dev runtime failed", error);
+});
+export const runtime = (g[globalKey] = ManagedRuntime.make(AppLayer, { memoMap }));

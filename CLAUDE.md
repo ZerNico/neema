@@ -56,8 +56,11 @@ See README.md for architecture; this file records the sharp edges.
 
 ## Invariants
 
-- One `ManagedRuntime` per process (`src/server/runtime.ts`, HMR-safe via globalThis).
-  Server functions/routes run effects with `runtime.runPromise`.
+- One live `ManagedRuntime` per process (`src/server/runtime.ts`). Server functions/routes
+  run effects with `runtime.runPromise`. Dev HMR re-runs the module on any layer-graph
+  change; each evaluation disposes the previous runtime (globalThis stash) and takes over —
+  repo/service edits apply without restarting `pnpm dev`. Vite never calls
+  `import.meta.hot.dispose` for server modules, which is why the module does it itself.
 - `message_chunks.seq` starts at 1 and is contiguous per message; resume protocol relies
   on it (`?after=<seq>` replays from Postgres, then live tail dedupes by seq).
 - Better Auth owns its tables' columns — `src/db/schema/auth.ts` must mirror what
