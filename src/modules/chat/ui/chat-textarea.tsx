@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { cn } from "~/ui/utils";
 
 export const CHAT_INPUT_SHELL_CLASS = cn(
@@ -35,8 +35,10 @@ export const ChatTextarea = forwardRef<
   useImperativeHandle(forwardedRef, () => textareaRef.current!);
 
   // The controlled value is the resize trigger, not a value read by the effect.
+  // Layout effect: the textarea must reach its grown height before ancestors
+  // measure it pre-paint (the edit-swap height tween in message-list.tsx).
   // oxlint-disable react/exhaustive-effect-dependencies
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";

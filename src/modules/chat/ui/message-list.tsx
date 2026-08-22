@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
@@ -144,52 +144,96 @@ export interface DisplayMessage {
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   if (message.role === "user") {
-    if (message.editState) {
-      return (
-        <div className="w-full">
-          <ChatInput
-            value={message.editState.draft}
-            onValueChange={message.editState.onDraftChange}
-            onSubmit={message.editState.onSave}
-            onCancel={message.editState.onCancel}
-            disabled={message.editState.saveDisabled}
-            controlsDisabled={message.editState.controlsDisabled}
-            modelId={message.editState.modelId}
-            onModelChange={message.editState.onModelChange}
-            searchEnabled={message.editState.searchEnabled}
-            onSearchEnabledChange={message.editState.onSearchEnabledChange}
-            placeholder="Edit message…"
-            autoFocus
-            submitLabel="Save edit"
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div className="group/user flex w-full flex-col items-end">
-        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
-          {message.content}
-        </div>
-        {message.editedAt ? (
-          <span className="text-muted-foreground mr-1 mt-1 text-[0.6875rem]">edited</span>
-        ) : null}
-        {/* Hover-revealed on pointer devices; always visible on touch, where
-            there is no hover. focus-within keeps them keyboard-reachable. */}
-        <MessageActions
-          messageId={message.id}
-          content={message.content}
-          sources={[]}
-          onEdit={message.onEdit}
-          editDisabled={message.editDisabled ?? false}
-          onRetry={message.onRetry}
-          retryDisabled={message.retryDisabled ?? false}
-          className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
-        />
-      </div>
-    );
+    return <UserBubble message={message} />;
   }
   return <AssistantBubble message={message} />;
+}
+
+// Tweens the wrapper's height when `editing` flips. The virtual list measures
+// rows with a ResizeObserver, so a gradual height change carries the rows
+// below along frame by frame — but only `height` may be animated here; the
+// virtualizer owns the row's transform.
+function useEditSwapHeight(editing: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const wasEditing = useRef(editing);
+  const lastHeight = useRef<number | null>(null);
+
+  // No dependency array: re-measure after every render so the recorded height
+  // tracks draft growth and streaming reflows, not just the edit toggle.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const height = el.offsetHeight;
+    if (
+      wasEditing.current !== editing &&
+      lastHeight.current !== null &&
+      lastHeight.current !== height &&
+      typeof el.animate === "function" &&
+      !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      // The outgoing state unmounts in the same commit, so a true cross-fade
+      // has nothing left to fade out; fading the incoming state in from
+      // transparent while the height morphs reads as one.
+      el.animate(
+        [
+          { height: `${lastHeight.current}px`, opacity: 0, overflow: "hidden" },
+          { height: `${height}px`, opacity: 1, overflow: "hidden" },
+        ],
+        { duration: 180, easing: "ease-in-out" },
+      );
+    }
+    wasEditing.current = editing;
+    lastHeight.current = height;
+  });
+
+  return ref;
+}
+
+function UserBubble({ message }: { message: DisplayMessage }) {
+  const wrapperRef = useEditSwapHeight(message.editState !== undefined);
+
+  return (
+    <div ref={wrapperRef} className="w-full">
+      {message.editState ? (
+        <ChatInput
+          value={message.editState.draft}
+          onValueChange={message.editState.onDraftChange}
+          onSubmit={message.editState.onSave}
+          onCancel={message.editState.onCancel}
+          disabled={message.editState.saveDisabled}
+          controlsDisabled={message.editState.controlsDisabled}
+          modelId={message.editState.modelId}
+          onModelChange={message.editState.onModelChange}
+          searchEnabled={message.editState.searchEnabled}
+          onSearchEnabledChange={message.editState.onSearchEnabledChange}
+          placeholder="Edit message…"
+          autoFocus
+          submitLabel="Save edit"
+        />
+      ) : (
+        <div className="group/user flex w-full flex-col items-end">
+          <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+            {message.content}
+          </div>
+          {message.editedAt ? (
+            <span className="text-muted-foreground mr-1 mt-1 text-[0.6875rem]">edited</span>
+          ) : null}
+          {/* Hover-revealed on pointer devices; always visible on touch, where
+              there is no hover. focus-within keeps them keyboard-reachable. */}
+          <MessageActions
+            messageId={message.id}
+            content={message.content}
+            sources={[]}
+            onEdit={message.onEdit}
+            editDisabled={message.editDisabled ?? false}
+            onRetry={message.onRetry}
+            retryDisabled={message.retryDisabled ?? false}
+            className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AssistantBubble({ message }: { message: DisplayMessage }) {
