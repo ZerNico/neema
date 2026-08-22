@@ -21,17 +21,14 @@ export function ReasoningBlock({
   active: boolean;
 }) {
   const hasContent = reasoning.trim().length > 0;
-  // Auto-expand while actively thinking with visible content; collapse after.
-  const [expanded, setExpanded] = useState(active && hasContent);
-  const wasActive = useRef(active);
+  // Automatic behavior: open while the model is visibly thinking, closed once
+  // it answers. A click overrides that — but only within the phase it was
+  // made in (`during`), so finishing still collapses a manually opened pane
+  // and a new generation re-opens a manually closed one.
+  const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);
+  const expanded =
+    override !== null && override.during === active ? override.value : active && hasContent;
   const paneRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (active && hasContent) setExpanded(true);
-    // Collapse automatically when thinking finishes.
-    if (wasActive.current && !active) setExpanded(false);
-    wasActive.current = active;
-  }, [active, hasContent]);
 
   // Keep the newest thought in view while streaming.
   useEffect(() => {
@@ -55,7 +52,7 @@ export function ReasoningBlock({
     <div className="mb-2">
       <button
         type="button"
-        onClick={() => setExpanded((e) => !e)}
+        onClick={() => setOverride({ during: active, value: !expanded })}
         aria-expanded={expanded}
         className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors"
       >

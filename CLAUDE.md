@@ -79,6 +79,8 @@ See README.md for architecture; this file records the sharp edges.
 
 - Schema change → `pnpm db:generate` → commit the `drizzle/` folder → `pnpm db:migrate`.
 - `pnpm typecheck && pnpm lint && pnpm test` before considering work done.
-  Integration tests need Docker (Testcontainers).
+  Integration tests need Docker (Testcontainers). Lint has exactly ONE known error
+  (`virtual-message-list.tsx` react(incompatible-library) — React Compiler cannot memoize
+  `useVirtualizer`, inherent to @tanstack/react-virtual); anything beyond it is new.
 - UI primitives in `src/ui/primitives` are shadcn-generated (Base UI, style
   `base-luma`) — regenerate via `pnpm dlx shadcn@latest add <component>`, don't hand-roll.

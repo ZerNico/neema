@@ -1,4 +1,4 @@
-import { expect, it, layer } from "@effect/vitest";
+import { expect, layer } from "@effect/vitest";
 import { Effect, Redacted } from "effect";
 import { KeyCipher } from "./crypto.ts";
 
