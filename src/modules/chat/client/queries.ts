@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   getConversationWithMessages,
   listChatModels,
@@ -6,10 +6,30 @@ import {
 } from "../server/functions.ts";
 import { getWebSearchAvailability } from "~/modules/tools/server/functions.ts";
 
-export const conversationsQuery = queryOptions({
-  queryKey: ["conversations"],
-  queryFn: () => listConversations(),
-});
+export const CONVERSATIONS_PAGE_SIZE = 30;
+
+/** Opaque to the client — handed straight back to the server next page. */
+export interface ConversationCursorValue {
+  activity: string;
+  id: string;
+}
+
+// Keyed under the existing `["conversations"]` prefix so the sync bus's
+// prefix invalidation still covers every search variant.
+export const conversationsInfiniteQuery = (query = "") =>
+  infiniteQueryOptions({
+    queryKey: ["conversations", { query }],
+    queryFn: ({ pageParam }) =>
+      listConversations({
+        data: {
+          query,
+          limit: CONVERSATIONS_PAGE_SIZE,
+          ...(pageParam === null ? {} : { cursor: pageParam }),
+        },
+      }),
+    initialPageParam: null as ConversationCursorValue | null,
+    getNextPageParam: (last) => last.nextCursor,
+  });
 
 export const conversationQuery = (conversationId: string) =>
   queryOptions({

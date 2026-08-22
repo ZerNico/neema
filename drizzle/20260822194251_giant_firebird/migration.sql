@@ -1,0 +1,1 @@
+CREATE INDEX "conversations_user_activity_idx" ON "conversations" ("user_id",coalesce("last_message_at", "created_at") desc,"id" desc);

@@ -1,7 +1,7 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { getSession } from "~/modules/auth/server/functions.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
-import { conversationsQuery } from "~/modules/chat/client/queries.ts";
+import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_app")({
     return { user: session.user };
   },
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(conversationsQuery);
+    await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery(""));
     return { user: context.user };
   },
   component: AppLayout,

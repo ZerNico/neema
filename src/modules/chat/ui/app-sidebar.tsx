@@ -1,31 +1,24 @@
 import {
-  Delete02Icon,
+  BubbleChatIcon,
   Logout03Icon,
-  PencilEdit02Icon,
   PlusSignIcon,
   Settings02Icon,
   UserCircleIcon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
-import { conversationsQuery } from "../client/queries.ts";
+import { conversationsInfiniteQuery } from "../client/queries.ts";
+import { ConversationMenuItems, useConversationActions } from "./conversation-actions.tsx";
 import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
+import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { describeActivity } from "./timestamps.ts";
-import { deleteConversation, renameConversation } from "../server/functions.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,8 +26,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Input } from "~/ui/primitives/input";
-import { useConfirm } from "~/ui/confirm.tsx";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import {
@@ -57,36 +48,31 @@ export function AppSidebar({
   user: { id: string; name: string; email: string; role?: string | null | undefined };
 }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { data: conversations } = useSuspenseQuery(conversationsQuery);
+  const conversationsPages = useSuspenseInfiniteQuery(conversationsInfiniteQuery(""));
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   // One registry for the whole shell: rows come and go with refetches, the
   // record of which titles already played their reveal must not.
   const [revealRegistry] = useState(createTitleRevealRegistry);
-  const confirm = useConfirm();
+  const actions = useConversationActions();
   // The rows are already bucketed by recency, so an inline stamp would only
   // repeat the group heading in a 16rem column. The exact time lives in the
   // row's tooltip instead — held back until hydration, because formatting it
   // on the server would produce an attribute in the wrong timezone.
   const hydrated = useHydrated();
 
-  const removeMutation = useMutation({
-    mutationFn: (conversationId: string) => deleteConversation({ data: { conversationId } }),
-    onSuccess: async (_, conversationId) => {
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      if (activeId === conversationId) await navigate({ to: "/" });
-    },
-  });
-
-  const renameMutation = useMutation({
-    mutationFn: (input: { conversationId: string; title: string }) =>
-      renameConversation({ data: input }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-  });
-
   const isAdmin = user.role === "admin";
+
+  const pages = conversationsPages.data.pages;
+  // Between two page fetches a chat that just received a message can appear on
+  // both — dedupe so React never sees a repeated key before the next
+  // invalidation re-pages the list.
+  const conversations = useMemo(() => {
+    const seen = new Set<string>();
+    return pages
+      .flatMap((page) => page.conversations)
+      .filter((conversation) => !seen.has(conversation.id) && seen.add(conversation.id));
+  }, [pages]);
 
   // Recomputed only when the list changes: the boundaries move at midnight,
   // and any activity (or a navigation) refetches long before that matters.
@@ -104,6 +90,14 @@ export function AppSidebar({
           <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
           New chat
         </Button>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton render={<Link to="/chats" />}>
+              <HugeiconsIcon icon={BubbleChatIcon} className="size-4" />
+              Chats
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         {groups.map((group) => (
@@ -136,32 +130,7 @@ export function AppSidebar({
                         …
                       </DropdownMenuTrigger>
                       <DropdownMenuContent side="right" align="start">
-                        <DropdownMenuItem
-                          onClick={() =>
-                            setRenaming({ id: conversation.id, title: conversation.title ?? "" })
-                          }
-                        >
-                          <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
-                          Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={async () => {
-                            if (
-                              await confirm({
-                                title: `Delete "${conversation.title ?? "New chat"}"?`,
-                                description:
-                                  "The chat and all its messages are removed permanently.",
-                                confirmLabel: "Delete chat",
-                              })
-                            ) {
-                              removeMutation.mutate(conversation.id);
-                            }
-                          }}
-                        >
-                          <HugeiconsIcon icon={Delete02Icon} className="size-4" />
-                          Delete
-                        </DropdownMenuItem>
+                        <ConversationMenuItems conversation={conversation} actions={actions} />
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </SidebarMenuItem>
@@ -171,8 +140,18 @@ export function AppSidebar({
           </SidebarGroup>
         ))}
         {conversations.length === 0 ? (
-          <p className="text-muted-foreground px-4 py-1.5 text-sm">No chats yet</p>
-        ) : null}
+          <div className="text-muted-foreground flex flex-col gap-1 px-4 py-3 text-sm">
+            <span className="text-foreground font-medium">No chats yet</span>
+            <span>Ask something in the composer and it will show up here.</span>
+          </div>
+        ) : (
+          <InfiniteSentinel
+            className="px-2 pb-2"
+            hasNext={conversationsPages.hasNextPage}
+            isFetching={conversationsPages.isFetchingNextPage}
+            onLoadMore={() => void conversationsPages.fetchNextPage()}
+          />
+        )}
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
@@ -224,36 +203,7 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarFooter>
 
-      <Dialog open={renaming !== null} onOpenChange={(open) => !open && setRenaming(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rename chat</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renaming?.title ?? ""}
-            onChange={(e) => setRenaming((r) => (r ? { ...r, title: e.target.value } : r))}
-            autoFocus
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (renaming && renaming.title.trim()) {
-                  renameMutation.mutate({
-                    conversationId: renaming.id,
-                    title: renaming.title.trim(),
-                  });
-                  setRenaming(null);
-                }
-              }}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {actions.renameDialog}
     </Sidebar>
   );
 }

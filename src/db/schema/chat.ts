@@ -1,3 +1,4 @@
+import { desc, sql } from "drizzle-orm";
 import {
   bigint,
   index,
@@ -31,6 +32,13 @@ export const conversations = pgTable(
   (t) => [
     index("conversations_user_id_idx").on(t.userId),
     index("conversations_last_message_at_idx").on(t.lastMessageAt),
+    // Serves the sidebar's keyset paging, which orders by exactly this
+    // expression pair (see ChatRepo.listConversations).
+    index("conversations_user_activity_idx").on(
+      t.userId,
+      sql`coalesce(${t.lastMessageAt}, ${t.createdAt}) desc`,
+      desc(t.id),
+    ),
   ],
 );
 

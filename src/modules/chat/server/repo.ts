@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -9,16 +9,40 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ConversationBusy, ConversationNotFound } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
+/** Position in the conversation list order: activity timestamp, then id. */
+export interface ConversationCursor {
+  readonly activity: Date;
+  readonly id: string;
+}
 export type MessageRow = typeof messages.$inferSelect;
 export type ChunkKind = "text" | "reasoning" | "tool";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 // Durable tool-call projection safe for clients (summaries only, no page bodies).
 export type ToolCallRow = typeof messageToolCalls.$inferSelect;
 
+// `%`, `_` and the escape character itself are literals when someone types
+// them into a search box, not wildcards.
+const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
+
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
-    listConversations(userId: string): Effect.Effect<ConversationRow[]>;
+    /**
+     * One page of a user's conversations, newest activity first. Ordered by
+     * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the
+     * order is total — the cursor rides on exactly that pair.
+     */
+    listConversations(input: {
+      userId: string;
+      limit: number;
+      /** Last row of the previous page; omit for the first one. */
+      cursor?: ConversationCursor | undefined;
+      /** Case-insensitive substring match on the title; blank matches all. */
+      query?: string | undefined;
+    }): Effect.Effect<{
+      conversations: ConversationRow[];
+      nextCursor: ConversationCursor | null;
+    }>;
     getConversation(
       userId: string,
       conversationId: string,
@@ -141,15 +165,45 @@ export class ChatRepo extends Context.Service<
       const attachments = yield* AttachmentRepo;
 
       return ChatRepo.of({
-        listConversations: Effect.fn("ChatRepo.listConversations")(function* (userId) {
-          return yield* db
+        listConversations: Effect.fn("ChatRepo.listConversations")(function* (input) {
+          const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
+          const title = input.query?.trim();
+          const rows = yield* db
             .select()
             .from(conversations)
-            .where(eq(conversations.userId, userId))
-            .orderBy(
-              desc(sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`),
-            );
-        }, Effect.orDie),
+            .where(
+              and(
+                eq(conversations.userId, input.userId),
+                // Keyset, not OFFSET: the list reorders whenever a message
+                // lands, and an offset would then skip or repeat rows.
+                input.cursor
+                  ? or(
+                      sql`${activity} < ${input.cursor.activity.toISOString()}::timestamptz`,
+                      and(
+                        sql`${activity} = ${input.cursor.activity.toISOString()}::timestamptz`,
+                        lt(conversations.id, input.cursor.id),
+                      ),
+                    )
+                  : undefined,
+                // A title still being generated is null, so it matches nothing
+                // — correct: there is not yet anything to match against.
+                title ? ilike(conversations.title, `%${escapeLike(title)}%`) : undefined,
+              ),
+            )
+            .orderBy(desc(activity), desc(conversations.id))
+            // One extra row answers "is there another page" without a count.
+            .limit(input.limit + 1)
+            .pipe(Effect.orDie);
+
+          const page = rows.slice(0, input.limit);
+          const last = rows.length > input.limit ? page.at(-1) : undefined;
+          return {
+            conversations: page,
+            nextCursor: last
+              ? { activity: last.lastMessageAt ?? last.createdAt, id: last.id }
+              : null,
+          };
+        }),
 
         getConversation: Effect.fn("ChatRepo.getConversation")(function* (userId, conversationId) {
           const rows = yield* db

@@ -22,6 +22,20 @@ export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
 });
 
+// Opaque to the client: it hands back whatever the previous page returned.
+export const ConversationCursor = Schema.Struct({
+  /** ISO timestamp of coalesce(lastMessageAt, createdAt) for the last row served. */
+  activity: Schema.String,
+  id: Schema.String,
+});
+
+export const ListConversationsInput = Schema.Struct({
+  /** Case-insensitive substring match on the title; blank lists everything. */
+  query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  cursor: Schema.optionalKey(ConversationCursor),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+});
+
 export const MessageIdInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,

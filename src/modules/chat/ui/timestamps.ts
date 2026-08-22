@@ -138,3 +138,18 @@ export function describeActivity(conversation: DatedConversation, locale?: strin
   const created = optionalDate(conversation.createdAt);
   return created ? `Created ${absoluteLabel(created, locale)}` : "";
 }
+
+/**
+ * Compact visible stamp for a conversation row: the clock time while it is
+ * still today, the day label after that. Empty when there is no usable date.
+ */
+export function activityStamp(
+  conversation: DatedConversation,
+  now: Date = new Date(),
+  locale?: string,
+): string {
+  const date = optionalDate(conversation.lastMessageAt) ?? optionalDate(conversation.createdAt);
+  if (!date) return "";
+  const label = dayLabel(date, now, locale);
+  return label === "Today" ? clockLabel(date, locale) : label;
+}

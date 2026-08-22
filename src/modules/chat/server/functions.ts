@@ -7,6 +7,7 @@ import { runtime } from "~/server/runtime.ts";
 import {
   ConversationIdInput,
   EditMessageInput,
+  ListConversationsInput,
   MessageIdInput,
   RenameConversationInput,
   RetryMessageInput,
@@ -17,10 +18,35 @@ import { ChatService } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
+const CONVERSATIONS_DEFAULT_LIMIT = 30;
+
 export const listConversations = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .handler(({ context }) =>
-    runtime.runPromise(ChatRepo.use((repo) => repo.listConversations(context.session.user.id))),
+  .validator(standard(ListConversationsInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatRepo.use((repo) =>
+        repo
+          .listConversations({
+            userId: context.session.user.id,
+            limit: data.limit ?? CONVERSATIONS_DEFAULT_LIMIT,
+            ...(data.query === undefined ? {} : { query: data.query }),
+            ...(data.cursor === undefined
+              ? {}
+              : { cursor: { activity: new Date(data.cursor.activity), id: data.cursor.id } }),
+          })
+          // The cursor goes back out exactly as it came in — a string the
+          // client round-trips without having to know what is in it.
+          .pipe(
+            Effect.map((page) => ({
+              conversations: page.conversations,
+              nextCursor: page.nextCursor
+                ? { activity: page.nextCursor.activity.toISOString(), id: page.nextCursor.id }
+                : null,
+            })),
+          ),
+      ),
+    ),
   );
 
 export const getConversationWithMessages = createServerFn({ method: "GET" })

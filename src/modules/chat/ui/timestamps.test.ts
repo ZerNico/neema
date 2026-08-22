@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { absoluteLabel, buildMessageStamps, clockLabel, dayLabel } from "./timestamps.ts";
+import {
+  absoluteLabel,
+  activityStamp,
+  buildMessageStamps,
+  clockLabel,
+  dayLabel,
+} from "./timestamps.ts";
 
 // en-GB keeps the labels 24-hour and day-first, which pins the assertions
 // below to something readable; the code itself always uses the visitor locale.
@@ -113,5 +119,35 @@ describe("buildMessageStamps", () => {
     );
     expect(stamps.has("a")).toBe(false);
     expect(stamps.get("b")?.dayLabel).toBe("Today");
+  });
+});
+
+describe("activityStamp", () => {
+  const conversation = (lastMessageAt: string | null, createdAt: string) => ({
+    lastMessageAt,
+    createdAt,
+  });
+
+  it("shows the clock while the activity is still today", () => {
+    expect(
+      activityStamp(conversation("2026-08-22T09:05:00", "2026-08-01T09:00:00"), NOW, LOCALE),
+    ).toBe("9:05");
+  });
+
+  it("shows the day label once it is not today", () => {
+    expect(
+      activityStamp(conversation("2026-08-21T09:05:00", "2026-08-01T09:00:00"), NOW, LOCALE),
+    ).toBe("Yesterday");
+    expect(
+      activityStamp(conversation("2026-05-04T09:05:00", "2026-05-01T09:00:00"), NOW, LOCALE),
+    ).toBe("4 May");
+  });
+
+  it("falls back to creation for a chat with no messages", () => {
+    expect(activityStamp(conversation(null, "2026-08-21T09:05:00"), NOW, LOCALE)).toBe("Yesterday");
+  });
+
+  it("stays empty rather than printing an unreadable date", () => {
+    expect(activityStamp(conversation("not a date", "also not a date"), NOW, LOCALE)).toBe("");
   });
 });
