@@ -14,7 +14,7 @@ import { ConversationTitle, createTitleRevealRegistry } from "./conversation-tit
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { activityStamp, describeActivity } from "./timestamps.ts";
-import { AdminPage, EmptyState, ListCard, ListRow } from "~/modules/admin/ui/admin-shell.tsx";
+import { AdminPage, EmptyState } from "~/modules/admin/ui/admin-shell.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -102,17 +102,21 @@ export function ChatsPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {groups.map((group) => (
-            <section key={group.label} className="flex flex-col gap-2">
+            <section key={group.label} className="flex flex-col gap-1">
               {group.label ? (
-                <h2 className="text-muted-foreground px-1 text-xs font-medium">{group.label}</h2>
+                <h2 className="text-muted-foreground px-3 text-xs font-medium">{group.label}</h2>
               ) : null}
-              <ListCard>
+              <ul className="flex flex-col">
+                {/* Whole-row links with a hover surface, not a bordered table:
+                    the row itself is the click target, the sidebar's idiom at
+                    page width. The menu button overlays the row's reserved
+                    right strip so it never nests inside the anchor. */}
                 {group.conversations.map((conversation) => (
-                  <ListRow key={conversation.id} className="gap-2 py-2">
+                  <li key={conversation.id} className="group/row relative">
                     <Link
                       to="/chat/$conversationId"
                       params={{ conversationId: conversation.id }}
-                      className="hover:text-foreground flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+                      className="hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-lg px-3 py-2.5 pr-11 text-sm transition-colors"
                       {...(hydrated ? { title: describeActivity(conversation) } : {})}
                     >
                       {conversation.branchedFrom ? (
@@ -122,15 +126,17 @@ export function ChatsPage() {
                           aria-label="Branched conversation"
                         />
                       ) : null}
-                      <ConversationTitle
-                        conversationId={conversation.id}
-                        title={conversation.title}
-                        registry={revealRegistry}
-                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        <ConversationTitle
+                          conversationId={conversation.id}
+                          title={conversation.title}
+                          registry={revealRegistry}
+                        />
+                      </span>
+                      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                        {hydrated ? activityStamp(conversation) : ""}
+                      </span>
                     </Link>
-                    <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                      {hydrated ? activityStamp(conversation) : ""}
-                    </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
@@ -138,6 +144,7 @@ export function ChatsPage() {
                             variant="ghost"
                             size="icon-sm"
                             aria-label={`Actions for ${conversation.title ?? "New chat"}`}
+                            className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100"
                           />
                         }
                       >
@@ -147,9 +154,9 @@ export function ChatsPage() {
                         <ConversationMenuItems conversation={conversation} actions={actions} />
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </ListRow>
+                  </li>
                 ))}
-              </ListCard>
+              </ul>
             </section>
           ))}
           <InfiniteSentinel
