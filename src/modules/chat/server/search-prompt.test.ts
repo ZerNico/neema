@@ -3,7 +3,7 @@ import { Prompt } from "effect/unstable/ai";
 import {
   buildSearchReminder,
   type CitableSource,
-  SEARCH_SYSTEM_HINT,
+  webToolsSystemHint,
   systemReminderMessage,
   withSearchReminder,
 } from "./search-prompt.ts";
@@ -66,7 +66,7 @@ describe("systemReminderMessage", () => {
 
 describe("withSearchReminder", () => {
   const transcript = Prompt.make([
-    { role: "system" as const, content: SEARCH_SYSTEM_HINT },
+    { role: "system" as const, content: webToolsSystemHint({ search: true, reader: false }) },
     { role: "user" as const, content: "what changed last week?" },
   ]);
 

@@ -27,6 +27,15 @@ export const DocumentParserConfig = Schema.Struct({
 });
 export type DocumentParserConfig = typeof DocumentParserConfig.Type;
 
+// Non-secret configuration for the url_reader tool row.
+export const UrlReaderConfig = Schema.Struct({
+  perPageCharCap: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1000),
+    Schema.isLessThanOrEqualTo(20000),
+  ),
+});
+export type UrlReaderConfig = typeof UrlReaderConfig.Type;
+
 // Parameters the model supplies when calling web_search.
 export const WebSearchParams = Schema.Struct({
   query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
@@ -34,6 +43,12 @@ export const WebSearchParams = Schema.Struct({
   language: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10))),
 });
 export type WebSearchParams = typeof WebSearchParams.Type;
+
+// Parameters the model supplies when calling read_url.
+export const UrlReadParams = Schema.Struct({
+  url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+});
+export type UrlReadParams = typeof UrlReadParams.Type;
 
 // Per-source status shown live in the chat UI (favicon row).
 export const PageStatus = Schema.Struct({
@@ -43,9 +58,9 @@ export const PageStatus = Schema.Struct({
 });
 export type PageStatus = typeof PageStatus.Type;
 
-// A citable source. `index` is assigned per assistant message (not per call), so
-// a second search continues the numbering and a repeated URL keeps its first
-// number — the model cites these as [^index].
+// A citable source. `index` is conversation-scoped: the allocator is seeded
+// from earlier messages' persisted sources, so a repeated URL keeps its first
+// number and new sources continue the sequence — the model cites [^index].
 export const Source = Schema.Struct({
   index: Schema.Int,
   url: Schema.String,
@@ -114,6 +129,12 @@ export const UpdateDocumentParserToolInput = Schema.Struct({
   maxPages: Schema.optionalKey(DocumentParserConfig.fields.maxPages),
 });
 export type UpdateDocumentParserToolInput = typeof UpdateDocumentParserToolInput.Type;
+
+export const UpdateUrlReaderToolInput = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  perPageCharCap: Schema.optionalKey(UrlReaderConfig.fields.perPageCharCap),
+});
+export type UpdateUrlReaderToolInput = typeof UpdateUrlReaderToolInput.Type;
 
 export const TestSearchConnectionInput = Schema.Struct({
   baseUrl: Schema.String.check(Schema.isMinLength(1)),

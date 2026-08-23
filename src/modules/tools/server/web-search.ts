@@ -1,8 +1,9 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool } from "effect/unstable/ai";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend } from "./search.ts";
 import { PageExtractor } from "./extraction.ts";
+import type { SourceIndexer } from "./source-indexer.ts";
 import { WebSearchParams, type PageStatus, type Source } from "../schema.ts";
 
 export class ToolUnavailable extends Schema.TaggedError<ToolUnavailable>()("ToolUnavailable", {
@@ -28,7 +29,11 @@ const SourceSchema = Schema.Struct({
   read: Schema.Boolean,
 });
 
-const WebSearchResult = Schema.Struct({
+// One result shape for every web tool (search and read_url alike): the
+// streaming pipeline, tool envelopes, persistence and the citations UI are all
+// written against these fields, so a new tool that speaks them plugs in
+// without touching that plumbing.
+export const WebToolResult = Schema.Struct({
   ok: Schema.Boolean,
   query: Schema.String,
   resultCount: Schema.Number,
@@ -52,32 +57,30 @@ const WebSearchResult = Schema.Struct({
   sources: Schema.optionalKey(Schema.Array(SourceSchema)),
   error: Schema.optionalKey(Schema.String),
 });
-export type WebSearchResult = typeof WebSearchResult.Type;
+export type WebToolResult = typeof WebToolResult.Type;
 
 export const webSearchTool = Tool.make("web_search", {
   description:
     "Search the web for current information. Returns search results with extracted page content. " +
     "Use for questions about recent events, facts you are unsure about, or anything the user asks to look up.",
   parameters: WebSearchParams,
-  success: WebSearchResult,
+  success: WebToolResult,
   // Handler failures become tool results the model can react to.
   failureMode: "return",
 });
 
-export const webSearchToolkit = Toolkit.make(webSearchTool);
-export type WebSearchToolkitWithHandler = Toolkit.WithHandler<typeof webSearchToolkit.tools>;
+export type WebSearchHandler = (
+  params: WebSearchParams,
+  ctx: { preliminary: (result: WebToolResult) => Effect.Effect<void> },
+) => Effect.Effect<WebToolResult>;
 
-// Builds the ready-to-use toolkit for a generation run. Loads config once so a
+// Builds the ready-to-use handler for a generation run. Loads config once so a
 // run keeps a stable snapshot even if an admin edits the tool mid-stream.
 export class WebSearchExecutor extends Context.Service<
   WebSearchExecutor,
   {
-    prepare(seed?: {
-      // Citation numbering is conversation-scoped (Onyx-style): the caller
-      // seeds the counter and URL map from sources persisted on earlier
-      // messages so numbers stay stable and unique across the conversation.
-      sources: ReadonlyArray<{ index: number; url: string }>;
-    }): Effect.Effect<WebSearchToolkitWithHandler, ToolUnavailable>;
+    /** The generation's shared indexer keeps citation numbers unique across tools. */
+    handler(indexer: SourceIndexer): Effect.Effect<WebSearchHandler, ToolUnavailable>;
     // Cheap check used by ChatService validation + composer availability.
     availability(): Effect.Effect<{ configured: boolean; enabled: boolean }>;
   }
@@ -89,9 +92,9 @@ export class WebSearchExecutor extends Context.Service<
       const backend = yield* SearchBackend;
       const extractor = yield* PageExtractor;
 
-      const prepare = Effect.fn("WebSearchExecutor.prepare")(function* (seed?: {
-        sources: ReadonlyArray<{ index: number; url: string }>;
-      }) {
+      const makeHandler = Effect.fn("WebSearchExecutor.handler")(function* (
+        indexer: SourceIndexer,
+      ) {
         const tool = yield* repo.getWebSearch();
         if (!tool) {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not configured" });
@@ -102,23 +105,9 @@ export class WebSearchExecutor extends Context.Service<
         const { config, secret } = tool;
         const connection = { baseUrl: config.baseUrl, secret };
 
-        // Conversation-scoped citation numbering: seeded from earlier
-        // messages' sources, so a URL cited before keeps its number and new
-        // sources continue the sequence instead of colliding with old indexes.
-        const seedSources = seed?.sources ?? [];
-        let nextIndex = seedSources.reduce((max, s) => Math.max(max, s.index), 0) + 1;
-        const indexByUrl = new Map<string, number>(seedSources.map((s) => [s.url, s.index]));
-        const indexFor = (url: string): number => {
-          const existing = indexByUrl.get(url);
-          if (existing !== undefined) return existing;
-          const assigned = nextIndex++;
-          indexByUrl.set(url, assigned);
-          return assigned;
-        };
-
         const handler = Effect.fnUntraced(function* (
           params: WebSearchParams,
-          ctx: { preliminary: (result: WebSearchResult) => Effect.Effect<void> },
+          ctx: { preliminary: (result: WebToolResult) => Effect.Effect<void> },
         ) {
           const rawHits = yield* backend
             .search(connection, {
@@ -141,7 +130,7 @@ export class WebSearchExecutor extends Context.Service<
               pagesFetched: 0,
               results: [],
               error: (rawHits as { error: string }).error,
-            } satisfies WebSearchResult;
+            } satisfies WebToolResult;
           }
           // Backend URLs are untrusted input: everything here is persisted,
           // rendered as links, and fetched — admit only http(s) once, at the
@@ -161,7 +150,7 @@ export class WebSearchExecutor extends Context.Service<
             const idx = pages.findIndex((p) => p.url === url);
             if (idx !== -1) pages[idx] = { ...pages[idx]!, status };
           };
-          const progress = (over?: Partial<WebSearchResult>) =>
+          const progress = (over?: Partial<WebToolResult>) =>
             ctx.preliminary({
               ok: true,
               query: params.query,
@@ -170,7 +159,7 @@ export class WebSearchExecutor extends Context.Service<
               results: [],
               pages: pages.map((p) => ({ ...p })),
               ...over,
-            } as WebSearchResult);
+            } as WebToolResult);
 
           // Search finished: announce hits + which pages we're about to read.
           yield* progress();
@@ -202,7 +191,7 @@ export class WebSearchExecutor extends Context.Service<
           const sources: Source[] = [];
           const results = hits.map((hit) => {
             const fetched = extracted.find((e) => e.hit.url === hit.url);
-            const index = indexFor(hit.url);
+            const index = indexer.indexFor(hit.url);
             const read = fetched?.page != null;
             sources.push({
               index,
@@ -237,12 +226,10 @@ export class WebSearchExecutor extends Context.Service<
             results,
             pages,
             sources,
-          } satisfies WebSearchResult;
+          } satisfies WebToolResult;
         });
 
-        return yield* webSearchToolkit.pipe(
-          Effect.provide(webSearchToolkit.toLayer({ web_search: handler })),
-        );
+        return handler as WebSearchHandler;
       });
 
       const availability = Effect.fn("WebSearchExecutor.availability")(function* () {
@@ -250,7 +237,7 @@ export class WebSearchExecutor extends Context.Service<
         return { configured: tool !== null, enabled: tool?.enabled ?? false };
       });
 
-      return WebSearchExecutor.of({ prepare, availability });
+      return WebSearchExecutor.of({ handler: makeHandler, availability });
     }),
   );
 }

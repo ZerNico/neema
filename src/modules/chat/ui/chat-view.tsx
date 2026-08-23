@@ -38,7 +38,7 @@ function toActivity(row: {
   status: "running" | "complete" | "error";
   error: { code: string; message: string } | null;
 }): ToolActivity {
-  const args = (row.arguments ?? {}) as { query?: string };
+  const args = (row.arguments ?? {}) as { query?: string; url?: string };
   const result = (row.result ?? {}) as {
     query?: string;
     resultCount?: number;
@@ -49,7 +49,7 @@ function toActivity(row: {
   return {
     callId: row.id,
     name: row.toolName,
-    query: result.query ?? args.query ?? "",
+    query: result.query ?? args.query ?? args.url ?? "",
     status: row.status,
     ...(result.resultCount !== undefined ? { resultCount: result.resultCount } : {}),
     ...(result.pagesFetched !== undefined ? { pagesFetched: result.pagesFetched } : {}),

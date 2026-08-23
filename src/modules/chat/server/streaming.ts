@@ -9,10 +9,13 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
+import { prepareWebToolkit } from "~/modules/tools/server/toolset.ts";
+import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
-import { MAX_PRIOR_SOURCES, SEARCH_SYSTEM_HINT, withSearchReminder } from "./search-prompt.ts";
+import { MAX_PRIOR_SOURCES, webToolsSystemHint, withSearchReminder } from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 
@@ -76,6 +79,7 @@ export class StreamEngine extends Context.Service<
       const gateway = yield* AiGateway;
       const sync = yield* SyncBus;
       const webSearch = yield* WebSearchExecutor;
+      const urlReader = yield* UrlReaderExecutor;
       const providers = yield* ProviderRepo;
       const analytics = yield* AnalyticsRepo;
       const promptDeps: PromptDeps = {
@@ -252,15 +256,24 @@ export class StreamEngine extends Context.Service<
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
 
-          const toolkit = input.searchEnabled
-            ? yield* webSearch.prepare({ sources: priorSources })
+          // One indexer for the whole generation: search hits and read pages
+          // share the citation sequence, and repeats keep their number.
+          const webTools = input.searchEnabled
+            ? yield* prepareWebToolkit({
+                webSearch,
+                urlReader,
+                indexer: createSourceIndexer(priorSources),
+              })
             : undefined;
+          const toolkit = webTools?.toolkit;
           const recapSources = priorSources.slice(-MAX_PRIOR_SOURCES);
 
-          // Search hint + history is the stable prefix. Everything that varies
+          // Tools hint + history is the stable prefix. Everything that varies
           // per model turn lives in the reminder appended below, never in here.
           let transcript = Prompt.make([
-            ...(toolkit ? [{ role: "system" as const, content: SEARCH_SYSTEM_HINT }] : []),
+            ...(webTools
+              ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
+              : []),
             ...historyMessages,
           ]);
 
@@ -333,7 +346,8 @@ export class StreamEngine extends Context.Service<
                           phase: "start",
                           callId: rowId,
                           name: part.name,
-                          args: { query: String(args["query"] ?? "") },
+                          // The envelope's display text: search query or URL.
+                          args: { query: String(args["query"] ?? args["url"] ?? "") },
                         });
                         return;
                       }

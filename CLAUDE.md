@@ -40,6 +40,15 @@ See README.md for architecture; this file records the sharp edges.
   stream loop must keep them out of the continuation transcript.
 - Tool page bodies are never persisted. `message_tool_calls.result` holds the summary
   plus the source list (url/title/status) only.
+- Every web tool (web_search, read_url) returns the SAME result shape
+  (`WebToolResult`) on purpose: streaming persistence, tool envelopes and the
+  citations UI are written once against those fields — a new tool that speaks
+  them needs no pipeline changes, only name-aware labels in
+  `tool-activity-block.tsx`. `result.query` carries read_url's URL.
+- URL fetching (search result pages and read_url alike) goes through
+  `PageExtractor`, whose `url-safety.ts` guard is the SSRF boundary: http(s)
+  only, no credentials, private/reserved addresses refused for the URL and for
+  every redirect hop. The SearXNG base URL is exempt by design (self-hosting).
 
 ## Citations / streamdown
 
@@ -53,8 +62,9 @@ See README.md for architecture; this file records the sharp edges.
   footnote ref, and the `data-footnotes` attribute on the appended section. hast gives that
   attribute the _empty string_, so suppress on `!== undefined` — a truthiness check silently
   renders the list. Both are pinned by `message-list.test.tsx`; re-probe on upgrade.
-- Citation numbers are per assistant message: `WebSearchExecutor.prepare()` runs once per
-  generation and closes over the counter, so a second search continues the sequence.
+- Citation numbers are conversation-scoped: `createSourceIndexer` is seeded from prior
+  messages' persisted sources and shared by all web tools in a generation, so repeats
+  keep their number and every tool continues one sequence.
 
 ## Markdown plugins (`src/ui/markdown-plugins.ts`)
 

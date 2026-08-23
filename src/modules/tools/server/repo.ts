@@ -3,7 +3,7 @@ import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
-import { DocumentParserConfig, WebSearchConfig } from "../schema.ts";
+import { DocumentParserConfig, UrlReaderConfig, WebSearchConfig } from "../schema.ts";
 
 type ToolRow = typeof tools.$inferSelect;
 // Tool rows safe for admin clients: ciphertext replaced by a boolean.
@@ -16,6 +16,7 @@ const toPublic = ({ secretCiphertext, ...rest }: ToolRow): PublicTool => ({
 
 const decodeWebSearchConfig = Schema.decodeUnknownEffect(WebSearchConfig);
 const decodeDocumentParserConfig = Schema.decodeUnknownEffect(DocumentParserConfig);
+const decodeUrlReaderConfig = Schema.decodeUnknownEffect(UrlReaderConfig);
 
 export class ToolsRepo extends Context.Service<
   ToolsRepo,
@@ -33,6 +34,8 @@ export class ToolsRepo extends Context.Service<
       kind: string;
       config: DocumentParserConfig;
     } | null>;
+    // Internal: decoded read_url row for the URL reader executor.
+    getUrlReader(): Effect.Effect<{ enabled: boolean; config: UrlReaderConfig } | null>;
     updateTool(
       name: string,
       patch: {
@@ -79,6 +82,13 @@ export class ToolsRepo extends Context.Service<
           if (!row) return null;
           const config = yield* decodeDocumentParserConfig(row.config).pipe(Effect.orDie);
           return { enabled: row.enabled, kind: row.kind, config };
+        }),
+
+        getUrlReader: Effect.fn("ToolsRepo.getUrlReader")(function* () {
+          const row = yield* getRow("read_url");
+          if (!row) return null;
+          const config = yield* decodeUrlReaderConfig(row.config).pipe(Effect.orDie);
+          return { enabled: row.enabled, config };
         }),
 
         updateTool: Effect.fn("ToolsRepo.updateTool")(function* (name, patch) {

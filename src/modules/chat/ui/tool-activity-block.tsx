@@ -46,8 +46,19 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
   );
 }
 
+/** For read_url the query field carries the URL; the hostname reads better. */
+const displayTarget = (activity: ToolActivity): string => {
+  if (activity.name !== "read_url") return activity.query;
+  try {
+    return new URL(activity.query).hostname;
+  } catch {
+    return activity.query;
+  }
+};
+
 function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpen: boolean }) {
   const running = activity.status === "running";
+  const reader = activity.name === "read_url";
   const pages = activity.pages ?? [];
   const phase =
     running && activity.resultCount === undefined
@@ -57,20 +68,26 @@ function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpe
         : running
           ? "searching"
           : activity.status;
+  const target = displayTarget(activity);
 
   const headline = running ? (
     <span className="animate-pulse">
-      {phase === "reading" ? "Reading sources" : "Searching"}
-      {activity.query ? <span className="text-foreground/70"> “{activity.query}”</span> : "…"}
+      {reader ? "Reading" : phase === "reading" ? "Reading sources" : "Searching"}
+      {target ? <span className="text-foreground/70"> “{target}”</span> : "…"}
     </span>
   ) : activity.status === "error" ? (
     <span>
-      Search failed{activity.query ? <> — “{activity.query}”</> : null}
+      {reader ? "Couldn't read" : "Search failed"}
+      {target ? <> — “{target}”</> : null}
       {activity.error ? <span className="opacity-70"> ({activity.error})</span> : null}
+    </span>
+  ) : reader ? (
+    <span>
+      Read <span className="text-foreground/70">“{target}”</span>
     </span>
   ) : (
     <span>
-      Searched <span className="text-foreground/70">“{activity.query}”</span>
+      Searched <span className="text-foreground/70">“{target}”</span>
       {activity.resultCount !== undefined ? <> — {activity.resultCount} results</> : null}
     </span>
   );
@@ -106,13 +123,26 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
   if (activities.length === 0) return null;
 
   const totalSources = activities.reduce((n, a) => n + (a.pages?.length ?? 0), 0);
+  const suffix = totalSources > 0 ? ` · ${totalSources} sources` : "";
+  const searches = activities.filter((a) => a.name !== "read_url").length;
+  const reads = activities.length - searches;
   const headerLabel = anyRunning
     ? activities.some((a) => (a.pages ?? []).some((p) => p.status === "reading"))
-      ? "Reading sources…"
-      : "Searching the web…"
-    : activities.length === 1
-      ? `Searched the web${totalSources > 0 ? ` · ${totalSources} sources` : ""}`
-      : `Searched the web ${activities.length} times${totalSources > 0 ? ` · ${totalSources} sources` : ""}`;
+      ? searches === 0
+        ? "Reading page…"
+        : "Reading sources…"
+      : searches === 0
+        ? "Reading page…"
+        : "Searching the web…"
+    : reads === 0
+      ? searches === 1
+        ? `Searched the web${suffix}`
+        : `Searched the web ${searches} times${suffix}`
+      : searches === 0
+        ? reads === 1
+          ? `Read a page${suffix}`
+          : `Read ${reads} pages${suffix}`
+        : `Searched and read${suffix}`;
 
   return (
     <div className="mb-2">

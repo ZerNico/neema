@@ -15,6 +15,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend } from "~/modules/tools/server/search.ts";
+import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db, PgLive } from "./db.ts";
 
@@ -34,7 +35,7 @@ const ReposLayer = Layer.mergeAll(
   ToolsRepo.layer,
   GroupRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
-const ToolsLayer = WebSearchExecutor.layer.pipe(
+const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
 );
 const CoreLayer = Layer.mergeAll(

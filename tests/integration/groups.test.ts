@@ -21,6 +21,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 
@@ -76,7 +77,11 @@ const FakeDocumentParser = Layer.succeed(DocumentParser, {
 });
 
 const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
-  prepare: () => Effect.die("not available in tests"),
+  handler: () => Effect.die("not available in tests"),
+  availability: () => Effect.succeed({ configured: false, enabled: false }),
+});
+const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
+  handler: () => Effect.die("not available in tests"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 
@@ -106,6 +111,7 @@ beforeAll(async () => {
       Layer.mergeAll(
         FakeGateway,
         FakeWebSearch,
+        FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
         SyncBus.layer,

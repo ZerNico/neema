@@ -1,6 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vitest";
 import { Effect } from "effect";
 import { assertPublicHttpUrl } from "./url-safety.ts";
+
+// Hostname resolution is stubbed so those cases are deterministic and offline;
+// IP-literal cases never hit DNS.
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn<() => Promise<Array<{ address: string; family: number }>>>(),
+}));
+vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
 
 const rejects = (url: string) =>
   Effect.gen(function* () {
@@ -32,6 +40,33 @@ describe("assertPublicHttpUrl", () => {
     Effect.gen(function* () {
       const url = yield* assertPublicHttpUrl("https://1.1.1.1/dns");
       expect(url.hostname).toBe("1.1.1.1");
+    }),
+  );
+
+  it.effect("accepts a hostname resolving to public addresses only", () =>
+    Effect.gen(function* () {
+      lookupMock.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+      const url = yield* assertPublicHttpUrl("https://example.com/page");
+      expect(url.hostname).toBe("example.com");
+    }),
+  );
+
+  it.effect("rejects a hostname when any DNS answer is private", () =>
+    Effect.gen(function* () {
+      // One poisoned record rejects the whole set — rebinding-style setups
+      // mix a public address with the internal target.
+      lookupMock.mockResolvedValueOnce([
+        { address: "93.184.216.34", family: 4 },
+        { address: "10.0.0.7", family: 4 },
+      ]);
+      yield* rejects("https://rebind.example.com/");
+    }),
+  );
+
+  it.effect("rejects a hostname that does not resolve", () =>
+    Effect.gen(function* () {
+      lookupMock.mockRejectedValueOnce(new Error("ENOTFOUND"));
+      yield* rejects("https://nope.invalid/");
     }),
   );
 });

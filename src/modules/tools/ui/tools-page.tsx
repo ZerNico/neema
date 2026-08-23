@@ -8,9 +8,11 @@ import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import {
   getDocumentParserTool,
+  getUrlReaderTool,
   getWebSearchTool,
   testSearchConnection,
   updateDocumentParserTool,
+  updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
 
@@ -22,6 +24,11 @@ export const webSearchToolQuery = queryOptions({
 export const documentParserToolQuery = queryOptions({
   queryKey: ["admin", "tools", "document-parser"],
   queryFn: () => getDocumentParserTool(),
+});
+
+export const urlReaderToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "url-reader"],
+  queryFn: () => getUrlReaderTool(),
 });
 
 type TestResult =
@@ -243,8 +250,101 @@ export function ToolsPage() {
         </ListCard>
       </section>
 
+      <UrlReaderSection />
       <DocumentParserSection />
     </AdminPage>
+  );
+}
+
+// Lets the model fetch one page the user pointed at, without a search backend.
+// Fetches go out from this server with SSRF guarding (private addresses and
+// redirects to them are refused); the page is extracted to markdown locally.
+function UrlReaderSection() {
+  const queryClient = useQueryClient();
+  const { data: tool } = useSuspenseQuery(urlReaderToolQuery);
+
+  const [perPageCharCap, setPerPageCharCap] = useState<string | null>(null);
+  const config = (tool?.config ?? {}) as { perPageCharCap?: number };
+  const effectiveCharCap = perPageCharCap ?? String(config.perPageCharCap ?? 12000);
+
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
+      queryClient.invalidateQueries({ queryKey: ["tools", "web-search", "availability"] }),
+    ]);
+
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => updateUrlReaderTool({ data: { enabled } }),
+    onSuccess: invalidate,
+  });
+
+  const save = useMutation({
+    mutationFn: () => updateUrlReaderTool({ data: { perPageCharCap: Number(effectiveCharCap) } }),
+    onSuccess: async () => {
+      setPerPageCharCap(null);
+      await invalidate();
+    },
+  });
+
+  if (!tool) {
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          URL reader
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          The read_url tool row is missing — run database migrations.
+        </p>
+      </section>
+    );
+  }
+
+  const capValid = Number(effectiveCharCap) >= 1000 && Number(effectiveCharCap) <= 20000;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        URL reader
+      </h2>
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Read linked pages</span>
+            <span className="text-muted-foreground text-xs">
+              Lets the model fetch a page the user links to and read its extracted content. Works
+              without a search backend; shares the composer's web toggle. Requests to private and
+              internal addresses are refused.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+            aria-label="URL reader enabled"
+          />
+        </ListRow>
+        <ListRow className="flex-col items-stretch gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Field>
+              <FieldLabel>Per-page character cap</FieldLabel>
+              <Input
+                type="number"
+                min={1000}
+                max={20000}
+                step={1000}
+                value={effectiveCharCap}
+                onChange={(e) => setPerPageCharCap(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => save.mutate()} disabled={!capValid || save.isPending}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </ListRow>
+      </ListCard>
+    </section>
   );
 }
 

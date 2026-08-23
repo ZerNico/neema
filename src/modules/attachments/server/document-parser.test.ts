@@ -12,6 +12,7 @@ const repoLayer = (
     ToolsRepo.of({
       getTool: () => Effect.succeed(null),
       getWebSearch: () => Effect.succeed(null),
+      getUrlReader: () => Effect.succeed(null),
       getDocumentParser: () => Effect.succeed(row),
       updateTool: () => Effect.succeed(null),
     }),
