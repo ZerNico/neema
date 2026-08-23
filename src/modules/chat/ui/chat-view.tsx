@@ -82,6 +82,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const [retryEpoch, setRetryEpoch] = useState(0);
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
+  // The row the stream overlay applies to. Sticky beyond streamingMessage:
+  // when the generation finishes, the sync bus refetches the conversation and
+  // the row flips to complete with its full content BEFORE the smoothed text
+  // has drained — dropping the overlay at that moment would pop the tail in,
+  // exactly what smoothing exists to prevent. (Guarded render-time adjust.)
+  const [overlayId, setOverlayId] = useState<string | null>(null);
+  if (streamingMessage && streamingMessage.id !== overlayId) {
+    setOverlayId(streamingMessage.id);
+  }
   // oxlint-disable react/memo-dependencies -- pendingChunks are a snapshot for this streaming generation
   const initialStream = useMemo(() => {
     if (!streamingMessage) return null;
@@ -396,7 +405,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           }
         : {}),
     };
-    if (m.id !== streamingMessage?.id) return base;
+    const liveId = streamingMessage?.id ?? (stream.status === "streaming" ? overlayId : null);
+    if (m.id !== liveId) return base;
     // Overlay live stream state onto the streaming message row.
     const live = {
       ...base,
@@ -404,7 +414,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
       toolActivities: stream.tools.length > 0 ? stream.tools : toolActivities,
     };
-    if (stream.status === "streaming") return { ...live, content: stream.text };
+    // Status comes from the stream, not the row: the refetched row says
+    // complete while the last words are still landing.
+    if (stream.status === "streaming")
+      return { ...live, content: stream.text, status: "streaming" };
     if (stream.text.length > m.content.length) {
       return { ...live, content: stream.text, status: stream.status };
     }

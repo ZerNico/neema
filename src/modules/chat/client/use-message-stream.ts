@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef } from "react";
+import { useSmoothText } from "./use-smooth-text.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -223,8 +224,12 @@ export function useMessageStream(
       };
       dispatch({ kind: "done", status: data.status });
       source.close();
-      // Refresh the canonical message row (final content, usage, status).
-      if (conversationId) {
+      // Errors and stops refresh the canonical row immediately — feedback
+      // outranks pacing. A normal completion holds the refetch until the
+      // smoothed view drains (the effect below): swapping in the row's full
+      // content early would be exactly the end-of-stream pop smoothing
+      // exists to remove.
+      if (data.status !== "complete" && conversationId) {
         void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
       }
     });
@@ -238,5 +243,28 @@ export function useMessageStream(
     // initial is intentionally captured only when the generation changes
   }, [messageId, epoch, conversationId, queryClient]);
 
-  return state;
+  // The reducer accumulates raw deltas (lastSeq must track receipt exactly —
+  // resume depends on it); only the strings the UI renders are word-paced.
+  const text = useSmoothText(state.text);
+  const reasoning = useSmoothText(state.reasoning);
+  const drained = text === state.text && reasoning === state.reasoning;
+
+  // Deferred half of the done handler: once the display has caught up,
+  // refresh the canonical message row (final content, usage, status). The
+  // messageId guard keeps the refetch from re-firing after it lands (the
+  // streaming row disappears, so messageId goes null) or on navigation.
+  useEffect(() => {
+    if (state.status !== "complete" || !drained || !messageId || !conversationId) return;
+    void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+  }, [state.status, drained, messageId, conversationId, queryClient]);
+
+  return {
+    ...state,
+    text,
+    reasoning,
+    // Completion is only reported once the words are all on screen; the
+    // pacer keeps advancing regardless of status, so this converges within
+    // ticks of the real finish. Errors and stops pass through undelayed.
+    status: state.status === "complete" && !drained ? ("streaming" as const) : state.status,
+  };
 }
