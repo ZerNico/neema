@@ -122,6 +122,10 @@ export function VirtualMessageList({
         onClick={() => scrollToBottom("smooth")}
         className={cn(
           "absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md transition-opacity",
+          // The outline variant is transparent in dark mode, which is fine for a
+          // button sitting on a surface but not for one floating over scrolling
+          // messages. Give it the popover surface the other floating elements use.
+          "bg-popover text-popover-foreground ring-foreground/5 dark:bg-popover dark:ring-foreground/10 ring-1",
           atBottom ? "pointer-events-none opacity-0" : "opacity-100",
         )}
       >
