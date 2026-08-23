@@ -312,8 +312,9 @@ function UrlReaderSection() {
             <span className="text-sm font-medium">Read linked pages</span>
             <span className="text-muted-foreground text-xs">
               Lets the model fetch a page the user links to and read its extracted content. Works
-              without a search backend; shares the composer's web toggle. Requests to private and
-              internal addresses are refused.
+              without a search backend. Unlike Search it has no composer toggle — while this is on
+              it is available on every message. Requests to private and internal addresses are
+              refused.
             </span>
           </div>
           <Switch

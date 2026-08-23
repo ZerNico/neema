@@ -64,6 +64,7 @@ const prepared = (indexer: SourceIndexer) =>
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
+      requestSearch: true,
     });
     return result!.toolkit;
   });

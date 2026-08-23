@@ -62,12 +62,13 @@ const layers = (readerEnabled: boolean) =>
     Layer.provide(Layer.mergeAll(FakeRepo(readerEnabled), FakeBackend, FakeExtractor)),
   );
 
-const prepared = (indexer: SourceIndexer) =>
+const prepared = (indexer: SourceIndexer, requestSearch = true) =>
   Effect.gen(function* () {
     return yield* prepareWebToolkit({
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
+      requestSearch,
     });
   });
 
@@ -154,6 +155,27 @@ describe("UrlReaderExecutor", () => {
     Effect.gen(function* () {
       const preparedToolkit = yield* prepared(createSourceIndexer([]));
       expect(preparedToolkit?.tools).toEqual({ search: true, reader: false });
+    }).pipe(Effect.provide(layers(false))),
+  );
+
+  // The reader is not a mode the user opts into: an admin enabling it is the
+  // only gate, so it must be armed on a generation that never asked to search.
+  it.effect("is armed without the search toggle, and search is not", () =>
+    Effect.gen(function* () {
+      const preparedToolkit = yield* prepared(createSourceIndexer([]), false);
+      expect(preparedToolkit?.tools).toEqual({ search: false, reader: true });
+
+      const results = yield* runTool(preparedToolkit!.toolkit, "read_url", {
+        url: "https://blog.example/x",
+      });
+      expect(results.at(-1)!.sources?.[0]?.index).toBe(1);
+    }).pipe(Effect.provide(layers(true))),
+  );
+
+  // Neither tool applies: the stream engine then runs with no toolkit at all.
+  it.effect("yields no toolkit when search is unasked and the reader is off", () =>
+    Effect.gen(function* () {
+      expect(yield* prepared(createSourceIndexer([]), false)).toBeUndefined();
     }).pipe(Effect.provide(layers(false))),
   );
 });

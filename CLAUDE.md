@@ -49,6 +49,14 @@ See README.md for architecture; this file records the sharp edges.
   `PageExtractor`, whose `url-safety.ts` guard is the SSRF boundary: http(s)
   only, no credentials, private/reserved addresses refused for the URL and for
   every redirect hop. The SearXNG base URL is exempt by design (self-hosting).
+- The two web tools are armed differently and that asymmetry is deliberate
+  (`prepareWebToolkit`, `requestSearch`). web_search is a per-message mode the
+  user opts into with the composer toggle; read_url has no toggle — it is armed
+  on every tool-capable generation while an admin has it enabled, because
+  "what does this link say?" is not a mode. Consequences: `searchEnabled`
+  gates search ONLY, history citation-marker stripping keys off whether any
+  tool is armed (`webToolsEnabled`), and the retry path re-arms search only
+  when the original generation actually called `web_search`.
 
 ## Citations / streamdown
 

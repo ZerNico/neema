@@ -18,7 +18,6 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ChatRepo } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
@@ -116,13 +115,11 @@ function makeChatService() {
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
-    const urlReader = yield* UrlReaderExecutor;
 
-    // The composer's one toggle arms whichever web tools are admin-enabled.
-    const anyWebToolEnabled = Effect.gen(function* () {
+    // The composer's toggle gates web_search only; the reader arms itself.
+    const searchToolEnabled = Effect.gen(function* () {
       const search = yield* webSearch.availability();
-      const reader = yield* urlReader.availability();
-      return (search.configured && search.enabled) || (reader.configured && reader.enabled);
+      return search.configured && search.enabled;
     });
     const attachmentRepo = yield* AttachmentRepo;
     const attachmentService = yield* AttachmentService;
@@ -166,7 +163,7 @@ function makeChatService() {
               reason: "model does not support tool calling",
             });
           }
-          if (!(yield* anyWebToolEnabled)) {
+          if (!(yield* searchToolEnabled)) {
             return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
           }
         }
@@ -418,10 +415,14 @@ function makeChatService() {
         );
       }
 
-      // Re-arm web tools iff the original generation actually used any and
-      // some are still available — a degraded retry beats a failing one.
-      const usedWebTools = (yield* repo.listToolCalls([message.id])).length > 0;
-      const searchEnabled = usedWebTools && model.capabilities.tools && (yield* anyWebToolEnabled);
+      // Re-arm search iff the original generation actually searched and search
+      // is still available — a degraded retry beats a failing one. Only
+      // web_search is re-armed here: the reader arms itself on every
+      // generation, so a retry of a read-only answer must not turn search on.
+      const usedSearch = (yield* repo.listToolCalls([message.id])).some(
+        (call) => call.toolName === "web_search",
+      );
+      const searchEnabled = usedSearch && model.capabilities.tools && (yield* searchToolEnabled);
 
       const restarted = yield* restartAssistant({
         userId: input.userId,

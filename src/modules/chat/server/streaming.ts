@@ -250,22 +250,28 @@ export class StreamEngine extends Context.Service<
           // an unparseable PDF then finalizes the message as an error like any
           // other generation failure.
           const model = yield* providers.getModel(input.modelId);
-          const historyMessages = yield* buildHistoryMessages(promptDeps, {
-            messages: completed,
-            searchEnabled: input.searchEnabled,
-            modelSupportsFiles: model?.capabilities.files ?? false,
-          });
 
           // One indexer for the whole generation: search hits and read pages
           // share the citation sequence, and repeats keep their number.
-          const webTools = input.searchEnabled
+          // Search follows the user's toggle; the reader is offered whenever
+          // it is enabled, so a pasted link works without arming search.
+          const webTools = model?.capabilities.tools
             ? yield* prepareWebToolkit({
                 webSearch,
                 urlReader,
                 indexer: createSourceIndexer(priorSources),
+                requestSearch: input.searchEnabled,
               })
             : undefined;
           const toolkit = webTools?.toolkit;
+
+          // Keyed off the armed toolkit, not the search toggle: the reader
+          // alone can resolve citations, so history markers stay meaningful.
+          const historyMessages = yield* buildHistoryMessages(promptDeps, {
+            webToolsEnabled: webTools !== undefined,
+            messages: completed,
+            modelSupportsFiles: model?.capabilities.files ?? false,
+          });
           const recapSources = priorSources.slice(-MAX_PRIOR_SOURCES);
 
           // Tools hint + history is the stable prefix. Everything that varies

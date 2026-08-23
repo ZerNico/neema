@@ -22,7 +22,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { WebSearchExecutor, ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -107,12 +107,17 @@ const FakeDocumentParser = Layer.succeed(DocumentParser, {
   availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
 });
 
+// Neither web tool is exercised in these tests. They report themselves
+// unavailable the way a disabled tool really does — a typed ToolUnavailable,
+// not a defect — so a tools-capable model here degrades instead of dying.
+const unavailable = (tool: "web_search" | "read_url") => () =>
+  Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
 const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
-  handler: () => Effect.die("not available in tests"),
+  handler: unavailable("web_search"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
-  handler: () => Effect.die("not available in tests"),
+  handler: unavailable("read_url"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 

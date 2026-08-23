@@ -40,7 +40,8 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   deps: PromptDeps,
   input: {
     messages: ReadonlyArray<HistoryMessage>;
-    searchEnabled: boolean;
+    /** Any web tool armed for this generation — search, the reader, or both. */
+    webToolsEnabled: boolean;
     /** Model accepts non-image file parts (catalog `files` capability). */
     modelSupportsFiles: boolean;
   },
@@ -48,9 +49,9 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   const plain = (message: HistoryMessage): Prompt.MessageEncoded => ({
     role: message.role,
     content:
-      // Without search there is no recap block, so history markers would teach
-      // the model to emit unresolvable citations — strip them.
-      message.role === "assistant" && !input.searchEnabled
+      // Without web tools there is no recap block, so history markers would
+      // teach the model to emit unresolvable citations — strip them.
+      message.role === "assistant" && !input.webToolsEnabled
         ? stripCitationMarkers(message.content)
         : message.content,
   });

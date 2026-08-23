@@ -10,7 +10,6 @@ import {
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend } from "./search.ts";
-import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor } from "./web-search.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -67,20 +66,17 @@ export const testSearchConnection = createServerFn({ method: "POST" })
     ),
   );
 
-// Non-admin: lets the composer decide whether to show the web toggle. One
-// toggle arms whichever web tools are admin-enabled — search, the URL reader,
-// or both — so this ORs their availability. Exposes nothing beyond booleans.
+// Non-admin: lets the composer decide whether to show the Search toggle, which
+// controls web_search only. The URL reader has no toggle — it arms itself
+// whenever an admin has it on — so it is deliberately not ORed in here.
+// Exposes nothing beyond booleans.
 export const getWebSearchAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(() =>
     runtime.runPromise(
       Effect.gen(function* () {
         const search = yield* (yield* WebSearchExecutor).availability();
-        const reader = yield* (yield* UrlReaderExecutor).availability();
-        return {
-          configured: search.configured || reader.configured,
-          enabled: (search.configured && search.enabled) || (reader.configured && reader.enabled),
-        };
+        return { configured: search.configured, enabled: search.configured && search.enabled };
       }),
     ),
   );

@@ -74,12 +74,12 @@ const harness = (options: {
 const build = (
   deps: PromptDeps,
   messages: ReadonlyArray<HistoryMessage>,
-  options: { searchEnabled?: boolean; modelSupportsFiles?: boolean } = {},
+  options: { webToolsEnabled?: boolean; modelSupportsFiles?: boolean } = {},
 ) =>
   Effect.runPromise(
     buildHistoryMessages(deps, {
       messages,
-      searchEnabled: options.searchEnabled ?? false,
+      webToolsEnabled: options.webToolsEnabled ?? false,
       modelSupportsFiles: options.modelSupportsFiles ?? false,
     }),
   );
@@ -99,12 +99,12 @@ describe("buildHistoryMessages without attachments", () => {
     ]);
   });
 
-  it("keeps markers when search is on for this generation", async () => {
+  it("keeps markers when a web tool is armed for this generation", async () => {
     const { deps } = harness({ rows: [] });
     const messages = await build(
       deps,
       [{ id: "m1", role: "assistant", content: "an answer[^1]" }],
-      { searchEnabled: true },
+      { webToolsEnabled: true },
     );
     expect(messages).toEqual([{ role: "assistant", content: "an answer[^1]" }]);
   });

@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 import { Toolkit } from "effect/unstable/ai";
+import type { SourceIndexer } from "./source-indexer.ts";
+import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";
+import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
 
 export interface PreparedWebToolkit {
   tools: { search: boolean; reader: boolean };
@@ -7,26 +10,33 @@ export interface PreparedWebToolkit {
   // "some toolkit with handlers", which is also all the multi-turn loop uses.
   toolkit: Toolkit.WithHandler<any>;
 }
-import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";
-import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
-import type { SourceIndexer } from "./source-indexer.ts";
 
-// The web toolkit for one generation: whichever of the two tools are admin-
-// enabled, wired to one shared citation indexer. `undefined` when none are —
-// the stream engine then runs without tools, exactly like searchEnabled=false.
+// The web toolkit for one generation: whichever tools apply, wired to one
+// shared citation indexer. `undefined` when none do — the stream engine then
+// runs without tools at all.
+//
+// The two tools are armed differently on purpose. Search is a mode the user
+// opts into per message (`requestSearch`), because it is slow, chatty and
+// changes how the model answers. Reading a page the user already named is not
+// a mode — it is what "what does this link say?" means — so the reader is
+// offered whenever an admin has it enabled, with no user opt-in.
 export const prepareWebToolkit: (input: {
   webSearch: WebSearchExecutor["Service"];
   urlReader: UrlReaderExecutor["Service"];
   indexer: SourceIndexer;
+  /** The composer's web toggle: search is offered only when the user asked. */
+  requestSearch: boolean;
 }) => Effect.Effect<PreparedWebToolkit | undefined> = Effect.fn("tools.prepareWebToolkit")(
   function* (input) {
-    // An unavailable tool is skipped, not fatal: validation only guarantees at
-    // least one is enabled, and an admin flipping one off mid-conversation
-    // should degrade the toolkit, not kill the generation.
+    // An unavailable tool is skipped, not fatal: validation only guarantees the
+    // tools the user explicitly asked for, and an admin flipping one off
+    // mid-conversation should degrade the toolkit, not kill the generation.
     const unavailable = () => Effect.succeed(null);
-    const search = yield* input.webSearch
-      .handler(input.indexer)
-      .pipe(Effect.catchTag("ToolUnavailable", unavailable));
+    const search = input.requestSearch
+      ? yield* input.webSearch
+          .handler(input.indexer)
+          .pipe(Effect.catchTag("ToolUnavailable", unavailable))
+      : null;
     const reader = yield* input.urlReader
       .handler(input.indexer)
       .pipe(Effect.catchTag("ToolUnavailable", unavailable));
