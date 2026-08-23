@@ -524,6 +524,24 @@ describe("MessageBubble actions", () => {
     expect(container.querySelector("time")).toBeNull();
   });
 
+  it("puts the time after the actions on answers, before them on questions", () => {
+    const time = {
+      iso: "2026-08-22T12:32:00.000Z",
+      clock: "14:32",
+      absolute: "Saturday 22 August 2026 at 14:32",
+    };
+
+    const assistant = renderPlain({ time, onRetry: vi.fn() });
+    const answerRow = assistant.container.querySelector("time")!.parentElement!;
+    expect(answerRow.lastElementChild?.tagName).toBe("TIME");
+    assistant.unmount();
+
+    // The user row is right-aligned, so it reads inward: time, then actions.
+    const user = renderPlain({ role: "user", content: "hi", time, onEdit: vi.fn() });
+    const questionRow = user.container.querySelector("time")!.parentElement!;
+    expect(questionRow.firstElementChild?.tagName).toBe("TIME");
+  });
+
   it("heads a message that opens a new day, and only that one", () => {
     const { container, rerender } = renderPlain({ dayLabel: "Yesterday" });
     expect(screen.getByRole("separator", { name: "Yesterday" })).toBeInTheDocument();

@@ -223,6 +223,7 @@ export function MessageActions({
   onRetryWith,
   retryModelId,
   retryDisabled,
+  timeFirst = false,
   className,
 }: {
   messageId: string;
@@ -230,6 +231,11 @@ export function MessageActions({
   sources: ToolSource[];
   /** Local send time. Absent until hydration — the server has no timezone. */
   time?: MessageTime | null | undefined;
+  /**
+   * Leads with the time instead of closing with it. User bubbles are
+   * right-aligned, so their row reads inward: time, then the actions.
+   */
+  timeFirst?: boolean;
   /** Absent for messages that cannot be edited. */
   onEdit?: (() => void) | undefined;
   editDisabled?: boolean;
@@ -254,8 +260,32 @@ export function MessageActions({
     });
   };
 
+  const stamp = time ? (
+    <Tooltip>
+      {/* Not a TooltipTrigger button: a focus stop per message would clog
+          keyboard navigation for something purely supplementary. The
+          visible clock time is what screen readers get. */}
+      <TooltipTrigger
+        render={
+          <time
+            dateTime={time.iso}
+            className={cn(
+              "text-muted-foreground shrink-0 text-[0.6875rem] tabular-nums",
+              timeFirst ? "mr-0.5" : "ml-0.5",
+            )}
+          />
+        }
+        tabIndex={-1}
+      >
+        {time.clock}
+      </TooltipTrigger>
+      <TooltipContent>{time.absolute}</TooltipContent>
+    </Tooltip>
+  ) : null;
+
   return (
     <div className={cn("mt-2 flex items-center gap-1", className)}>
+      {timeFirst ? stamp : null}
       <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
         <HugeiconsIcon
           icon={copied ? Tick02Icon : Copy01Icon}
@@ -281,25 +311,7 @@ export function MessageActions({
         />
       ) : null}
       {sources.length > 0 ? <SourcesMenu messageId={messageId} sources={sources} /> : null}
-      {time ? (
-        <Tooltip>
-          {/* Not a TooltipTrigger button: a focus stop per message would clog
-              keyboard navigation for something purely supplementary. The
-              visible clock time is what screen readers get. */}
-          <TooltipTrigger
-            render={
-              <time
-                dateTime={time.iso}
-                className="text-muted-foreground ml-0.5 shrink-0 text-[0.6875rem] tabular-nums"
-              />
-            }
-            tabIndex={-1}
-          >
-            {time.clock}
-          </TooltipTrigger>
-          <TooltipContent>{time.absolute}</TooltipContent>
-        </Tooltip>
-      ) : null}
+      {timeFirst ? null : stamp}
     </div>
   );
 }

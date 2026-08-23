@@ -296,6 +296,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             content={message.content}
             sources={[]}
             time={message.time}
+            timeFirst
             onEdit={message.onEdit}
             editDisabled={message.editDisabled ?? false}
             onRetry={message.onRetry}
