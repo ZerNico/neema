@@ -1,5 +1,4 @@
 import { barX, barY, defineChart, lineY } from "@tanstack/charts";
-import { colorLegend } from "@tanstack/charts/legend";
 import { Chart } from "@tanstack/charts/react";
 import { scaleBand } from "@tanstack/charts/scales/band";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
@@ -56,10 +55,11 @@ export function TokensPerDayChart({ daily, days }: { daily: readonly UsageDay[];
         grid: true,
         axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
       },
+      // The legend is HTML in the card header — the built-in one spreads its
+      // items across the full chart width (itemWidth = width / columns).
       color: {
         domain: ["Input", "Output"],
         range: ["var(--chart-1)", "var(--chart-2)"],
-        legend: colorLegend(),
       },
       tooltip,
     });

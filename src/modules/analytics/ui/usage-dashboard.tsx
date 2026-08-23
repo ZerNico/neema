@@ -55,12 +55,41 @@ function StatTile({ label, value, sub }: { label: string; value: string; sub?: s
   );
 }
 
-export function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+export function ChartCard({
+  title,
+  legend,
+  children,
+}: {
+  title: string;
+  legend?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="border-border bg-background flex flex-col gap-3 rounded-lg border p-4">
-      <h2 className="text-sm font-medium">{title}</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">{title}</h2>
+        {legend}
+      </div>
       {children}
     </section>
+  );
+}
+
+/** Rect swatches (mirroring the bar marks) with the labels in text ink. */
+function ChartLegend({ items }: { items: ReadonlyArray<{ label: string; colorVar: string }> }) {
+  return (
+    <div className="flex items-center gap-4">
+      {items.map((item) => (
+        <span key={item.label} className="text-muted-foreground flex items-center gap-1.5 text-xs">
+          <span
+            aria-hidden
+            className="size-2.5 rounded-[3px]"
+            style={{ background: `var(${item.colorVar})` }}
+          />
+          {item.label}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -99,7 +128,17 @@ export function UsageOverview({
           <StatTile label="Active users" value={formatCount(summary.activeUsers)} />
         ) : null}
       </div>
-      <ChartCard title="Tokens per day">
+      <ChartCard
+        title="Tokens per day"
+        legend={
+          <ChartLegend
+            items={[
+              { label: "Input", colorVar: "--chart-1" },
+              { label: "Output", colorVar: "--chart-2" },
+            ]}
+          />
+        }
+      >
         <TokensPerDayChart daily={daily} days={days} />
       </ChartCard>
       <ChartCard title="Messages per day">
