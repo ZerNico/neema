@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
+import { CodeViewer } from "./code-viewer.tsx";
 import { type AttachmentKind, formatFileSize, textLanguage } from "../constants.ts";
 import {
   Dialog,
@@ -76,19 +77,9 @@ type TextPreviewState =
   | { status: "error" }
   | { status: "ready"; text: string; truncated: boolean };
 
-// Markdown parsing and shiki highlighting both walk the whole document; past
-// this the plain view is the only one on offer.
+// Markdown parsing walks the whole document; past this a markdown file is
+// shown as source instead.
 const RENDER_CHAR_CAP = 100_000;
-
-/** Fence that no backtick run inside the file can break out of. */
-const fenceCode = (text: string, language: string): string => {
-  const longestRun = [...text.matchAll(/`+/g)].reduce(
-    (max, match) => Math.max(max, match[0].length),
-    0,
-  );
-  const fence = "`".repeat(Math.max(3, longestRun + 1));
-  return `${fence}${language}\n${text}\n${fence}`;
-};
 
 function TextPreview({ url, language }: { url: string; language: string }) {
   const [state, setState] = useState<TextPreviewState>({ status: "loading" });
@@ -121,15 +112,15 @@ function TextPreview({ url, language }: { url: string; language: string }) {
     return <p className="text-destructive text-sm">Could not load this file.</p>;
   }
 
-  // Markdown renders as itself; a recognised source file renders as the code
-  // block streamdown already gives model output, highlighting included.
-  const markdown = language === "markdown";
-  const renderable = language !== "" && state.text.length <= RENDER_CHAR_CAP;
+  // A markdown file is the one kind with two genuinely different readings, so
+  // it keeps the toggle. Everything else — source, config, logs, plain text —
+  // is a file, and goes to the file viewer.
+  const markdown = language === "markdown" && state.text.length <= RENDER_CHAR_CAP;
 
   return (
     <div className="min-w-0 space-y-2">
-      {renderable ? <ViewToggle rendered={rendered} onChange={setRendered} /> : null}
-      {renderable && rendered ? (
+      {markdown ? <ViewToggle rendered={rendered} onChange={setRendered} /> : null}
+      {markdown && rendered ? (
         // Streamdown's pipeline ignores raw HTML (no rehype-raw), so an
         // uploaded file cannot inject markup here.
         <div className="max-h-[65vh] overflow-auto">
@@ -138,13 +129,11 @@ function TextPreview({ url, language }: { url: string; language: string }) {
             plugins={markdownPlugins}
             className="space-y-3 text-sm [&_pre]:overflow-x-auto"
           >
-            {markdown ? state.text : fenceCode(state.text, language)}
+            {state.text}
           </Streamdown>
         </div>
       ) : (
-        <div className="bg-muted/50 max-h-[65vh] overflow-auto rounded-xl p-4">
-          <pre className="font-mono text-xs whitespace-pre-wrap">{state.text}</pre>
-        </div>
+        <CodeViewer text={state.text} language={language} className="max-h-[65vh]" />
       )}
       {state.truncated ? (
         <p className="text-muted-foreground text-xs">

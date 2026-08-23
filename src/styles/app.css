@@ -161,3 +161,10 @@
     background: transparent;
   }
 }
+
+/* Shiki emits one colour per token plus a `--shiki-dark` custom property for
+   the dark theme. Streamdown's own renderer consumes that pair internally;
+   CodeViewer renders tokens itself, so the dark swap lives here. */
+.dark [data-shiki-token] {
+  color: var(--shiki-dark) !important;
+}

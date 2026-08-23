@@ -448,7 +448,7 @@ describe("ChatInput preview", () => {
     fetchSpy.mockRestore();
   });
 
-  it("highlights a source file as a code block and toggles back to plain", async () => {
+  it("shows a source file in the line-numbered viewer, with no rendered toggle", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("const x = 1;", { status: 200 }));
@@ -459,18 +459,17 @@ describe("ChatInput preview", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview app.ts" }));
 
-    // streamdown's own code block — the fence we wrap the file in is consumed,
-    // not shown, and the extension picks the language. Polled because
-    // highlighting swaps the body in asynchronously.
+    // Source files go to CodeViewer, not through markdown: one line, numbered,
+    // coloured once the grammar lands. "Rendered/Plain" is markdown-only.
     await waitFor(() => {
-      const block = document.querySelector('[data-language="typescript"]');
-      expect(block?.textContent).toContain("const x = 1;");
+      expect(document.querySelectorAll("[data-shiki-token]").length).toBeGreaterThan(1);
     });
-    expect(screen.queryByText(/```/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Plain" }));
-
-    expect(screen.getByText("const x = 1;").tagName).toBe("PRE");
+    expect(screen.getByText("const")).toBeInTheDocument();
+    // One numbered line — the dialog's own chrome also carries aria-hidden, so
+    // count the gutter cells next to the tokens rather than the whole document.
+    const viewer = document.querySelector("[data-shiki-token]")!.closest(".font-mono")!;
+    expect(viewer.querySelectorAll("[aria-hidden]")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Plain" })).not.toBeInTheDocument();
     fetchSpy.mockRestore();
   });
 
