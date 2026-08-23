@@ -54,6 +54,26 @@ See README.md for architecture; this file records the sharp edges.
 - Citation numbers are per assistant message: `WebSearchExecutor.prepare()` runs once per
   generation and closes over the counter, so a second search continues the sequence.
 
+## Markdown plugins (`src/ui/markdown-plugins.ts`)
+
+- Streamdown 2.x ships highlighting, math, mermaid and CJK handling as opt-in plugins.
+  Without them a fence renders as unstyled plain text (every token at `--sdm-c: inherit`),
+  `$$…$$` stays literal, and a CJK autolink swallows the punctuation after it — all
+  silently, with no error. One shared config feeds all three `<Streamdown>` call sites.
+- `katex` is a direct dependency only for its stylesheet: streamdown never calls the math
+  plugin's `getStyles()`, so `app.css` imports it. Keep it on the same major as the
+  renderer — `rehype-katex@7` pins `katex@^0.16`, so a float to 0.17+ styles markup that
+  0.16 produced.
+- The math plugin overrides remark-math's default to `singleDollarTextMath: false`; leave
+  it there. Enabled, "It costs $5 and $10" renders as the expression "5and".
+- mermaid is ~950 KB gzipped and `@streamdown/mermaid` imports it at module scope, so it is
+  wrapped in a lazy stand-in — streamdown only needs `getMermaid()` synchronously and
+  awaits `render()`, which is where the dynamic import happens. Re-exporting the upstream
+  plugin directly would put all of mermaid in the eager chat chunk.
+- Diagrams render behind an `IntersectionObserver` + `requestIdleCallback` gate, so they
+  stay blank in a browser-automation tab that never paints; the fullscreen button takes the
+  `immediate` path and renders regardless.
+
 ## Invariants
 
 - One live `ManagedRuntime` per process (`src/server/runtime.ts`). Server functions/routes

@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
 @import "streamdown/styles.css";
+/* KaTeX markup comes from rehype-katex, which pins katex to 0.16 — keep the
+   stylesheet on the same major as the renderer that produces the markup. */
+@import "katex/dist/katex.min.css";
 
 /* Streamdown ships Tailwind utility classes in its dist */
 @source "../../node_modules/streamdown/dist/*.js";
