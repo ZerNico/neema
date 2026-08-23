@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -22,17 +22,29 @@ export interface UsageEventInput {
   costSource: "provider" | "pricing" | null;
 }
 
-/** All reads take the same scope: events since a date, optionally one user's. */
+/**
+ * All reads take the same scope: a half-open window, optionally one user's.
+ *
+ * `to` is exclusive so the prior-period window can end exactly where this one
+ * begins without double-counting the instant they share.
+ */
 export interface UsageScope {
-  since: Date;
+  from: Date;
+  to: Date;
   userId?: string;
 }
 
 export interface UsageSummary {
   /** Chat generations only — title runs are counted in tokens, not here. */
   messages: number;
+  /** Every generation attempt, chat and title alike — the error-rate divisor. */
+  attempts: number;
+  titleGenerations: number;
+  errorAttempts: number;
+  abortedAttempts: number;
   inputTokens: number;
   outputTokens: number;
+  /** Cache reads, already included in `inputTokens` — not an addend. */
   cachedInputTokens: number;
   reasoningTokens: number;
   cost: number;
@@ -45,8 +57,12 @@ export interface UsageDay {
   /** ISO date (YYYY-MM-DD), UTC bucket. */
   day: string;
   messages: number;
+  attempts: number;
+  errorAttempts: number;
   inputTokens: number;
   outputTokens: number;
+  cachedInputTokens: number;
+  reasoningTokens: number;
   cost: number;
 }
 
@@ -76,7 +92,7 @@ export class AnalyticsRepo extends Context.Service<
     summary(scope: UsageScope): Effect.Effect<UsageSummary>;
     daily(scope: UsageScope): Effect.Effect<UsageDay[]>;
     byModel(scope: UsageScope): Effect.Effect<UsageByModel[]>;
-    byUser(scope: { since: Date }): Effect.Effect<UsageByUser[]>;
+    byUser(scope: UsageScope): Effect.Effect<UsageByUser[]>;
   }
 >()("chat/analytics/AnalyticsRepo") {
   static readonly layer = Layer.effect(
@@ -84,10 +100,11 @@ export class AnalyticsRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
 
+      const inWindow = (scope: UsageScope) =>
+        and(gte(usageEvents.createdAt, scope.from), lt(usageEvents.createdAt, scope.to));
+
       const inScope = (scope: UsageScope) =>
-        scope.userId
-          ? and(gte(usageEvents.createdAt, scope.since), eq(usageEvents.userId, scope.userId))
-          : gte(usageEvents.createdAt, scope.since);
+        scope.userId ? and(inWindow(scope), eq(usageEvents.userId, scope.userId)) : inWindow(scope);
 
       // Sums are null over zero rows; coalesce keeps the shape numeric.
       const sums = {
@@ -95,6 +112,14 @@ export class AnalyticsRepo extends Context.Service<
         inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)::int`,
         outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)::int`,
         cost: sql<number>`coalesce(sum(${usageEvents.cost}), 0)`,
+      };
+
+      // Only summary and daily need these; the grouped tables stay narrow.
+      const detail = {
+        attempts: sql<number>`count(*)::int`,
+        errorAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'error')::int`,
+        cachedInputTokens: sql<number>`coalesce(sum(${usageEvents.cachedInputTokens}), 0)::int`,
+        reasoningTokens: sql<number>`coalesce(sum(${usageEvents.reasoningTokens}), 0)::int`,
       };
 
       return AnalyticsRepo.of({
@@ -109,8 +134,9 @@ export class AnalyticsRepo extends Context.Service<
           const rows = yield* db
             .select({
               ...sums,
-              cachedInputTokens: sql<number>`coalesce(sum(${usageEvents.cachedInputTokens}), 0)::int`,
-              reasoningTokens: sql<number>`coalesce(sum(${usageEvents.reasoningTokens}), 0)::int`,
+              ...detail,
+              titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
+              abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null)::int`,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
             })
@@ -120,6 +146,10 @@ export class AnalyticsRepo extends Context.Service<
           const row = rows[0]!;
           return {
             messages: row.messages,
+            attempts: row.attempts,
+            titleGenerations: row.titleGenerations,
+            errorAttempts: row.errorAttempts,
+            abortedAttempts: row.abortedAttempts,
             inputTokens: row.inputTokens,
             outputTokens: row.outputTokens,
             cachedInputTokens: row.cachedInputTokens,
@@ -133,7 +163,7 @@ export class AnalyticsRepo extends Context.Service<
         daily: Effect.fn("AnalyticsRepo.daily")(function* (scope) {
           const day = sql<string>`to_char(date_trunc('day', ${usageEvents.createdAt} at time zone 'UTC'), 'YYYY-MM-DD')`;
           return yield* db
-            .select({ day, ...sums })
+            .select({ day, ...sums, ...detail })
             .from(usageEvents)
             .where(inScope(scope))
             .groupBy(day)
@@ -156,7 +186,7 @@ export class AnalyticsRepo extends Context.Service<
             .select({ userId: user.id, name: user.name, email: user.email, ...sums })
             .from(usageEvents)
             .innerJoin(user, eq(user.id, usageEvents.userId))
-            .where(gte(usageEvents.createdAt, scope.since))
+            .where(inWindow(scope))
             .groupBy(user.id, user.name, user.email)
             .orderBy(desc(sql`sum(${usageEvents.inputTokens} + ${usageEvents.outputTokens})`))
             .pipe(Effect.orDie);

@@ -35,12 +35,38 @@ export const formatDay = (day: string): string => {
   return `${names[Number(month) - 1]} ${Number(dayOfMonth)}`;
 };
 
-/** The last `days` UTC day keys ending today, oldest first. */
-export const lastDays = (days: number): string[] => {
-  const out: string[] = [];
-  const now = Date.now();
-  for (let i = days - 1; i >= 0; i--) {
-    out.push(new Date(now - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-  }
-  return out;
+/** 0.42 → "42%". Rates are coarse; a decimal place would imply precision. */
+export const formatPercent = (value: number): string => `${Math.round(value * 100)}%`;
+
+/**
+ * Ratios that are already percentages move in *points*, not percent: 1% → 2%
+ * is +1pp, and calling that "+100%" would be true but wildly misleading.
+ */
+export const formatPointDelta = (delta: number): string =>
+  `${delta >= 0 ? "+" : "\u2212"}${Math.abs(delta * 100).toFixed(1)}pp`;
+
+/**
+ * Relative change for counts and totals. Null means there is no honest
+ * comparison to draw — the caller renders nothing rather than a fake 0%.
+ */
+export const formatRelativeDelta = (current: number, previous: number): string | null => {
+  if (previous === 0) return current === 0 ? null : "New";
+  const change = (current - previous) / previous;
+  if (Math.abs(change) < 0.005) return "0%";
+  return `${change >= 0 ? "+" : "\u2212"}${Math.abs(change * 100).toFixed(0)}%`;
+};
+
+/** Cost per million tokens — the blended rate across every model in range. */
+export const formatCostPerMillion = (cost: number, tokens: number): string =>
+  `${formatCost((cost / tokens) * 1_000_000)}/M`;
+
+/** "Aug 10 – Aug 15, 2026" for the picker trigger; `to` is exclusive. */
+export const formatRangeLabel = (from: string, to: string): string => {
+  const start = new Date(from);
+  // The window ends at midnight *after* the last day the user picked.
+  const end = new Date(new Date(to).getTime() - 24 * 60 * 60 * 1000);
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear();
+  const day = (date: Date) => formatDay(date.toISOString().slice(0, 10));
+  const label = day(start) === day(end) ? day(start) : `${day(start)} \u2013 ${day(end)}`;
+  return sameYear ? `${label}, ${end.getUTCFullYear()}` : `${label} ${end.getUTCFullYear()}`;
 };

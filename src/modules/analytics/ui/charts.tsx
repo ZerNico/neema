@@ -1,4 +1,4 @@
-import { barX, barY, defineChart, lineY } from "@tanstack/charts";
+import { areaY, barX, barY, defineChart, lineY } from "@tanstack/charts";
 import { Chart } from "@tanstack/charts/react";
 import { scaleBand } from "@tanstack/charts/scales/band";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
@@ -6,7 +6,8 @@ import { stack } from "@tanstack/charts/stack";
 import { tooltip } from "@tanstack/charts/tooltip";
 import { useMemo } from "react";
 import type { UsageByModel, UsageDay } from "../server/repo.ts";
-import { formatDay, formatTokens, lastDays } from "./format.ts";
+import { windowDays, type UsageWindow } from "../server/range.ts";
+import { formatDay, formatTokens } from "./format.ts";
 
 // Definition identity is the chart's update boundary, so every definition
 // below is memoized on its data. Colors come from the app's --chart-N tokens
@@ -14,20 +15,56 @@ import { formatDay, formatTokens, lastDays } from "./format.ts";
 
 const INK = "var(--color-muted-foreground)";
 
-/** Sparse day rows from SQL, densified over the visible range with zeros. */
-const densify = (daily: readonly UsageDay[], days: number): UsageDay[] => {
+const EMPTY_DAY = {
+  messages: 0,
+  attempts: 0,
+  errorAttempts: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cachedInputTokens: 0,
+  reasoningTokens: 0,
+  cost: 0,
+} as const;
+
+/**
+ * Sparse day rows from SQL, densified over the window the server actually
+ * scanned — a custom window that ended months ago renders its own days rather
+ * than the last N ending today.
+ */
+const densify = (daily: readonly UsageDay[], window: UsageWindow): UsageDay[] => {
   const byDay = new Map(daily.map((row) => [row.day, row]));
-  return lastDays(days).map(
-    (day) => byDay.get(day) ?? { day, messages: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
-  );
+  return windowDays(window).map((day) => byDay.get(day) ?? { day, ...EMPTY_DAY });
 };
 
-/** Stacked input/output tokens per day — two fixed series, slots 1 and 2. */
-export function TokensPerDayChart({ daily, days }: { daily: readonly UsageDay[]; days: number }) {
+/**
+ * Stacked token composition per day — four mutually exclusive series.
+ *
+ * Cached input is a *subset* of input and reasoning a subset of output, so the
+ * stack subtracts rather than adds them; charting the raw four would double
+ * count. Both subtractions clamp at zero in case a provider reports a subset
+ * larger than its total.
+ */
+export function TokensPerDayChart({
+  daily,
+  window,
+}: {
+  daily: readonly UsageDay[];
+  window: UsageWindow;
+}) {
   const definition = useMemo(() => {
-    const rows = densify(daily, days).flatMap((row) => [
-      { day: row.day, series: "Input", tokens: row.inputTokens },
-      { day: row.day, series: "Output", tokens: row.outputTokens },
+    const rows = densify(daily, window).flatMap((row) => [
+      {
+        day: row.day,
+        series: "Input",
+        tokens: Math.max(row.inputTokens - row.cachedInputTokens, 0),
+      },
+      { day: row.day, series: "Cached", tokens: row.cachedInputTokens },
+      {
+        day: row.day,
+        series: "Output",
+        tokens: Math.max(row.outputTokens - row.reasoningTokens, 0),
+      },
+      { day: row.day, series: "Reasoning", tokens: row.reasoningTokens },
     ]);
     return defineChart({
       marks: [
@@ -58,24 +95,34 @@ export function TokensPerDayChart({ daily, days }: { daily: readonly UsageDay[];
       // The legend is HTML in the card header — the built-in one spreads its
       // items across the full chart width (itemWidth = width / columns).
       color: {
-        domain: ["Input", "Output"],
-        range: ["var(--chart-1)", "var(--chart-2)"],
+        domain: ["Input", "Cached", "Output", "Reasoning"],
+        range: ["var(--chart-1)", "var(--chart-3)", "var(--chart-2)", "var(--chart-4)"],
       },
       tooltip,
     });
-  }, [daily, days]);
+  }, [daily, window]);
 
   return (
     <div style={{ color: INK }} className="text-xs">
-      <Chart definition={definition} height={240} ariaLabel="Tokens per day, input and output" />
+      <Chart
+        definition={definition}
+        height={240}
+        ariaLabel="Token composition per day: input, cached, output and reasoning"
+      />
     </div>
   );
 }
 
 /** Single-series line — messages per day. No legend; the card title names it. */
-export function MessagesPerDayChart({ daily, days }: { daily: readonly UsageDay[]; days: number }) {
+export function MessagesPerDayChart({
+  daily,
+  window,
+}: {
+  daily: readonly UsageDay[];
+  window: UsageWindow;
+}) {
   const definition = useMemo(() => {
-    const rows = densify(daily, days);
+    const rows = densify(daily, window);
     return defineChart({
       marks: [lineY(rows, { x: "day", y: "messages", stroke: "var(--chart-1)", strokeWidth: 2 })],
       x: {
@@ -94,7 +141,7 @@ export function MessagesPerDayChart({ daily, days }: { daily: readonly UsageDay[
       },
       tooltip,
     });
-  }, [daily, days]);
+  }, [daily, window]);
 
   return (
     <div style={{ color: INK }} className="text-xs">
@@ -144,6 +191,45 @@ export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel
   return (
     <div style={{ color: INK }} className="text-xs">
       <Chart definition={definition} height={height} ariaLabel="Total tokens by model" />
+    </div>
+  );
+}
+
+/**
+ * A bare trend line for a KPI tile: no axes, grid, tooltip or focus ring.
+ *
+ * Decorative by design — the tile's value and delta carry the meaning, so the
+ * mark is hidden from assistive tech rather than given a label that would
+ * repeat them. Below two points there is no trend to draw, so it renders
+ * nothing rather than a single misleading dot.
+ */
+export function UsageSparkline({ values }: { values: readonly number[] }) {
+  const definition = useMemo(() => {
+    const rows = values.map((value, index) => ({ index, value }));
+    return defineChart({
+      marks: [
+        areaY(rows, {
+          x: "index",
+          y: "value",
+          fill: "var(--chart-1)",
+          fillOpacity: 0.15,
+          stroke: "var(--chart-1)",
+          strokeWidth: 1.5,
+        }),
+      ],
+      x: { scale: scaleLinear, axis: false },
+      y: { scale: scaleLinear, axis: false, nice: false },
+      guides: false,
+      margin: 0,
+    });
+  }, [values]);
+
+  if (values.length < 2) return null;
+  return (
+    <div aria-hidden className="pointer-events-none">
+      {/* Required by the lib; empty because the wrapper is aria-hidden and
+          the tile's own value and delta already say this. */}
+      <Chart definition={definition} width={72} height={22} ariaLabel="" />
     </div>
   );
 }

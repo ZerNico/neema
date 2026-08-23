@@ -402,13 +402,19 @@ describe("usage ledger capture", () => {
 });
 
 describe("usage aggregates", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // A fixed window rather than "now minus 7 days": the edge assertions below
+  // need boundaries they can place rows exactly on.
+  const WINDOW_FROM = new Date("2026-06-10T00:00:00.000Z");
+  const WINDOW_TO = new Date("2026-06-13T00:00:00.000Z");
+
   // Rows are seeded directly with explicit timestamps; all reads are scoped
   // to this user so parallel-running capture tests can't leak in.
   const seed = Effect.fn("test.seedAggregates")(function* () {
     const db = yield* Db;
     const userId = yield* makeUser();
-    const today = new Date();
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const today = new Date(WINDOW_TO.getTime() - DAY_MS / 2);
+    const yesterday = new Date(today.getTime() - DAY_MS);
     const base = {
       userId,
       modelId: null,
@@ -424,6 +430,8 @@ describe("usage aggregates", () => {
         modelName: "Alpha",
         inputTokens: 100,
         outputTokens: 50,
+        cachedInputTokens: 40,
+        reasoningTokens: 10,
         cost: 0.001,
         costSource: "provider",
         createdAt: yesterday,
@@ -435,6 +443,8 @@ describe("usage aggregates", () => {
         modelName: "Alpha",
         inputTokens: 200,
         outputTokens: 100,
+        cachedInputTokens: 60,
+        reasoningTokens: 25,
         cost: 0.002,
         costSource: "pricing",
         createdAt: today,
@@ -451,41 +461,187 @@ describe("usage aggregates", () => {
         createdAt: today,
       },
     ]);
-    return { userId, todayKey: today.toISOString().slice(0, 10) };
+    return {
+      userId,
+      scope: { from: WINDOW_FROM, to: WINDOW_TO, userId },
+      todayKey: today.toISOString().slice(0, 10),
+      today,
+    };
   });
 
   it("sums the summary and flags incomplete cost", async () => {
     const result = await run(
       Effect.gen(function* () {
         const analytics = yield* AnalyticsRepo;
-        const { userId } = yield* seed();
-        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        return yield* analytics.summary({ since, userId });
+        const { scope } = yield* seed();
+        return yield* analytics.summary(scope);
       }),
     );
     expect(result).toEqual({
       messages: 2, // titles counted in tokens, not messages
+      // Every row, chat and title alike — this is the error-rate divisor.
+      attempts: 3,
+      titleGenerations: 1,
+      errorAttempts: 0,
+      abortedAttempts: 0,
       inputTokens: 310,
       outputTokens: 155,
-      cachedInputTokens: 0,
-      reasoningTokens: 0,
+      // Cache reads live *inside* inputTokens; they are not an addend.
+      cachedInputTokens: 100,
+      reasoningTokens: 35,
       cost: 0.003,
       costComplete: false, // the title row has unknown cost
       activeUsers: 1,
     });
   });
 
-  it("buckets by UTC day and honours the since bound", async () => {
+  it("includes an event exactly on `from` and excludes one exactly on `to`", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const userId = yield* makeUser();
+        const base = {
+          userId,
+          modelId: null,
+          kind: "chat" as const,
+          modelName: "Edge",
+          status: "complete" as const,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          outputTokens: 0,
+          cost: 0,
+          costSource: "provider" as const,
+        };
+        yield* db.insert(usageEvents).values([
+          { ...base, id: uuidv7(), inputTokens: 1, createdAt: WINDOW_FROM },
+          // One millisecond inside the upper bound — must be counted.
+          {
+            ...base,
+            id: uuidv7(),
+            inputTokens: 10,
+            createdAt: new Date(WINDOW_TO.getTime() - 1),
+          },
+          // Exactly on the exclusive bound — must not be.
+          { ...base, id: uuidv7(), inputTokens: 100, createdAt: WINDOW_TO },
+          // Just before the inclusive bound — must not be.
+          {
+            ...base,
+            id: uuidv7(),
+            inputTokens: 1000,
+            createdAt: new Date(WINDOW_FROM.getTime() - 1),
+          },
+        ]);
+        return yield* analytics.summary({ from: WINDOW_FROM, to: WINDOW_TO, userId });
+      }),
+    );
+    // 1 + 10 only: the half-open window is [from, to).
+    expect(result.inputTokens).toBe(11);
+    expect(result.attempts).toBe(2);
+  });
+
+  it("counts errors across chat and title, and keeps aborted out of them", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const userId = yield* makeUser();
+        const at = new Date(WINDOW_FROM.getTime() + DAY_MS / 2);
+        const base = {
+          userId,
+          modelId: null,
+          modelName: "Gamma",
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          cost: 0,
+          costSource: "provider" as const,
+          createdAt: at,
+        };
+        yield* db.insert(usageEvents).values([
+          { ...base, id: uuidv7(), kind: "chat", status: "error" },
+          // A failed *title* run is still a failed attempt — the rate would
+          // be wrong if the divisor were chat-only.
+          { ...base, id: uuidv7(), kind: "title", status: "error" },
+          { ...base, id: uuidv7(), kind: "chat", status: "aborted" },
+          { ...base, id: uuidv7(), kind: "chat", status: "complete" },
+        ]);
+        return yield* analytics.summary({ from: WINDOW_FROM, to: WINDOW_TO, userId });
+      }),
+    );
+    expect(result).toMatchObject({
+      attempts: 4,
+      errorAttempts: 2,
+      abortedAttempts: 1,
+      messages: 3,
+      titleGenerations: 1,
+    });
+  });
+
+  it("returns zeros — and a complete cost — for a range with no events", async () => {
     const result = await run(
       Effect.gen(function* () {
         const analytics = yield* AnalyticsRepo;
-        const { userId, todayKey } = yield* seed();
-        const week = yield* analytics.daily({
-          since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        const { userId } = yield* seed();
+        // A window well before anything was seeded.
+        return yield* analytics.summary({
+          from: new Date("2026-01-01T00:00:00.000Z"),
+          to: new Date("2026-01-08T00:00:00.000Z"),
           userId,
         });
+      }),
+    );
+    expect(result).toEqual({
+      messages: 0,
+      attempts: 0,
+      titleGenerations: 0,
+      errorAttempts: 0,
+      abortedAttempts: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      cost: 0,
+      // Nothing is unknown when nothing is there — the tile must not claim
+      // "at least".
+      costComplete: true,
+      activeUsers: 0,
+    });
+  });
+
+  it("sees only the preceding window from the prior scope", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const analytics = yield* AnalyticsRepo;
+        const { userId, scope } = yield* seed();
+        const span = WINDOW_TO.getTime() - WINDOW_FROM.getTime();
+        const previous = {
+          from: new Date(WINDOW_FROM.getTime() - span),
+          to: WINDOW_FROM,
+          userId,
+        };
+        return {
+          current: yield* analytics.summary(scope),
+          previous: yield* analytics.summary(previous),
+        };
+      }),
+    );
+    expect(result.current.inputTokens).toBe(310);
+    // Every seeded row sits in the current window; the baseline is empty.
+    expect(result.previous.inputTokens).toBe(0);
+    expect(result.previous.attempts).toBe(0);
+  });
+
+  it("buckets by UTC day and honours both bounds", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const analytics = yield* AnalyticsRepo;
+        const { userId, scope, todayKey, today } = yield* seed();
+        const week = yield* analytics.daily(scope);
         const hour = yield* analytics.daily({
-          since: new Date(Date.now() - 60 * 60 * 1000),
+          from: new Date(today.getTime() - 60 * 60 * 1000),
+          to: WINDOW_TO,
           userId,
         });
         return { week, hour, todayKey };
@@ -495,8 +651,12 @@ describe("usage aggregates", () => {
     expect(result.week[1]).toMatchObject({
       day: result.todayKey,
       messages: 1,
+      attempts: 2, // the chat row plus the title row
+      errorAttempts: 0,
       inputTokens: 210,
       outputTokens: 105,
+      cachedInputTokens: 60,
+      reasoningTokens: 25,
     });
     // Tight bound sees only today's rows.
     expect(result.hour).toHaveLength(1);
@@ -506,10 +666,11 @@ describe("usage aggregates", () => {
     const result = await run(
       Effect.gen(function* () {
         const analytics = yield* AnalyticsRepo;
-        const { userId } = yield* seed();
-        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        const byModel = yield* analytics.byModel({ since, userId });
-        const byUser = (yield* analytics.byUser({ since })).filter((row) => row.userId === userId);
+        const { userId, scope } = yield* seed();
+        const byModel = yield* analytics.byModel(scope);
+        const byUser = (yield* analytics.byUser({ from: WINDOW_FROM, to: WINDOW_TO })).filter(
+          (row) => row.userId === userId,
+        );
         return { byModel, byUser };
       }),
     );
@@ -523,12 +684,11 @@ describe("usage aggregates", () => {
     const result = await run(
       Effect.gen(function* () {
         const analytics = yield* AnalyticsRepo;
-        const { userId: userA } = yield* seed();
+        const { scope } = yield* seed();
         const userB = yield* makeUser();
-        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         return {
-          a: yield* analytics.summary({ since, userId: userA }),
-          b: yield* analytics.summary({ since, userId: userB }),
+          a: yield* analytics.summary(scope),
+          b: yield* analytics.summary({ ...scope, userId: userB }),
         };
       }),
     );

@@ -1,14 +1,18 @@
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { AdminPage, EmptyState } from "~/modules/admin/ui/admin-shell.tsx";
 import { myUsageQuery } from "~/modules/analytics/client/queries.ts";
-import type { UsageRangeDays } from "~/modules/analytics/schema.ts";
-import { UsageOverview, UsageRangeSelect } from "~/modules/analytics/ui/usage-dashboard.tsx";
+import { DEFAULT_USAGE_RANGE, type UsageRangeEncoded } from "~/modules/analytics/schema.ts";
+import { UsageOverview, UsageRangePicker } from "~/modules/analytics/ui/usage-dashboard.tsx";
 
 export function UsagePage() {
-  const [days, setDays] = useState<UsageRangeDays>(30);
-  const { data } = useSuspenseQuery(myUsageQuery(days));
+  const [range, setRange] = useState<UsageRangeEncoded>(DEFAULT_USAGE_RANGE);
+  const { data } = useSuspenseQuery(myUsageQuery(range));
+  const changeRange = (next: UsageRangeEncoded) => {
+    // Keep the previous dashboard visible while the new range loads.
+    startTransition(() => setRange(next));
+  };
 
   return (
     <AdminPage
@@ -16,7 +20,7 @@ export function UsagePage() {
       description="Your own token usage and messages, including retries and title generations."
       rootPath="/settings"
       rootLabel="Settings"
-      actions={<UsageRangeSelect days={days} onChange={setDays} />}
+      actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
       {data.daily.length === 0 ? (
         <EmptyState
@@ -29,7 +33,8 @@ export function UsagePage() {
           summary={data.summary}
           daily={data.daily}
           byModel={data.byModel}
-          days={days}
+          previousSummary={data.previousSummary}
+          window={data.window}
           showActiveUsers={false}
         />
       )}

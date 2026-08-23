@@ -4,28 +4,39 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { runtime } from "~/server/runtime.ts";
 import { UsageRangeInput } from "../schema.ts";
 import { AnalyticsRepo } from "./repo.ts";
+import { previousUsageWindow, resolveUsageWindow, type UsageWindow } from "./range.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-const sinceDaysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+/**
+ * The window travels back to the client so the charts label the days the SQL
+ * actually scanned, rather than re-deriving them from a preset and drifting.
+ */
+const serializeWindow = (window: UsageWindow) => ({
+  from: window.from.toISOString(),
+  to: window.to.toISOString(),
+});
 
 /** Instance-wide usage for the admin dashboard, one round trip. */
 export const getUsageAnalytics = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .validator(standard(UsageRangeInput))
   .handler(({ data }) => {
-    const since = sinceDaysAgo(data.days);
+    const window = resolveUsageWindow(data, new Date());
+    const previous = previousUsageWindow(window);
     return runtime.runPromise(
       AnalyticsRepo.use((repo) =>
         Effect.all(
           {
-            summary: repo.summary({ since }),
-            daily: repo.daily({ since }),
-            byModel: repo.byModel({ since }),
-            byUser: repo.byUser({ since }),
+            summary: repo.summary(window),
+            // Same query, shifted back one window — the delta baseline.
+            previousSummary: repo.summary(previous),
+            daily: repo.daily(window),
+            byModel: repo.byModel(window),
+            byUser: repo.byUser(window),
           },
           { concurrency: "unbounded" },
-        ),
+        ).pipe(Effect.map((result) => ({ ...result, window: serializeWindow(window) }))),
       ),
     );
   });
@@ -35,17 +46,21 @@ export const getMyUsage = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(UsageRangeInput))
   .handler(({ data, context }) => {
-    const scope = { since: sinceDaysAgo(data.days), userId: context.session.user.id };
+    const userId = context.session.user.id;
+    const window = resolveUsageWindow(data, new Date());
+    const scope = { ...window, userId };
+    const previousScope = { ...previousUsageWindow(window), userId };
     return runtime.runPromise(
       AnalyticsRepo.use((repo) =>
         Effect.all(
           {
             summary: repo.summary(scope),
+            previousSummary: repo.summary(previousScope),
             daily: repo.daily(scope),
             byModel: repo.byModel(scope),
           },
           { concurrency: "unbounded" },
-        ),
+        ).pipe(Effect.map((result) => ({ ...result, window: serializeWindow(window) }))),
       ),
     );
   });

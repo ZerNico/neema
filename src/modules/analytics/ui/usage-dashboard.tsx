@@ -1,15 +1,30 @@
-import type { ReactNode } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Calendar03Icon } from "@hugeicons/core-free-icons";
+import { useMemo, useState, type ReactNode } from "react";
+import type { DateRange } from "react-day-picker";
 import type { UsageByModel, UsageByUser, UsageDay, UsageSummary } from "../server/repo.ts";
-import type { UsageRangeDays } from "../schema.ts";
-import { MessagesPerDayChart, TokensByModelChart, TokensPerDayChart } from "./charts.tsx";
-import { formatCost, formatCount, formatTokens } from "./format.ts";
+import type { UsageWindow } from "../server/range.ts";
+import type { UsageRangeDays, UsageRangeEncoded } from "../schema.ts";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/ui/primitives/select";
+  MessagesPerDayChart,
+  TokensByModelChart,
+  TokensPerDayChart,
+  UsageSparkline,
+} from "./charts.tsx";
+import {
+  formatCost,
+  formatCostPerMillion,
+  formatCount,
+  formatPercent,
+  formatPointDelta,
+  formatRangeLabel,
+  formatRelativeDelta,
+  formatTokens,
+} from "./format.ts";
+import { Button } from "~/ui/primitives/button";
+import { Calendar } from "~/ui/primitives/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
+import { cn } from "~/ui/utils";
 
 export const USAGE_RANGES: Array<{ value: UsageRangeDays; label: string }> = [
   { value: 7, label: "Last 7 days" },
@@ -17,40 +32,163 @@ export const USAGE_RANGES: Array<{ value: UsageRangeDays; label: string }> = [
   { value: 90, label: "Last 90 days" },
 ];
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Build the UTC boundary from the calendar's own y/m/d fields.
+ *
+ * `react-day-picker` hands back a *local* midnight; calling `.toISOString()`
+ * on that lands on the previous or next day for anyone east or west of UTC,
+ * silently shifting the range by a day.
+ */
+const utcDay = (date: Date): Date =>
+  new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+
+const toCustomRange = (range: DateRange): UsageRangeEncoded | null => {
+  if (!range.from || !range.to) return null;
+  return {
+    kind: "custom",
+    from: utcDay(range.from).toISOString(),
+    // The picker's end day is inclusive; the window's `to` is exclusive.
+    to: new Date(utcDay(range.to).getTime() + DAY_MS).toISOString(),
+  };
+};
+
+const rangeLabel = (range: UsageRangeEncoded): string =>
+  range.kind === "preset"
+    ? (USAGE_RANGES.find((r) => r.value === range.days)?.label ?? `Last ${range.days} days`)
+    : formatRangeLabel(range.from, range.to);
+
 /** The one filter row — sits above everything it scopes. */
-export function UsageRangeSelect({
-  days,
+export function UsageRangePicker({
+  range,
   onChange,
 }: {
-  days: UsageRangeDays;
-  onChange: (days: UsageRangeDays) => void;
+  range: UsageRangeEncoded;
+  onChange: (range: UsageRangeEncoded) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState<DateRange | undefined>();
+
+  const close = () => {
+    setOpen(false);
+    setCustom(false);
+    setDraft(undefined);
+  };
+
+  const apply = () => {
+    const next = draft && toCustomRange(draft);
+    if (next) onChange(next);
+    close();
+  };
+
   return (
-    <Select
-      value={String(days)}
-      onValueChange={(v) => v && onChange(Number(v) as UsageRangeDays)}
-      items={USAGE_RANGES.map((r) => ({ value: String(r.value), label: r.label }))}
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) close();
+      }}
     >
-      <SelectTrigger className="w-40" aria-label="Date range">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {USAGE_RANGES.map((r) => (
-          <SelectItem key={r.value} value={String(r.value)}>
-            {r.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <PopoverTrigger
+        render={
+          <Button variant="outline" className="gap-2" aria-label="Date range">
+            <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-4" />
+            {rangeLabel(range)}
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className={custom ? "w-auto" : "w-56"}>
+        {custom ? (
+          <div className="flex flex-col gap-3">
+            <Calendar
+              mode="range"
+              numberOfMonths={2}
+              selected={draft}
+              onSelect={setDraft}
+              // Usage cannot exist in the future; offering it invites an
+              // empty dashboard with no explanation.
+              disabled={{ after: new Date() }}
+              autoFocus
+            />
+            <div className="flex items-center justify-between gap-3">
+              {/* Bucketing is UTC everywhere else; say so rather than let a
+                  user near midnight wonder why a day looks light. */}
+              <span className="text-muted-foreground text-xs">Days are grouped in UTC</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={close}>
+                  Cancel
+                </Button>
+                {/* react-day-picker fills `from` and `to` on the first click,
+                    so this is "nothing picked yet" — one click is a legitimate
+                    one-day range and commits as such. */}
+                <Button size="sm" onClick={apply} disabled={!draft?.from || !draft.to}>
+                  Apply
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {USAGE_RANGES.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => {
+                  onChange({ kind: "preset", days: preset.value });
+                  close();
+                }}
+                className={cn(
+                  "hover:bg-accent rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  range.kind === "preset" && range.days === preset.value && "bg-accent",
+                )}
+              >
+                {preset.label}
+              </button>
+            ))}
+            <div className="bg-border my-1 h-px" />
+            <button
+              type="button"
+              onClick={() => setCustom(true)}
+              className="hover:bg-accent rounded-md px-2.5 py-1.5 text-left text-sm transition-colors"
+            >
+              Custom range…
+            </button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
-function StatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatTile({
+  label,
+  value,
+  sub,
+  delta,
+  spark,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  delta?: string | null;
+  spark?: readonly number[];
+}) {
   return (
     <div className="border-border bg-background flex flex-col gap-1 rounded-lg border px-4 py-3">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <span className="text-2xl font-semibold tracking-tight">{value}</span>
-      {sub ? <span className="text-muted-foreground text-xs">{sub}</span> : null}
+      <div className="flex items-end justify-between gap-2">
+        <span className="text-2xl font-semibold tracking-tight">{value}</span>
+        {spark ? <UsageSparkline values={spark} /> : null}
+      </div>
+      <div className="text-muted-foreground flex items-baseline gap-1.5 text-xs">
+        {/* Direction is stated, never coloured: more tokens is neither good
+            nor bad, and the same tile shape carries cost and error rate. */}
+        {delta ? <span className="text-foreground font-medium">{delta}</span> : null}
+        {delta && sub ? <span aria-hidden>·</span> : null}
+        {sub ? <span>{sub}</span> : null}
+      </div>
     </div>
   );
 }
@@ -66,7 +204,7 @@ export function ChartCard({
 }) {
   return (
     <section className="border-border bg-background flex flex-col gap-3 rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-medium">{title}</h2>
         {legend}
       </div>
@@ -78,7 +216,7 @@ export function ChartCard({
 /** Rect swatches (mirroring the bar marks) with the labels in text ink. */
 function ChartLegend({ items }: { items: ReadonlyArray<{ label: string; colorVar: string }> }) {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex flex-wrap items-center gap-4">
       {items.map((item) => (
         <span key={item.label} className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <span
@@ -93,56 +231,172 @@ function ChartLegend({ items }: { items: ReadonlyArray<{ label: string; colorVar
   );
 }
 
-/** KPI row + the two time charts + by-model — shared by admin and settings. */
+/** A ratio, or null when the denominator is zero — never a fake 0%. */
+const ratio = (numerator: number, denominator: number): number | null =>
+  denominator === 0 ? null : numerator / denominator;
+
+/**
+ * Compare two rates in percentage points.
+ * Null unless both sides exist, so an empty prior period shows no delta.
+ */
+const pointDelta = (current: number | null, previous: number | null): string | null =>
+  current === null || previous === null ? null : formatPointDelta(current - previous);
+
+/** Two-segment part-to-whole meter — a static split, so CSS, not a chart. */
+function SplitMeter({ chat, title }: { chat: number; title: number }) {
+  const total = chat + title;
+  const chatShare = total === 0 ? 0 : (chat / total) * 100;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="bg-muted flex h-2 overflow-hidden rounded-full" aria-hidden>
+        <div style={{ width: `${chatShare}%`, background: "var(--chart-1)" }} />
+        <div style={{ width: `${100 - chatShare}%`, background: "var(--chart-3)" }} />
+      </div>
+      <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
+        <span>
+          <span className="text-foreground font-medium">{formatCount(chat)}</span> chat
+          {total > 0 ? ` (${formatPercent(chat / total)})` : ""}
+        </span>
+        <span>
+          <span className="text-foreground font-medium">{formatCount(title)}</span> title
+          {total > 0 ? ` (${formatPercent(title / total)})` : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** KPI row + the time charts + by-model — shared by admin and settings. */
 export function UsageOverview({
   summary,
+  previousSummary,
   daily,
   byModel,
-  days,
+  window,
   showActiveUsers,
 }: {
   summary: UsageSummary;
+  previousSummary: UsageSummary;
   daily: readonly UsageDay[];
   byModel: readonly UsageByModel[];
-  days: UsageRangeDays;
+  /** The window the server actually scanned, ISO-encoded over the wire. */
+  window: { from: string; to: string };
   showActiveUsers: boolean;
 }) {
+  const scanned: UsageWindow = useMemo(
+    () => ({ from: new Date(window.from), to: new Date(window.to) }),
+    [window.from, window.to],
+  );
+
+  const tokens = summary.inputTokens + summary.outputTokens;
+  const previousTokens = previousSummary.inputTokens + previousSummary.outputTokens;
+
   // A partial cost sum is a floor, not a total — say so instead of lying.
-  const costValue = summary.cost > 0 || summary.costComplete ? formatCost(summary.cost) : "—";
+  const costKnown = summary.cost > 0 || summary.costComplete;
+  const costValue = costKnown ? formatCost(summary.cost) : "—";
   const costSub =
     !summary.costComplete && summary.cost > 0 ? "at least — some costs unknown" : undefined;
+  // A delta between two floors is not a delta. Both sides must be complete.
+  const bothCostsComplete = summary.costComplete && previousSummary.costComplete;
+
+  const cacheRate = ratio(summary.cachedInputTokens, summary.inputTokens);
+  const previousCacheRate = ratio(previousSummary.cachedInputTokens, previousSummary.inputTokens);
+  // Errors span chat *and* title runs, so the divisor is attempts — not
+  // `messages`, which counts only chat.
+  const errorRate = ratio(summary.errorAttempts, summary.attempts);
+  const previousErrorRate = ratio(previousSummary.errorAttempts, previousSummary.attempts);
+
+  const series = (pick: (day: UsageDay) => number) => daily.map(pick);
 
   return (
     <>
-      <div
-        className={`grid grid-cols-2 gap-3 ${showActiveUsers ? "md:grid-cols-4" : "md:grid-cols-3"}`}
-      >
-        <StatTile label="Messages" value={formatCount(summary.messages)} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatTile
+          label="Messages"
+          value={formatCount(summary.messages)}
+          delta={formatRelativeDelta(summary.messages, previousSummary.messages)}
+          spark={series((day) => day.messages)}
+        />
         <StatTile
           label="Tokens"
-          value={formatTokens(summary.inputTokens + summary.outputTokens)}
+          value={formatTokens(tokens)}
           sub={`${formatTokens(summary.inputTokens)} in / ${formatTokens(summary.outputTokens)} out`}
+          delta={formatRelativeDelta(tokens, previousTokens)}
+          spark={series((day) => day.inputTokens + day.outputTokens)}
         />
-        <StatTile label="Cost" value={costValue} {...(costSub ? { sub: costSub } : {})} />
+        <StatTile
+          label="Cost"
+          value={costValue}
+          {...(costSub ? { sub: costSub } : {})}
+          delta={bothCostsComplete ? formatRelativeDelta(summary.cost, previousSummary.cost) : null}
+          // Charting a floor as a trend would read as fact.
+          {...(summary.costComplete ? { spark: series((day) => day.cost) } : {})}
+        />
+        <StatTile
+          label="Cache hit rate"
+          value={cacheRate === null ? "—" : formatPercent(cacheRate)}
+          sub="of input tokens"
+          delta={pointDelta(cacheRate, previousCacheRate)}
+        />
+        <StatTile
+          label="Cost per 1M"
+          value={
+            summary.costComplete && tokens > 0 ? formatCostPerMillion(summary.cost, tokens) : "—"
+          }
+          sub="blended"
+          delta={null}
+        />
+        <StatTile
+          label="Error rate"
+          value={errorRate === null ? "—" : formatPercent(errorRate)}
+          sub={`${formatCount(summary.errorAttempts)} errors · ${formatCount(summary.abortedAttempts)} aborted · ${formatCount(summary.attempts)} attempts`}
+          delta={pointDelta(errorRate, previousErrorRate)}
+        />
         {showActiveUsers ? (
-          <StatTile label="Active users" value={formatCount(summary.activeUsers)} />
+          <StatTile
+            label="Active users"
+            value={formatCount(summary.activeUsers)}
+            delta={formatRelativeDelta(summary.activeUsers, previousSummary.activeUsers)}
+          />
         ) : null}
       </div>
       <ChartCard
-        title="Tokens per day"
+        title="Token composition"
         legend={
           <ChartLegend
             items={[
               { label: "Input", colorVar: "--chart-1" },
+              { label: "Cached", colorVar: "--chart-3" },
               { label: "Output", colorVar: "--chart-2" },
+              { label: "Reasoning", colorVar: "--chart-4" },
             ]}
           />
         }
       >
-        <TokensPerDayChart daily={daily} days={days} />
+        <TokensPerDayChart daily={daily} window={scanned} />
+        {/* The accessible companion: the stacked segments get small. */}
+        <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
+          {[
+            ["Input", summary.inputTokens - summary.cachedInputTokens],
+            ["Cached", summary.cachedInputTokens],
+            ["Output", summary.outputTokens - summary.reasoningTokens],
+            ["Reasoning", summary.reasoningTokens],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="flex justify-between gap-2">
+              <dt>{label}</dt>
+              <dd className="text-foreground tabular-nums">
+                {formatTokens(Math.max(Number(value), 0))}
+              </dd>
+            </div>
+          ))}
+        </dl>
       </ChartCard>
       <ChartCard title="Messages per day">
-        <MessagesPerDayChart daily={daily} days={days} />
+        <MessagesPerDayChart daily={daily} window={scanned} />
+      </ChartCard>
+      <ChartCard title="Generation types">
+        <SplitMeter chat={summary.messages} title={summary.titleGenerations} />
       </ChartCard>
       <ChartCard title="By model">
         <TokensByModelChart byModel={byModel} />
