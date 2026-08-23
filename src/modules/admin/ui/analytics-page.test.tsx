@@ -107,6 +107,28 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Nico (nico@example.com)")).toBeInTheDocument();
   });
 
+  it("replaces the whole body with an empty state when the range has no events", async () => {
+    renderPage({
+      summary: {
+        ...data.summary,
+        messages: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        activeUsers: 0,
+      },
+      daily: [],
+      byModel: [],
+      byUser: [],
+    });
+    expect(await screen.findByText("No usage in this range")).toBeInTheDocument();
+    // No zero-value tiles or empty charts behind it.
+    expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Messages per day" })).not.toBeInTheDocument();
+    // The range select stays usable to widen the window.
+    expect(screen.getByLabelText("Date range")).toBeInTheDocument();
+  });
+
   it("shows an em dash and a floor hint when cost is incomplete", async () => {
     renderPage({
       summary: { ...data.summary, cost: 0, costComplete: false },

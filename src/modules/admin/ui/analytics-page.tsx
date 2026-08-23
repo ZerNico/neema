@@ -1,6 +1,7 @@
+import { Analytics01Icon } from "@hugeicons/core-free-icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { AdminPage } from "./admin-shell.tsx";
+import { AdminPage, EmptyState } from "./admin-shell.tsx";
 import { adminUsageQuery } from "~/modules/analytics/client/queries.ts";
 import type { UsageRangeDays } from "~/modules/analytics/schema.ts";
 import {
@@ -20,20 +21,28 @@ export function AnalyticsPage() {
       description="Token usage, messages and cost across the instance. Every generation attempt counts — including retries and title runs."
       actions={<UsageRangeSelect days={days} onChange={setDays} />}
     >
-      <UsageOverview
-        summary={data.summary}
-        daily={data.daily}
-        byModel={data.byModel}
-        days={days}
-        showActiveUsers
-      />
-      <ChartCard title="By user">
-        {data.byUser.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No usage recorded yet.</p>
-        ) : (
-          <UsersTable byUser={data.byUser} />
-        )}
-      </ChartCard>
+      {data.daily.length === 0 ? (
+        // The range select above stays live — a quiet week can still switch
+        // to 90 days and find history.
+        <EmptyState
+          icon={Analytics01Icon}
+          title="No usage in this range"
+          description="Every generation attempt lands here once someone chats — tokens, messages and cost, including retries and title runs."
+        />
+      ) : (
+        <>
+          <UsageOverview
+            summary={data.summary}
+            daily={data.daily}
+            byModel={data.byModel}
+            days={days}
+            showActiveUsers
+          />
+          <ChartCard title="By user">
+            <UsersTable byUser={data.byUser} />
+          </ChartCard>
+        </>
+      )}
     </AdminPage>
   );
 }

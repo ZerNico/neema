@@ -145,22 +145,16 @@ export function UsageOverview({
         <MessagesPerDayChart daily={daily} days={days} />
       </ChartCard>
       <ChartCard title="By model">
-        {byModel.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No usage recorded yet.</p>
-        ) : (
-          <>
-            <TokensByModelChart byModel={byModel} />
-            <UsageTable
-              head={["Model", "Messages", "Tokens", "Cost"]}
-              rows={byModel.map((row) => [
-                row.modelName,
-                formatCount(row.messages),
-                formatTokens(row.inputTokens + row.outputTokens),
-                row.cost > 0 ? formatCost(row.cost) : "—",
-              ])}
-            />
-          </>
-        )}
+        <TokensByModelChart byModel={byModel} />
+        <UsageTable
+          head={["Model", "Messages", "Tokens", "Cost"]}
+          rows={byModel.map((row) => [
+            row.modelName,
+            formatCount(row.messages),
+            formatTokens(row.inputTokens + row.outputTokens),
+            row.cost > 0 ? formatCost(row.cost) : "—",
+          ])}
+        />
       </ChartCard>
     </>
   );
