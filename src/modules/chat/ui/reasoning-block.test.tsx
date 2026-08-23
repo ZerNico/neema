@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 
 const toggle = () => screen.getByRole("button", { name: /Thinking|Thought process/ });
-const pane = () => screen.queryByText("Chain of thought…");
+// Matched on assembled text, not a single node: while reasoning is active the
+// animation plugin splits the markdown into per-word spans.
+const paneShown = () => (document.body.textContent ?? "").includes("Chain of thought…");
 
 describe("ReasoningBlock", () => {
   it("shows only a pulse indicator for hidden reasoning while active", () => {
@@ -19,11 +21,11 @@ describe("ReasoningBlock", () => {
   it("auto-expands while thinking and collapses when the answer starts", () => {
     const { rerender } = render(<ReasoningBlock reasoning="Chain of thought…" active />);
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    expect(pane()).toBeInTheDocument();
+    expect(paneShown()).toBe(true);
 
     rerender(<ReasoningBlock reasoning="Chain of thought…" active={false} />);
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
-    expect(pane()).toBeNull();
+    expect(paneShown()).toBe(false);
   });
 
   it("lets a manual collapse stick while still thinking", () => {
@@ -49,7 +51,7 @@ describe("ReasoningBlock", () => {
     // A manual expand of the finished summary sticks.
     act(() => toggle().click());
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    expect(pane()).toBeInTheDocument();
+    expect(paneShown()).toBe(true);
   });
 
   it("re-arms the automatic behavior for the next generation", () => {

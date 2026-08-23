@@ -73,6 +73,8 @@ export function ReasoningBlock({
           <Streamdown
             mode={active ? "streaming" : "static"}
             parseIncompleteMarkdown
+            isAnimating={active}
+            animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
             className="space-y-2"
           >
             {reasoning}

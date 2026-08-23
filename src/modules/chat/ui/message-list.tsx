@@ -104,7 +104,7 @@ function AssistantMarkdown({
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
       isAnimating={streaming}
-      {...(streaming ? { caret: "block" as const } : {})}
+      animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
       {...(components ? { components } : {})}
       className={cn("space-y-3 [&_pre]:overflow-x-auto")}
     >
