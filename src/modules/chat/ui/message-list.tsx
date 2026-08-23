@@ -16,6 +16,7 @@ import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
+import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
@@ -103,6 +104,7 @@ function AssistantMarkdown({
     <Streamdown
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
+      plugins={markdownPlugins}
       isAnimating={streaming}
       animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
       {...(components ? { components } : {})}

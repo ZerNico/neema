@@ -2,6 +2,7 @@ import { ArrowDown01Icon, AiBrain01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
+import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 
 // ChatGPT-style thinking section above an assistant answer.
@@ -73,6 +74,7 @@ export function ReasoningBlock({
           <Streamdown
             mode={active ? "streaming" : "static"}
             parseIncompleteMarkdown
+            plugins={markdownPlugins}
             isAnimating={active}
             animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
             className="space-y-2"

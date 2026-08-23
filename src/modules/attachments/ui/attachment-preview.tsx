@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
+import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { type AttachmentKind, formatFileSize, textLanguage } from "../constants.ts";
 import {
   Dialog,
@@ -132,7 +133,11 @@ function TextPreview({ url, language }: { url: string; language: string }) {
         // Streamdown's pipeline ignores raw HTML (no rehype-raw), so an
         // uploaded file cannot inject markup here.
         <div className="max-h-[65vh] overflow-auto">
-          <Streamdown mode="static" className="space-y-3 text-sm [&_pre]:overflow-x-auto">
+          <Streamdown
+            mode="static"
+            plugins={markdownPlugins}
+            className="space-y-3 text-sm [&_pre]:overflow-x-auto"
+          >
             {markdown ? state.text : fenceCode(state.text, language)}
           </Streamdown>
         </div>
