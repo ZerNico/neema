@@ -203,8 +203,10 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
 
 // Tweens the wrapper's height when `editing` flips. The virtual list measures
 // rows with a ResizeObserver, so a gradual height change carries the rows
-// below along frame by frame — but only `height` may be animated here; the
-// virtualizer owns the row's transform.
+// below along frame by frame — but only `height` may be animated here. A
+// transform would make this a containing block and strand the sticky
+// code-block toolbar inside the message, which is why the row itself is
+// positioned with `top` rather than translateY.
 function useEditSwapHeight(editing: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const wasEditing = useRef(editing);

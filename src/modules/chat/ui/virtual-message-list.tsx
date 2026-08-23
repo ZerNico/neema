@@ -103,8 +103,12 @@ export function VirtualMessageList({
               key={item.key}
               ref={virtualizer.measureElement}
               data-index={item.index}
-              className="absolute left-0 top-0 w-full px-4 py-2"
-              style={{ transform: `translateY(${item.start}px)` }}
+              // Offset with `top`, not translateY: a transform makes the row a
+              // containing block, and a `position: sticky` descendant then
+              // resolves against the row instead of the scrollport — which
+              // parked streamdown's code-block toolbar partway down the page.
+              className="absolute left-0 w-full px-4 py-2"
+              style={{ top: item.start }}
             >
               <MessageBubble message={messages[item.index]!} />
             </div>
