@@ -1,4 +1,18 @@
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -14,6 +28,8 @@ import {
 } from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
+/** A list row plus the live state the list surfaces (sidebar spinner). */
+export type ConversationListRow = ConversationRow & { generating: boolean };
 /** Position in the conversation list order: activity timestamp, then id. */
 export interface ConversationCursor {
   readonly activity: Date;
@@ -45,7 +61,7 @@ export class ChatRepo extends Context.Service<
       /** Case-insensitive substring match on the title; blank matches all. */
       query?: string | undefined;
     }): Effect.Effect<{
-      conversations: ConversationRow[];
+      conversations: ConversationListRow[];
       nextCursor: ConversationCursor | null;
     }>;
     getConversation(
@@ -185,7 +201,14 @@ export class ChatRepo extends Context.Service<
           const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
           const title = input.query?.trim();
           const rows = yield* db
-            .select()
+            .select({
+              ...getTableColumns(conversations),
+              // Live per-row state for the list UIs: an answer is being
+              // generated iff a message row is still streaming. The sync bus
+              // invalidates the list on every message.status flip, so the
+              // flag turns on and off without polling.
+              generating: sql<boolean>`exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming')`,
+            })
             .from(conversations)
             .where(
               and(

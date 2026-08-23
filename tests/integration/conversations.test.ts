@@ -4,7 +4,7 @@ import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations } from "~/db/schema/index.ts";
+import { conversations, messages } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type ConversationCursor } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -172,6 +172,57 @@ describe("listConversations pagination", () => {
       }),
     );
     expect(ids).toEqual(["mine-1"]);
+  });
+});
+
+describe("listConversations generating flag", () => {
+  it("flags exactly the conversations with an answer still streaming", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        yield* seed(userId, [
+          { id: "gen-busy", title: "Busy", created: 1000 },
+          { id: "gen-idle", title: "Idle", created: 2000 },
+        ]);
+        // One finished turn in each; only the busy one has a second answer
+        // still open. The finished rows prove the flag reads status, not
+        // mere message existence.
+        yield* db.insert(messages).values([
+          { id: uuidv7(), conversationId: "gen-busy", role: "assistant", status: "complete" },
+          { id: uuidv7(), conversationId: "gen-busy", role: "assistant", status: "streaming" },
+          { id: uuidv7(), conversationId: "gen-idle", role: "assistant", status: "complete" },
+        ]);
+        const repo = yield* ChatRepo;
+        const page = yield* repo.listConversations({ userId, limit: 10 });
+        return page.conversations.map((c) => ({ id: c.id, generating: c.generating }));
+      }),
+    );
+    expect(rows).toEqual([
+      { id: "gen-idle", generating: false },
+      { id: "gen-busy", generating: true },
+    ]);
+  });
+
+  it("treats a failed or stopped answer as done", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        yield* seed(userId, [
+          { id: "gen-err", title: "Errored", created: 1000 },
+          { id: "gen-stop", title: "Stopped", created: 2000 },
+        ]);
+        yield* db.insert(messages).values([
+          { id: uuidv7(), conversationId: "gen-err", role: "assistant", status: "error" },
+          { id: uuidv7(), conversationId: "gen-stop", role: "assistant", status: "aborted" },
+        ]);
+        const repo = yield* ChatRepo;
+        const page = yield* repo.listConversations({ userId, limit: 10 });
+        return page.conversations.map((c) => c.generating);
+      }),
+    );
+    expect(rows).toEqual([false, false]);
   });
 });
 

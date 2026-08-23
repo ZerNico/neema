@@ -39,6 +39,7 @@ const conversation = (id: string, title: string | null, minutesAgo: number) => (
   title,
   modelId: "m1",
   branchedFrom: null as string | null,
+  generating: false,
   createdAt: new Date(BASE - minutesAgo * 60_000),
   updatedAt: new Date(BASE - minutesAgo * 60_000),
   lastMessageAt: new Date(BASE - minutesAgo * 60_000),
@@ -162,6 +163,38 @@ describe("ChatsPage", () => {
     expect(within(forked).getByLabelText("Branched conversation")).toBeInTheDocument();
     const root = screen.getByText("Root chat").closest("a")!;
     expect(within(root).queryByLabelText("Branched conversation")).toBeNull();
+  });
+
+  it("spins on the rows still writing an answer", async () => {
+    listMock.mockResolvedValue({
+      conversations: [
+        { ...conversation("a", "Busy chat", 5), generating: true },
+        conversation("b", "Settled chat", 10),
+      ],
+      nextCursor: null,
+    } as never);
+
+    renderPage();
+
+    const busy = (await screen.findByText("Busy chat")).closest("a")!;
+    expect(within(busy).getByLabelText("Generating")).toBeInTheDocument();
+    const settled = screen.getByText("Settled chat").closest("a")!;
+    expect(within(settled).queryByLabelText("Generating")).toBeNull();
+  });
+
+  it("lets the spinner displace the branch icon until the answer lands", async () => {
+    listMock.mockResolvedValue({
+      conversations: [
+        { ...conversation("a", "Busy fork", 5), branchedFrom: "root", generating: true },
+      ],
+      nextCursor: null,
+    } as never);
+
+    renderPage();
+
+    const row = (await screen.findByText("Busy fork")).closest("a")!;
+    expect(within(row).getByLabelText("Generating")).toBeInTheDocument();
+    expect(within(row).queryByLabelText("Branched conversation")).toBeNull();
   });
 
   it("offers rename and delete per row", async () => {

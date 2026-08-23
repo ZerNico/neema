@@ -1,6 +1,7 @@
 import {
   BubbleChatIcon,
   GitBranchIcon,
+  Loading03Icon,
   MoreHorizontalIcon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -119,7 +120,15 @@ export function ChatsPage() {
                       className="hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-lg px-3 py-2.5 pr-11 text-sm transition-colors"
                       {...(hydrated ? { title: describeActivity(conversation) } : {})}
                     >
-                      {conversation.branchedFrom ? (
+                      {/* Same slot precedence as the sidebar: generation is
+                          transient and outranks lineage for the moment. */}
+                      {conversation.generating ? (
+                        <HugeiconsIcon
+                          icon={Loading03Icon}
+                          className="text-muted-foreground size-3.5 shrink-0 animate-spin"
+                          aria-label="Generating"
+                        />
+                      ) : conversation.branchedFrom ? (
                         <HugeiconsIcon
                           icon={GitBranchIcon}
                           className="text-muted-foreground size-3.5 shrink-0"

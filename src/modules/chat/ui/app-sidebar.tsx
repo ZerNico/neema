@@ -2,6 +2,7 @@ import {
   BubbleChatIcon,
   Logout03Icon,
   GitBranchIcon,
+  Loading03Icon,
   PlusSignIcon,
   Settings02Icon,
   UserCircleIcon,
@@ -118,7 +119,15 @@ export function AppSidebar({
                         />
                       }
                     >
-                      {conversation.branchedFrom ? (
+                      {/* The spinner borrows the branch icon's slot: while an
+                          answer streams, "busy" is the state worth a glance. */}
+                      {conversation.generating ? (
+                        <HugeiconsIcon
+                          icon={Loading03Icon}
+                          className="text-muted-foreground shrink-0 animate-spin"
+                          aria-label="Generating"
+                        />
+                      ) : conversation.branchedFrom ? (
                         <HugeiconsIcon
                           icon={GitBranchIcon}
                           className="text-muted-foreground shrink-0"
