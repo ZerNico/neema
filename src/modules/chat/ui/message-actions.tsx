@@ -58,46 +58,83 @@ function ActionButton({
   );
 }
 
+// The retry button is a menu, not a split control: it always opens with
+// "Retry same" pinned on top and the model list underneath, so both paths
+// share one target (the t3.chat pattern).
+//
 // Deliberately not useSuspenseQuery: the composer already suspends on this
-// list, so the cache is warm by the time the picker opens — and a message row
+// list, so the cache is warm by the time the menu opens — and a message row
 // that suspends would blank the conversation around it.
-function RetryModelPicker({
-  currentModelId,
-  onPick,
+function RetryMenu({
+  onRetry,
+  onRetryWith,
+  retryModelId,
   disabled,
 }: {
-  currentModelId?: string | null | undefined;
-  onPick: (modelId: string) => void;
+  onRetry: () => void;
+  onRetryWith: (modelId: string) => void;
+  retryModelId?: string | null | undefined;
   disabled: boolean;
 }) {
   const { data: models } = useQuery(chatModelsQuery);
 
   return (
-    <ModelPicker
-      models={models ?? []}
-      // Marks whichever model wrote the answer being replaced, so "same again"
-      // and "something else" are one glance apart.
-      value={currentModelId}
-      onChange={onPick}
-      disabled={disabled}
-      side="bottom"
-      emptyLabel={models === undefined ? "Loading models…" : "No models match"}
-      trigger={
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Retry with another model"
-          disabled={disabled}
-          className="text-muted-foreground w-5 rounded-l-none px-0 [&>svg]:size-3.5"
-        />
-      }
-    />
+    <Tooltip>
+      <ModelPicker
+        models={models ?? []}
+        // Marks whichever model wrote the answer being replaced, so "same
+        // again" and "something else" are one glance apart in the list too.
+        value={retryModelId}
+        onChange={onRetryWith}
+        disabled={disabled}
+        side="bottom"
+        emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+        header={({ close }) => (
+          <div className="p-1.5 pb-0">
+            <button
+              type="button"
+              className="hover:bg-accent hover:text-accent-foreground flex w-full cursor-default items-center gap-2.5 rounded-2xl px-3 py-2 text-sm font-medium select-none [&_svg]:size-4 [&_svg]:shrink-0"
+              onClick={() => {
+                close();
+                onRetry();
+              }}
+            >
+              <HugeiconsIcon icon={ArrowReloadHorizontalIcon} />
+              Retry same
+            </button>
+            <div
+              className="text-muted-foreground my-1 flex items-center gap-2 px-2 text-xs"
+              role="separator"
+            >
+              <span className="bg-border h-px flex-1" />
+              or switch model
+              <span className="bg-border h-px flex-1" />
+            </div>
+          </div>
+        )}
+        trigger={
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Retry"
+                disabled={disabled}
+                // The trigger primitive appends its own chevron; on an
+                // icon-sized button the retry glyph alone is the affordance.
+                className="text-muted-foreground [&>svg:last-child]:hidden"
+              />
+            }
+          />
+        }
+      >
+        <HugeiconsIcon icon={ArrowReloadHorizontalIcon} className="size-4" />
+      </ModelPicker>
+      <TooltipContent>Retry</TooltipContent>
+    </Tooltip>
   );
 }
 
-// Split control: the button repeats the generation with the model that already
-// answered, the chevron beside it swaps in another one. Two targets rather than
-// a menu on the icon, so the common case stays a single click.
 function RetryControl({
   onRetry,
   onRetryWith,
@@ -109,8 +146,10 @@ function RetryControl({
   retryModelId?: string | null | undefined;
   disabled: boolean;
 }) {
-  return (
-    <div className="flex items-center">
+  // No model switch wired (e.g. the caller has no models to offer) — the
+  // button degrades to a plain immediate retry.
+  if (!onRetryWith) {
+    return (
       <Tooltip>
         <TooltipTrigger
           render={
@@ -120,7 +159,7 @@ function RetryControl({
               aria-label="Retry"
               onClick={onRetry}
               disabled={disabled}
-              className={cn("text-muted-foreground", onRetryWith && "w-7 rounded-r-none pr-0.5")}
+              className="text-muted-foreground"
             />
           }
         >
@@ -128,10 +167,15 @@ function RetryControl({
         </TooltipTrigger>
         <TooltipContent>Retry</TooltipContent>
       </Tooltip>
-      {onRetryWith ? (
-        <RetryModelPicker currentModelId={retryModelId} onPick={onRetryWith} disabled={disabled} />
-      ) : null}
-    </div>
+    );
+  }
+  return (
+    <RetryMenu
+      onRetry={onRetry}
+      onRetryWith={onRetryWith}
+      retryModelId={retryModelId}
+      disabled={disabled}
+    />
   );
 }
 

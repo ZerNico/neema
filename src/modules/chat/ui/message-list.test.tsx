@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "./message-list.tsx";
@@ -370,17 +370,47 @@ describe("MessageBubble actions", () => {
     ).toEqual(["Copy", "Branch off", "Retry"]);
   });
 
-  it("offers the model chevron only when retry-with is wired", () => {
-    renderPlain({ onRetry: vi.fn() });
-    expect(screen.queryByRole("combobox", { name: "Retry with another model" })).toBeNull();
+  it("retries immediately only when no model switch is wired", () => {
+    const onRetry = vi.fn();
+    renderPlain({ onRetry });
+    // Plain button, no menu: the click IS the retry.
+    expect(screen.queryByRole("combobox", { name: "Retry" })).toBeNull();
+    screen.getByRole("button", { name: "Retry" }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
   });
 
-  it("picks a different model from the retry picker", async () => {
+  it("opens the retry menu instead of retrying when models are on offer", async () => {
     const onRetry = vi.fn();
     const onRetryWith = vi.fn();
     renderPlain({ onRetry, onRetryWith, retryModelId: "model-1" });
 
-    screen.getByRole("combobox", { name: "Retry with another model" }).click();
+    screen.getByRole("combobox", { name: "Retry" }).click();
+    await screen.findByRole("button", { name: /Retry same/ });
+    // Opening the menu alone must not regenerate anything.
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("retries with the same model from the pinned menu row", async () => {
+    const onRetry = vi.fn();
+    const onRetryWith = vi.fn();
+    renderPlain({ onRetry, onRetryWith, retryModelId: "model-1" });
+
+    screen.getByRole("combobox", { name: "Retry" }).click();
+    (await screen.findByRole("button", { name: /Retry same/ })).click();
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onRetryWith).not.toHaveBeenCalled();
+    // The row dismisses the menu like a model pick would (after its exit
+    // animation).
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Retry same/ })).toBeNull());
+  });
+
+  it("picks a different model from the retry menu", async () => {
+    const onRetry = vi.fn();
+    const onRetryWith = vi.fn();
+    renderPlain({ onRetry, onRetryWith, retryModelId: "model-1" });
+
+    screen.getByRole("combobox", { name: "Retry" }).click();
 
     // The model that wrote the answer is marked, so "same again" is visible.
     const current = await screen.findByRole("option", { name: /Test Model/ });
@@ -391,7 +421,7 @@ describe("MessageBubble actions", () => {
     other.click();
 
     expect(onRetryWith).toHaveBeenCalledWith("model-2");
-    // The plain retry is a separate target and must not have fired.
+    // Switching models is its own path; the same-model retry must not fire.
     expect(onRetry).not.toHaveBeenCalled();
   });
 

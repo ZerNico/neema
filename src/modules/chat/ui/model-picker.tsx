@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import type { Capabilities } from "~/modules/providers/ui/capability-icons.tsx";
 import type { ReactNode } from "react";
@@ -40,8 +40,8 @@ const matches = (model: PickableModel, query: string): boolean => {
 
 /**
  * Searchable, provider-grouped model list. Shared by the composer's model
- * button and the retry-with chevron so both offer the same rows, the same
- * grouping and the same typeahead — only the trigger differs.
+ * button and the retry menu so both offer the same rows, the same grouping and
+ * the same typeahead — only the trigger (and an optional header) differs.
  */
 export function ModelPicker({
   models,
@@ -49,6 +49,7 @@ export function ModelPicker({
   onChange,
   trigger,
   children,
+  header,
   disabled = false,
   align = "start",
   side = "top",
@@ -62,6 +63,13 @@ export function ModelPicker({
   trigger: React.ReactElement<Record<string, unknown>>;
   /** Visible trigger content; the primitive appends its own chevron. */
   children?: ReactNode;
+  /**
+   * Rendered inside the popup above the search input — extra actions that
+   * belong to the trigger, not to any model (e.g. the retry menu's
+   * "Retry same" row). Gets a `close` so a chosen action can dismiss the
+   * popup, which model selection otherwise does on its own.
+   */
+  header?: (args: { close: () => void }) => ReactNode;
   disabled?: boolean;
   align?: "start" | "center" | "end";
   side?: "top" | "bottom";
@@ -84,8 +92,14 @@ export function ModelPicker({
     [models, value],
   );
 
+  // Controlled only so the header's actions can close the popup; model
+  // selection still closes it through the primitive's own change event.
+  const [open, setOpen] = useState(false);
+
   return (
     <Combobox
+      open={open}
+      onOpenChange={setOpen}
       items={groups}
       value={selected}
       disabled={disabled}
@@ -103,6 +117,7 @@ export function ModelPicker({
         {children}
       </ComboboxTrigger>
       <ComboboxContent side={side} align={align} className="w-72 min-w-72">
+        {header?.({ close: () => setOpen(false) })}
         <ComboboxInput placeholder="Search models…" showTrigger={false} />
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
         <ComboboxList>
