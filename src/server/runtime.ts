@@ -6,6 +6,7 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -25,10 +26,12 @@ const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).p
 );
 // ChatRepo claims attachments inside its own transactions, so AttachmentRepo
 // has to be provided to it rather than merged beside it.
-const ReposLayer = Layer.mergeAll(ChatRepo.layer, ProviderRepo.layer, ToolsRepo.layer).pipe(
-  Layer.provideMerge(AttachmentRepo.layer),
-  Layer.provideMerge(InfraLayer),
-);
+const ReposLayer = Layer.mergeAll(
+  ChatRepo.layer,
+  ProviderRepo.layer,
+  ToolsRepo.layer,
+  GroupRepo.layer,
+).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = WebSearchExecutor.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
 );

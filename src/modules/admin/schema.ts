@@ -47,3 +47,27 @@ export const UpdateModelInput = Schema.Struct({
 export const ModelIdInput = Schema.Struct({
   modelId: Schema.String,
 });
+
+export const CreateGroupInput = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+});
+
+export const RenameGroupInput = Schema.Struct({
+  groupId: Schema.String,
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+});
+
+export const GroupIdInput = Schema.Struct({
+  groupId: Schema.String,
+});
+
+export const GroupMemberInput = Schema.Struct({
+  groupId: Schema.String,
+  userId: Schema.String,
+});
+
+export const UpdateModelAccessInput = Schema.Struct({
+  modelId: Schema.String,
+  access: Schema.Literals(["public", "groups"]),
+  groupIds: Schema.Array(Schema.String),
+});

@@ -142,6 +142,11 @@ function makeChatService() {
         if (!model || !model.enabled || model.type !== "chat") {
           return yield* new ModelNotFound({ modelId: input.modelId });
         }
+        // Group-restricted models answer exactly like nonexistent ones, so a
+        // denied id discloses nothing.
+        if (!(yield* providers.isModelAccessible(input.userId, input.modelId))) {
+          return yield* new ModelNotFound({ modelId: input.modelId });
+        }
 
         if (input.searchEnabled) {
           if (!model.capabilities.tools) {
@@ -377,6 +382,11 @@ function makeChatService() {
       }
       const model = yield* providers.getModel(modelId);
       if (!model || !model.enabled || model.type !== "chat") {
+        return yield* new ModelNotFound({ modelId });
+      }
+      // Checked on the resolved id: "Retry same" must also stop working once
+      // the user's group access to the original model is gone.
+      if (!(yield* providers.isModelAccessible(input.userId, modelId))) {
         return yield* new ModelNotFound({ modelId });
       }
 

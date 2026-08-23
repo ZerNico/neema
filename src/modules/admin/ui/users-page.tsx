@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "~/modules/auth/client.ts";
 import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
+import { membershipsQuery } from "./groups-page.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -17,6 +18,8 @@ import { Skeleton } from "~/ui/primitives/skeleton";
 export function UsersPage() {
   const queryClient = useQueryClient();
   const session = authClient.useSession();
+  // Read-only here; membership is edited on the group detail pages.
+  const memberships = useQuery(membershipsQuery);
 
   const users = useQuery({
     queryKey: ["admin", "users"],
@@ -97,6 +100,13 @@ export function UsersPage() {
                   </span>
                   <span className="text-muted-foreground truncate text-xs">{user.email}</span>
                 </div>
+                {(memberships.data ?? [])
+                  .filter((membership) => membership.userId === user.id)
+                  .map((membership) => (
+                    <Badge key={membership.groupId} variant="secondary">
+                      {membership.groupName}
+                    </Badge>
+                  ))}
                 {user.banned ? <Badge variant="destructive">banned</Badge> : null}
                 <Badge variant={isAdmin ? "default" : "outline"}>
                   {isAdmin ? "admin" : "user"}

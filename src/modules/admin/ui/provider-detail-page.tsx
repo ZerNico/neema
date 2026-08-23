@@ -17,6 +17,7 @@ import {
   updateProvider,
 } from "../server/functions.ts";
 import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
+import { ModelAccessControl } from "./model-access-control.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
 import {
   CAPABILITY_META,
@@ -205,6 +206,11 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                     <CapabilityIcons capabilities={model.capabilities} />
                   </span>
                 </div>
+                <ModelAccessControl
+                  modelId={model.id}
+                  modelName={model.displayName}
+                  access={model.access}
+                />
                 <Switch
                   checked={model.enabled}
                   onCheckedChange={(enabled) => toggleModel.mutate({ modelId: model.id, enabled })}

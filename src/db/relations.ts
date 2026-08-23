@@ -7,6 +7,7 @@ export const relations = defineRelations(schema, (r) => ({
     sessions: r.many.session(),
     attachments: r.many.attachments(),
     attachmentBlobs: r.many.attachmentBlobs(),
+    groupMemberships: r.many.groupMembers(),
   },
   session: {
     user: r.one.user({
@@ -98,6 +99,35 @@ export const relations = defineRelations(schema, (r) => ({
     provider: r.one.providers({
       from: r.models.providerId,
       to: r.providers.id,
+      optional: false,
+    }),
+    groupAccess: r.many.modelGroupAccess(),
+  },
+  groups: {
+    members: r.many.groupMembers(),
+    modelAccess: r.many.modelGroupAccess(),
+  },
+  groupMembers: {
+    group: r.one.groups({
+      from: r.groupMembers.groupId,
+      to: r.groups.id,
+      optional: false,
+    }),
+    user: r.one.user({
+      from: r.groupMembers.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+  },
+  modelGroupAccess: {
+    model: r.one.models({
+      from: r.modelGroupAccess.modelId,
+      to: r.models.id,
+      optional: false,
+    }),
+    group: r.one.groups({
+      from: r.modelGroupAccess.groupId,
+      to: r.groups.id,
       optional: false,
     }),
   },

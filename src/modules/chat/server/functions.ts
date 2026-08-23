@@ -261,21 +261,11 @@ export const renameConversation = createServerFn({ method: "POST" })
 
 export const listChatModels = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .handler(() =>
+  .handler(({ context }) =>
     runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ProviderRepo;
-        const models = yield* repo.listModels({ enabledOnly: true });
-        // The picker groups by provider, so each model carries its provider's
-        // display name — the id alone means nothing to the person choosing.
-        const providers = yield* repo.listProviders();
-        const nameOf = new Map(providers.map((provider) => [provider.id, provider.name]));
-        return models
-          .filter((m) => m.type === "chat")
-          .map((model) => ({
-            ...model,
-            providerName: nameOf.get(model.providerId) ?? "Other",
-          }));
-      }),
+      // Filtered to what THIS user may see: public models plus private ones
+      // shared with a group they belong to (admins see everything). The rows
+      // carry the provider's display name — the picker groups by it.
+      ProviderRepo.use((repo) => repo.listChatModelsFor(context.session.user.id)),
     ),
   );

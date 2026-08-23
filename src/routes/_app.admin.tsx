@@ -1,4 +1,9 @@
-import { CloudServerIcon, UserMultipleIcon, WrenchIcon } from "@hugeicons/core-free-icons";
+import {
+  CloudServerIcon,
+  UserGroupIcon,
+  UserMultipleIcon,
+  WrenchIcon,
+} from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { AdminShell } from "~/modules/admin/ui/admin-shell.tsx";
 
@@ -30,6 +35,12 @@ function AdminLayout() {
           label: "Users",
           icon: UserMultipleIcon,
           matchPrefix: "/admin/users",
+        },
+        {
+          to: "/admin/groups",
+          label: "Groups",
+          icon: UserGroupIcon,
+          matchPrefix: "/admin/groups",
         },
       ]}
     >

@@ -1,14 +1,17 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, exists, getTableColumns, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer, type Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { models, providers } from "~/db/schema/index.ts";
+import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
 import { KeyCipher } from "./crypto.ts";
 
 export type ProviderKind = "openrouter" | "openai-compatible";
 export type ModelType = "chat" | "embedding" | "image" | "audio";
 
 export type ModelRow = typeof models.$inferSelect;
+export type ModelAccess = ModelRow["access"];
+/** A model as the chat picker consumes it: its row plus the provider's name. */
+export type ChatModelRow = ModelRow & { providerName: string };
 type ProviderRow = typeof providers.$inferSelect;
 // Provider rows with the ciphertext stripped — safe to send to admin clients.
 export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext">;
@@ -34,6 +37,20 @@ export class ProviderRepo extends Context.Service<
     // Internal: full row incl. decrypted key, for the AI gateway only.
     getProviderWithKey(providerId: string): Effect.Effect<ProviderWithKey | null>;
     listModels(filter?: { providerId?: string; enabledOnly?: boolean }): Effect.Effect<ModelRow[]>;
+    /**
+     * The enabled chat models this user may see: public ones, plus private
+     * ones shared with a group the user belongs to. Admins see everything.
+     */
+    listChatModelsFor(userId: string): Effect.Effect<ChatModelRow[]>;
+    /** Same predicate as listChatModelsFor, for one model (any type/state). */
+    isModelAccessible(userId: string, modelId: string): Effect.Effect<boolean>;
+    /** Atomically sets access and replaces the allowed-group links. */
+    updateModelAccess(
+      modelId: string,
+      access: ModelAccess,
+      groupIds: ReadonlyArray<string>,
+    ): Effect.Effect<void>;
+    listModelAccess(): Effect.Effect<Array<{ modelId: string; groupId: string }>>;
     getModel(modelId: string): Effect.Effect<ModelRow | null>;
     createModel(input: {
       providerId: string;
@@ -62,6 +79,27 @@ export class ProviderRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const cipher = yield* KeyCipher;
+
+      // Who may use a model: everyone when public, admins always, otherwise
+      // members of a linked group. Evaluated in SQL so listing and the
+      // per-request check can never drift apart.
+      const accessibleBy = (userId: string) =>
+        or(
+          eq(models.access, "public"),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(user)
+              .where(and(eq(user.id, userId), eq(user.role, "admin"))),
+          ),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(modelGroupAccess)
+              .innerJoin(groupMembers, eq(groupMembers.groupId, modelGroupAccess.groupId))
+              .where(and(eq(modelGroupAccess.modelId, models.id), eq(groupMembers.userId, userId))),
+          ),
+        );
 
       return ProviderRepo.of({
         listProviders: Effect.fn("ProviderRepo.listProviders")(function* () {
@@ -124,6 +162,56 @@ export class ProviderRepo extends Context.Service<
           if (filter?.providerId) rows = rows.filter((m) => m.providerId === filter.providerId);
           if (filter?.enabledOnly) rows = rows.filter((m) => m.enabled);
           return rows;
+        }),
+
+        listChatModelsFor: Effect.fn("ProviderRepo.listChatModelsFor")(function* (userId) {
+          return yield* db
+            .select({ ...getTableColumns(models), providerName: providers.name })
+            .from(models)
+            .innerJoin(providers, eq(providers.id, models.providerId))
+            .where(and(eq(models.enabled, true), eq(models.type, "chat"), accessibleBy(userId)))
+            .orderBy(asc(models.displayName))
+            .pipe(Effect.orDie);
+        }),
+
+        isModelAccessible: Effect.fn("ProviderRepo.isModelAccessible")(function* (userId, modelId) {
+          const rows = yield* db
+            .select({ id: models.id })
+            .from(models)
+            .where(and(eq(models.id, modelId), accessibleBy(userId)))
+            .limit(1)
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
+
+        updateModelAccess: Effect.fn("ProviderRepo.updateModelAccess")(
+          function* (modelId, access, groupIds) {
+            yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  yield* tx
+                    .update(models)
+                    .set({ access, updatedAt: new Date() })
+                    .where(eq(models.id, modelId));
+                  // Replace wholesale: the editor submits the complete set, and
+                  // the lists are small enough that diffing buys nothing.
+                  yield* tx.delete(modelGroupAccess).where(eq(modelGroupAccess.modelId, modelId));
+                  if (access === "groups" && groupIds.length > 0) {
+                    yield* tx
+                      .insert(modelGroupAccess)
+                      .values(groupIds.map((groupId) => ({ modelId, groupId })));
+                  }
+                }),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        listModelAccess: Effect.fn("ProviderRepo.listModelAccess")(function* () {
+          return yield* db
+            .select({ modelId: modelGroupAccess.modelId, groupId: modelGroupAccess.groupId })
+            .from(modelGroupAccess)
+            .pipe(Effect.orDie);
         }),
 
         getModel: Effect.fn("ProviderRepo.getModel")(function* (modelId) {

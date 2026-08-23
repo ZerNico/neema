@@ -1,0 +1,80 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Suspense } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GroupsPage } from "./groups-page.tsx";
+import { createGroup } from "../server/functions.ts";
+
+vi.mock("../server/functions.ts", () => ({
+  listGroups: vi.fn(),
+  listGroupMemberships: vi.fn(),
+  createGroup: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, params, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
+    <a
+      href={String(to)}
+      data-group-id={(params as { groupId?: string } | undefined)?.groupId}
+      {...(rest as object)}
+    >
+      {children as never}
+    </a>
+  ),
+  useMatches: () => [{ pathname: "/admin/groups" }],
+  useNavigate: () => vi.fn(),
+  useParams: () => ({}),
+}));
+
+const createMock = vi.mocked(createGroup);
+
+const group = (id: string, name: string, memberCount: number) => ({
+  id,
+  name,
+  memberCount,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
+const renderPage = (groups: ReturnType<typeof group>[]) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["admin", "groups"], groups);
+  return render(
+    <QueryClientProvider client={client}>
+      <Suspense fallback={null}>
+        <GroupsPage />
+      </Suspense>
+    </QueryClientProvider>,
+  );
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("GroupsPage", () => {
+  it("lists groups with their member counts, each linking to its detail", async () => {
+    renderPage([group("g1", "Engineering", 3), group("g2", "Design", 1)]);
+
+    const row = (await screen.findByText("Engineering")).closest("a")!;
+    expect(row).toHaveAttribute("data-group-id", "g1");
+    expect(row.textContent).toContain("3 members");
+    expect(screen.getByText("Design").closest("a")!.textContent).toContain("1 member");
+  });
+
+  it("offers creation from the empty state", async () => {
+    renderPage([]);
+    expect(await screen.findByText("No groups yet")).toBeInTheDocument();
+  });
+
+  it("creates a group from the dialog", async () => {
+    createMock.mockResolvedValue(group("g9", "Ops", 0) as never);
+    renderPage([group("g1", "Engineering", 3)]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New group" }));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Ops" } });
+    fireEvent.submit(screen.getByLabelText("Name").closest("form")!);
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledWith({ data: { name: "Ops" } }));
+  });
+});

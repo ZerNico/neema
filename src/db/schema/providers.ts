@@ -41,6 +41,11 @@ export const models = pgTable(
       .notNull()
       .default({ reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
+    // "public": every user sees and can use it. "groups": only members of the
+    // groups linked via model_group_access (admins always bypass).
+    access: text({ enum: ["public", "groups"] })
+      .notNull()
+      .default("public"),
     enabled: boolean().notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,14 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin } from "~/modules/auth/server/middleware.ts";
+import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
+  CreateGroupInput,
   CreateModelInput,
   CreateProviderInput,
+  GroupIdInput,
+  GroupMemberInput,
   ModelIdInput,
   ProviderIdInput,
+  RenameGroupInput,
+  UpdateModelAccessInput,
   UpdateModelInput,
   UpdateProviderInput,
 } from "../schema.ts";
@@ -78,3 +84,93 @@ export const deleteModel = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     runtime.runPromise(ProviderRepo.use((repo) => repo.deleteModel(data.modelId))),
   );
+
+// --- Groups ---
+
+const conflict = () => Effect.die(new Response("Group name already taken", { status: 409 }));
+const groupGone = () => Effect.die(new Response("Group not found", { status: 404 }));
+
+export const listGroups = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(GroupRepo.use((repo) => repo.listGroups())));
+
+export const createGroup = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(CreateGroupInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      GroupRepo.use((repo) => repo.createGroup(data.name)).pipe(
+        Effect.catchTag("GroupNameTaken", conflict),
+      ),
+    ),
+  );
+
+export const renameGroup = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(RenameGroupInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      GroupRepo.use((repo) => repo.renameGroup(data.groupId, data.name)).pipe(
+        Effect.catchTag("GroupNameTaken", conflict),
+        Effect.catchTag("GroupNotFound", groupGone),
+      ),
+    ),
+  );
+
+export const deleteGroup = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupIdInput))
+  .handler(({ data }) =>
+    runtime.runPromise(GroupRepo.use((repo) => repo.deleteGroup(data.groupId))),
+  );
+
+export const getGroup = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupIdInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      GroupRepo.use((repo) => repo.getGroup(data.groupId)).pipe(
+        Effect.catchTag("GroupNotFound", groupGone),
+      ),
+    ),
+  );
+
+export const listGroupMembers = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupIdInput))
+  .handler(({ data }) =>
+    runtime.runPromise(GroupRepo.use((repo) => repo.listMembers(data.groupId))),
+  );
+
+export const listGroupMemberships = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(GroupRepo.use((repo) => repo.listMemberships())));
+
+export const addGroupMember = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupMemberInput))
+  .handler(({ data }) =>
+    runtime.runPromise(GroupRepo.use((repo) => repo.addMember(data.groupId, data.userId))),
+  );
+
+export const removeGroupMember = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupMemberInput))
+  .handler(({ data }) =>
+    runtime.runPromise(GroupRepo.use((repo) => repo.removeMember(data.groupId, data.userId))),
+  );
+
+// --- Model access ---
+
+export const updateModelAccess = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateModelAccessInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      ProviderRepo.use((repo) => repo.updateModelAccess(data.modelId, data.access, data.groupIds)),
+    ),
+  );
+
+export const listModelAccess = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ProviderRepo.use((repo) => repo.listModelAccess())));
