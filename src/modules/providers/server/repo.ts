@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, getTableColumns, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer, type Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -10,8 +10,13 @@ export type ModelType = "chat" | "embedding" | "image" | "audio";
 
 export type ModelRow = typeof models.$inferSelect;
 export type ModelAccess = ModelRow["access"];
-/** A model as the chat picker consumes it: its row plus the provider's name. */
-export type ChatModelRow = ModelRow & { providerName: string };
+/** A model as the chat picker consumes it — only what the picker renders. */
+export type ChatModelRow = Pick<
+  ModelRow,
+  "id" | "displayName" | "contextLength" | "capabilities"
+> & {
+  providerName: string;
+};
 type ProviderRow = typeof providers.$inferSelect;
 // Provider rows with the ciphertext stripped — safe to send to admin clients.
 export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext">;
@@ -38,11 +43,17 @@ export class ProviderRepo extends Context.Service<
     getProviderWithKey(providerId: string): Effect.Effect<ProviderWithKey | null>;
     listModels(filter?: { providerId?: string; enabledOnly?: boolean }): Effect.Effect<ModelRow[]>;
     /**
-     * The enabled chat models this user may see: public ones, plus private
-     * ones shared with a group the user belongs to. Admins see everything.
+     * The enabled chat models of enabled providers this user may see: public
+     * ones, plus private ones shared with a group the user belongs to. Admins
+     * see everything (but never models of a disabled provider).
      */
     listChatModelsFor(userId: string): Effect.Effect<ChatModelRow[]>;
-    /** Same predicate as listChatModelsFor, for one model (any type/state). */
+    /**
+     * May this user use this model right now: the listChatModelsFor access
+     * predicate plus an enabled provider. The model's own enabled/type flags
+     * are deliberately not checked — callers already hold the row via
+     * getModel and fold those into the same ModelNotFound.
+     */
     isModelAccessible(userId: string, modelId: string): Effect.Effect<boolean>;
     /** Atomically sets access and replaces the allowed-group links. */
     updateModelAccess(
@@ -165,11 +176,26 @@ export class ProviderRepo extends Context.Service<
         }),
 
         listChatModelsFor: Effect.fn("ProviderRepo.listChatModelsFor")(function* (userId) {
+          // Selects only what the picker renders: the full row would leak
+          // provider-internal details (modelKey, metadata) to every user.
           return yield* db
-            .select({ ...getTableColumns(models), providerName: providers.name })
+            .select({
+              id: models.id,
+              displayName: models.displayName,
+              contextLength: models.contextLength,
+              capabilities: models.capabilities,
+              providerName: providers.name,
+            })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
-            .where(and(eq(models.enabled, true), eq(models.type, "chat"), accessibleBy(userId)))
+            .where(
+              and(
+                eq(providers.enabled, true),
+                eq(models.enabled, true),
+                eq(models.type, "chat"),
+                accessibleBy(userId),
+              ),
+            )
             .orderBy(asc(models.displayName))
             .pipe(Effect.orDie);
         }),
@@ -178,7 +204,8 @@ export class ProviderRepo extends Context.Service<
           const rows = yield* db
             .select({ id: models.id })
             .from(models)
-            .where(and(eq(models.id, modelId), accessibleBy(userId)))
+            .innerJoin(providers, eq(providers.id, models.providerId))
+            .where(and(eq(models.id, modelId), eq(providers.enabled, true), accessibleBy(userId)))
             .limit(1)
             .pipe(Effect.orDie);
           return rows.length > 0;

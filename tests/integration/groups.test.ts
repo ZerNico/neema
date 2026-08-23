@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
-import { modelGroupAccess, models } from "~/db/schema/index.ts";
+import { modelGroupAccess, models, providers } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -127,18 +127,32 @@ const makeUser = Effect.fn("test.makeUser")(function* (role: "user" | "admin" = 
 });
 
 const makeModel = Effect.fn("test.makeModel")(function* (
-  options: { access?: "public" | "groups"; enabled?: boolean } = {},
+  options: { access?: "public" | "groups"; enabled?: boolean; providerId?: string } = {},
 ) {
   const db = yield* Db;
   const id = uuidv7();
   yield* db.insert(models).values({
     id,
-    providerId,
+    providerId: options.providerId ?? providerId,
     modelKey: `key-${id}`,
     displayName: `Model ${id.slice(-4)}`,
     type: "chat",
     access: options.access ?? "public",
     enabled: options.enabled ?? true,
+  });
+  return id;
+});
+
+const makeProvider = Effect.fn("test.makeProvider")(function* (enabled: boolean) {
+  const db = yield* Db;
+  const id = uuidv7();
+  yield* db.insert(providers).values({
+    id,
+    name: `Prov ${id.slice(-4)}`,
+    kind: "openrouter",
+    baseUrl: "http://x",
+    apiKeyCiphertext: "x",
+    enabled,
   });
   return id;
 });
@@ -271,6 +285,38 @@ describe("model visibility", () => {
       }),
     );
     expect(result.sees).not.toContain(result.dark);
+  });
+
+  it("hides every model of a disabled provider, even from admins, until it is re-enabled", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const providerRepo = yield* ProviderRepo;
+        const userId = yield* makeUser();
+        const admin = yield* makeUser("admin");
+        const offProvider = yield* makeProvider(false);
+        const model = yield* makeModel({ providerId: offProvider });
+
+        const whileOff = {
+          userSees: (yield* visibleIds(userId)).includes(model),
+          adminSees: (yield* visibleIds(admin)).includes(model),
+          userMayUse: yield* providerRepo.isModelAccessible(userId, model),
+          adminMayUse: yield* providerRepo.isModelAccessible(admin, model),
+        };
+        yield* providerRepo.updateProvider(offProvider, { enabled: true });
+        const afterOn = {
+          userSees: (yield* visibleIds(userId)).includes(model),
+          userMayUse: yield* providerRepo.isModelAccessible(userId, model),
+        };
+        return { whileOff, afterOn };
+      }),
+    );
+    expect(result.whileOff).toEqual({
+      userSees: false,
+      adminSees: false,
+      userMayUse: false,
+      adminMayUse: false,
+    });
+    expect(result.afterOn).toEqual({ userSees: true, userMayUse: true });
   });
 
   it("agrees with isModelAccessible across the whole matrix", async () => {
