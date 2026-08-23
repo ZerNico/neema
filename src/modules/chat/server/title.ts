@@ -1,7 +1,10 @@
 import { Cause, Duration, Effect } from "effect";
 import { Prompt } from "effect/unstable/ai";
+import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
+import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ChatRepo } from "./repo.ts";
 
 // Only what the generator touches, so unit tests can pass plain objects
@@ -10,6 +13,8 @@ export interface TitleDeps {
   readonly gateway: Pick<AiGateway["Service"], "generateText">;
   readonly repo: Pick<ChatRepo["Service"], "setTitleIfPending">;
   readonly sync: Pick<SyncBus["Service"], "publish">;
+  readonly providers: Pick<ProviderRepo["Service"], "getModel">;
+  readonly analytics: Pick<AnalyticsRepo["Service"], "record">;
 }
 
 export interface TitleInput {
@@ -116,6 +121,32 @@ export const generateConversationTitle = Effect.fn("chat.generateConversationTit
   );
 });
 
+// Side generations burn tokens too; without this the ledger undercounts
+// every new conversation by one small request.
+const recordTitleUsage = Effect.fn("chat.recordTitleUsage")(function* (
+  deps: TitleDeps,
+  input: TitleInput,
+  result: { usage: Parameters<typeof addFinishUsage>[1]["usage"]; finishMetadata: unknown },
+) {
+  const totals = emptyUsageTotals();
+  addFinishUsage(totals, { usage: result.usage, metadata: result.finishMetadata });
+  if (!totals.sawUsage) return;
+  const model = yield* deps.providers.getModel(input.modelId);
+  yield* deps.analytics.record({
+    userId: input.userId,
+    kind: "title",
+    modelId: model ? input.modelId : null,
+    modelName: model?.displayName ?? input.modelId,
+    conversationId: input.conversationId,
+    status: "complete",
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    cachedInputTokens: totals.cachedInputTokens,
+    reasoningTokens: totals.reasoningTokens,
+    ...resolveCost(totals, model?.pricing),
+  });
+});
+
 const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, input: TitleInput) {
   const generated = yield* deps.gateway
     .generateText({
@@ -124,7 +155,8 @@ const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, 
     })
     .pipe(
       Effect.timeout(TITLE_TIMEOUT),
-      Effect.map(sanitizeTitle),
+      Effect.tap((result) => recordTitleUsage(deps, input, result)),
+      Effect.map((result) => sanitizeTitle(result.text)),
       // A failed or slow side generation is a log line, not a broken
       // conversation — the fallback below still resolves the placeholder.
       Effect.catch((cause) =>

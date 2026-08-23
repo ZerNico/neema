@@ -19,6 +19,12 @@ export const ProviderIdInput = Schema.Struct({
   providerId: Schema.String,
 });
 
+// USD per 1M tokens. Null clears a stored price (unknown again).
+const PricingSchema = Schema.Struct({
+  input: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+  output: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
 const CapabilitiesSchema = Schema.Struct({
   reasoning: Schema.Boolean,
   tools: Schema.Boolean,
@@ -33,6 +39,7 @@ export const CreateModelInput = Schema.Struct({
   type: Schema.Literals(["chat", "embedding", "image", "audio"]),
   contextLength: Schema.optionalKey(Schema.Number),
   capabilities: Schema.optionalKey(CapabilitiesSchema),
+  pricing: Schema.optionalKey(PricingSchema),
 });
 
 export const UpdateModelInput = Schema.Struct({
@@ -41,6 +48,7 @@ export const UpdateModelInput = Schema.Struct({
   type: Schema.optionalKey(Schema.Literals(["chat", "embedding", "image", "audio"])),
   contextLength: Schema.optionalKey(Schema.Number),
   capabilities: Schema.optionalKey(CapabilitiesSchema),
+  pricing: Schema.optionalKey(Schema.NullOr(PricingSchema)),
   enabled: Schema.optionalKey(Schema.Boolean),
 });
 

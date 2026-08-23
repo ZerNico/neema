@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
+import { Response as AiResponse } from "effect/unstable/ai";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { modelGroupAccess, models, providers } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -31,9 +33,24 @@ let providerId: string;
 
 // Denials happen during validation, before any stream starts; the one
 // positive send still forks a generation, so the stream must finish cleanly.
+const fakeGeneratedText = (text: string) =>
+  Effect.succeed({
+    text,
+    usage: new AiResponse.Usage({
+      inputTokens: {
+        uncached: undefined,
+        total: undefined,
+        cacheRead: undefined,
+        cacheWrite: undefined,
+      },
+      outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+    }),
+    finishMetadata: undefined,
+  });
+
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
-  generateText: () => Effect.succeed("A title"),
+  generateText: () => fakeGeneratedText("A title"),
   streamChat: () =>
     Stream.make(
       { type: "text-delta", id: "t", delta: "ok" } as never as ChatStreamPart,
@@ -75,7 +92,12 @@ beforeAll(async () => {
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
-  const ReposLayer = Layer.mergeAll(ChatRepo.layer, ProviderRepo.layer, GroupRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    ChatRepo.layer,
+    ProviderRepo.layer,
+    GroupRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );

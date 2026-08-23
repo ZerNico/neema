@@ -19,6 +19,7 @@ import {
 import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
 import { ModelAccessControl } from "./model-access-control.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
+import { ModelPricingControl } from "./model-pricing-control.tsx";
 import {
   CAPABILITY_META,
   type Capabilities,
@@ -206,6 +207,11 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                     <CapabilityIcons capabilities={model.capabilities} />
                   </span>
                 </div>
+                <ModelPricingControl
+                  modelId={model.id}
+                  modelName={model.displayName}
+                  pricing={model.pricing}
+                />
                 <ModelAccessControl
                   modelId={model.id}
                   modelName={model.displayName}
@@ -289,6 +295,8 @@ function AddModelDialog({
           type: input.pick.custom ? customType : input.pick.type,
           capabilities,
           ...(input.pick.contextLength ? { contextLength: input.pick.contextLength } : {}),
+          // Catalog prices ride along so cost estimates work out of the box.
+          ...(input.pick.pricing ? { pricing: input.pick.pricing } : {}),
         },
       }),
     onSuccess: () => {

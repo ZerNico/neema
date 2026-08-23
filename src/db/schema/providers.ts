@@ -41,6 +41,10 @@ export const models = pgTable(
       .notNull()
       .default({ reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
+    // USD per 1M tokens; prefilled from the provider catalog where it carries
+    // prices (OpenRouter), admin-editable. Null = unknown — usage costs then
+    // rely on provider-reported numbers or stay unknown.
+    pricing: jsonb().$type<{ input: number; output: number }>(),
     // "public": every user sees and can use it. "groups": only members of the
     // groups linked via model_group_access (admins always bypass).
     access: text({ enum: ["public", "groups"] })

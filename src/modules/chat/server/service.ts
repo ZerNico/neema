@@ -9,6 +9,7 @@ import {
   ModelNotFound,
   RetryNotAllowed,
 } from "~/modules/chat/errors.ts";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
@@ -118,7 +119,8 @@ function makeChatService() {
     const attachmentService = yield* AttachmentService;
     const documentParser = yield* DocumentParser;
     const gateway = yield* AiGateway;
-    const titleDeps: TitleDeps = { gateway, repo, sync };
+    const analytics = yield* AnalyticsRepo;
+    const titleDeps: TitleDeps = { gateway, repo, sync, providers, analytics };
 
     const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
       function* (input: {

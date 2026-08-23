@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Duration, Effect, Fiber } from "effect";
 import * as TestClock from "effect/testing/TestClock";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt, Response } from "effect/unstable/ai";
 import {
   buildTitlePrompt,
   fallbackTitle,
@@ -122,16 +122,27 @@ const input = (overrides: Partial<TitleInput> = {}): TitleInput => ({
   ...overrides,
 });
 
+// No token fields at all — recordTitleUsage sees sawUsage=false and returns
+// before touching providers or analytics.
+const emptyUsage = { inputTokens: {}, outputTokens: {} } as Response.Usage;
+
 const harness = (options: { generate?: Effect.Effect<string, never>; applied?: boolean } = {}) => {
-  const generateText = vi.fn(() => options.generate ?? Effect.succeed("Postgres vs SQLite"));
+  const generateText = vi.fn(() =>
+    (options.generate ?? Effect.succeed("Postgres vs SQLite")).pipe(
+      Effect.map((text) => ({ text, usage: emptyUsage, finishMetadata: undefined })),
+    ),
+  );
   const setTitleIfPending = vi.fn(() => Effect.succeed(options.applied ?? true));
   const publish = vi.fn(() => Effect.void);
+  const record = vi.fn(() => Effect.void);
   const deps = {
     gateway: { generateText },
     repo: { setTitleIfPending },
     sync: { publish },
+    providers: { getModel: () => Effect.succeed(null) },
+    analytics: { record },
   } as unknown as TitleDeps;
-  return { deps, generateText, setTitleIfPending, publish };
+  return { deps, generateText, setTitleIfPending, publish, record };
 };
 
 describe("generateConversationTitle", () => {

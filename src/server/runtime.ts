@@ -1,4 +1,5 @@
 import { Layer, ManagedRuntime } from "effect";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -27,6 +28,7 @@ const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).p
 // ChatRepo claims attachments inside its own transactions, so AttachmentRepo
 // has to be provided to it rather than merged beside it.
 const ReposLayer = Layer.mergeAll(
+  AnalyticsRepo.layer,
   ChatRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,

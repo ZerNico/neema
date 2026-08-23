@@ -18,6 +18,8 @@ export interface CatalogPick {
   type: "chat" | "embedding" | "image" | "audio";
   contextLength: number | null;
   capabilities?: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
+  /** USD per 1M tokens, when the catalog stated prices. */
+  pricing?: { input: number; output: number } | null;
   /** True when the entry was typed by the user rather than picked from the catalog. */
   custom?: boolean;
 }

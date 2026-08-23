@@ -5,6 +5,7 @@ import { PgClient } from "@effect/sql-pg";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { attachmentBlobs, attachments, messageAttachments, models } from "~/db/schema/index.ts";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -104,7 +105,7 @@ beforeAll(async () => {
   const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 5 });
   const InfraLayer = Db.layer.pipe(Layer.provideMerge(PgLive));
   // ChatRepo reconciles attachment claims, so AttachmentRepo sits under it.
-  const ReposLayer = Layer.mergeAll(ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );

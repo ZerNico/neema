@@ -8,6 +8,7 @@ import { uuidv7 } from "uuidv7";
 import { conversations, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { Response as AiResponse } from "effect/unstable/ai";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
 import { Db } from "~/server/db.ts";
 
@@ -97,9 +98,27 @@ const titleOf = Effect.fn("test.titleOf")(function* (conversationId: string) {
 const depsWith = (repo: ChatRepo["Service"], generated: string) => {
   const publish = vi.fn(() => Effect.void);
   const deps: TitleDeps = {
-    gateway: { generateText: () => Effect.succeed(generated) },
+    gateway: {
+      generateText: () =>
+        Effect.succeed({
+          text: generated,
+          usage: new AiResponse.Usage({
+            inputTokens: {
+              uncached: undefined,
+              total: undefined,
+              cacheRead: undefined,
+              cacheWrite: undefined,
+            },
+            outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+          }),
+          finishMetadata: undefined,
+        }),
+    },
     repo,
     sync: { publish } as unknown as TitleDeps["sync"],
+    // Empty usage above means recordTitleUsage returns before touching these.
+    providers: { getModel: () => Effect.succeed(null) },
+    analytics: { record: () => Effect.void },
   };
   return { deps, publish };
 };

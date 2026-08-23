@@ -1,6 +1,8 @@
 import { Context, Deferred, Duration, Effect, Layer, PubSub, Stream } from "effect";
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -75,6 +77,7 @@ export class StreamEngine extends Context.Service<
       const sync = yield* SyncBus;
       const webSearch = yield* WebSearchExecutor;
       const providers = yield* ProviderRepo;
+      const analytics = yield* AnalyticsRepo;
       const promptDeps: PromptDeps = {
         attachments: yield* AttachmentRepo,
         store: yield* BlobStore,
@@ -100,6 +103,9 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         abort: Deferred.Deferred<void>;
       }) {
+        // Snapshot the model row up front: the ledger wants its display name
+        // and pricing even if the admin deletes or reprices it mid-generation.
+        const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
         const completed = history.filter(
           (m) => m.id !== input.messageId && m.status === "complete",
@@ -177,11 +183,7 @@ export class StreamEngine extends Context.Service<
             return flush; // tool markers flush immediately so the UI reacts
           });
 
-        const finalize = (
-          status: "complete" | "error" | "aborted",
-          usage: { inputTokens?: number; outputTokens?: number },
-          error?: unknown,
-        ) =>
+        const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
             yield* flush;
             if (error) {
@@ -200,12 +202,28 @@ export class StreamEngine extends Context.Service<
               status,
               content: assembled,
               reasoning: assembledReasoning,
-              ...(usage.inputTokens !== undefined || usage.outputTokens !== undefined
-                ? { usage }
+              ...(totals.sawUsage
+                ? { usage: { inputTokens: totals.inputTokens, outputTokens: totals.outputTokens } }
                 : {}),
               ...(error
                 ? { error: { tag: "GenerationFailed", message: shortErrorMessage(error) } }
                 : {}),
+            });
+            // Append-only ledger row for this attempt — a retry writes a new
+            // one rather than touching this record.
+            yield* analytics.record({
+              userId: input.userId,
+              kind: "chat",
+              modelId: model ? input.modelId : null,
+              modelName: model?.displayName ?? input.modelId,
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              status,
+              inputTokens: totals.inputTokens,
+              outputTokens: totals.outputTokens,
+              cachedInputTokens: totals.cachedInputTokens,
+              reasoningTokens: totals.reasoningTokens,
+              ...resolveCost(totals, model?.pricing),
             });
             yield* repo.updateConversation(input.conversationId, { lastMessageAt: new Date() });
             yield* PubSub.publish(pubsub, { kind: "done", messageId: input.messageId, status });
@@ -218,16 +236,10 @@ export class StreamEngine extends Context.Service<
           });
 
         // Outside `generate`: a stopped generation is interrupted mid-effect,
-        // and the tokens it already burned still have to be recorded.
-        const totalUsage: { inputTokens?: number; outputTokens?: number } = {};
-        const addUsage = (usage: Response.FinishPart["usage"]) => {
-          if (usage.inputTokens.total !== undefined) {
-            totalUsage.inputTokens = (totalUsage.inputTokens ?? 0) + usage.inputTokens.total;
-          }
-          if (usage.outputTokens.total !== undefined) {
-            totalUsage.outputTokens = (totalUsage.outputTokens ?? 0) + usage.outputTokens.total;
-          }
-        };
+        // and the tokens it already burned still have to be recorded. A turn
+        // interrupted before its finish part contributes nothing — the
+        // provider never sent the numbers.
+        const totals = emptyUsageTotals();
 
         const generate = Effect.gen(function* () {
           // Attachments resolve here, inside the generation: a missing blob or
@@ -413,7 +425,7 @@ export class StreamEngine extends Context.Service<
                       }
                       case "finish": {
                         finishReason = part.reason;
-                        addUsage(part.usage);
+                        addFinishUsage(totals, part);
                         return;
                       }
                       case "error": {
@@ -444,8 +456,8 @@ export class StreamEngine extends Context.Service<
         const ran = generate.pipe(Effect.as(false));
 
         yield* Effect.raceFirst(Effect.raceFirst(ran, stopped), flusher).pipe(
-          Effect.flatMap((wasStopped) => finalize(wasStopped ? "aborted" : "complete", totalUsage)),
-          Effect.catchCause((cause) => finalize("error", totalUsage, cause)),
+          Effect.flatMap((wasStopped) => finalize(wasStopped ? "aborted" : "complete")),
+          Effect.catchCause((cause) => finalize("error", cause)),
         );
       });
 

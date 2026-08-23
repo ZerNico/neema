@@ -17,6 +17,8 @@ export interface CatalogModel {
   readonly type: "chat" | "embedding" | "image" | "audio";
   readonly contextLength: number | null;
   readonly capabilities: ModelCapabilities;
+  /** USD per 1M tokens, when the catalog carries prices (OpenRouter does). */
+  readonly pricing: { input: number; output: number } | null;
 }
 
 export interface ModelCapabilities {
@@ -37,6 +39,15 @@ const ModelsResponse = Schema.Struct({
       name: Schema.optionalKey(Schema.String),
       context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
       supported_parameters: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      // OpenRouter: USD per token, as decimal strings. Generic providers omit it.
+      pricing: Schema.optionalKey(
+        Schema.NullOr(
+          Schema.Struct({
+            prompt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+            completion: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          }),
+        ),
+      ),
       architecture: Schema.optionalKey(
         Schema.Struct({
           input_modalities: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -46,6 +57,21 @@ const ModelsResponse = Schema.Struct({
     }),
   ),
 });
+
+// Catalog prices arrive as USD-per-token decimal strings ("0.0000025");
+// the app stores USD per 1M tokens. Free models ("0") map to a zero price,
+// which is a statement, not an unknown.
+const catalogPricing = (
+  pricing: { prompt?: string | null; completion?: string | null } | null | undefined,
+): CatalogModel["pricing"] => {
+  // Number(null) is 0 — only a non-empty string is a stated price.
+  const parse = (v: string | null | undefined) =>
+    typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  const input = parse(pricing?.prompt);
+  const output = parse(pricing?.completion);
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
+  return { input: input * 1_000_000, output: output * 1_000_000 };
+};
 
 const inferType = (outputModalities: ReadonlyArray<string> | undefined): CatalogModel["type"] => {
   if (!outputModalities || outputModalities.includes("text")) return "chat";
@@ -91,10 +117,15 @@ export class AiGateway extends Context.Service<
     }): Stream.Stream<ChatStreamPart, ProviderUnreachable | ModelNotFound>;
     // One bounded, tool-free model turn returning just the text. Used for
     // side generations (conversation titles), never for the answer itself.
-    generateText(input: {
-      modelId: string;
-      prompt: Prompt.Prompt;
-    }): Effect.Effect<string, ProviderUnreachable | ModelNotFound>;
+    generateText(input: { modelId: string; prompt: Prompt.Prompt }): Effect.Effect<
+      {
+        text: string;
+        usage: Response.Usage;
+        /** The finish part's provider metadata (OpenRouter: raw usage incl. cost). */
+        finishMetadata: unknown;
+      },
+      ProviderUnreachable | ModelNotFound
+    >;
   }
 >()("chat/providers/AiGateway") {
   static readonly layer = Layer.effect(
@@ -128,6 +159,7 @@ export class AiGateway extends Context.Service<
           type: inferType(m.architecture?.output_modalities),
           contextLength: m.context_length ?? null,
           capabilities: inferCapabilities(m),
+          pricing: catalogPricing(m.pricing),
         }));
       });
 
@@ -201,7 +233,11 @@ export class AiGateway extends Context.Service<
             (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
           ),
         );
-        return response.text;
+        return {
+          text: response.text,
+          usage: response.usage,
+          finishMetadata: response.content.find((part) => part.type === "finish")?.metadata,
+        };
       });
 
       return AiGateway.of({ fetchCatalog, streamChat, generateText });

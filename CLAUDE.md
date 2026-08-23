@@ -11,6 +11,8 @@ See README.md for architecture; this file records the sharp edges.
 - `drizzle-orm` / `drizzle-kit` are on `1.0.0-rc.5-*` builds. rc.4 crashes at import time
   with effect >= 4.0.0-beta.104 (`Schema.TaggedErrorClass` was renamed to `Schema.TaggedError`).
 - `vitest` must be v4 (peer of `@effect/vitest` rc).
+- `@tanstack/charts` is pre-alpha — pinned exact (no caret); its API may change
+  between releases, so re-probe the analytics charts on any bump.
 
 ## Effect 4 API notes (differs from most Effect 3 docs online)
 
@@ -90,6 +92,10 @@ See README.md for architecture; this file records the sharp edges.
   32 bytes); ciphertext never leaves the server (`toPublic` strips it).
 - First registered user becomes admin via the `user.create.before` database hook — do not
   bypass Better Auth for user creation.
+- `usage_events` is an append-only ledger: one row per generation attempt (chat or
+  title), written at finalize time. Retry appends, branching copies nothing, deleting a
+  conversation leaves it intact. Analytics reads only the ledger — never
+  `messages.usage`, which retries reset and branches clone.
 - Nitro's Vite **dev** middleware guesses static assets from `sec-fetch-dest`: anything
   that is neither `empty` nor a document dest never reaches the app, so
   `<img src="/api/files/:id">` 404s while `fetch()` on the same URL works. `vite.config.ts`

@@ -8,6 +8,7 @@ export const relations = defineRelations(schema, (r) => ({
     attachments: r.many.attachments(),
     attachmentBlobs: r.many.attachmentBlobs(),
     groupMemberships: r.many.groupMembers(),
+    usageEvents: r.many.usageEvents(),
   },
   session: {
     user: r.one.user({
@@ -102,6 +103,7 @@ export const relations = defineRelations(schema, (r) => ({
       optional: false,
     }),
     groupAccess: r.many.modelGroupAccess(),
+    usageEvents: r.many.usageEvents(),
   },
   groups: {
     members: r.many.groupMembers(),
@@ -117,6 +119,17 @@ export const relations = defineRelations(schema, (r) => ({
       from: r.groupMembers.userId,
       to: r.user.id,
       optional: false,
+    }),
+  },
+  usageEvents: {
+    user: r.one.user({
+      from: r.usageEvents.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+    model: r.one.models({
+      from: r.usageEvents.modelId,
+      to: r.models.id,
     }),
   },
   modelGroupAccess: {

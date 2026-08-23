@@ -1,4 +1,5 @@
 import {
+  Analytics01Icon,
   CloudServerIcon,
   UserGroupIcon,
   UserMultipleIcon,
@@ -41,6 +42,12 @@ function AdminLayout() {
           label: "Groups",
           icon: UserGroupIcon,
           matchPrefix: "/admin/groups",
+        },
+        {
+          to: "/admin/analytics",
+          label: "Analytics",
+          icon: Analytics01Icon,
+          matchPrefix: "/admin/analytics",
         },
       ]}
     >

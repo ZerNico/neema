@@ -70,6 +70,7 @@ export class ProviderRepo extends Context.Service<
       type: ModelType;
       contextLength?: number;
       capabilities?: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
+      pricing?: { input: number; output: number };
       metadata?: Record<string, import("~/db/schema/providers.ts").JsonValue>;
     }): Effect.Effect<ModelRow>;
     updateModel(
@@ -79,6 +80,7 @@ export class ProviderRepo extends Context.Service<
         type: ModelType;
         contextLength: number;
         capabilities: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
+        pricing: { input: number; output: number } | null;
         enabled: boolean;
       }>,
     ): Effect.Effect<void>;

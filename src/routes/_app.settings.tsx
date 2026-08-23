@@ -1,4 +1,4 @@
-import { Brain02Icon, UserCircleIcon } from "@hugeicons/core-free-icons";
+import { Analytics01Icon, Brain02Icon, UserCircleIcon } from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { AdminShell } from "~/modules/admin/ui/admin-shell.tsx";
 
@@ -23,6 +23,12 @@ function SettingsLayout() {
           label: "Memory",
           icon: Brain02Icon,
           matchPrefix: "/settings/memory",
+        },
+        {
+          to: "/settings/usage",
+          label: "Usage",
+          icon: Analytics01Icon,
+          matchPrefix: "/settings/usage",
         },
       ]}
     >
