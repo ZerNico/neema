@@ -10,6 +10,19 @@ export function useSync() {
   useEffect(() => {
     const source = new EventSource("/api/sync");
 
+    // Events published while the connection was down are gone for good (the
+    // bus is fire-and-forget), so a reconnect refetches everything the feed
+    // keeps fresh. Skipped on the initial open: mounting queries are fresh
+    // already, and invalidating here would double-fetch every page load.
+    let opened = false;
+    source.addEventListener("open", () => {
+      if (opened) {
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      }
+      opened = true;
+    });
+
     source.addEventListener("sync", (raw) => {
       const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
       switch (event.type) {
