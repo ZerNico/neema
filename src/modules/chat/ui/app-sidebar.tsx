@@ -1,6 +1,7 @@
 import {
   BubbleChatIcon,
   Logout03Icon,
+  GitBranchIcon,
   PlusSignIcon,
   Settings02Icon,
   UserCircleIcon,
@@ -117,6 +118,13 @@ export function AppSidebar({
                         />
                       }
                     >
+                      {conversation.branchedFrom ? (
+                        <HugeiconsIcon
+                          icon={GitBranchIcon}
+                          className="text-muted-foreground shrink-0"
+                          aria-label="Branched conversation"
+                        />
+                      ) : null}
                       <ConversationTitle
                         conversationId={conversation.id}
                         title={conversation.title}

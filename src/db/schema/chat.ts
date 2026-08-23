@@ -1,4 +1,5 @@
 import { desc, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
   index,
@@ -25,12 +26,22 @@ export const conversations = pgTable(
     // pending placeholder for it. Never reset to null once resolved.
     title: text(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
+    // Set when this conversation was forked off another one at some message.
+    // Lineage is a display detail, so losing the source loses the marker
+    // rather than the branch; the annotation breaks the self-reference cycle
+    // TypeScript cannot infer its way out of.
+    branchedFrom: text("branched_from").references((): AnyPgColumn => conversations.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
   },
   (t) => [
     index("conversations_user_id_idx").on(t.userId),
+    // Postgres does not index the referencing side of a foreign key, and
+    // `on delete set null` scans it for every deleted conversation.
+    index("conversations_branched_from_idx").on(t.branchedFrom),
     index("conversations_last_message_at_idx").on(t.lastMessageAt),
     // Serves the sidebar's keyset paging, which orders by exactly this
     // expression pair (see ChatRepo.listConversations).

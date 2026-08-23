@@ -158,6 +158,9 @@ export interface DisplayMessage {
     /** The view-level upload state, seeded with the message's own files. */
     attachments: AttachmentUploads;
   };
+  /** Fork the conversation into a new one ending at this message. */
+  onBranch?: () => void;
+  branchDisabled?: boolean;
   /** Regenerate this message (rewinding the conversation to it). */
   onRetry?: () => void;
   /** Regenerate it with a different model. */
@@ -381,6 +384,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
             content={message.content}
             sources={sources}
             time={message.time}
+            onBranch={message.onBranch}
+            branchDisabled={message.branchDisabled ?? false}
             onRetry={message.onRetry}
             onRetryWith={message.onRetryWith}
             retryModelId={message.retryModelId}

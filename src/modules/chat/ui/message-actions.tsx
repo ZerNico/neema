@@ -2,6 +2,7 @@ import {
   ArrowReloadHorizontalIcon,
   BookOpen01Icon,
   Copy01Icon,
+  GitBranchIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   Tick02Icon,
@@ -172,6 +173,8 @@ export function MessageActions({
   time,
   onEdit,
   editDisabled,
+  onBranch,
+  branchDisabled,
   onRetry,
   onRetryWith,
   retryModelId,
@@ -186,6 +189,9 @@ export function MessageActions({
   /** Absent for messages that cannot be edited. */
   onEdit?: (() => void) | undefined;
   editDisabled?: boolean;
+  /** Fork the conversation at this message. Absent hides the action. */
+  onBranch?: (() => void) | undefined;
+  branchDisabled?: boolean;
   /** Absent when nothing can be regenerated from this message. */
   onRetry?: (() => void) | undefined;
   /** Regenerate with a different model. Absent hides the model chevron. */
@@ -215,6 +221,11 @@ export function MessageActions({
       {onEdit ? (
         <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>
           <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+        </ActionButton>
+      ) : null}
+      {onBranch ? (
+        <ActionButton label="Branch off" onClick={onBranch} disabled={branchDisabled ?? false}>
+          <HugeiconsIcon icon={GitBranchIcon} className="size-4" />
         </ActionButton>
       ) : null}
       {onRetry ? (

@@ -49,6 +49,12 @@ export const RetryMessageInput = Schema.Struct({
   modelId: Schema.optionalKey(Schema.String),
 });
 
+// Forks the conversation at this assistant message into a new one.
+export const BranchConversationInput = Schema.Struct({
+  conversationId: Schema.String,
+  messageId: Schema.String,
+});
+
 export const EditMessageInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,

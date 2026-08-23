@@ -38,6 +38,7 @@ const conversation = (id: string, title: string | null, minutesAgo: number) => (
   userId: "u1",
   title,
   modelId: "m1",
+  branchedFrom: null as string | null,
   createdAt: new Date(BASE - minutesAgo * 60_000),
   updatedAt: new Date(BASE - minutesAgo * 60_000),
   lastMessageAt: new Date(BASE - minutesAgo * 60_000),
@@ -144,6 +145,23 @@ describe("ChatsPage", () => {
 
     expect(await screen.findByText("No chats match")).toBeInTheDocument();
     expect(screen.queryByText("No chats yet")).not.toBeInTheDocument();
+  });
+
+  it("marks the rows that were branched off another chat", async () => {
+    listMock.mockResolvedValue({
+      conversations: [
+        { ...conversation("a", "Forked chat", 5), branchedFrom: "root" },
+        conversation("b", "Root chat", 10),
+      ],
+      nextCursor: null,
+    } as never);
+
+    renderPage();
+
+    const forked = (await screen.findByText("Forked chat")).closest("a")!;
+    expect(within(forked).getByLabelText("Branched conversation")).toBeInTheDocument();
+    const root = screen.getByText("Root chat").closest("a")!;
+    expect(within(root).queryByLabelText("Branched conversation")).toBeNull();
   });
 
   it("offers rename and delete per row", async () => {

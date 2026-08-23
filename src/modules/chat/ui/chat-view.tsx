@@ -1,5 +1,7 @@
+import { GitBranchIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
 import {
@@ -8,7 +10,13 @@ import {
   type ToolPageStatus,
   type ToolSource,
 } from "../client/use-message-stream.ts";
-import { editMessage, retryMessage, sendMessage, stopGeneration } from "../server/functions.ts";
+import {
+  branchConversation,
+  editMessage,
+  retryMessage,
+  sendMessage,
+  stopGeneration,
+} from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
 import { buildMessageStamps } from "./timestamps.ts";
@@ -53,6 +61,7 @@ function toActivity(row: {
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const confirm = useConfirm();
   const { data } = useSuspenseQuery(conversationQuery(conversationId));
   // Stays in step with an asynchronously generated title: `conversation.updated`
@@ -130,6 +139,19 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
   });
 
+  // Branching leaves this conversation untouched and opens the copy, so the
+  // only cache work here is making the new chat show up in the lists.
+  const branchMutation = useMutation({
+    mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await navigate({
+        to: "/chat/$conversationId",
+        params: { conversationId: result.conversationId },
+      });
+    },
+  });
+
   const stopMutation = useMutation({
     mutationFn: (messageId: string) => stopGeneration({ data: { conversationId, messageId } }),
     // No invalidation here: the generation finalizes itself and the `done`
@@ -160,9 +182,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
   const generating = sendMutation.isPending || stream.status === "streaming";
   const mutationPending =
-    sendMutation.isPending || retryMutation.isPending || editMutation.isPending;
+    sendMutation.isPending ||
+    retryMutation.isPending ||
+    editMutation.isPending ||
+    branchMutation.isPending;
   const actionsDisabled =
-    generating || retryMutation.isPending || editMutation.isPending || activeEditState !== null;
+    generating ||
+    retryMutation.isPending ||
+    editMutation.isPending ||
+    branchMutation.isPending ||
+    activeEditState !== null;
   const retry = async (messageId: string, modelId?: string) => {
     if (
       messageId !== lastAssistantId &&
@@ -350,6 +379,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             },
           }
         : {}),
+      // Only the answer itself can be forked, and only once it is finished —
+      // the server insists on the same, this just keeps the row honest.
+      ...(m.role === "assistant" && m.status !== "streaming"
+        ? {
+            onBranch: () => branchMutation.mutate(m.id),
+            branchDisabled: actionsDisabled,
+          }
+        : {}),
       ...(retryTarget !== undefined
         ? {
             onRetry: () => void retry(retryTarget),
@@ -376,6 +413,23 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      {data.branchedFrom ? (
+        // Outside the scroller, on the message column's geometry: lineage is a
+        // property of the conversation, not of its first message.
+        <div className="[scrollbar-gutter:stable_both-edges]">
+          <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
+            <HugeiconsIcon icon={GitBranchIcon} className="size-3.5 shrink-0" />
+            <span className="shrink-0">Branched from</span>
+            <Link
+              to="/chat/$conversationId"
+              params={{ conversationId: data.branchedFrom.conversationId }}
+              className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
+            >
+              {data.branchedFrom.title ?? "New chat…"}
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1">
         {/* lastSeq covers tool-activity-only updates too */}
         <VirtualMessageList messages={display} followKey={stream.lastSeq} />

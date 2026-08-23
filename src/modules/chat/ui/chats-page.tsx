@@ -1,4 +1,9 @@
-import { BubbleChatIcon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+  BubbleChatIcon,
+  GitBranchIcon,
+  MoreHorizontalIcon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -107,9 +112,16 @@ export function ChatsPage() {
                     <Link
                       to="/chat/$conversationId"
                       params={{ conversationId: conversation.id }}
-                      className="hover:text-foreground flex min-w-0 flex-1 items-center text-sm"
+                      className="hover:text-foreground flex min-w-0 flex-1 items-center gap-1.5 text-sm"
                       {...(hydrated ? { title: describeActivity(conversation) } : {})}
                     >
+                      {conversation.branchedFrom ? (
+                        <HugeiconsIcon
+                          icon={GitBranchIcon}
+                          className="text-muted-foreground size-3.5 shrink-0"
+                          aria-label="Branched conversation"
+                        />
+                      ) : null}
                       <ConversationTitle
                         conversationId={conversation.id}
                         title={conversation.title}

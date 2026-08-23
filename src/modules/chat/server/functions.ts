@@ -5,6 +5,7 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
+  BranchConversationInput,
   ConversationIdInput,
   EditMessageInput,
   ListConversationsInput,
@@ -74,7 +75,15 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
         const attachments = yield* attachmentRepo.listForMessages(
           messages.filter((m) => m.role === "user").map((m) => m.id),
         );
-        return { conversation, messages, pendingChunks, toolCalls, attachments };
+        // The source of a branch, for the "branched from" link. Read through
+        // the same ownership check, and null when it has been deleted since.
+        const branchedFrom = conversation.branchedFrom
+          ? yield* repo.getConversation(context.session.user.id, conversation.branchedFrom).pipe(
+              Effect.map((source) => ({ conversationId: source.id, title: source.title })),
+              Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
+            )
+          : null;
+        return { conversation, messages, pendingChunks, toolCalls, attachments, branchedFrom };
       }).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),
@@ -138,6 +147,27 @@ export const retryMessage = createServerFn({ method: "POST" })
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
           AttachmentUnsupported: (e) =>
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+        }),
+      ),
+    ),
+  );
+
+export const branchConversation = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(BranchConversationInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.branchConversation({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          BranchNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
         }),
       ),
     ),

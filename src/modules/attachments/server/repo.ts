@@ -148,6 +148,18 @@ export class AttachmentRepo extends Context.Service<
       tx: DbTx,
       input: { userId: string; messageId: string; attachmentIds: ReadonlyArray<string> },
     ): Effect.Effect<ReadonlyArray<string>, AttachmentNotAvailable>;
+    /**
+     * Copies the attachments of each source message onto its target message,
+     * inside the caller's transaction (branching). Blobs are shared, not
+     * duplicated — only the attachment rows and links are new.
+     */
+    cloneForMessages(
+      tx: DbTx,
+      input: {
+        userId: string;
+        messages: ReadonlyArray<{ sourceMessageId: string; targetMessageId: string }>;
+      },
+    ): Effect.Effect<void>;
     /** Releases every attachment linked to these messages (rewind/delete). */
     releaseForMessages(
       tx: DbTx,
@@ -369,6 +381,69 @@ export class AttachmentRepo extends Context.Service<
         return yield* deleteAttachmentRows(tx, dropped).pipe(Effect.orDie);
       });
 
+      const cloneForMessages = Effect.fn("AttachmentRepo.cloneForMessages")(function* (
+        tx: DbTx,
+        input: {
+          userId: string;
+          messages: ReadonlyArray<{ sourceMessageId: string; targetMessageId: string }>;
+        },
+      ) {
+        if (input.messages.length === 0) return;
+        const targetOf = new Map(
+          input.messages.map((m) => [m.sourceMessageId, m.targetMessageId] as const),
+        );
+        const linked = yield* tx
+          .select({
+            messageId: messageAttachments.messageId,
+            position: messageAttachments.position,
+            blobId: attachments.blobId,
+            fileName: attachments.fileName,
+          })
+          .from(messageAttachments)
+          .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
+          .where(
+            and(
+              inArray(messageAttachments.messageId, [...targetOf.keys()]),
+              // Ownership belongs on the copy too: the caller owns the
+              // conversation, so anything else here would be a bug worth
+              // dropping rather than duplicating.
+              eq(attachments.userId, input.userId),
+            ),
+          )
+          .pipe(Effect.orDie);
+        if (linked.length === 0) return;
+
+        // Fresh attachment rows are not an option but a requirement:
+        // message_attachments.attachment_id is unique, so a row can only ever
+        // be claimed by one message. The blob underneath is shared and
+        // reference-counted by deleteAttachmentRows.
+        const rows = linked.map((row) => ({
+          id: uuidv7(),
+          userId: input.userId,
+          blobId: row.blobId,
+          fileName: row.fileName,
+          messageId: targetOf.get(row.messageId)!,
+          position: row.position,
+        }));
+
+        yield* tx
+          .insert(attachments)
+          .values(
+            rows.map(({ id, userId, blobId, fileName }) => ({ id, userId, blobId, fileName })),
+          )
+          .pipe(Effect.orDie);
+        yield* tx
+          .insert(messageAttachments)
+          .values(
+            rows.map((row) => ({
+              messageId: row.messageId,
+              attachmentId: row.id,
+              position: row.position,
+            })),
+          )
+          .pipe(Effect.orDie);
+      });
+
       const releaseForMessages = Effect.fn("AttachmentRepo.releaseForMessages")(function* (
         tx: DbTx,
         messageIds: ReadonlyArray<string>,
@@ -489,6 +564,7 @@ export class AttachmentRepo extends Context.Service<
         findForAccess,
         deleteUnclaimed,
         reconcile,
+        cloneForMessages,
         releaseForMessages,
         listForMessages,
         listWithBlobsForMessages,

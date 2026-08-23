@@ -335,6 +335,41 @@ describe("MessageBubble actions", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
   });
 
+  it("shows branch off only when the message wires it", () => {
+    renderPlain();
+    expect(screen.queryByRole("button", { name: "Branch off" })).toBeNull();
+  });
+
+  it("wires the branch button to the callback", () => {
+    const onBranch = vi.fn();
+    renderPlain({ onBranch });
+    screen.getByRole("button", { name: "Branch off" }).click();
+    expect(onBranch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps branching off user messages — only an answer can be forked", () => {
+    renderPlain({ role: "user", content: "hi there", onBranch: vi.fn() });
+    expect(screen.queryByRole("button", { name: "Branch off" })).toBeNull();
+  });
+
+  it("hides the whole action row, branching included, while the answer streams", () => {
+    renderPlain({ status: "streaming", content: "half an ans", onBranch: vi.fn() });
+    expect(screen.queryByRole("button", { name: "Branch off" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+  });
+
+  it("disables branching while another mutation runs", () => {
+    renderPlain({ onBranch: vi.fn(), branchDisabled: true });
+    expect(screen.getByRole("button", { name: "Branch off" })).toBeDisabled();
+  });
+
+  it("orders the actions copy, branch off, retry", () => {
+    renderPlain({ onBranch: vi.fn(), onRetry: vi.fn() });
+    expect(
+      screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Copy", "Branch off", "Retry"]);
+  });
+
   it("offers the model chevron only when retry-with is wired", () => {
     renderPlain({ onRetry: vi.fn() });
     expect(screen.queryByRole("combobox", { name: "Retry with another model" })).toBeNull();

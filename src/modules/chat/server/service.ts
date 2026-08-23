@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import {
+  BranchNotAllowed,
   ConversationBusy,
   ConversationNotFound,
   EditNotAllowed,
@@ -19,7 +20,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ChatRepo } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
-import { generateConversationTitle, type TitleDeps } from "./title.ts";
+import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 
 // Orchestrates the chat use-cases on top of repo + stream engine + sync bus.
 export class ChatService extends Context.Service<
@@ -58,6 +59,16 @@ export class ChatService extends Context.Service<
       | RetryNotAllowed
       | AttachmentNotAvailable
       | AttachmentUnsupported
+    >;
+    // Forks the conversation at an assistant message into a new one holding a
+    // copy of everything up to it. The source is left untouched.
+    branchConversation(input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }): Effect.Effect<
+      { conversationId: string },
+      ConversationNotFound | MessageNotFound | BranchNotAllowed
     >;
     editMessage(input: {
       userId: string;
@@ -415,6 +426,82 @@ function makeChatService() {
       return restarted;
     });
 
+    const branchConversation = Effect.fn("ChatService.branchConversation")(function* (input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+    }) {
+      // ownership check
+      yield* repo.getConversation(input.userId, input.conversationId);
+
+      const message = yield* repo.getMessage(input.messageId);
+      if (!message || message.conversationId !== input.conversationId) {
+        return yield* new MessageNotFound({ messageId: input.messageId });
+      }
+      if (message.role !== "assistant") {
+        return yield* new BranchNotAllowed({
+          messageId: input.messageId,
+          reason: "only assistant messages can be branched from",
+        });
+      }
+      if (message.status === "streaming") {
+        return yield* new BranchNotAllowed({
+          messageId: input.messageId,
+          reason: "message is still generating",
+        });
+      }
+
+      const all = yield* repo.listMessages(input.conversationId);
+      const index = all.findIndex((m) => m.id === input.messageId);
+      const prefix = index === -1 ? [] : all.slice(0, index + 1);
+
+      // Everything above is a fast pre-check for a decent error; the clone
+      // re-validates under its own locks, which is what actually holds.
+      const branch = yield* repo.cloneConversationPrefix({
+        userId: input.userId,
+        sourceConversationId: input.conversationId,
+        throughMessageId: input.messageId,
+      });
+
+      yield* sync.publish(input.userId, {
+        type: "conversation.created",
+        conversationId: branch.id,
+      });
+
+      // Branching a chat whose title has not resolved yet would otherwise
+      // leave the copy stuck on the placeholder forever — the source's own
+      // title fiber only ever writes to the source.
+      if (branch.title === null) {
+        const seed = prefix.find((m) => m.role === "user");
+        const firstAssistant = prefix.find((m) => m.role === "assistant");
+        const attachmentFileNames = seed
+          ? (yield* attachmentRepo.listForMessages([seed.id])).map((a) => a.fileName)
+          : [];
+        const titleInput = { content: seed?.content ?? "", attachmentFileNames };
+        // The model of the first turn, like sendMessage — not the
+        // conversation's current one.
+        if (firstAssistant?.modelId) {
+          yield* Effect.forkDetach(
+            generateConversationTitle(titleDeps, {
+              userId: input.userId,
+              conversationId: branch.id,
+              modelId: firstAssistant.modelId,
+              ...titleInput,
+            }),
+          );
+        } else if (yield* repo.setTitleIfPending(branch.id, fallbackTitle(titleInput))) {
+          // That model row is gone (deleted provider), so there is nothing to
+          // ask — settle on the fallback rather than stay pending.
+          yield* sync.publish(input.userId, {
+            type: "conversation.updated",
+            conversationId: branch.id,
+          });
+        }
+      }
+
+      return { conversationId: branch.id };
+    });
+
     const editMessage = Effect.fn("ChatService.editMessage")(function* (input: {
       userId: string;
       conversationId: string;
@@ -553,6 +640,7 @@ function makeChatService() {
     return ChatService.of({
       sendMessage,
       retryMessage,
+      branchConversation,
       editMessage,
       stopGeneration,
       deleteConversation,

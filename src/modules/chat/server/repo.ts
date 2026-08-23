@@ -6,7 +6,12 @@ import { conversations, messageChunks, messages, messageToolCalls } from "~/db/s
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { ConversationBusy, ConversationNotFound } from "../errors.ts";
+import {
+  BranchNotAllowed,
+  ConversationBusy,
+  ConversationNotFound,
+  MessageNotFound,
+} from "../errors.ts";
 
 export type ConversationRow = typeof conversations.$inferSelect;
 /** Position in the conversation list order: activity timestamp, then id. */
@@ -83,6 +88,17 @@ export class ChatRepo extends Context.Service<
       userId: string,
       conversationId: string,
     ): Effect.Effect<ReadonlyArray<string>>;
+    /**
+     * Forks the conversation into a new one carrying every message up to and
+     * including `throughMessageId`. Messages, tool calls and attachment links
+     * are copied; stream chunks are not (they only serve live resume). One
+     * transaction, so a half-copied branch can never be observed.
+     */
+    cloneConversationPrefix(input: {
+      userId: string;
+      sourceConversationId: string;
+      throughMessageId: string;
+    }): Effect.Effect<ConversationRow, ConversationNotFound | MessageNotFound | BranchNotAllowed>;
     listMessages(conversationId: string): Effect.Effect<MessageRow[]>;
     insertMessage(input: {
       conversationId: string;
@@ -385,6 +401,130 @@ export class ChatRepo extends Context.Service<
               .pipe(Effect.orDie);
           },
         ),
+
+        cloneConversationPrefix: Effect.fn("ChatRepo.cloneConversationPrefix")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                // Locks both sides of what is being copied: the conversation
+                // row against a concurrent rename/title/delete, the messages
+                // against a retry or edit rewinding history mid-copy.
+                const sourceRows = yield* tx
+                  .select()
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.id, input.sourceConversationId),
+                      eq(conversations.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .pipe(Effect.orDie);
+                const source = sourceRows[0];
+                if (!source) {
+                  return yield* new ConversationNotFound({
+                    conversationId: input.sourceConversationId,
+                  });
+                }
+
+                const all = yield* tx
+                  .select()
+                  .from(messages)
+                  .where(eq(messages.conversationId, source.id))
+                  .orderBy(asc(messages.createdAt))
+                  .for("update")
+                  .pipe(Effect.orDie);
+
+                // Position in the list, never the timestamp: two messages of
+                // the same turn can share a clock tick.
+                const index = all.findIndex((m) => m.id === input.throughMessageId);
+                if (index === -1) {
+                  return yield* new MessageNotFound({ messageId: input.throughMessageId });
+                }
+                const target = all[index]!;
+                if (target.role !== "assistant") {
+                  return yield* new BranchNotAllowed({
+                    messageId: input.throughMessageId,
+                    reason: "only assistant messages can be branched from",
+                  });
+                }
+                const prefix = all.slice(0, index + 1);
+                // A cloned streaming row would have no fiber to finish it.
+                if (prefix.some((m) => m.status === "streaming")) {
+                  return yield* new BranchNotAllowed({
+                    messageId: input.throughMessageId,
+                    reason: "message is still generating",
+                  });
+                }
+
+                const branchRows = yield* tx
+                  .insert(conversations)
+                  .values({
+                    id: uuidv7(),
+                    userId: source.userId,
+                    // Whatever the locked row says — a title that resolved
+                    // between the service's read and this lock counts.
+                    title: source.title,
+                    modelId: source.modelId,
+                    branchedFrom: source.id,
+                    // Left null so the branch sorts by its own createdAt (now)
+                    // and lands at the top of the list, like a new chat.
+                    lastMessageAt: null,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                const branch = branchRows[0]!;
+
+                const clonedIds = new Map(prefix.map((m) => [m.id, uuidv7()] as const));
+                yield* tx
+                  .insert(messages)
+                  .values(
+                    prefix.map((m) => ({
+                      ...m,
+                      id: clonedIds.get(m.id)!,
+                      conversationId: branch.id,
+                      // createdAt/completedAt/editedAt stay as they were: the
+                      // branch shows the same history, day dividers included.
+                    })),
+                  )
+                  .pipe(Effect.orDie);
+
+                // Tool calls are part of the answer, not of its generation:
+                // the sources panel and the citation numbering both read them.
+                const toolCalls = yield* tx
+                  .select()
+                  .from(messageToolCalls)
+                  .where(inArray(messageToolCalls.messageId, [...clonedIds.keys()]))
+                  .pipe(Effect.orDie);
+                if (toolCalls.length > 0) {
+                  yield* tx
+                    .insert(messageToolCalls)
+                    .values(
+                      toolCalls.map((call) => ({
+                        ...call,
+                        id: uuidv7(),
+                        messageId: clonedIds.get(call.messageId)!,
+                      })),
+                    )
+                    .pipe(Effect.orDie);
+                }
+
+                yield* attachments.cloneForMessages(tx, {
+                  userId: input.userId,
+                  messages: [...clonedIds].map(([sourceMessageId, targetMessageId]) => ({
+                    sourceMessageId,
+                    targetMessageId,
+                  })),
+                });
+
+                // message_chunks are deliberately not copied — they exist so a
+                // reconnecting client can replay a live stream, and nothing in
+                // the branch is live.
+                return branch;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
 
         listMessages: Effect.fn("ChatRepo.listMessages")(function* (conversationId) {
           return yield* db
