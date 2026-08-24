@@ -377,6 +377,7 @@ describe("resumable streaming pipeline", () => {
             content: "edited prompt",
             attachmentIds: [],
           },
+          invalidateCheckpointThroughMessageIds: [],
         };
         const firstClaim = yield* repo.resetMessageForRetry(restart);
         const secondClaim = yield* repo.resetMessageForRetry(restart);
@@ -422,6 +423,7 @@ describe("resumable streaming pipeline", () => {
           attachmentIds: [],
           modelId: null as never,
           deleteMessageIds: [later.id],
+          invalidateCheckpointThroughMessageIds: [],
         };
         const created = yield* repo.createAssistantForEdit(edit);
         const secondClaim = yield* repo.createAssistantForEdit(edit);

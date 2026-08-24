@@ -3,6 +3,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchProviderCatalog } from "../server/functions.ts";
+import type {
+  ModelCapabilities,
+  ModelPricing,
+  ModelType,
+} from "~/modules/providers/model-config.ts";
 import {
   Combobox,
   ComboboxContent,
@@ -15,11 +20,11 @@ import {
 export interface CatalogPick {
   id: string;
   name: string;
-  type: "chat" | "embedding" | "image" | "audio";
+  type: ModelType;
   contextLength: number | null;
-  capabilities?: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
+  capabilities?: ModelCapabilities;
   /** USD per 1M tokens, when the catalog stated prices. */
-  pricing?: { input: number; output: number } | null;
+  pricing?: ModelPricing | null;
   /** True when the entry was typed by the user rather than picked from the catalog. */
   custom?: boolean;
 }

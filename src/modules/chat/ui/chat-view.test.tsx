@@ -1,9 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatView } from "./chat-view.tsx";
-import { branchConversation } from "../server/functions.ts";
+import {
+  branchConversation,
+  getConversationWithMessages,
+  sendMessage,
+} from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 
 const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
@@ -17,6 +21,9 @@ vi.mock("../server/functions.ts", () => ({
   retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stopGeneration: vi.fn(),
+}));
+vi.mock("~/modules/tools/server/functions.ts", () => ({
+  getWebSearchAvailability: vi.fn(),
 }));
 
 // Enough router for a chip link and a navigation; the real one would drag the
@@ -43,6 +50,13 @@ vi.mock("./virtual-message-list.tsx", () => ({
       {messages.map((message) => (
         <div key={String(message.id)}>
           <span>{String(message.content)}</span>
+          {(message.compactionActivities as ReadonlyArray<{ summary?: string }> | undefined)?.map(
+            (activity, index) => (
+              <output key={index} data-testid="compaction-activity">
+                {`${String(message.id)}: ${activity.summary ?? "running"}`}
+              </output>
+            ),
+          )}
           {message.onBranch ? (
             <button
               type="button"
@@ -59,7 +73,27 @@ vi.mock("./virtual-message-list.tsx", () => ({
   ),
 }));
 
-vi.mock("./composer.tsx", () => ({ Composer: () => null }));
+vi.mock("./composer.tsx", () => ({
+  Composer: ({
+    onSend,
+    searchEnabled,
+    onSearchEnabledChange,
+  }: {
+    onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
+    searchEnabled: boolean;
+    onSearchEnabledChange: (enabled: boolean) => void;
+  }) => (
+    <div>
+      <output data-testid="search-mode">{searchEnabled ? "on" : "off"}</output>
+      <button type="button" onClick={() => onSearchEnabledChange(false)}>
+        Disable search
+      </button>
+      <button type="button" onClick={() => void onSend("hello", [])}>
+        Send test message
+      </button>
+    </div>
+  ),
+}));
 
 vi.mock("../client/use-message-stream.ts", () => ({
   useMessageStream: () => ({
@@ -67,6 +101,7 @@ vi.mock("../client/use-message-stream.ts", () => ({
     reasoning: "",
     reasoningSeen: false,
     tools: [],
+    compactions: [],
     lastSeq: 0,
     status: "complete",
   }),
@@ -93,10 +128,12 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
 }));
 
 const branchMock = vi.mocked(branchConversation);
+const conversationMock = vi.mocked(getConversationWithMessages);
+const sendMock = vi.mocked(sendMessage);
 
 const BASE = new Date("2026-03-01T12:00:00Z");
 
-const message = (id: string, role: "user" | "assistant", content: string) => ({
+const message = (id: string, role: "user" | "assistant" | "system", content: string) => ({
   id,
   conversationId: "c1",
   role,
@@ -111,7 +148,9 @@ const message = (id: string, role: "user" | "assistant", content: string) => ({
   editedAt: null,
 });
 
-const payload = (branchedFrom: { conversationId: string; title: string | null } | null) => ({
+type Payload = ReturnType<typeof basePayload>;
+
+const basePayload = (branchedFrom: { conversationId: string; title: string | null } | null) => ({
   conversation: {
     id: "c1",
     userId: "u1",
@@ -127,14 +166,56 @@ const payload = (branchedFrom: { conversationId: string; title: string | null } 
   toolCalls: [],
   attachments: [],
   branchedFrom,
+  compactionEvents: [] as Array<{
+    id: string;
+    messageId: string;
+    checkpointId: string | null;
+    beforeTurnIndex: number;
+    passIndex: number;
+    scope: "history" | "active_rounds";
+    status: "running" | "complete" | "error";
+    outcome: "summary" | "hard_truncation" | null;
+    summary: string | null;
+    error: { code: string; message: string } | null;
+    createdAt: Date;
+    completedAt: Date | null;
+  }>,
 });
 
-const renderView = (branchedFrom: Parameters<typeof payload>[0] = null) => {
+const payload = (
+  branchedFrom: Parameters<typeof basePayload>[0],
+  overrides: Partial<Payload> = {},
+) => ({ ...basePayload(branchedFrom), ...overrides });
+
+const renderView = (
+  branchedFrom: Parameters<typeof basePayload>[0] = null,
+  overrides: Partial<Payload> = {},
+) => {
   const client = new QueryClient({
     // The payload is seeded, not fetched — the server functions are mocks.
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  client.setQueryData(["conversation", "c1"], payload(branchedFrom));
+  client.setQueryData(["conversation", "c1"], payload(branchedFrom, overrides));
+  client.setQueryData(
+    ["chat-models"],
+    [
+      {
+        id: "m1",
+        providerId: "provider-1",
+        providerName: "Provider One",
+        modelKey: "m1",
+        displayName: "Model One",
+        type: "chat",
+        enabled: true,
+        contextLength: 128_000,
+        capabilities: { reasoning: false, tools: true, vision: false, files: false },
+      },
+    ],
+  );
+  client.setQueryData(["tools", "web-search", "availability"], {
+    configured: true,
+    enabled: true,
+  });
   return render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -148,6 +229,36 @@ const renderView = (branchedFrom: Parameters<typeof payload>[0] = null) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("ChatView search mode", () => {
+  it("starts enabled for an available tool-capable model", () => {
+    renderView();
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("on");
+  });
+
+  it("resets a one-message opt-out after a successful send", async () => {
+    conversationMock.mockResolvedValue(payload(null) as never);
+    sendMock.mockResolvedValue({} as never);
+    renderView();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable search" }));
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "c1",
+          modelId: "m1",
+          content: "hello",
+          searchEnabled: false,
+          attachmentIds: [],
+        },
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId("search-mode")).toHaveTextContent("on"));
+  });
 });
 
 describe("ChatView branching", () => {
@@ -192,5 +303,35 @@ describe("ChatView branching", () => {
         params: { conversationId: "c2" },
       }),
     );
+  });
+
+  it("attaches completed compaction to the assistant response that performed it", async () => {
+    renderView(null, {
+      compactionEvents: [
+        {
+          id: "compact-1",
+          messageId: "m-answer",
+          checkpointId: "cp1",
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+          status: "complete",
+          outcome: "summary",
+          summary: "Earlier: they settled on an append-only ledger.",
+          error: null,
+          createdAt: BASE,
+          completedAt: BASE,
+        },
+      ],
+    });
+
+    const activity = await screen.findByTestId("compaction-activity");
+    expect(activity).toHaveTextContent("m-answer: Earlier: they settled on an append-only ledger.");
+  });
+
+  it("marks nothing when the conversation has no compaction event", async () => {
+    renderView();
+    expect(await screen.findByText("a1")).toBeInTheDocument();
+    expect(screen.queryByTestId("compaction-activity")).toBeNull();
   });
 });

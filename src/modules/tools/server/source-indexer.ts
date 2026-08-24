@@ -7,17 +7,29 @@ export interface SourceIndexer {
   indexFor(url: string): number;
 }
 
+const sourceKey = (raw: string): string => {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return raw;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return raw;
+  }
+};
+
 export const createSourceIndexer = (
   seed: ReadonlyArray<{ index: number; url: string }>,
 ): SourceIndexer => {
   let nextIndex = seed.reduce((max, s) => Math.max(max, s.index), 0) + 1;
-  const indexByUrl = new Map<string, number>(seed.map((s) => [s.url, s.index]));
+  const indexByUrl = new Map<string, number>(seed.map((s) => [sourceKey(s.url), s.index]));
   return {
     indexFor(url) {
-      const existing = indexByUrl.get(url);
+      const key = sourceKey(url);
+      const existing = indexByUrl.get(key);
       if (existing !== undefined) return existing;
       const assigned = nextIndex++;
-      indexByUrl.set(url, assigned);
+      indexByUrl.set(key, assigned);
       return assigned;
     },
   };

@@ -305,6 +305,7 @@ describe("attachment replacement on edit", () => {
           messageId: turn.assistant.id,
           modelId,
           deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
           edit: {
             messageId: turn.userMessage.id,
             conversationId: turn.conversation.id,
@@ -361,6 +362,7 @@ describe("attachment replacement on edit", () => {
           messageId: turn.assistant.id,
           modelId,
           deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
           edit: {
             messageId: turn.userMessage.id,
             conversationId: turn.conversation.id,

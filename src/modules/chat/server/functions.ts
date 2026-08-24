@@ -67,10 +67,12 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
         // persisted so far; ship them inline so the first paint is complete.
         const streaming = messages.find((m) => m.status === "streaming");
         const pendingChunks = streaming ? yield* repo.chunksAfter(streaming.id, 0) : [];
-        // Durable tool activity for all assistant messages (summaries only).
-        const toolCalls = yield* repo.listToolCalls(
-          messages.filter((m) => m.role === "assistant").map((m) => m.id),
-        );
+        const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
+        // Durable generation activity for all assistant messages. Tool results
+        // are summaries only; compaction events carry generated summaries and
+        // safe ordering metadata, never the transcript they summarized.
+        const toolCalls = yield* repo.listToolCalls(assistantIds);
+        const compactionEvents = yield* repo.listCompactionEvents(assistantIds);
         // Flat, like tool calls — the view groups by messageId.
         const attachments = yield* attachmentRepo.listForMessages(
           messages.filter((m) => m.role === "user").map((m) => m.id),
@@ -83,7 +85,15 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
               Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
             )
           : null;
-        return { conversation, messages, pendingChunks, toolCalls, attachments, branchedFrom };
+        return {
+          conversation,
+          messages,
+          pendingChunks,
+          toolCalls,
+          compactionEvents,
+          attachments,
+          branchedFrom,
+        };
       }).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),

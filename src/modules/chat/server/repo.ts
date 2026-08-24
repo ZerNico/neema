@@ -16,7 +16,14 @@ import {
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { conversations, messageChunks, messages, messageToolCalls } from "~/db/schema/index.ts";
+import {
+  conversationCompactionCheckpoints,
+  conversations,
+  messageChunks,
+  messageCompactionEvents,
+  messages,
+  messageToolCalls,
+} from "~/db/schema/index.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -36,10 +43,12 @@ export interface ConversationCursor {
   readonly id: string;
 }
 export type MessageRow = typeof messages.$inferSelect;
-export type ChunkKind = "text" | "reasoning" | "tool";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 // Durable tool-call projection safe for clients (summaries only, no page bodies).
 export type ToolCallRow = typeof messageToolCalls.$inferSelect;
+export type CompactionCheckpointRow = typeof conversationCompactionCheckpoints.$inferSelect;
+export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
 
 // `%`, `_` and the escape character itself are literals when someone types
 // them into a search box, not wildcards.
@@ -147,12 +156,35 @@ export class ChatRepo extends Context.Service<
     // Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
     failRunningToolCalls(messageId: string, message: string): Effect.Effect<void>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
+    createCompactionEvent(input: {
+      id: string;
+      messageId: string;
+      beforeTurnIndex: number;
+      passIndex: number;
+      scope: "history" | "active_rounds";
+    }): Effect.Effect<void>;
+    completeCompactionEvent(input: {
+      id: string;
+      status: "complete" | "error";
+      outcome?: "summary" | "hard_truncation";
+      checkpointId?: string | null;
+      summary?: string;
+      error?: { code: string; message: string };
+    }): Effect.Effect<void>;
+    // Marks an interrupted compaction terminal alongside interrupted tools.
+    failRunningCompactionEvents(messageId: string, message: string): Effect.Effect<void>;
+    listCompactionEvents(messageIds: ReadonlyArray<string>): Effect.Effect<CompactionEventRow[]>;
     finalizeMessage(input: {
       messageId: string;
       status: "complete" | "error" | "aborted";
       content: string;
       reasoning?: string;
-      usage?: { inputTokens?: number; outputTokens?: number };
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        firstInputTokens?: number;
+        estimatedFirstInputTokens?: number;
+      };
       error?: { tag: string; message: string };
     }): Effect.Effect<void>;
     // Claims and wipes a finished assistant back to a fresh streaming state.
@@ -162,6 +194,13 @@ export class ChatRepo extends Context.Service<
       messageId: string;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
+      /**
+       * Compaction boundaries this rewind invalidates. Deleted messages take
+       * their checkpoints with them via cascade, but a retried assistant and
+       * an edited user message keep their ids — a summary ending there now
+       * describes text that no longer exists, so it has to go explicitly.
+       */
+      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: {
         messageId: string;
         conversationId: string;
@@ -181,6 +220,8 @@ export class ChatRepo extends Context.Service<
       attachmentIds: ReadonlyArray<string>;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
+      /** See resetMessageForRetry. */
+      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
     }): Effect.Effect<
       { message: MessageRow; orphanedKeys: ReadonlyArray<string> } | null,
       AttachmentNotAvailable
@@ -188,6 +229,25 @@ export class ChatRepo extends Context.Service<
     // Removes messages entirely (chunks/tool calls go via FK cascade).
     // Returns storage keys to delete after the commit.
     deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>>;
+    /**
+     * Every compaction checkpoint of a conversation, oldest first. Superseded
+     * rows are kept, so the caller picks the newest whose boundary is still a
+     * position in the message list it is looking at (see `compaction.ts`).
+     */
+    listCompactionCheckpoints(
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<CompactionCheckpointRow>>;
+    /**
+     * Records a summary covering everything through `throughMessageId`. Takes
+     * the conversation lock first so a concurrent branch clone sees either all
+     * of this checkpoint or none of it.
+     */
+    insertCompactionCheckpoint(input: {
+      conversationId: string;
+      throughMessageId: string;
+      modelId: string | null;
+      summary: string;
+    }): Effect.Effect<CompactionCheckpointRow | null>;
   }
 >()("chat/chat/ChatRepo") {
   static readonly layer = Layer.effect(
@@ -454,7 +514,7 @@ export class ChatRepo extends Context.Service<
                   .select()
                   .from(messages)
                   .where(eq(messages.conversationId, source.id))
-                  .orderBy(asc(messages.createdAt))
+                  .orderBy(asc(messages.createdAt), asc(messages.id))
                   .for("update")
                   .pipe(Effect.orDie);
 
@@ -540,6 +600,61 @@ export class ChatRepo extends Context.Service<
                   })),
                 });
 
+                // Compaction checkpoints follow the prefix they describe. Only
+                // those whose boundary is inside the copied range are eligible
+                // — a summary ending past the branch point covers messages
+                // this conversation does not have. createdAt is preserved so
+                // the clones keep their relative age.
+                const checkpoints = yield* tx
+                  .select()
+                  .from(conversationCompactionCheckpoints)
+                  .where(eq(conversationCompactionCheckpoints.conversationId, source.id))
+                  .pipe(Effect.orDie);
+                const inherited = checkpoints.filter((checkpoint) =>
+                  clonedIds.has(checkpoint.throughMessageId),
+                );
+                const checkpointIds = new Map(
+                  inherited.map((checkpoint) => [checkpoint.id, uuidv7()] as const),
+                );
+                if (inherited.length > 0) {
+                  yield* tx
+                    .insert(conversationCompactionCheckpoints)
+                    .values(
+                      inherited.map((checkpoint) => ({
+                        ...checkpoint,
+                        id: checkpointIds.get(checkpoint.id)!,
+                        conversationId: branch.id,
+                        throughMessageId: clonedIds.get(checkpoint.throughMessageId)!,
+                      })),
+                    )
+                    .pipe(Effect.orDie);
+                }
+
+                // Compaction activity belongs to the assistant row that
+                // performed it. Clone every visible event in the copied prefix;
+                // checkpoint linkage survives only when that semantic
+                // checkpoint was itself valid for (and cloned into) the branch.
+                const compactionEvents = yield* tx
+                  .select()
+                  .from(messageCompactionEvents)
+                  .where(inArray(messageCompactionEvents.messageId, [...clonedIds.keys()]))
+                  .pipe(Effect.orDie);
+                if (compactionEvents.length > 0) {
+                  yield* tx
+                    .insert(messageCompactionEvents)
+                    .values(
+                      compactionEvents.map((event) => ({
+                        ...event,
+                        id: uuidv7(),
+                        messageId: clonedIds.get(event.messageId)!,
+                        checkpointId: event.checkpointId
+                          ? (checkpointIds.get(event.checkpointId) ?? null)
+                          : null,
+                      })),
+                    )
+                    .pipe(Effect.orDie);
+                }
+
                 // message_chunks are deliberately not copied — they exist so a
                 // reconnecting client can replay a live stream, and nothing in
                 // the branch is live.
@@ -554,7 +669,10 @@ export class ChatRepo extends Context.Service<
             .select()
             .from(messages)
             .where(eq(messages.conversationId, conversationId))
-            .orderBy(asc(messages.createdAt))
+            // Total order: timestamps collide inside a turn, and every
+            // position-based decision downstream (retry rewind, branch prefix,
+            // compaction boundary) needs the sequence to be the same one twice.
+            .orderBy(asc(messages.createdAt), asc(messages.id))
             .pipe(Effect.orDie);
         }),
 
@@ -657,6 +775,61 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
+        createCompactionEvent: Effect.fn("ChatRepo.createCompactionEvent")(function* (input) {
+          yield* db
+            .insert(messageCompactionEvents)
+            .values({ ...input, status: "running" })
+            .pipe(Effect.orDie);
+        }),
+
+        completeCompactionEvent: Effect.fn("ChatRepo.completeCompactionEvent")(function* (input) {
+          yield* db
+            .update(messageCompactionEvents)
+            .set({
+              status: input.status,
+              outcome: input.outcome,
+              checkpointId: input.checkpointId,
+              summary: input.summary,
+              error: input.error,
+              completedAt: new Date(),
+            })
+            .where(eq(messageCompactionEvents.id, input.id))
+            .pipe(Effect.orDie);
+        }),
+
+        failRunningCompactionEvents: Effect.fn("ChatRepo.failRunningCompactionEvents")(
+          function* (messageId, message) {
+            yield* db
+              .update(messageCompactionEvents)
+              .set({
+                status: "error",
+                error: { code: "GenerationFailed", message },
+                completedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(messageCompactionEvents.messageId, messageId),
+                  eq(messageCompactionEvents.status, "running"),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        listCompactionEvents: Effect.fn("ChatRepo.listCompactionEvents")(function* (messageIds) {
+          if (messageIds.length === 0) return [];
+          return yield* db
+            .select()
+            .from(messageCompactionEvents)
+            .where(inArray(messageCompactionEvents.messageId, [...messageIds]))
+            .orderBy(
+              asc(messageCompactionEvents.messageId),
+              asc(messageCompactionEvents.beforeTurnIndex),
+              asc(messageCompactionEvents.passIndex),
+            )
+            .pipe(Effect.orDie);
+        }),
+
         finalizeMessage: Effect.fn("ChatRepo.finalizeMessage")(function* (input) {
           yield* db
             .update(messages)
@@ -716,6 +889,16 @@ export class ChatRepo extends Context.Service<
                     .pipe(Effect.orDie);
                 }
 
+                if (input.invalidateCheckpointThroughMessageIds.length > 0) {
+                  yield* tx
+                    .delete(conversationCompactionCheckpoints)
+                    .where(
+                      inArray(conversationCompactionCheckpoints.throughMessageId, [
+                        ...input.invalidateCheckpointThroughMessageIds,
+                      ]),
+                    )
+                    .pipe(Effect.orDie);
+                }
                 if (input.deleteMessageIds.length > 0) {
                   orphanedKeys.push(
                     ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),
@@ -732,6 +915,10 @@ export class ChatRepo extends Context.Service<
                 yield* tx
                   .delete(messageToolCalls)
                   .where(eq(messageToolCalls.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .delete(messageCompactionEvents)
+                  .where(eq(messageCompactionEvents.messageId, input.messageId))
                   .pipe(Effect.orDie);
 
                 return { claimed: true, orphanedKeys: orphanedKeys as ReadonlyArray<string> };
@@ -770,6 +957,16 @@ export class ChatRepo extends Context.Service<
                   })),
                 ];
 
+                if (input.invalidateCheckpointThroughMessageIds.length > 0) {
+                  yield* tx
+                    .delete(conversationCompactionCheckpoints)
+                    .where(
+                      inArray(conversationCompactionCheckpoints.throughMessageId, [
+                        ...input.invalidateCheckpointThroughMessageIds,
+                      ]),
+                    )
+                    .pipe(Effect.orDie);
+                }
                 if (input.deleteMessageIds.length > 0) {
                   orphanedKeys.push(
                     ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),
@@ -817,6 +1014,47 @@ export class ChatRepo extends Context.Service<
             )
             .pipe(Effect.orDie);
         }),
+
+        listCompactionCheckpoints: Effect.fn("ChatRepo.listCompactionCheckpoints")(
+          function* (conversationId) {
+            return yield* db
+              .select()
+              .from(conversationCompactionCheckpoints)
+              .where(eq(conversationCompactionCheckpoints.conversationId, conversationId))
+              .orderBy(asc(conversationCompactionCheckpoints.createdAt))
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        insertCompactionCheckpoint: Effect.fn("ChatRepo.insertCompactionCheckpoint")(
+          function* (input) {
+            return yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  // Serializes against a branch clone reading the checkpoint set,
+                  // and against a second generation summarizing the same range.
+                  const locked = yield* tx
+                    .select({ id: conversations.id })
+                    .from(conversations)
+                    .where(eq(conversations.id, input.conversationId))
+                    .for("update")
+                    .pipe(Effect.orDie);
+                  if (locked.length === 0) return null;
+
+                  const rows = yield* tx
+                    .insert(conversationCompactionCheckpoints)
+                    .values({ id: uuidv7(), ...input })
+                    // A concurrent generation that summarized the same boundary
+                    // first wins; both summaries describe the same messages.
+                    .onConflictDoNothing()
+                    .returning()
+                    .pipe(Effect.orDie);
+                  return rows[0] ?? null;
+                }),
+              )
+              .pipe(Effect.catchTag("SqlError", Effect.die));
+          },
+        ),
       });
     }),
   );

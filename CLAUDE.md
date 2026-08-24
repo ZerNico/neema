@@ -35,6 +35,13 @@ See README.md for architecture; this file records the sharp edges.
 - `OpenRouterLanguageModel` only emits the `finish` part when a chunk carries `usage`.
   A provider (or mock) that omits usage hangs the loop forever — real OpenRouter always
   sends it because the client forces `stream_options: { include_usage: true }`.
+- Every model call is a **streaming** chat completion, side generations (titles,
+  compaction summaries) included. `@effect/ai-openrouter`'s non-streaming `ChatResult`
+  requires `system_fingerprint`; plain OpenAI-compatible servers omit it, so
+  `LanguageModel.generateText` fails to decode against providers whose streaming path
+  works fine (`ChatStreamChunk` marks the same field optional). `AiGateway.generateText`
+  folds the stream instead — usage rides the finish part, and a provider that never
+  sends one yields a zeroed `Response.Usage`, which bills nothing rather than failing.
 - A handler's second arg is `Toolkit.HandlerContext`: `ctx.preliminary(result)` streams
   progress as `tool-result` parts with `preliminary: true`. Those are UI-only — the
   stream loop must keep them out of the continuation transcript.
@@ -44,19 +51,19 @@ See README.md for architecture; this file records the sharp edges.
   (`WebToolResult`) on purpose: streaming persistence, tool envelopes and the
   citations UI are written once against those fields — a new tool that speaks
   them needs no pipeline changes, only name-aware labels in
-  `tool-activity-block.tsx`. `result.query` carries read_url's URL.
-- URL fetching (search result pages and read_url alike) goes through
-  `PageExtractor`, whose `url-safety.ts` guard is the SSRF boundary: http(s)
-  only, no credentials, private/reserved addresses refused for the URL and for
-  every redirect hop. The SearXNG base URL is exempt by design (self-hosting).
-- The two web tools are armed differently and that asymmetry is deliberate
-  (`prepareWebToolkit`, `requestSearch`). web_search is a per-message mode the
-  user opts into with the composer toggle; read_url has no toggle — it is armed
-  on every tool-capable generation while an admin has it enabled, because
-  "what does this link say?" is not a mode. Consequences: `searchEnabled`
-  gates search ONLY, history citation-marker stripping keys off whether any
-  tool is armed (`webToolsEnabled`), and the retry path re-arms search only
-  when the original generation actually called `web_search`.
+  `tool-activity-block.tsx`. `targets` contains search queries or reader URLs.
+- `web_search` is snippet-only and accepts several queries in one call. It never
+  fetches result pages. `read_url` accepts several URLs, fetches them concurrently,
+  and is the only path through `PageExtractor`, whose `url-safety.ts` guard is the
+  SSRF boundary: http(s) only, no credentials, private/reserved addresses refused
+  for the URL and every redirect hop. The SearXNG base URL is exempt by design.
+- Search follows the per-message composer toggle. The reader rides with an armed
+  search so the model can open its hits, and is also armed when user-authored text
+  or prior persisted sources seed URL authority. Search hits extend that authority
+  during the generation; assistant prose never does, so invented URLs are refused.
+  `searchEnabled` gates search ONLY, history citation-marker stripping keys off
+  whether any tool is armed (`webToolsEnabled`), and retry re-arms search only when
+  the original generation called `web_search`.
 
 ## Citations / streamdown
 

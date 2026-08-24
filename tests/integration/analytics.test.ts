@@ -194,7 +194,13 @@ const makeModel = Effect.fn("test.makeModel")(function* (
     modelKey: `key-${uuidv7()}`,
     displayName: `Model ${uuidv7().slice(-4)}`,
     type: "chat",
-    ...(options.pricing ? { pricing: options.pricing } : {}),
+    contextLength: null,
+    embeddingDimensions: null,
+    capabilities: { reasoning: false, tools: false, vision: false, files: false },
+    pricing: options.pricing ?? null,
+    enabled: true,
+    access: "public",
+    groupIds: [],
   });
 });
 
@@ -482,6 +488,7 @@ describe("usage aggregates", () => {
       // Every row, chat and title alike — this is the error-rate divisor.
       attempts: 3,
       titleGenerations: 1,
+      compactionGenerations: 0,
       errorAttempts: 0,
       abortedAttempts: 0,
       inputTokens: 310,
@@ -492,6 +499,42 @@ describe("usage aggregates", () => {
       cost: 0.003,
       costComplete: false, // the title row has unknown cost
       activeUsers: 1,
+    });
+  });
+
+  it("counts compaction summaries as their own generation kind", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const { userId, scope, today } = yield* seed();
+        yield* db.insert(usageEvents).values({
+          id: uuidv7(),
+          userId,
+          modelId: null,
+          kind: "compaction",
+          modelName: "Alpha",
+          status: "complete",
+          inputTokens: 5_000,
+          outputTokens: 400,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          cost: 0.004,
+          costSource: "provider",
+          createdAt: today,
+        });
+        return yield* analytics.summary(scope);
+      }),
+    );
+    // A compaction is an attempt and its tokens are real spend, but it is
+    // neither a message the user sent nor a title.
+    expect(result).toMatchObject({
+      messages: 2,
+      titleGenerations: 1,
+      compactionGenerations: 1,
+      attempts: 4,
+      inputTokens: 5_310,
+      outputTokens: 555,
     });
   });
 
@@ -596,6 +639,7 @@ describe("usage aggregates", () => {
       messages: 0,
       attempts: 0,
       titleGenerations: 0,
+      compactionGenerations: 0,
       errorAttempts: 0,
       abortedAttempts: 0,
       inputTokens: 0,

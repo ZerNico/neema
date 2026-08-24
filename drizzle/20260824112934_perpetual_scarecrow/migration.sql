@@ -1,0 +1,1 @@
+ALTER TABLE "models" ADD COLUMN "embedding_dimensions" integer;

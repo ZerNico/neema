@@ -14,7 +14,6 @@ import {
   ModelIdInput,
   ProviderIdInput,
   RenameGroupInput,
-  UpdateModelAccessInput,
   UpdateModelInput,
   UpdateProviderInput,
 } from "../schema.ts";
@@ -161,15 +160,6 @@ export const removeGroupMember = createServerFn({ method: "POST" })
   );
 
 // --- Model access ---
-
-export const updateModelAccess = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(UpdateModelAccessInput))
-  .handler(({ data }) =>
-    runtime.runPromise(
-      ProviderRepo.use((repo) => repo.updateModelAccess(data.modelId, data.access, data.groupIds)),
-    ),
-  );
 
 export const listModelAccess = createServerFn({ method: "GET" })
   .middleware([requireAdmin])

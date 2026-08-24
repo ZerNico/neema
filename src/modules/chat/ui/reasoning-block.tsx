@@ -2,6 +2,7 @@ import { ArrowDown01Icon, AiBrain01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 
@@ -50,23 +51,25 @@ export function ReasoningBlock({
   }
 
   return (
-    <div className="mb-2">
-      <button
-        type="button"
-        onClick={() => setOverride({ during: active, value: !expanded })}
-        aria-expanded={expanded}
-        className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors"
-      >
+    <Collapsible
+      open={expanded}
+      onOpenChange={(next) => setOverride({ during: active, value: next })}
+      className="mb-2"
+    >
+      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors">
         <HugeiconsIcon icon={AiBrain01Icon} className={cn("size-4", active && "animate-pulse")} />
         <span className={cn(active && "animate-pulse")}>
           {active ? "Thinking…" : "Thought process"}
         </span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
-          className={cn("size-3.5 transition-transform", expanded && "rotate-180")}
+          className={cn(
+            "size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none",
+            expanded && "rotate-180",
+          )}
         />
-      </button>
-      {expanded ? (
+      </CollapsibleTrigger>
+      <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
         <div
           ref={paneRef}
           className="border-border text-muted-foreground mt-2 max-h-56 overflow-y-auto border-l-2 pl-3 text-sm leading-relaxed"
@@ -82,7 +85,7 @@ export function ReasoningBlock({
             {reasoning}
           </Streamdown>
         </div>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

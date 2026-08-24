@@ -116,7 +116,7 @@ function makeChatService() {
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
 
-    // The composer's toggle gates web_search only; the reader arms itself.
+    // The composer's toggle gates web_search only; read_url is gated by user URLs.
     const searchToolEnabled = Effect.gen(function* () {
       const search = yield* webSearch.availability();
       return search.configured && search.enabled;
@@ -293,6 +293,7 @@ function makeChatService() {
       modelId: string;
       searchEnabled: boolean;
       deleteMessageIds: ReadonlyArray<string>;
+      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: {
         messageId: string;
         content: string;
@@ -304,6 +305,7 @@ function makeChatService() {
         messageId: input.assistantMessageId,
         modelId: input.modelId,
         deleteMessageIds: input.deleteMessageIds,
+        invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
         ...(input.edit
           ? {
               edit: {
@@ -416,9 +418,9 @@ function makeChatService() {
       }
 
       // Re-arm search iff the original generation actually searched and search
-      // is still available — a degraded retry beats a failing one. Only
-      // web_search is re-armed here: the reader arms itself on every
-      // generation, so a retry of a read-only answer must not turn search on.
+      // is still available — a degraded retry beats a failing one. read_url is
+      // independently derived from user-authored URLs when generation restarts,
+      // so retrying a read-only answer must not turn search on.
       const usedSearch = (yield* repo.listToolCalls([message.id])).some(
         (call) => call.toolName === "web_search",
       );
@@ -431,6 +433,10 @@ function makeChatService() {
         modelId,
         searchEnabled,
         deleteMessageIds: after.map((m) => m.id),
+        // From the retried answer onward: a summary that ends at this message
+        // describes the response about to be thrown away. Rows after it are
+        // deleted and cascade, but this one keeps its id.
+        invalidateCheckpointThroughMessageIds: all.slice(index).map((m) => m.id),
       });
       if (!restarted) {
         return yield* new RetryNotAllowed({
@@ -560,6 +566,9 @@ function makeChatService() {
           modelId: input.modelId,
           searchEnabled: input.searchEnabled,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
+          // From the edited user message onward — its text changes while the
+          // row survives, so any summary covering it is stale.
+          invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
           edit: {
             messageId: message.id,
             content: input.content,
@@ -584,6 +593,7 @@ function makeChatService() {
         attachmentIds: input.attachmentIds,
         modelId: input.modelId,
         deleteMessageIds: after.map((candidate) => candidate.id),
+        invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
       });
       if (!created) {
         return yield* new EditNotAllowed({

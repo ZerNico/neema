@@ -163,7 +163,7 @@ describe("MessageBubble citations", () => {
   const searchActivity: ToolActivity = {
     callId: "call-1",
     name: "web_search",
-    query: "effect 4",
+    targets: ["effect 4"],
     status: "complete",
     sources: [
       {
@@ -561,5 +561,153 @@ describe("MessageBubble actions", () => {
       />,
     );
     expect(container.querySelector("[role='separator']")).toBeNull();
+  });
+
+  it("collapses the compaction summary behind a trigger, and expands it on click", async () => {
+    renderPlain({
+      compactionActivities: [
+        {
+          eventId: "compact-1",
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+          status: "complete",
+          outcome: "summary",
+          summary: "Nico wants the ledger left append-only.",
+        },
+      ],
+    });
+
+    const trigger = screen.getByRole("button", { name: "Earlier context summarized" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/append-only/)).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(await screen.findByText(/append-only/)).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("draws no compaction activity when none occurred", () => {
+    renderPlain();
+    expect(screen.queryByRole("button", { name: "Earlier context summarized" })).toBeNull();
+  });
+
+  it("announces a running compaction instead of the thinking placeholder", () => {
+    renderPlain({
+      content: "",
+      status: "streaming",
+      compactionActivities: [
+        {
+          eventId: "compact-running",
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+          status: "running",
+        },
+      ],
+    });
+
+    expect(screen.getByText("Summarizing earlier context…")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    // Nothing to expand yet — a dead button would just be noise.
+    expect(screen.queryByRole("button", { name: /Summarizing/ })).toBeNull();
+  });
+
+  it("expands the summary of a compaction that finished mid-generation", async () => {
+    renderPlain({
+      content: "",
+      status: "streaming",
+      compactionActivities: [
+        {
+          eventId: "compact-complete",
+          beforeTurnIndex: 1,
+          passIndex: 0,
+          scope: "active_rounds",
+          status: "complete",
+          outcome: "summary",
+          summary: "Nico wants the ledger append-only.",
+        },
+      ],
+    });
+
+    const trigger = screen.getByRole("button", { name: "Earlier context summarized" });
+    expect(screen.queryByText(/append-only/)).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(await screen.findByText(/append-only/)).toBeInTheDocument();
+  });
+
+  it("orders tool, compaction, then later tool by model turn", () => {
+    renderPlain({
+      toolActivities: [
+        {
+          callId: "search-1",
+          name: "web_search",
+          turnIndex: 0,
+          callIndex: 0,
+          targets: ["effect"],
+          status: "complete",
+        },
+        {
+          callId: "read-1",
+          name: "read_url",
+          turnIndex: 1,
+          callIndex: 0,
+          targets: ["https://example.com"],
+          status: "complete",
+        },
+      ],
+      compactionActivities: [
+        {
+          eventId: "compact-between",
+          beforeTurnIndex: 1,
+          passIndex: 0,
+          scope: "active_rounds",
+          status: "complete",
+          outcome: "summary",
+          summary: "The search found relevant evidence.",
+        },
+      ],
+    });
+
+    const search = screen.getByRole("button", { name: /Searched the web/ });
+    const compact = screen.getByRole("button", { name: "Earlier context summarized" });
+    const read = screen.getByRole("button", { name: /Read pages/ });
+    expect(search.compareDocumentPosition(compact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(compact.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("labels a successful hard truncation without calling it a summary", () => {
+    renderPlain({
+      compactionActivities: [
+        {
+          eventId: "compact-truncated",
+          beforeTurnIndex: 1,
+          passIndex: 0,
+          scope: "active_rounds",
+          status: "complete",
+          outcome: "hard_truncation",
+        },
+      ],
+    });
+    expect(screen.getByText("Earlier context truncated")).toBeInTheDocument();
+  });
+
+  it("says so when compaction failed and the transcript was truncated instead", () => {
+    renderPlain({
+      content: "",
+      status: "streaming",
+      compactionActivities: [
+        {
+          eventId: "compact-failed",
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+          status: "failed",
+        },
+      ],
+    });
+
+    expect(screen.getByText("Couldn't summarize earlier context")).toBeInTheDocument();
   });
 });

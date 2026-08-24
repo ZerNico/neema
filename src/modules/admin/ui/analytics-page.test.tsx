@@ -31,7 +31,8 @@ vi.mock("@tanstack/charts/react", () => ({
 const summary = {
   messages: 42,
   attempts: 60,
-  titleGenerations: 18,
+  titleGenerations: 12,
+  compactionGenerations: 6,
   errorAttempts: 3,
   abortedAttempts: 2,
   inputTokens: 1_200_000,
@@ -165,6 +166,7 @@ describe("AnalyticsPage", () => {
         messages: 0,
         attempts: 0,
         titleGenerations: 0,
+        compactionGenerations: 0,
         errorAttempts: 0,
         abortedAttempts: 0,
         inputTokens: 0,
@@ -240,11 +242,13 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("100K")).toBeInTheDocument(); // reasoning
   });
 
-  it("splits chat from title generations", async () => {
+  it("splits chat from title and compaction generations", async () => {
     renderPage();
     expect(await screen.findByText("Generation types")).toBeInTheDocument();
-    // 42 chat + 18 title = 60 attempts → 70/30.
+    // 42 chat + 12 title + 6 compaction = 60 attempts → 70/20/10.
     expect(screen.getByText(/70%/)).toBeInTheDocument();
-    expect(screen.getByText(/30%/)).toBeInTheDocument();
+    expect(screen.getByText(/20%/)).toBeInTheDocument();
+    expect(screen.getByText(/10%/)).toBeInTheDocument();
+    expect(screen.getByText("compaction", { exact: false })).toBeInTheDocument();
   });
 });

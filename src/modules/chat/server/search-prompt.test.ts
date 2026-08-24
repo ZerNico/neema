@@ -23,6 +23,23 @@ const textOf = (message: Prompt.Message): string =>
         .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
         .join("");
 
+describe("webToolsSystemHint", () => {
+  it("limits read_url to user and search-result URLs", () => {
+    const hint = webToolsSystemHint({ search: false, reader: true });
+    expect(hint).toContain("URLs from user messages and web_search results");
+    expect(hint).toContain("Never invent a URL");
+    expect(hint).toContain("one or more HTTP(S) URLs in a single call");
+    expect(hint).not.toContain("Use web_search to look up");
+  });
+
+  it("explains the snippet-search then batch-read flow", () => {
+    const hint = webToolsSystemHint({ search: true, reader: true });
+    expect(hint).toContain("returns snippets only, not page content");
+    expect(hint).toContain("several focused queries in one call");
+    expect(hint).toContain("use read_url to open the most relevant results");
+  });
+});
+
 describe("buildSearchReminder", () => {
   it("lists prior sources by index with their url and snippet", () => {
     const text = buildSearchReminder({ sources: [source(1), source(4)], lastCycle: false });

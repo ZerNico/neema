@@ -14,9 +14,11 @@ export interface CitableSource {
 // Which sentence leads depends only on the admin's tool toggles.
 export const webToolsSystemHint = (tools: { search: boolean; reader: boolean }): string =>
   [
-    tools.search ? "You can use the web_search tool to look up current information." : "",
+    tools.search
+      ? "Use web_search to look up current information. It returns snippets only, not page content. Search with several focused queries in one call when useful, then use read_url to open the most relevant results before answering."
+      : "",
     tools.reader
-      ? "You can use the read_url tool to fetch and read a specific web page the user points at."
+      ? "Use read_url to open one or more HTTP(S) URLs in a single call. It accepts URLs from user messages and web_search results in this conversation. Never invent a URL."
       : "",
     WEB_TOOLS_HINT_BODY,
   ]

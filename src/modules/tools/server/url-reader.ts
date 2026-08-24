@@ -1,23 +1,28 @@
 import { Context, Effect, Layer } from "effect";
 import { Tool } from "effect/unstable/ai";
-import { UrlReadParams, type PageStatus } from "../schema.ts";
-import { PageExtractor } from "./extraction.ts";
+import {
+  UrlReadParams,
+  WebToolResult,
+  type PageStatus,
+  type Source,
+  type WebToolFailure,
+  type WebToolResult as Result,
+} from "../schema.ts";
+import { PageExtractor, type ExtractedPage } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
 import type { SourceIndexer } from "./source-indexer.ts";
-import { ToolUnavailable, WebToolResult, type WebToolResult as Result } from "./web-search.ts";
+import type { UrlAuthority } from "./url-authority.ts";
+import { canonicalUserUrl } from "./user-urls.ts";
+import { ToolUnavailable } from "./web-search.ts";
 
-// Reads one page the user (via the model) pointed at. Speaks the shared
-// WebToolResult shape so the streaming pipeline, envelopes, persistence and
-// citations treat it exactly like a search that found a single source.
-// PageExtractor owns the SSRF boundary: scheme/credential checks plus
-// private-address rejection on the URL and on every redirect hop.
+const MAX_CHARS_ACROSS_URLS = 60_000;
+const DISALLOWED_REASON =
+  "read_url can only open a URL from a user message or from this conversation's search results";
 
 export const urlReaderTool = Tool.make("read_url", {
   description:
-    "Fetch and read one web page the user pointed at (or a page you learned about from " +
-    "search results). Returns the page's extracted main content as markdown. Use when the " +
-    "user provides a URL or asks about a specific page; use web_search when you need to " +
-    "find pages first.",
+    "Open and read one or more URLs from user messages or web_search results. Fetches the pages " +
+    "in parallel and returns extracted main content as markdown. Never invent a URL.",
   parameters: UrlReadParams,
   success: WebToolResult,
   failureMode: "return",
@@ -27,10 +32,39 @@ export const urlReaderTool = Tool.make("read_url", {
 const snippetOf = (content: string): string => {
   const line = content
     .split("\n")
-    .map((l) => l.replace(/^[#>\-*\s]+/, "").trim())
-    .find((l) => l.length > 0);
+    .map((value) => value.replace(/^[#>\-*\s]+/, "").trim())
+    .find((value) => value.length > 0);
   return (line ?? "").slice(0, 200);
 };
+
+const uniqueTargets = (urls: ReadonlyArray<string>): string[] => {
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  for (const raw of urls) {
+    const target = raw.trim();
+    const key = canonicalUserUrl(target) ?? target;
+    if (!target || seen.has(key)) continue;
+    seen.add(key);
+    targets.push(target);
+  }
+  return targets;
+};
+
+const formatFailures = (failures: ReadonlyArray<WebToolFailure>): string =>
+  failures.map((failure) => `${failure.target} (${failure.error})`).join("; ");
+
+const truncateAtCodePoint = (value: string, maxChars: number): string => {
+  let result = "";
+  for (const codePoint of value) {
+    if (result.length + codePoint.length > maxChars) break;
+    result += codePoint;
+  }
+  return result;
+};
+
+type ReadOutcome =
+  | { readonly target: string; readonly extracted: ExtractedPage; readonly error: null }
+  | { readonly target: string; readonly extracted: null; readonly error: string };
 
 export class UrlReaderExecutor extends Context.Service<
   UrlReaderExecutor,
@@ -38,6 +72,7 @@ export class UrlReaderExecutor extends Context.Service<
     /** The generation's shared indexer keeps citation numbers unique across tools. */
     handler(
       indexer: SourceIndexer,
+      authority: UrlAuthority,
     ): Effect.Effect<
       (
         params: UrlReadParams,
@@ -56,6 +91,7 @@ export class UrlReaderExecutor extends Context.Service<
 
       const makeHandler = Effect.fn("UrlReaderExecutor.handler")(function* (
         indexer: SourceIndexer,
+        authority: UrlAuthority,
       ) {
         const tool = yield* repo.getUrlReader();
         if (!tool) {
@@ -70,49 +106,131 @@ export class UrlReaderExecutor extends Context.Service<
           params: UrlReadParams,
           ctx: { preliminary: (result: Result) => Effect.Effect<void> },
         ) {
-          const requested = params.url.trim();
-          const base = { query: requested, resultCount: 0, pagesFetched: 0, results: [] };
-          const page = (status: PageStatus["status"], title?: string): PageStatus[] => [
-            { url: requested, ...(title !== undefined ? { title } : {}), status },
-          ];
-
-          yield* ctx.preliminary({ ok: true, ...base, pages: page("reading") });
-
-          return yield* extractor.extract({ url: requested, charCap: config.perPageCharCap }).pipe(
-            Effect.map((extracted): Result => {
-              // Cite the final post-redirect URL — it's what the sources panel
-              // links to and what a later search hit is deduped against.
-              const title = extracted.title ?? new URL(extracted.url).hostname;
-              const index = indexer.indexFor(extracted.url);
-              const snippet = snippetOf(extracted.content);
-              return {
-                ok: true,
-                query: requested,
-                resultCount: 1,
-                pagesFetched: 1,
-                results: [
-                  {
-                    index,
-                    title,
-                    url: extracted.url,
-                    snippet,
-                    content: extracted.content,
-                    ...(extracted.truncated ? { truncated: true } : {}),
-                  },
-                ],
-                pages: [{ url: extracted.url, title, status: "done" }],
-                sources: [{ index, url: extracted.url, title, snippet, read: true }],
-              };
-            }),
-            Effect.catchTag("PageExtractionError", (e) =>
-              Effect.succeed<Result>({
-                ok: false,
-                ...base,
-                pages: page("error"),
-                error: e.message,
-              }),
-            ),
+          const targets = uniqueTargets(params.urls);
+          const entries = targets.map((target, index) => ({
+            target,
+            index,
+            canonical: authority.resolve(target),
+          }));
+          const pages: PageStatus[] = entries.map((entry) =>
+            entry.canonical
+              ? { url: entry.canonical, status: "pending" }
+              : { url: entry.target, status: "error", error: DISALLOWED_REASON },
           );
+          const allowed = entries.filter(
+            (entry): entry is typeof entry & { canonical: string } => entry.canonical !== null,
+          );
+          const refused: WebToolFailure[] = entries.flatMap((entry) =>
+            entry.canonical ? [] : [{ target: entry.target, error: DISALLOWED_REASON }],
+          );
+
+          if (allowed.length === 0) {
+            return {
+              ok: false,
+              targets,
+              resultCount: 0,
+              pagesFetched: 0,
+              results: [],
+              failures: refused,
+              pages,
+              error: formatFailures(refused),
+            } satisfies Result;
+          }
+
+          const progress = () =>
+            ctx.preliminary({
+              ok: true,
+              targets,
+              resultCount: 0,
+              pagesFetched: 0,
+              results: [],
+              failures: refused,
+              pages: structuredClone(pages),
+            });
+          yield* progress();
+
+          const outcomes = yield* Effect.forEach(
+            allowed,
+            (entry): Effect.Effect<ReadOutcome> =>
+              Effect.gen(function* () {
+                pages[entry.index] = { url: entry.canonical, status: "reading" };
+                yield* progress();
+                return yield* extractor
+                  .extract({ url: entry.canonical, charCap: config.perPageCharCap })
+                  .pipe(
+                    Effect.map((extracted): ReadOutcome => {
+                      const title = extracted.title ?? new URL(extracted.url).hostname;
+                      pages[entry.index] = { url: extracted.url, title, status: "done" };
+                      return { target: entry.target, extracted, error: null };
+                    }),
+                    Effect.catchTag("PageExtractionError", (error) => {
+                      pages[entry.index] = {
+                        url: entry.canonical,
+                        status: "error",
+                        error: error.message,
+                      };
+                      return Effect.succeed<ReadOutcome>({
+                        target: entry.target,
+                        extracted: null,
+                        error: error.message,
+                      });
+                    }),
+                    Effect.tap(() => progress()),
+                  );
+              }),
+            { concurrency: 3 },
+          );
+
+          const successful = outcomes.filter(
+            (outcome): outcome is Extract<ReadOutcome, { error: null }> => outcome.error === null,
+          );
+          const extractionFailures: WebToolFailure[] = outcomes.flatMap((outcome) =>
+            outcome.error ? [{ target: outcome.target, error: outcome.error }] : [],
+          );
+          const failures = [...refused, ...extractionFailures];
+          let remainingChars = MAX_CHARS_ACROSS_URLS;
+          let remainingPages = successful.length;
+          const sources: Source[] = [];
+          const results: Array<Result["results"][number]> = [];
+          for (const { extracted } of successful) {
+            authority.allow(extracted.url);
+            const title = extracted.title ?? new URL(extracted.url).hostname;
+            const index = indexer.indexFor(extracted.url);
+            const fairShare = Math.ceil(remainingChars / remainingPages);
+            const truncatedAcrossBatch = extracted.content.length > fairShare;
+            const marker = "\n\n[content truncated]";
+            const content = truncatedAcrossBatch
+              ? `${truncateAtCodePoint(
+                  extracted.content,
+                  Math.max(0, fairShare - marker.length),
+                )}${marker}`
+              : extracted.content;
+            remainingChars = Math.max(0, remainingChars - content.length);
+            remainingPages -= 1;
+            const snippet = snippetOf(content);
+            sources.push({ index, url: extracted.url, title, snippet, read: true });
+            results.push({
+              index,
+              title,
+              url: extracted.url,
+              snippet,
+              content,
+              ...(extracted.truncated || truncatedAcrossBatch ? { truncated: true } : {}),
+            });
+          }
+          const ok = results.length > 0;
+
+          return {
+            ok,
+            targets,
+            resultCount: results.length,
+            pagesFetched: results.length,
+            results,
+            failures,
+            pages,
+            ...(sources.length > 0 ? { sources } : {}),
+            ...(failures.length > 0 ? { error: formatFailures(failures) } : {}),
+          } satisfies Result;
         });
       });
 

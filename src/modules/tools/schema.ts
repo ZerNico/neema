@@ -4,15 +4,7 @@ import { Schema } from "effect";
 export const WebSearchConfig = Schema.Struct({
   backend: Schema.Literals(["searxng"]),
   baseUrl: Schema.String.check(Schema.isMinLength(1)),
-  maxResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10)),
-  maxPagesFetched: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(0),
-    Schema.isLessThanOrEqualTo(5),
-  ),
-  perPageCharCap: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(1000),
-    Schema.isLessThanOrEqualTo(20000),
-  ),
+  maxResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(20)),
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
 
@@ -36,9 +28,13 @@ export const UrlReaderConfig = Schema.Struct({
 });
 export type UrlReaderConfig = typeof UrlReaderConfig.Type;
 
-// Parameters the model supplies when calling web_search.
+const SearchQuery = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500));
+const ReadableUrl = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000));
+
+// Parameters the model supplies when calling web_search. Multiple queries let
+// one model turn cover different phrasings or facets of the same question.
 export const WebSearchParams = Schema.Struct({
-  query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+  queries: Schema.Array(SearchQuery).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
   timeRange: Schema.optionalKey(Schema.Literals(["day", "month", "year"])),
   language: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10))),
 });
@@ -46,7 +42,7 @@ export type WebSearchParams = typeof WebSearchParams.Type;
 
 // Parameters the model supplies when calling read_url.
 export const UrlReadParams = Schema.Struct({
-  url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+  urls: Schema.Array(ReadableUrl).check(Schema.isMinLength(1), Schema.isMaxLength(5)),
 });
 export type UrlReadParams = typeof UrlReadParams.Type;
 
@@ -55,6 +51,7 @@ export const PageStatus = Schema.Struct({
   url: Schema.String,
   title: Schema.optionalKey(Schema.String),
   status: Schema.Literals(["pending", "reading", "done", "error"]),
+  error: Schema.optionalKey(Schema.String),
 });
 export type PageStatus = typeof PageStatus.Type;
 
@@ -66,10 +63,47 @@ export const Source = Schema.Struct({
   url: Schema.String,
   title: Schema.String,
   snippet: Schema.String,
-  /** true when we fetched and extracted the page, false for snippet-only hits. */
+  /** true when read_url extracted the page, false for snippet-only search hits. */
   read: Schema.Boolean,
 });
 export type Source = typeof Source.Type;
+
+export const WebToolFailure = Schema.Struct({
+  target: Schema.String,
+  error: Schema.String,
+});
+export type WebToolFailure = typeof WebToolFailure.Type;
+
+const WebToolItem = Schema.Struct({
+  index: Schema.Int,
+  title: Schema.String,
+  url: Schema.String,
+  snippet: Schema.String,
+  content: Schema.optionalKey(Schema.String),
+  truncated: Schema.optionalKey(Schema.Boolean),
+});
+
+// One result shape for every web tool. `targets` contains search queries for
+// web_search and URLs for read_url. Page bodies are returned to the model here
+// but are intentionally omitted from persisted tool-call summaries below.
+export const WebToolResult = Schema.Struct({
+  ok: Schema.Boolean,
+  targets: Schema.Array(Schema.String),
+  resultCount: Schema.Number,
+  pagesFetched: Schema.Number,
+  results: Schema.Array(WebToolItem),
+  failures: Schema.Array(WebToolFailure),
+  pages: Schema.optionalKey(Schema.Array(PageStatus)),
+  sources: Schema.optionalKey(Schema.Array(Source)),
+  error: Schema.optionalKey(Schema.String),
+});
+export type WebToolResult = typeof WebToolResult.Type;
+
+const ToolSummary = Schema.Struct({
+  targets: Schema.Array(Schema.String),
+  resultCount: Schema.optionalKey(Schema.Number),
+  pagesFetched: Schema.optionalKey(Schema.Number),
+});
 
 // Envelope persisted in message_chunks.delta for kind:"tool" markers.
 export const ToolChunkEnvelope = Schema.Union([
@@ -78,18 +112,16 @@ export const ToolChunkEnvelope = Schema.Union([
     phase: Schema.Literals(["start"]),
     callId: Schema.String,
     name: Schema.String,
-    args: Schema.Struct({ query: Schema.String }),
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+    args: Schema.Struct({ targets: Schema.Array(Schema.String) }),
   }),
-  // Live progress while the tool runs (search hits found, pages being read).
   Schema.Struct({
     v: Schema.Literals([1]),
     phase: Schema.Literals(["progress"]),
     callId: Schema.String,
     name: Schema.String,
-    summary: Schema.Struct({
-      query: Schema.String,
-      resultCount: Schema.optionalKey(Schema.Number),
-    }),
+    summary: ToolSummary,
     pages: Schema.Array(PageStatus),
   }),
   Schema.Struct({
@@ -98,13 +130,10 @@ export const ToolChunkEnvelope = Schema.Union([
     callId: Schema.String,
     name: Schema.String,
     ok: Schema.Boolean,
-    summary: Schema.Struct({
-      query: Schema.String,
-      resultCount: Schema.optionalKey(Schema.Number),
-      pagesFetched: Schema.optionalKey(Schema.Number),
-    }),
+    summary: ToolSummary,
     pages: Schema.optionalKey(Schema.Array(PageStatus)),
     sources: Schema.optionalKey(Schema.Array(Source)),
+    failures: Schema.optionalKey(Schema.Array(WebToolFailure)),
     error: Schema.optionalKey(Schema.String),
   }),
 ]);
@@ -118,8 +147,6 @@ export const UpdateWebSearchToolInput = Schema.Struct({
   secret: Schema.optionalKey(Schema.String),
   clearSecret: Schema.optionalKey(Schema.Boolean),
   maxResults: Schema.optionalKey(WebSearchConfig.fields.maxResults),
-  maxPagesFetched: Schema.optionalKey(WebSearchConfig.fields.maxPagesFetched),
-  perPageCharCap: Schema.optionalKey(WebSearchConfig.fields.perPageCharCap),
 });
 export type UpdateWebSearchToolInput = typeof UpdateWebSearchToolInput.Type;
 

@@ -1,13 +1,9 @@
 import { AiBrain01Icon, Attachment01Icon, ToolsIcon, ViewIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ModelCapabilities } from "../model-config.ts";
 import { cn } from "~/ui/utils";
 
-export interface Capabilities {
-  reasoning: boolean;
-  tools: boolean;
-  vision: boolean;
-  files: boolean;
-}
+export type Capabilities = ModelCapabilities;
 
 export const CAPABILITY_META = [
   { key: "reasoning" as const, label: "Reasoning", icon: AiBrain01Icon },

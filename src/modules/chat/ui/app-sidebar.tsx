@@ -3,6 +3,7 @@ import {
   Logout03Icon,
   GitBranchIcon,
   Loading03Icon,
+  MoreHorizontalIcon,
   PlusSignIcon,
   Settings02Icon,
   UserCircleIcon,
@@ -144,7 +145,7 @@ export function AppSidebar({
                       <DropdownMenuTrigger
                         render={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
                       >
-                        …
+                        <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent side="right" align="start">
                         <ConversationMenuItems conversation={conversation} actions={actions} />

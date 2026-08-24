@@ -6,16 +6,35 @@ import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analyti
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { AiGateway } from "~/modules/providers/server/gateway.ts";
+import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { prepareWebToolkit } from "~/modules/tools/server/toolset.ts";
+import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
+import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
+import type { CompactionChunkEnvelope } from "../schema.ts";
+import {
+  calibrationFactor,
+  compileActivePrompt,
+  estimatePromptTokens,
+  prepareCompactedActiveRounds,
+  prepareCompactedHistory,
+  shrinkForOverflow,
+  type ActiveRound,
+  type ActiveRoundCompactionDecision,
+  type CompactionDecision,
+} from "./compaction.ts";
 import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
-import { MAX_PRIOR_SOURCES, webToolsSystemHint, withSearchReminder } from "./search-prompt.ts";
+import {
+  buildSearchReminder,
+  MAX_PRIOR_SOURCES,
+  systemReminderMessage,
+  webToolsSystemHint,
+} from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 
@@ -40,7 +59,7 @@ export type StreamEvent =
 
 // One assistant message may span several model turns when tools are involved:
 // model → tool_calls → execute → feed results back → model continues.
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
 
 // Message and tool-call rows are shipped to the client wholesale, so the
 // stored error must not carry provider stack traces or internal URLs — the
@@ -114,6 +133,7 @@ export class StreamEngine extends Context.Service<
         const completed = history.filter(
           (m) => m.id !== input.messageId && m.status === "complete",
         );
+        const readerUrls = extractUserMessageUrls(completed);
 
         // Conversation-scoped citations (Onyx-style): gather every source from
         // earlier messages' persisted tool calls. They seed the numbering (so
@@ -138,6 +158,14 @@ export class StreamEngine extends Context.Service<
         const priorSources = [...priorByIndex.values()]
           // oxlint-disable-next-line no-array-sort -- fresh array from Map values
           .sort((a, b) => a.index - b.index);
+
+        // Calibrates the token estimator: the newest answer that recorded what
+        // the provider counted for its first model call, against what we had
+        // predicted for that same prompt.
+        const priorUsage =
+          completed
+            .filter((m) => m.role === "assistant" && m.usage?.firstInputTokens !== undefined)
+            .at(-1)?.usage ?? null;
 
         let seq = 0;
         let assembled = "";
@@ -187,6 +215,12 @@ export class StreamEngine extends Context.Service<
             return flush; // tool markers flush immediately so the UI reacts
           });
 
+        const pushCompactionChunk = (envelope: CompactionChunkEnvelope) =>
+          Effect.suspend(() => {
+            pushChunk("compaction", JSON.stringify(envelope));
+            return flush; // same reason as tool markers, only more so: this
+          }); //          is the only thing on screen while it runs
+
         const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
             yield* flush;
@@ -196,10 +230,12 @@ export class StreamEngine extends Context.Service<
                 cause: String(error),
               });
               yield* repo.failRunningToolCalls(input.messageId, shortErrorMessage(error));
+              yield* repo.failRunningCompactionEvents(input.messageId, shortErrorMessage(error));
             } else if (status === "aborted") {
               // A tool interrupted mid-flight never reports back; without this
               // its row would stay "running" forever.
               yield* repo.failRunningToolCalls(input.messageId, "stopped");
+              yield* repo.failRunningCompactionEvents(input.messageId, "stopped");
             }
             yield* repo.finalizeMessage({
               messageId: input.messageId,
@@ -207,7 +243,16 @@ export class StreamEngine extends Context.Service<
               content: assembled,
               reasoning: assembledReasoning,
               ...(totals.sawUsage
-                ? { usage: { inputTokens: totals.inputTokens, outputTokens: totals.outputTokens } }
+                ? {
+                    usage: {
+                      inputTokens: totals.inputTokens,
+                      outputTokens: totals.outputTokens,
+                      // Only useful as a pair; either alone calibrates nothing.
+                      ...(firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
+                        ? { firstInputTokens, estimatedFirstInputTokens }
+                        : {}),
+                    },
+                  }
                 : {}),
               ...(error
                 ? { error: { tag: "GenerationFailed", message: shortErrorMessage(error) } }
@@ -244,6 +289,13 @@ export class StreamEngine extends Context.Service<
         // interrupted before its finish part contributes nothing — the
         // provider never sent the numbers.
         const totals = emptyUsageTotals();
+        // The estimator's calibration pair, persisted at finalize: what the
+        // provider counted for the first model call, and what we predicted for
+        // that same prompt. Only the first call maps onto one prompt —
+        // `totals.inputTokens` sums every tool round.
+        let sawFirstFinish = false;
+        let firstInputTokens: number | undefined;
+        let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
           // Attachments resolve here, inside the generation: a missing blob or
@@ -251,15 +303,19 @@ export class StreamEngine extends Context.Service<
           // other generation failure.
           const model = yield* providers.getModel(input.modelId);
 
-          // One indexer for the whole generation: search hits and read pages
-          // share the citation sequence, and repeats keep their number.
-          // Search follows the user's toggle; the reader is offered whenever
-          // it is enabled, so a pasted link works without arming search.
+          // One indexer and one URL authority for the whole generation. Search
+          // hits extend the reader's authority immediately, while user URLs and
+          // earlier persisted sources seed it for direct reads and follow-ups.
+          const authority = createUrlAuthority([
+            ...readerUrls,
+            ...priorSources.map((source) => source.url),
+          ]);
           const webTools = model?.capabilities.tools
             ? yield* prepareWebToolkit({
                 webSearch,
                 urlReader,
                 indexer: createSourceIndexer(priorSources),
+                authority,
                 requestSearch: input.searchEnabled,
               })
             : undefined;
@@ -272,16 +328,122 @@ export class StreamEngine extends Context.Service<
             messages: completed,
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
-          const recapSources = priorSources.slice(-MAX_PRIOR_SOURCES);
+          const sourcesByIndex = new Map(priorSources.map((source) => [source.index, source]));
+          const recapSources = () => {
+            const sources = [...sourcesByIndex.values()];
+            // oxlint-disable-next-line no-array-sort -- fresh array from Map values
+            sources.sort((a, b) => a.index - b.index);
+            return sources.slice(-MAX_PRIOR_SOURCES);
+          };
+          const sourceManifest = () =>
+            recapSources()
+              .map((source) => `[${source.index}] ${source.title} — ${source.url}`)
+              .join("\n");
+          const reminderPrompt = (lastCycle: boolean) =>
+            toolkit
+              ? Prompt.make([
+                  systemReminderMessage(
+                    buildSearchReminder({ sources: recapSources(), lastCycle }),
+                  ),
+                ])
+              : null;
 
           // Tools hint + history is the stable prefix. Everything that varies
           // per model turn lives in the reminder appended below, never in here.
-          let transcript = Prompt.make([
-            ...(webTools
-              ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
-              : []),
-            ...historyMessages,
-          ]);
+          const fixedPrefix = webTools
+            ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
+            : [];
+
+          // Synchronously, before a single token streams: a summary written
+          // after the answer would be a summary of the wrong prompt. Failure
+          // here (nothing left to drop) finalizes the message as an error.
+          let compaction: CompactionDecision = yield* prepareCompactedHistory(
+            { gateway, repo, providers, analytics },
+            {
+              userId: input.userId,
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              modelId: input.modelId,
+              contextLength: model?.contextLength,
+              messages: completed,
+              renderedMessages: historyMessages,
+              fixedPrefix,
+              ...(reminderPrompt(false)
+                ? {
+                    trailingMessages: reminderPrompt(false)!
+                      .content as unknown as ReadonlyArray<Prompt.MessageEncoded>,
+                  }
+                : {}),
+              webToolsEnabled: webTools !== undefined,
+              priorUsage,
+              onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+            },
+          );
+
+          const buildBaseTranscript = () =>
+            Prompt.make([
+              ...fixedPrefix,
+              ...compaction.injectedMessages,
+              ...historyMessages.slice(compaction.startIndex),
+            ]);
+          let activeSummary: string | null = null;
+          let activeRounds: ReadonlyArray<ActiveRound> = [];
+          const buildTranscript = () =>
+            compileActivePrompt({
+              basePrompt: buildBaseTranscript(),
+              summary: activeSummary,
+              rounds: activeRounds,
+            });
+
+          let transcript = buildTranscript();
+          const estimateRequestPrompt = (lastCycle: boolean) => {
+            const trailing = reminderPrompt(lastCycle);
+            return estimatePromptTokens([
+              ...(transcript.content as unknown as ReadonlyArray<Prompt.MessageEncoded>),
+              ...(trailing
+                ? (trailing.content as unknown as ReadonlyArray<Prompt.MessageEncoded>)
+                : []),
+            ]);
+          };
+          // Persist the raw estimate of the exact first request. The provider's
+          // actual/raw pair then learns one stable calibration multiplier.
+          estimatedFirstInputTokens = estimateRequestPrompt(false);
+          // Pass indexes are local to one before-turn position. Turn 0 reserves
+          // pass 0 for the initial history planner, whether or not it emitted.
+          const nextPassByTurn = new Map<number, number>([[0, 1]]);
+          const nextPassIndex = (beforeTurnIndex: number) => {
+            const next = nextPassByTurn.get(beforeTurnIndex) ?? 0;
+            nextPassByTurn.set(beforeTurnIndex, next + 1);
+            return next;
+          };
+          const recordHardTruncation = (beforeTurnIndex: number) =>
+            Effect.gen(function* () {
+              const eventId = uuidv7();
+              const position = {
+                beforeTurnIndex,
+                passIndex: nextPassIndex(beforeTurnIndex),
+                scope: "history" as const,
+              };
+              yield* repo.createCompactionEvent({
+                id: eventId,
+                messageId: input.messageId,
+                ...position,
+              });
+              yield* pushCompactionChunk({ v: 1, phase: "start", eventId, ...position });
+              yield* repo.completeCompactionEvent({
+                id: eventId,
+                status: "complete",
+                outcome: "hard_truncation",
+              });
+              yield* pushCompactionChunk({
+                v: 1,
+                phase: "result",
+                eventId,
+                ...position,
+                ok: true,
+                outcome: "hard_truncation",
+              });
+            });
 
           for (let turn = 0; turn <= MAX_TOOL_ROUNDS; turn++) {
             const toolRoundsLeft = turn < MAX_TOOL_ROUNDS;
@@ -290,179 +452,355 @@ export class StreamEngine extends Context.Service<
             const turnParts: Response.AnyPart[] = [];
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
+            let providerOutputStarted = false;
+            const currentReminderPrompt = () => reminderPrompt(!toolRoundsLeft);
+            const requestPrompt = () => {
+              const trailing = currentReminderPrompt();
+              return trailing ? Prompt.concat(transcript, trailing) : transcript;
+            };
 
-            // Rebuilt every round and always last, the way Onyx re-appends its
-            // reminder: the recap has to sit behind the tool results it
-            // competes with, and the final round must know it has no tool
-            // calls left. It is never fed back into the transcript.
-            const prompt = toolkit
-              ? withSearchReminder(transcript, {
-                  sources: recapSources,
-                  lastCycle: !toolRoundsLeft,
+            // Suspended so an overflow retry re-reads the shrunken transcript
+            // rather than the one the provider just rejected.
+            const drain = Effect.suspend(() =>
+              gateway
+                .streamChat({
+                  modelId: input.modelId,
+                  // Rebuilt every round and always last: the recap has to sit
+                  // behind the tool results it competes with. It is budgeted but
+                  // never fed back into the continuation transcript.
+                  prompt: requestPrompt(),
+                  ...(toolkit && toolRoundsLeft ? { toolkit, toolChoice: "auto" as const } : {}),
                 })
-              : transcript;
-
-            yield* gateway
-              .streamChat({
-                modelId: input.modelId,
-                prompt,
-                ...(toolkit && toolRoundsLeft ? { toolkit, toolChoice: "auto" as const } : {}),
-              })
-              .pipe(
-                Stream.mapEffect((part) =>
-                  Effect.gen(function* () {
-                    // Preliminary tool results are UI progress only — keep them
-                    // out of the continuation transcript.
-                    const isPreliminary =
-                      part.type === "tool-result" &&
-                      (part as { preliminary?: boolean }).preliminary === true;
-                    if (!isPreliminary) turnParts.push(part);
-                    switch (part.type) {
-                      case "text-delta": {
-                        pushChunk("text", part.delta);
-                        if (buffer.length >= 16) yield* flush;
-                        return;
+                .pipe(
+                  Stream.mapEffect((part) =>
+                    Effect.gen(function* () {
+                      // Preliminary tool results are UI progress only — keep them
+                      // out of the continuation transcript.
+                      const isPreliminary =
+                        part.type === "tool-result" &&
+                        (part as { preliminary?: boolean }).preliminary === true;
+                      if (part.type !== "error" && part.type !== "finish") {
+                        providerOutputStarted = true;
                       }
-                      case "reasoning-delta": {
-                        pushChunk("reasoning", part.delta);
-                        if (buffer.length >= 16) yield* flush;
-                        return;
-                      }
-                      case "reasoning-start": {
-                        // Hidden-reasoning marker: an empty reasoning chunk lets
-                        // the UI show "Thinking…" even if no readable trace follows.
-                        pushChunk("reasoning", "");
-                        return;
-                      }
-                      case "tool-call": {
-                        const rowId = uuidv7();
-                        callRowIds.set(part.id, rowId);
-                        const args = part.params as Record<string, unknown>;
-                        yield* repo.insertToolCall({
-                          id: rowId,
-                          messageId: input.messageId,
-                          turnIndex: turn,
-                          callIndex: callIndex++,
-                          providerCallId: part.id,
-                          toolName: part.name,
-                          arguments: args as JsonValue,
-                        });
-                        yield* pushToolChunk({
-                          v: 1,
-                          phase: "start",
-                          callId: rowId,
-                          name: part.name,
-                          // The envelope's display text: search query or URL.
-                          args: { query: String(args["query"] ?? args["url"] ?? "") },
-                        });
-                        return;
-                      }
-                      case "tool-result": {
-                        const rowId = callRowIds.get(part.id) ?? uuidv7();
-                        const result = part.result as {
-                          ok?: boolean;
-                          query?: string;
-                          resultCount?: number;
-                          pagesFetched?: number;
-                          pages?: ReadonlyArray<{
-                            url: string;
-                            title?: string;
-                            status: "pending" | "reading" | "done" | "error";
-                          }>;
-                          sources?: ReadonlyArray<{
-                            index: number;
-                            url: string;
-                            title: string;
-                            snippet: string;
-                            read: boolean;
-                          }>;
-                          error?: string;
-                        } | null;
-                        const pages = result?.pages ?? [];
-                        const sources = result?.sources ?? [];
-
-                        if (isPreliminary) {
-                          // Live progress: hits found / page fetch transitions.
+                      if (!isPreliminary && part.type !== "error") turnParts.push(part);
+                      switch (part.type) {
+                        case "text-delta": {
+                          pushChunk("text", part.delta);
+                          if (buffer.length >= 16) yield* flush;
+                          return;
+                        }
+                        case "reasoning-delta": {
+                          pushChunk("reasoning", part.delta);
+                          if (buffer.length >= 16) yield* flush;
+                          return;
+                        }
+                        case "reasoning-start": {
+                          // Hidden-reasoning marker: an empty reasoning chunk lets
+                          // the UI show "Thinking…" even if no readable trace follows.
+                          pushChunk("reasoning", "");
+                          return;
+                        }
+                        case "tool-call": {
+                          const rowId = uuidv7();
+                          callRowIds.set(part.id, rowId);
+                          const args = part.params as Record<string, unknown>;
+                          yield* repo.insertToolCall({
+                            id: rowId,
+                            messageId: input.messageId,
+                            turnIndex: turn,
+                            callIndex: callIndex++,
+                            providerCallId: part.id,
+                            toolName: part.name,
+                            arguments: args as JsonValue,
+                          });
+                          const targets = Array.isArray(args["queries"])
+                            ? args["queries"].map(String)
+                            : Array.isArray(args["urls"])
+                              ? args["urls"].map(String)
+                              : [];
                           yield* pushToolChunk({
                             v: 1,
-                            phase: "progress",
+                            phase: "start",
                             callId: rowId,
                             name: part.name,
-                            summary: {
-                              query: result?.query ?? "",
-                              ...(result?.resultCount !== undefined
-                                ? { resultCount: result.resultCount }
-                                : {}),
-                            },
-                            pages,
+                            turnIndex: turn,
+                            callIndex: callIndex - 1,
+                            args: { targets },
                           });
                           return;
                         }
+                        case "tool-result": {
+                          const rowId = callRowIds.get(part.id) ?? uuidv7();
+                          const result = part.result as {
+                            ok?: boolean;
+                            targets?: ReadonlyArray<string>;
+                            resultCount?: number;
+                            pagesFetched?: number;
+                            pages?: ReadonlyArray<{
+                              url: string;
+                              title?: string;
+                              status: "pending" | "reading" | "done" | "error";
+                              error?: string;
+                            }>;
+                            sources?: ReadonlyArray<{
+                              index: number;
+                              url: string;
+                              title: string;
+                              snippet: string;
+                              read: boolean;
+                            }>;
+                            failures?: ReadonlyArray<{ target: string; error: string }>;
+                            error?: string;
+                          } | null;
+                          const pages = result?.pages ?? [];
+                          const sources = result?.sources ?? [];
+                          const failures = result?.failures ?? [];
 
-                        const ok = !part.isFailure && result?.ok !== false;
-                        // Persist summary + source list only — never page bodies.
-                        const summary = {
-                          query: result?.query ?? "",
-                          ...(result?.resultCount !== undefined
-                            ? { resultCount: result.resultCount }
-                            : {}),
-                          ...(result?.pagesFetched !== undefined
-                            ? { pagesFetched: result.pagesFetched }
-                            : {}),
-                        };
-                        yield* repo.completeToolCall({
-                          id: rowId,
-                          // Schema-validated tool output — plain JSON at runtime,
-                          // but readonly arrays and optional keys keep TS from
-                          // proving it against the recursive JsonValue type.
-                          result: {
-                            ...summary,
+                          if (!isPreliminary) {
+                            for (const source of sources) {
+                              if (!sourcesByIndex.has(source.index)) {
+                                sourcesByIndex.set(source.index, source);
+                              }
+                            }
+                          }
+
+                          if (isPreliminary) {
+                            // Live progress: hits found / page fetch transitions.
+                            yield* pushToolChunk({
+                              v: 1,
+                              phase: "progress",
+                              callId: rowId,
+                              name: part.name,
+                              summary: {
+                                targets: result?.targets ?? [],
+                                ...(result?.resultCount !== undefined
+                                  ? { resultCount: result.resultCount }
+                                  : {}),
+                                ...(result?.pagesFetched !== undefined
+                                  ? { pagesFetched: result.pagesFetched }
+                                  : {}),
+                              },
+                              pages,
+                            });
+                            return;
+                          }
+
+                          const ok = !part.isFailure && result?.ok !== false;
+                          // Persist summary + source list only — never page bodies.
+                          const summary = {
+                            targets: result?.targets ?? [],
+                            ...(result?.resultCount !== undefined
+                              ? { resultCount: result.resultCount }
+                              : {}),
+                            ...(result?.pagesFetched !== undefined
+                              ? { pagesFetched: result.pagesFetched }
+                              : {}),
+                          };
+                          yield* repo.completeToolCall({
+                            id: rowId,
+                            // Schema-validated tool output — plain JSON at runtime,
+                            // but readonly arrays and optional keys keep TS from
+                            // proving it against the recursive JsonValue type.
+                            result: {
+                              ...summary,
+                              ...(pages.length > 0 ? { pages } : {}),
+                              ...(sources.length > 0 ? { sources } : {}),
+                              ...(failures.length > 0 ? { failures } : {}),
+                            } as unknown as JsonValue,
+                            status: ok ? "complete" : "error",
+                            ...(ok
+                              ? {}
+                              : {
+                                  error: {
+                                    code: "ToolFailed",
+                                    message: result?.error ?? "tool execution failed",
+                                  },
+                                }),
+                          });
+                          yield* pushToolChunk({
+                            v: 1,
+                            phase: "result",
+                            callId: rowId,
+                            name: part.name,
+                            ok,
+                            summary,
                             ...(pages.length > 0 ? { pages } : {}),
                             ...(sources.length > 0 ? { sources } : {}),
-                          } as unknown as JsonValue,
-                          status: ok ? "complete" : "error",
-                          ...(ok
-                            ? {}
-                            : {
-                                error: {
-                                  code: "ToolFailed",
-                                  message: result?.error ?? "tool execution failed",
-                                },
-                              }),
-                        });
-                        yield* pushToolChunk({
-                          v: 1,
-                          phase: "result",
-                          callId: rowId,
-                          name: part.name,
-                          ok,
-                          summary,
-                          ...(pages.length > 0 ? { pages } : {}),
-                          ...(sources.length > 0 ? { sources } : {}),
-                          ...(ok ? {} : { error: result?.error ?? "tool execution failed" }),
-                        });
-                        return;
+                            ...(failures.length > 0 ? { failures } : {}),
+                            ...(ok ? {} : { error: result?.error ?? "tool execution failed" }),
+                          });
+                          return;
+                        }
+                        case "finish": {
+                          finishReason = part.reason;
+                          addFinishUsage(totals, part);
+                          if (!sawFirstFinish) {
+                            sawFirstFinish = true;
+                            firstInputTokens = part.usage.inputTokens.total;
+                          }
+                          return;
+                        }
+                        case "error": {
+                          return yield* Effect.fail(part.error);
+                        }
+                        default:
+                          return;
                       }
-                      case "finish": {
-                        finishReason = part.reason;
-                        addFinishUsage(totals, part);
-                        return;
-                      }
-                      case "error": {
-                        return yield* Effect.fail(part.error);
-                      }
-                      default:
-                        return;
+                    }),
+                  ),
+                  Stream.runDrain,
+                ),
+            );
+
+            const currentCalibration = () =>
+              firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
+                ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
+                : calibrationFactor(priorUsage);
+
+            // Two bounded recovery stages: first reduce complete active rounds,
+            // then old history. A retry remains safe only while this provider
+            // call has emitted no user-visible or tool output.
+            const runProviderCall = (recoveryStage: number): Effect.Effect<void, unknown> =>
+              drain.pipe(
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    const untouched = !providerOutputStarted && turnParts.length === 0;
+                    if (
+                      !(error instanceof ProviderContextOverflow) ||
+                      !untouched ||
+                      recoveryStage >= 2
+                    ) {
+                      return yield* Effect.fail(error);
                     }
+
+                    const factor = currentCalibration();
+                    const beforeEstimate = Math.ceil(
+                      estimateRequestPrompt(!toolRoundsLeft) * factor,
+                    );
+                    if (recoveryStage === 0 && activeRounds.length > 0) {
+                      const reduced: ActiveRoundCompactionDecision =
+                        yield* prepareCompactedActiveRounds(
+                          { gateway, repo, providers, analytics },
+                          {
+                            userId: input.userId,
+                            conversationId: input.conversationId,
+                            messageId: input.messageId,
+                            modelId: input.modelId,
+                            contextLength: model?.contextLength,
+                            webToolsEnabled: webTools !== undefined,
+                            basePrompt: buildBaseTranscript(),
+                            summary: activeSummary,
+                            rounds: activeRounds,
+                            beforeTurnIndex: turn,
+                            passIndex: nextPassIndex(turn),
+                            calibrationFactor: factor,
+                            sourceManifest: sourceManifest(),
+                            ...(currentReminderPrompt()
+                              ? { trailingPrompt: currentReminderPrompt()! }
+                              : {}),
+                            force: true,
+                            onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                          },
+                        );
+                      if (reduced.compacted && reduced.estimatedInputTokens < beforeEstimate) {
+                        activeSummary = reduced.summary;
+                        activeRounds = reduced.rounds;
+                        transcript = buildTranscript();
+                        yield* Effect.logInfo(
+                          "context overflow, retrying after compacting tool rounds",
+                          { messageId: input.messageId, turn },
+                        );
+                        return yield* runProviderCall(1);
+                      }
+                    }
+
+                    const activeOnly = compileActivePrompt({
+                      basePrompt: Prompt.make([]),
+                      summary: activeSummary,
+                      rounds: activeRounds,
+                    });
+                    const trailing = currentReminderPrompt();
+                    const shrunk = shrinkForOverflow({
+                      decision: compaction,
+                      messages: completed,
+                      renderedMessages: historyMessages,
+                      fixedPrefix: [
+                        ...fixedPrefix,
+                        ...(activeOnly.content as unknown as ReadonlyArray<Prompt.MessageEncoded>),
+                      ],
+                      ...(trailing
+                        ? {
+                            trailingMessages:
+                              trailing.content as unknown as ReadonlyArray<Prompt.MessageEncoded>,
+                          }
+                        : {}),
+                      calibrationFactor: factor,
+                    });
+                    if (!shrunk) return yield* Effect.fail(error);
+
+                    compaction = { ...compaction, ...shrunk, mode: "truncated" };
+                    transcript = buildTranscript();
+                    if (turn === 0) {
+                      estimatedFirstInputTokens = estimateRequestPrompt(!toolRoundsLeft);
+                    }
+                    yield* recordHardTruncation(turn);
+                    yield* Effect.logInfo("context overflow, retrying with fewer history turns", {
+                      messageId: input.messageId,
+                      turn,
+                      startIndex: shrunk.startIndex,
+                    });
+                    return yield* runProviderCall(2);
                   }),
                 ),
-                Stream.runDrain,
               );
 
+            yield* runProviderCall(0);
+
             if (finishReason !== "tool-calls") break;
-            // Feed this turn (assistant tool calls + tool results) back in and
-            // let the model continue. The final iteration runs without tools.
-            transcript = Prompt.concat(transcript, Prompt.fromResponseParts(turnParts));
+            // A completed response/tool batch is one atomic unit. It becomes
+            // eligible for compaction only now, after every tool result is
+            // terminal; no call can ever be separated from its result.
+            activeRounds = [
+              ...activeRounds,
+              { turnIndex: turn, prompt: Prompt.fromResponseParts(turnParts) },
+            ];
+            transcript = buildTranscript();
+
+            // Re-budget before every continuation call. The helper accepts a
+            // pass only when the exact prompt (trailing reminder included) gets
+            // smaller, so repeated passes cannot loop on a verbose summary.
+            while (true) {
+              const factor =
+                firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
+                  ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
+                  : calibrationFactor(priorUsage);
+              const trailing = reminderPrompt(turn + 1 >= MAX_TOOL_ROUNDS);
+              const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
+                { gateway, repo, providers, analytics },
+                {
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  modelId: input.modelId,
+                  contextLength: model?.contextLength,
+                  webToolsEnabled: webTools !== undefined,
+                  basePrompt: buildBaseTranscript(),
+                  summary: activeSummary,
+                  rounds: activeRounds,
+                  beforeTurnIndex: turn + 1,
+                  passIndex: nextPassIndex(turn + 1),
+                  calibrationFactor: factor,
+                  sourceManifest: sourceManifest(),
+                  ...(trailing ? { trailingPrompt: trailing } : {}),
+                  onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                },
+              );
+              if (!reduced.compacted) break;
+
+              activeSummary = reduced.summary;
+              activeRounds = reduced.rounds;
+              transcript = buildTranscript();
+            }
           }
         });
 

@@ -43,21 +43,15 @@ export function ToolsPage() {
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
   const [maxResults, setMaxResults] = useState<string | null>(null);
-  const [maxPagesFetched, setMaxPagesFetched] = useState<string | null>(null);
-  const [perPageCharCap, setPerPageCharCap] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const config = (tool?.config ?? {}) as {
     baseUrl?: string;
     maxResults?: number;
-    maxPagesFetched?: number;
-    perPageCharCap?: number;
   };
 
   const effectiveBaseUrl = baseUrl ?? config.baseUrl ?? "";
   const effectiveMaxResults = maxResults ?? String(config.maxResults ?? 8);
-  const effectiveMaxPages = maxPagesFetched ?? String(config.maxPagesFetched ?? 3);
-  const effectiveCharCap = perPageCharCap ?? String(config.perPageCharCap ?? 12000);
 
   const invalidate = () =>
     Promise.all([
@@ -76,8 +70,6 @@ export function ToolsPage() {
         data: {
           baseUrl: effectiveBaseUrl,
           maxResults: Number(effectiveMaxResults),
-          maxPagesFetched: Number(effectiveMaxPages),
-          perPageCharCap: Number(effectiveCharCap),
           ...(secret ? { secret } : {}),
         },
       }),
@@ -85,8 +77,6 @@ export function ToolsPage() {
       setSecret("");
       setBaseUrl(null);
       setMaxResults(null);
-      setMaxPagesFetched(null);
-      setPerPageCharCap(null);
       await invalidate();
     },
   });
@@ -112,13 +102,7 @@ export function ToolsPage() {
     );
   }
 
-  const numbersValid =
-    Number(effectiveMaxResults) >= 1 &&
-    Number(effectiveMaxResults) <= 10 &&
-    Number(effectiveMaxPages) >= 0 &&
-    Number(effectiveMaxPages) <= 5 &&
-    Number(effectiveCharCap) >= 1000 &&
-    Number(effectiveCharCap) <= 20000;
+  const numbersValid = Number(effectiveMaxResults) >= 1 && Number(effectiveMaxResults) <= 20;
 
   return (
     <AdminPage title="Tools" description="Assistant tools available in chats.">
@@ -131,7 +115,7 @@ export function ToolsPage() {
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="text-sm font-medium">Web search</span>
               <span className="text-muted-foreground text-xs">
-                SearXNG-backed search with page content extraction. Models with tool support get a
+                SearXNG-backed search returning titles and snippets. Models with tool support get a
                 search toggle in the composer.
               </span>
             </div>
@@ -182,39 +166,16 @@ export function ToolsPage() {
                 ) : null}
               </div>
             </Field>
-            <div className="grid grid-cols-3 gap-3">
-              <Field>
-                <FieldLabel>Max results</FieldLabel>
-                <Input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={effectiveMaxResults}
-                  onChange={(e) => setMaxResults(e.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Pages fetched</FieldLabel>
-                <Input
-                  type="number"
-                  min={0}
-                  max={5}
-                  value={effectiveMaxPages}
-                  onChange={(e) => setMaxPagesFetched(e.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Chars per page</FieldLabel>
-                <Input
-                  type="number"
-                  min={1000}
-                  max={20000}
-                  step={1000}
-                  value={effectiveCharCap}
-                  onChange={(e) => setPerPageCharCap(e.target.value)}
-                />
-              </Field>
-            </div>
+            <Field className="max-w-48">
+              <FieldLabel>Max results per query</FieldLabel>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={effectiveMaxResults}
+                onChange={(e) => setMaxResults(e.target.value)}
+              />
+            </Field>
             {testResult ? (
               <p
                 className={
@@ -256,7 +217,7 @@ export function ToolsPage() {
   );
 }
 
-// Lets the model fetch one page the user pointed at, without a search backend.
+// Lets the model fetch pages from user messages or search results.
 // Fetches go out from this server with SSRF guarding (private addresses and
 // redirects to them are refused); the page is extracted to markdown locally.
 function UrlReaderSection() {
@@ -311,10 +272,10 @@ function UrlReaderSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Read linked pages</span>
             <span className="text-muted-foreground text-xs">
-              Lets the model fetch a page the user links to and read its extracted content. Works
-              without a search backend. Unlike Search it has no composer toggle — while this is on
-              it is available on every message. Requests to private and internal addresses are
-              refused.
+              Lets the model fetch several pages at once from user links or search results and read
+              their extracted content. It has no separate composer toggle: it is available alongside
+              web search or when the conversation provides a URL. Requests to private and internal
+              addresses are refused.
             </span>
           </div>
           <Switch

@@ -6,8 +6,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import type { ToolActivity, ToolPageStatus } from "../client/use-message-stream.ts";
+import type { ToolActivity, ToolPageStatus, ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import { cn } from "~/ui/utils";
 
 function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
@@ -24,7 +25,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
           "hover:text-foreground min-w-0 truncate transition-colors",
           active && reading && "animate-pulse",
         )}
-        title={page.url}
+        title={page.error ?? page.url}
       >
         {label}
       </a>
@@ -35,7 +36,11 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
         {page.status === "done" ? (
           <HugeiconsIcon icon={Tick02Icon} className="size-3.5 text-emerald-500" />
         ) : page.status === "error" ? (
-          <HugeiconsIcon icon={Alert02Icon} className="text-destructive size-3.5" />
+          <HugeiconsIcon
+            icon={Alert02Icon}
+            className="text-destructive size-3.5"
+            aria-label={page.error ?? "Page failed"}
+          />
         ) : active ? (
           <span className="text-muted-foreground text-xs">
             {page.status === "reading" ? "reading…" : "queued"}
@@ -46,48 +51,61 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
   );
 }
 
-/** For read_url the query field carries the URL; the hostname reads better. */
-const displayTarget = (activity: ToolActivity): string => {
-  if (activity.name !== "read_url") return activity.query;
-  try {
-    return new URL(activity.query).hostname;
-  } catch {
-    return activity.query;
-  }
+function SourceRow({ source }: { source: ToolSource }) {
+  return (
+    <li className="flex min-w-0 items-center gap-2">
+      <Favicon url={source.url} />
+      <a
+        href={source.url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="hover:text-foreground min-w-0 truncate transition-colors"
+        title={source.url}
+      >
+        {source.title.trim() || hostOf(source.url)}
+      </a>
+      <span className="text-muted-foreground/70 hidden shrink-0 text-xs sm:inline">
+        {hostOf(source.url)}
+      </span>
+    </li>
+  );
+}
+
+const quotedTargets = (targets: ReadonlyArray<string>): string => {
+  const visible = targets.slice(0, 2).map((target) => `“${target}”`);
+  const joined = visible.join(targets.length === 2 ? " and " : ", ");
+  return targets.length > 2 ? `${joined}, +${targets.length - 2} more` : joined;
 };
 
 function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpen: boolean }) {
   const running = activity.status === "running";
   const reader = activity.name === "read_url";
   const pages = activity.pages ?? [];
-  const phase =
-    running && activity.resultCount === undefined
-      ? "searching"
-      : running && pages.some((p) => p.status === "reading" || p.status === "pending")
-        ? "reading"
-        : running
-          ? "searching"
-          : activity.status;
-  const target = displayTarget(activity);
+  const sources = activity.sources ?? [];
+  const targetCount = activity.targets.length;
+  const searchTargets = quotedTargets(activity.targets);
+  const readCount = pages.length || targetCount;
 
   const headline = running ? (
     <span className="animate-pulse">
-      {reader ? "Reading" : phase === "reading" ? "Reading sources" : "Searching"}
-      {target ? <span className="text-foreground/70"> “{target}”</span> : "…"}
+      {reader ? `Reading ${readCount || ""} ${readCount === 1 ? "page" : "pages"}` : "Searching"}
+      {!reader && searchTargets ? (
+        <span className="text-foreground/70"> {searchTargets}</span>
+      ) : null}
+      {!reader && !searchTargets ? "…" : null}
     </span>
   ) : activity.status === "error" ? (
     <span>
-      {reader ? "Couldn't read" : "Search failed"}
-      {target ? <> — “{target}”</> : null}
+      {reader
+        ? `Couldn't read ${readCount === 1 ? "the page" : `${readCount} pages`}`
+        : "Search failed"}
       {activity.error ? <span className="opacity-70"> ({activity.error})</span> : null}
     </span>
   ) : reader ? (
-    <span>
-      Read <span className="text-foreground/70">“{target}”</span>
-    </span>
+    <span>Read {readCount === 1 ? "a page" : `${activity.pagesFetched ?? readCount} pages`}</span>
   ) : (
     <span>
-      Searched <span className="text-foreground/70">“{target}”</span>
+      Searched <span className="text-foreground/70">{searchTargets}</span>
       {activity.resultCount !== undefined ? <> — {activity.resultCount} results</> : null}
     </span>
   );
@@ -95,11 +113,11 @@ function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpe
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5">{headline}</div>
-      {pages.length > 0 && autoOpen ? (
+      {autoOpen && (pages.length > 0 || sources.length > 0) ? (
         <ul className="flex flex-col gap-1 pl-0.5">
-          {pages.map((p) => (
-            <PageRow key={p.url} page={p} active={running} />
-          ))}
+          {reader
+            ? pages.map((page) => <PageRow key={page.url} page={page} active={running} />)
+            : sources.map((source) => <SourceRow key={source.index} source={source} />)}
         </ul>
       ) : null}
     </div>
@@ -110,7 +128,7 @@ function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpe
 // live pane with per-source favicon rows streaming their fetch status;
 // afterwards a collapsed summary that expands to the source list.
 export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }) {
-  const anyRunning = activities.some((a) => a.status === "running");
+  const anyRunning = activities.some((activity) => activity.status === "running");
   const [expanded, setExpanded] = useState(anyRunning);
   // Auto-expand while a call runs, auto-collapse when the last one finishes
   // (derived during render — no effect needed).
@@ -122,17 +140,27 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
 
   if (activities.length === 0) return null;
 
-  const totalSources = activities.reduce((n, a) => n + (a.pages?.length ?? 0), 0);
+  const totalSources = activities.reduce(
+    (total, activity) =>
+      total +
+      (activity.name === "read_url"
+        ? (activity.pages?.length ?? 0)
+        : (activity.sources?.length ?? 0)),
+    0,
+  );
   const suffix = totalSources > 0 ? ` · ${totalSources} sources` : "";
-  const searches = activities.filter((a) => a.name !== "read_url").length;
+  const searches = activities.filter((activity) => activity.name !== "read_url").length;
   const reads = activities.length - searches;
+  const reading = activities.some((activity) =>
+    (activity.pages ?? []).some((page) => page.status === "reading"),
+  );
   const headerLabel = anyRunning
-    ? activities.some((a) => (a.pages ?? []).some((p) => p.status === "reading"))
+    ? reading
       ? searches === 0
-        ? "Reading page…"
+        ? "Reading pages…"
         : "Reading sources…"
       : searches === 0
-        ? "Reading page…"
+        ? "Reading pages…"
         : "Searching the web…"
     : reads === 0
       ? searches === 1
@@ -140,18 +168,13 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
         : `Searched the web ${searches} times${suffix}`
       : searches === 0
         ? reads === 1
-          ? `Read a page${suffix}`
-          : `Read ${reads} pages${suffix}`
+          ? `Read pages${suffix}`
+          : `Read pages ${reads} times${suffix}`
         : `Searched and read${suffix}`;
 
   return (
-    <div className="mb-2">
-      <button
-        type="button"
-        onClick={() => setExpanded((e) => !e)}
-        aria-expanded={expanded}
-        className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors"
-      >
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="mb-2">
+      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors">
         <HugeiconsIcon
           icon={GlobalSearchIcon}
           className={cn("size-4", anyRunning && "animate-pulse")}
@@ -159,16 +182,19 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
         <span className={cn(anyRunning && "animate-pulse")}>{headerLabel}</span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
-          className={cn("size-3.5 transition-transform", expanded && "rotate-180")}
+          className={cn(
+            "size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none",
+            expanded && "rotate-180",
+          )}
         />
-      </button>
-      {expanded ? (
+      </CollapsibleTrigger>
+      <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
         <div className="border-border text-muted-foreground mt-2 flex flex-col gap-3 border-l-2 pl-3 text-sm">
-          {activities.map((a) => (
-            <ActivityEntry key={a.callId} activity={a} autoOpen />
+          {activities.map((activity) => (
+            <ActivityEntry key={activity.callId} activity={activity} autoOpen />
           ))}
         </div>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

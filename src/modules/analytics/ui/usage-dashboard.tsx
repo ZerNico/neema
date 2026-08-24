@@ -176,19 +176,25 @@ function StatTile({
   spark?: readonly number[];
 }) {
   return (
-    <div className="border-border bg-background flex flex-col gap-1 rounded-lg border px-4 py-3">
+    <div className="border-border bg-background flex min-w-0 flex-col gap-1 overflow-hidden rounded-lg border px-4 py-3">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <div className="flex items-end justify-between gap-2">
-        <span className="text-2xl font-semibold tracking-tight">{value}</span>
-        {spark ? <UsageSparkline values={spark} /> : null}
-      </div>
-      <div className="text-muted-foreground flex items-baseline gap-1.5 text-xs">
+      {/* The plot gets its own row below. A value such as “218.8K” plus the
+          fixed-width sparkline cannot share a narrow four-column KPI card. */}
+      <span className="text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums">
+        {value}
+      </span>
+      <div className="text-muted-foreground flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-xs leading-snug">
         {/* Direction is stated, never coloured: more tokens is neither good
             nor bad, and the same tile shape carries cost and error rate. */}
-        {delta ? <span className="text-foreground font-medium">{delta}</span> : null}
+        {delta ? <span className="text-foreground shrink-0 font-medium">{delta}</span> : null}
         {delta && sub ? <span aria-hidden>·</span> : null}
-        {sub ? <span>{sub}</span> : null}
+        {sub ? <span className="min-w-0 break-words">{sub}</span> : null}
       </div>
+      {spark ? (
+        <div className="mt-auto flex h-[22px] w-full min-w-0 justify-end overflow-hidden pt-1">
+          <UsageSparkline values={spark} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -243,25 +249,46 @@ const pointDelta = (current: number | null, previous: number | null): string | n
   current === null || previous === null ? null : formatPointDelta(current - previous);
 
 /** Two-segment part-to-whole meter — a static split, so CSS, not a chart. */
-function SplitMeter({ chat, title }: { chat: number; title: number }) {
-  const total = chat + title;
-  const chatShare = total === 0 ? 0 : (chat / total) * 100;
+// Fixed segment order, so a kind keeps its colour whatever the counts do.
+const GENERATION_KINDS = [
+  { key: "chat", label: "chat", color: "var(--chart-1)" },
+  { key: "title", label: "title", color: "var(--chart-3)" },
+  { key: "compaction", label: "compaction", color: "var(--chart-4)" },
+] as const;
+
+function SplitMeter({
+  counts,
+}: {
+  counts: Record<(typeof GENERATION_KINDS)[number]["key"], number>;
+}) {
+  const total = GENERATION_KINDS.reduce((sum, kind) => sum + counts[kind.key], 0);
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="bg-muted flex h-2 overflow-hidden rounded-full" aria-hidden>
-        <div style={{ width: `${chatShare}%`, background: "var(--chart-1)" }} />
-        <div style={{ width: `${100 - chatShare}%`, background: "var(--chart-3)" }} />
+      <div className="bg-muted flex h-2 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+        {GENERATION_KINDS.map((kind) => (
+          <div
+            key={kind.key}
+            style={{
+              width: total === 0 ? "0%" : `${(counts[kind.key] / total) * 100}%`,
+              background: kind.color,
+            }}
+          />
+        ))}
       </div>
       <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
-        <span>
-          <span className="text-foreground font-medium">{formatCount(chat)}</span> chat
-          {total > 0 ? ` (${formatPercent(chat / total)})` : ""}
-        </span>
-        <span>
-          <span className="text-foreground font-medium">{formatCount(title)}</span> title
-          {total > 0 ? ` (${formatPercent(title / total)})` : ""}
-        </span>
+        {GENERATION_KINDS.map((kind) => (
+          <span key={kind.key} className="flex items-center gap-1.5">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: kind.color }}
+              aria-hidden
+            />
+            <span className="text-foreground font-medium">{formatCount(counts[kind.key])}</span>
+            {kind.label}
+            {total > 0 ? ` (${formatPercent(counts[kind.key] / total)})` : ""}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -311,7 +338,7 @@ export function UsageOverview({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
         <StatTile
           label="Messages"
           value={formatCount(summary.messages)}
@@ -348,7 +375,7 @@ export function UsageOverview({
           delta={null}
         />
         <StatTile
-          label="Error rate"
+          label="Generation error rate"
           value={errorRate === null ? "—" : formatPercent(errorRate)}
           sub={`${formatCount(summary.errorAttempts)} errors · ${formatCount(summary.abortedAttempts)} aborted · ${formatCount(summary.attempts)} attempts`}
           delta={pointDelta(errorRate, previousErrorRate)}
@@ -396,7 +423,13 @@ export function UsageOverview({
         <MessagesPerDayChart daily={daily} window={scanned} />
       </ChartCard>
       <ChartCard title="Generation types">
-        <SplitMeter chat={summary.messages} title={summary.titleGenerations} />
+        <SplitMeter
+          counts={{
+            chat: summary.messages,
+            title: summary.titleGenerations,
+            compaction: summary.compactionGenerations,
+          }}
+        />
       </ChartCard>
       <ChartCard title="By model">
         <TokensByModelChart byModel={byModel} />

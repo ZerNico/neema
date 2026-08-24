@@ -19,9 +19,13 @@ describe("ReasoningBlock", () => {
   });
 
   it("auto-expands while thinking and collapses when the answer starts", () => {
-    const { rerender } = render(<ReasoningBlock reasoning="Chain of thought…" active />);
+    const { container, rerender } = render(<ReasoningBlock reasoning="Chain of thought…" active />);
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
     expect(paneShown()).toBe(true);
+    expect(container.querySelector('[data-slot="collapsible-content"]')).toHaveClass(
+      "transition-[height,opacity]",
+      "data-ending-style:h-0",
+    );
 
     rerender(<ReasoningBlock reasoning="Chain of thought…" active={false} />);
     expect(toggle()).toHaveAttribute("aria-expanded", "false");

@@ -3,9 +3,10 @@ import { Effect, Layer, Stream } from "effect";
 import type { Toolkit } from "effect/unstable/ai";
 import { PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchBackend, type SearchHit } from "./search.ts";
+import { SearchBackend, SearchBackendError, type SearchHit } from "./search.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
 import { prepareWebToolkit } from "./toolset.ts";
+import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
@@ -13,8 +14,6 @@ const config = {
   backend: "searxng" as const,
   baseUrl: "http://localhost:8081",
   maxResults: 5,
-  maxPagesFetched: 1,
-  perPageCharCap: 1000,
 };
 
 const FakeRepo = Layer.succeed(
@@ -30,17 +29,21 @@ const FakeRepo = Layer.succeed(
 
 const hit = (url: string): SearchHit => ({ url, title: `Title of ${url}`, snippet: "snippet" });
 
-// Two searches: the second repeats effect.website and adds a new host.
 const resultsByQuery: Record<string, SearchHit[]> = {
   first: [hit("https://effect.website"), hit("https://drizzle.team")],
   second: [hit("https://effect.website"), hit("https://tanstack.com")],
+  alpha: [hit("https://a.example"), hit("https://shared.example")],
+  beta: [hit("https://shared.example/"), hit("https://b.example")],
 };
 
 const FakeBackend = Layer.succeed(
   SearchBackend,
   SearchBackend.of({
     kind: "fake",
-    search: (_connection, request) => Effect.succeed(resultsByQuery[request.query] ?? []),
+    search: (_connection, request) =>
+      request.query === "broken"
+        ? Effect.fail(new SearchBackendError({ backend: "fake", message: "backend unavailable" }))
+        : Effect.succeed(resultsByQuery[request.query] ?? []),
     test: () => Effect.succeed({ resultCount: 0 }),
   }),
 );
@@ -57,58 +60,49 @@ const TestLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.laye
   Layer.provide(Layer.mergeAll(FakeRepo, FakeBackend, FakeExtractor)),
 );
 
-// The reader row is null in FakeRepo, so this builds a search-only toolkit.
 const prepared = (indexer: SourceIndexer) =>
   Effect.gen(function* () {
     const result = yield* prepareWebToolkit({
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
+      authority: createUrlAuthority([]),
       requestSearch: true,
     });
     return result!.toolkit;
   });
 
-// Runs a query through a prepared toolkit and returns the final result —
-// `handle` streams the handler's preliminary progress ahead of the real one.
-const runQuery = (toolkit: Toolkit.WithHandler<any>, query: string) =>
+const runSearch = (toolkit: Toolkit.WithHandler<any>, queries: string[]) =>
   Effect.gen(function* () {
-    // WithHandler<any> widens handle's requirements to unknown; the concrete
-    // toolkit needs none, so pin the type for it.effect's Scope context.
-    const stream = yield* toolkit.handle("web_search", { query }) as unknown as Effect.Effect<
+    const stream = yield* toolkit.handle("web_search", { queries }) as unknown as Effect.Effect<
       Stream.Stream<{ result: unknown }>
     >;
     const parts = yield* Stream.runCollect(stream);
     return [...parts].at(-1)!.result as WebToolResult;
   });
 
-describe("WebSearchExecutor citation numbering", () => {
+describe("WebSearchExecutor", () => {
   it.effect("numbers sources per generation, not per call", () =>
     Effect.gen(function* () {
-      // One indexer per generation — both searches share its counter.
       const toolkit = yield* prepared(createSourceIndexer([]));
 
-      const first = yield* runQuery(toolkit, "first");
-      const second = yield* runQuery(toolkit, "second");
+      const first = yield* runSearch(toolkit, ["first"]);
+      const second = yield* runSearch(toolkit, ["second"]);
 
-      expect(first.sources?.map((s) => [s.index, s.url])).toEqual([
-        [1, "https://effect.website"],
-        [2, "https://drizzle.team"],
+      expect(first.sources?.map((source) => [source.index, source.url])).toEqual([
+        [1, "https://effect.website/"],
+        [2, "https://drizzle.team/"],
       ]);
-      // Continues the sequence, and the repeated URL keeps its original number.
-      expect(second.sources?.map((s) => [s.index, s.url])).toEqual([
-        [1, "https://effect.website"],
-        [3, "https://tanstack.com"],
+      expect(second.sources?.map((source) => [source.index, source.url])).toEqual([
+        [1, "https://effect.website/"],
+        [3, "https://tanstack.com/"],
       ]);
-      // The model sees the same numbers on the results it reads.
-      expect(second.results.map((r) => r.index)).toEqual([1, 3]);
+      expect(second.results.map((result) => result.index)).toEqual([1, 3]);
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect("continues numbering from a conversation seed and reuses seeded URLs", () =>
+  it.effect("continues numbering from a conversation seed", () =>
     Effect.gen(function* () {
-      // A later generation in the same conversation: earlier messages already
-      // used indexes 1–5, and effect.website was index 2.
       const toolkit = yield* prepared(
         createSourceIndexer([
           { index: 2, url: "https://effect.website" },
@@ -116,20 +110,48 @@ describe("WebSearchExecutor citation numbering", () => {
         ]),
       );
 
-      const result = yield* runQuery(toolkit, "first");
-      expect(result.sources?.map((s) => [s.index, s.url])).toEqual([
-        [2, "https://effect.website"],
-        [6, "https://drizzle.team"],
+      const result = yield* runSearch(toolkit, ["first"]);
+      expect(result.sources?.map((source) => [source.index, source.url])).toEqual([
+        [2, "https://effect.website/"],
+        [6, "https://drizzle.team/"],
       ]);
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect("marks fetched pages as read and the rest as snippet-only", () =>
+  it.effect("returns snippets only and never invokes page extraction", () =>
     Effect.gen(function* () {
       const toolkit = yield* prepared(createSourceIndexer([]));
-      const result = yield* runQuery(toolkit, "first");
-      // maxPagesFetched is 1, so only the first hit is read in full.
-      expect(result.sources?.map((s) => s.read)).toEqual([true, false]);
+      const result = yield* runSearch(toolkit, ["first"]);
+
+      expect(result.pagesFetched).toBe(0);
+      expect(result.pages).toBeUndefined();
+      expect(result.results.every((item) => item.content === undefined)).toBe(true);
+      expect(result.sources?.map((source) => source.read)).toEqual([false, false]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("merges multiple queries round-robin and deduplicates canonical URLs", () =>
+    Effect.gen(function* () {
+      const toolkit = yield* prepared(createSourceIndexer([]));
+      const result = yield* runSearch(toolkit, ["alpha", "beta"]);
+
+      expect(result.targets).toEqual(["alpha", "beta"]);
+      expect(result.results.map((item) => item.url)).toEqual([
+        "https://a.example/",
+        "https://shared.example/",
+        "https://b.example/",
+      ]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("keeps successful queries when one backend call fails", () =>
+    Effect.gen(function* () {
+      const toolkit = yield* prepared(createSourceIndexer([]));
+      const result = yield* runSearch(toolkit, ["broken", "first"]);
+
+      expect(result.ok).toBe(true);
+      expect(result.results).toHaveLength(2);
+      expect(result.failures).toEqual([{ target: "broken", error: "backend unavailable" }]);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

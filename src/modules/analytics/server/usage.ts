@@ -52,12 +52,18 @@ export const addFinishUsage = (
  */
 export const resolveCost = (
   totals: UsageTotals,
-  pricing: { input: number; output: number } | null | undefined,
+  pricing: { input: number; output: number | null } | null | undefined,
 ): { cost: number | null; costSource: "provider" | "pricing" | null } => {
   if (totals.providerCost !== null) return { cost: totals.providerCost, costSource: "provider" };
-  if (pricing && (totals.inputTokens > 0 || totals.outputTokens > 0)) {
+  if (
+    pricing &&
+    (totals.inputTokens > 0 || totals.outputTokens > 0) &&
+    (totals.outputTokens === 0 || pricing.output !== null)
+  ) {
     return {
-      cost: (totals.inputTokens * pricing.input + totals.outputTokens * pricing.output) / 1_000_000,
+      cost:
+        (totals.inputTokens * pricing.input + totals.outputTokens * (pricing.output ?? 0)) /
+        1_000_000,
       costSource: "pricing",
     };
   }

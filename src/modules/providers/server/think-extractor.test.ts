@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
+import { Prompt, Response } from "effect/unstable/ai";
 import type { ChatStreamPart } from "./gateway.ts";
 import { extractThinkTags } from "./think-extractor.ts";
 
@@ -8,10 +9,11 @@ const run = (parts: ChatStreamPart[]) =>
     Array.from(chunks),
   );
 
+// Built the way the providers' decoded stream parts are, metadata and all.
 const text = (delta: string): ChatStreamPart =>
-  ({ type: "text-delta", id: "t1", delta }) as ChatStreamPart;
+  Response.makePart("text-delta", { id: "t1", delta });
 const reasoning = (delta: string): ChatStreamPart =>
-  ({ type: "reasoning-delta", id: "r1", delta }) as ChatStreamPart;
+  Response.makePart("reasoning-delta", { id: "r1", delta });
 
 // Collapse the output to comparable {track, text} tuples, ignoring
 // start/end bracketing parts.
@@ -72,6 +74,48 @@ describe("extractThinkTags", () => {
     Effect.gen(function* () {
       const out = yield* run([text("Pre <think>mid</think> post")]);
       expect(tracks(out)).toEqual({ reasoning: "mid", text: "Pre  post" });
+    }),
+  );
+
+  // Regression: parts were built as bare object literals, so `metadata` was
+  // undefined. Nothing noticed until a turn ended in tool calls and
+  // `Prompt.fromResponseParts` folded it back in — `Object.entries(undefined)`
+  // killed the whole generation.
+  it.effect("stamps metadata on every part it synthesizes", () =>
+    Effect.gen(function* () {
+      const out = yield* run([text("Pre <think>mid</think> post")]);
+      expect(out.length).toBeGreaterThan(0);
+      for (const part of out) expect(part.metadata).toBeDefined();
+    }),
+  );
+
+  it.effect("carries the source delta's metadata onto the re-chunked text", () =>
+    Effect.gen(function* () {
+      const tagged = Response.makePart("text-delta", {
+        id: "t1",
+        delta: "hello",
+        metadata: { openrouter: { note: "keep me" } },
+      });
+      const out = yield* run([tagged]);
+      const delta = out.find((p) => p.type === "text-delta");
+      expect(delta?.metadata).toEqual({ openrouter: { note: "keep me" } });
+    }),
+  );
+
+  it.effect("produces a tool-calling turn that folds back into a prompt", () =>
+    Effect.gen(function* () {
+      const out = yield* run([
+        Response.makePart("text-start", { id: "t1" }),
+        text("Let me look that up."),
+        Response.makePart("tool-call", {
+          id: "call_1",
+          name: "read_url",
+          params: { urls: ["https://example.com"] },
+          providerExecuted: false,
+        }),
+      ]);
+      const prompt = Prompt.fromResponseParts(out);
+      expect(prompt.content.map((message) => message.role)).toContain("assistant");
     }),
   );
 

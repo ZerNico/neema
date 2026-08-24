@@ -1,103 +1,130 @@
 import { describe, expect, it } from "vitest";
-import { applyToolChunk, type ToolActivity } from "./use-message-stream.ts";
+import {
+  applyCompactionChunk,
+  applyToolChunk,
+  type CompactionActivity,
+  type ToolActivity,
+} from "./use-message-stream.ts";
 
-const env = (o: Record<string, unknown>) => JSON.stringify({ v: 1, ...o });
+const env = (value: Record<string, unknown>) => JSON.stringify({ v: 1, ...value });
+
+const start = env({
+  phase: "start",
+  callId: "c1",
+  name: "web_search",
+  turnIndex: 0,
+  callIndex: 0,
+  args: { targets: ["effect ts", "effect schema"] },
+});
 
 describe("applyToolChunk", () => {
   it("creates a running activity from a start envelope", () => {
-    const tools = applyToolChunk(
-      [],
-      env({ phase: "start", callId: "c1", name: "web_search", args: { query: "effect ts" } }),
-    );
-    expect(tools).toEqual([
-      { callId: "c1", name: "web_search", query: "effect ts", status: "running" },
+    expect(applyToolChunk([], start)).toEqual([
+      {
+        callId: "c1",
+        name: "web_search",
+        turnIndex: 0,
+        callIndex: 0,
+        targets: ["effect ts", "effect schema"],
+        status: "running",
+      },
     ]);
   });
 
   it("ignores a duplicate start for the same call", () => {
-    const start = env({ phase: "start", callId: "c1", name: "web_search", args: { query: "q" } });
     const once = applyToolChunk([], start);
     expect(applyToolChunk(once, start)).toBe(once);
   });
 
-  it("applies progress envelopes as per-page status transitions", () => {
+  it("applies reader progress envelopes as per-page status transitions", () => {
     let tools = applyToolChunk(
       [],
-      env({ phase: "start", callId: "c1", name: "web_search", args: { query: "q" } }),
-    );
-
-    // Search finished: hit count known, pages queued.
-    tools = applyToolChunk(
-      tools,
       env({
-        phase: "progress",
+        phase: "start",
         callId: "c1",
-        name: "web_search",
-        summary: { query: "q", resultCount: 5 },
-        pages: [
-          { url: "https://a.dev/x", title: "A", status: "pending" },
-          { url: "https://b.dev/y", status: "pending" },
-        ],
+        name: "read_url",
+        args: { targets: ["https://a.dev/x", "https://b.dev/y"] },
       }),
     );
-    expect(tools[0]).toMatchObject({ status: "running", resultCount: 5 });
-    expect(tools[0]!.pages).toHaveLength(2);
 
-    // First page starts reading.
     tools = applyToolChunk(
       tools,
       env({
         phase: "progress",
         callId: "c1",
-        name: "web_search",
-        summary: { query: "q", resultCount: 5 },
+        name: "read_url",
+        summary: { targets: ["https://a.dev/x", "https://b.dev/y"], resultCount: 0 },
         pages: [
           { url: "https://a.dev/x", title: "A", status: "reading" },
           { url: "https://b.dev/y", status: "pending" },
         ],
       }),
     );
-    expect(tools[0]!.pages?.map((p) => p.status)).toEqual(["reading", "pending"]);
-    expect(tools).toHaveLength(1); // upserted, not appended
+
+    expect(tools[0]).toMatchObject({ status: "running", resultCount: 0 });
+    expect(tools[0]!.pages?.map((page) => page.status)).toEqual(["reading", "pending"]);
+    expect(tools).toHaveLength(1);
   });
 
-  it("does not resurrect a query already known when progress omits it", () => {
-    let tools = applyToolChunk(
-      [],
-      env({ phase: "start", callId: "c1", name: "web_search", args: { query: "keep me" } }),
-    );
+  it("keeps known targets when progress omits them", () => {
+    let tools = applyToolChunk([], start);
     tools = applyToolChunk(
       tools,
-      env({ phase: "progress", callId: "c1", name: "web_search", summary: {}, pages: [] }),
+      env({
+        phase: "progress",
+        callId: "c1",
+        name: "web_search",
+        summary: {},
+        pages: [],
+      }),
     );
-    expect(tools[0]!.query).toBe("keep me");
+    expect(tools[0]!.targets).toEqual(["effect ts", "effect schema"]);
   });
 
   it("finalizes on a result envelope", () => {
-    let tools = applyToolChunk(
-      [],
-      env({ phase: "start", callId: "c1", name: "web_search", args: { query: "q" } }),
-    );
-    tools = applyToolChunk(
-      tools,
+    const tools = applyToolChunk(
+      applyToolChunk([], start),
       env({
         phase: "result",
         callId: "c1",
         name: "web_search",
         ok: true,
-        summary: { query: "q", resultCount: 5, pagesFetched: 2 },
-        pages: [{ url: "https://a.dev/x", title: "A", status: "done" }],
+        summary: {
+          targets: ["effect ts", "effect schema"],
+          resultCount: 5,
+          pagesFetched: 0,
+        },
+        sources: [
+          {
+            index: 1,
+            url: "https://a.dev/x",
+            title: "A",
+            snippet: "A result",
+            read: false,
+          },
+        ],
       }),
     );
+
     expect(tools).toEqual<ToolActivity[]>([
       {
         callId: "c1",
         name: "web_search",
-        query: "q",
+        turnIndex: 0,
+        callIndex: 0,
+        targets: ["effect ts", "effect schema"],
         status: "complete",
         resultCount: 5,
-        pagesFetched: 2,
-        pages: [{ url: "https://a.dev/x", title: "A", status: "done" }],
+        pagesFetched: 0,
+        sources: [
+          {
+            index: 1,
+            url: "https://a.dev/x",
+            title: "A",
+            snippet: "A result",
+            read: false,
+          },
+        ],
       },
     ]);
   });
@@ -110,7 +137,7 @@ describe("applyToolChunk", () => {
         callId: "c1",
         name: "web_search",
         ok: false,
-        summary: { query: "q" },
+        summary: { targets: ["q"] },
         error: "searxng unreachable",
       }),
     );
@@ -119,7 +146,7 @@ describe("applyToolChunk", () => {
 
   it("ignores malformed or unversioned envelopes", () => {
     const seed: ToolActivity[] = [
-      { callId: "c1", name: "web_search", query: "q", status: "running" },
+      { callId: "c1", name: "web_search", targets: ["q"], status: "running" },
     ];
     expect(applyToolChunk(seed, "not json")).toBe(seed);
     expect(applyToolChunk(seed, env({ phase: "start", name: "web_search" }))).toBe(seed);
@@ -127,5 +154,95 @@ describe("applyToolChunk", () => {
       seed,
     );
     expect(applyToolChunk(seed, env({ phase: "who-knows", callId: "c1", name: "x" }))).toBe(seed);
+  });
+});
+
+describe("applyCompactionChunk", () => {
+  const compaction = (value: Record<string, unknown>) =>
+    env({
+      eventId: "compact-1",
+      beforeTurnIndex: 1,
+      passIndex: 0,
+      scope: "active_rounds",
+      ...value,
+    });
+
+  it("upserts a stable event and carries its summary through the result", () => {
+    const running = applyCompactionChunk([], compaction({ phase: "start" }));
+    expect(running).toEqual([
+      {
+        eventId: "compact-1",
+        beforeTurnIndex: 1,
+        passIndex: 0,
+        scope: "active_rounds",
+        status: "running",
+      },
+    ]);
+
+    expect(
+      applyCompactionChunk(
+        running,
+        compaction({ phase: "result", ok: true, outcome: "summary", summary: "Older turns." }),
+      ),
+    ).toEqual([
+      {
+        eventId: "compact-1",
+        beforeTurnIndex: 1,
+        passIndex: 0,
+        scope: "active_rounds",
+        status: "complete",
+        outcome: "summary",
+        summary: "Older turns.",
+      },
+    ]);
+  });
+
+  it("retains multiple events in chronological turn/pass order", () => {
+    const later = applyCompactionChunk(
+      [],
+      env({
+        phase: "start",
+        eventId: "later",
+        beforeTurnIndex: 2,
+        passIndex: 0,
+        scope: "active_rounds",
+      }),
+    );
+    const ordered = applyCompactionChunk(
+      later,
+      env({
+        phase: "result",
+        eventId: "earlier",
+        beforeTurnIndex: 0,
+        passIndex: 0,
+        scope: "history",
+        ok: true,
+        outcome: "hard_truncation",
+      }),
+    );
+    expect(ordered.map((event) => event.eventId)).toEqual(["earlier", "later"]);
+  });
+
+  it("does not regress a terminal event on a replayed start", () => {
+    const complete = applyCompactionChunk(
+      [],
+      compaction({ phase: "result", ok: true, outcome: "summary", summary: "done" }),
+    );
+    expect(applyCompactionChunk(complete, compaction({ phase: "start" }))).toBe(complete);
+  });
+
+  it("ignores malformed or unversioned envelopes", () => {
+    const seed: CompactionActivity[] = [
+      {
+        eventId: "compact-1",
+        beforeTurnIndex: 1,
+        passIndex: 0,
+        scope: "active_rounds",
+        status: "running",
+      },
+    ];
+    expect(applyCompactionChunk(seed, "not json")).toBe(seed);
+    expect(applyCompactionChunk(seed, JSON.stringify({ v: 99, phase: "result" }))).toBe(seed);
+    expect(applyCompactionChunk(seed, env({ phase: "who-knows" }))).toBe(seed);
   });
 });

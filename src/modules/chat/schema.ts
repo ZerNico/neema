@@ -66,4 +66,33 @@ export const RenameConversationInput = Schema.Struct({
   title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
 });
 
+// Envelope persisted in message_chunks.delta for kind:"compaction" markers.
+// Compaction runs to completion before the first token of the answer, so
+// without these the UI has nothing to show for however long it takes.
+// `result` carries the summary so the finished block reads the same live as
+// it does after the conversation refetches the checkpoint.
+const compactionPositionFields = {
+  eventId: Schema.String,
+  beforeTurnIndex: Schema.Int,
+  passIndex: Schema.Int,
+  scope: Schema.Literals(["history", "active_rounds"]),
+};
+
+export const CompactionChunkEnvelope = Schema.Union([
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    phase: Schema.Literals(["start"]),
+    ...compactionPositionFields,
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    phase: Schema.Literals(["result"]),
+    ...compactionPositionFields,
+    ok: Schema.Boolean,
+    outcome: Schema.optionalKey(Schema.Literals(["summary", "hard_truncation"])),
+    summary: Schema.optionalKey(Schema.String),
+  }),
+]);
+export type CompactionChunkEnvelope = typeof CompactionChunkEnvelope.Type;
+
 export const standard = Schema.toStandardSchemaV1;

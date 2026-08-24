@@ -5,7 +5,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
 import {
+  applyCompactionChunk,
   useMessageStream,
+  type CompactionActivity,
   type ToolActivity,
   type ToolPageStatus,
   type ToolSource,
@@ -20,6 +22,7 @@ import {
 import { Composer } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
 import { buildMessageStamps } from "./timestamps.ts";
+import { useSearchMode } from "./use-search-mode.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
@@ -36,11 +39,13 @@ function toActivity(row: {
   arguments: unknown;
   result: unknown;
   status: "running" | "complete" | "error";
+  turnIndex: number;
+  callIndex: number;
   error: { code: string; message: string } | null;
 }): ToolActivity {
-  const args = (row.arguments ?? {}) as { query?: string; url?: string };
+  const args = (row.arguments ?? {}) as { queries?: string[]; urls?: string[] };
   const result = (row.result ?? {}) as {
-    query?: string;
+    targets?: string[];
     resultCount?: number;
     pagesFetched?: number;
     pages?: ToolPageStatus[];
@@ -49,13 +54,35 @@ function toActivity(row: {
   return {
     callId: row.id,
     name: row.toolName,
-    query: result.query ?? args.query ?? args.url ?? "",
+    turnIndex: row.turnIndex,
+    callIndex: row.callIndex,
+    targets: result.targets ?? args.queries ?? args.urls ?? [],
     status: row.status,
     ...(result.resultCount !== undefined ? { resultCount: result.resultCount } : {}),
     ...(result.pagesFetched !== undefined ? { pagesFetched: result.pagesFetched } : {}),
     ...(result.pages !== undefined ? { pages: result.pages } : {}),
     ...(result.sources !== undefined ? { sources: result.sources } : {}),
     ...(row.error ? { error: row.error.message } : {}),
+  };
+}
+
+function toCompactionActivity(row: {
+  id: string;
+  beforeTurnIndex: number;
+  passIndex: number;
+  scope: "history" | "active_rounds";
+  status: "running" | "complete" | "error";
+  outcome: "summary" | "hard_truncation" | null;
+  summary: string | null;
+}): CompactionActivity {
+  return {
+    eventId: row.id,
+    beforeTurnIndex: row.beforeTurnIndex,
+    passIndex: row.passIndex,
+    scope: row.scope,
+    status: row.status === "error" ? "failed" : row.status,
+    ...(row.outcome ? { outcome: row.outcome } : {}),
+    ...(row.summary ? { summary: row.summary } : {}),
   };
 }
 
@@ -68,7 +95,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
   const [modelId, setModelId] = useState<string | null>(null);
-  const [searchEnabled, setSearchEnabled] = useState(false);
   const [editState, setEditState] = useState<{ messageId: string; draft: string } | null>(null);
   // One instance, mounted for the whole view: an edit opens by seeding it, so
   // the chips survive the ChatInput remount that swapping the bubble causes.
@@ -103,7 +129,25 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
     // Seed tool activity from durable rows; live envelopes upsert on top.
     const tools = data.toolCalls.filter((t) => t.messageId === streamingMessage.id).map(toActivity);
-    return { text, reasoning, reasoningSeen: reasoningChunks.length > 0, tools, lastSeq };
+    // Seed durable activity first; replayed chunks then idempotently overlay
+    // any terminal marker that landed after the query snapshot.
+    const durableCompactions = data.compactionEvents
+      .filter((event) => event.messageId === streamingMessage.id)
+      .map(toCompactionActivity);
+    const compactions = data.pendingChunks
+      .filter((c) => c.kind === "compaction")
+      .reduce<CompactionActivity[]>(
+        (current, c) => applyCompactionChunk(current, c.delta),
+        durableCompactions,
+      );
+    return {
+      text,
+      reasoning,
+      reasoningSeen: reasoningChunks.length > 0,
+      tools,
+      compactions,
+      lastSeq,
+    };
   }, [streamingMessage?.id, retryEpoch]);
   // oxlint-enable react/memo-dependencies
 
@@ -115,6 +159,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   );
 
   const effectiveModelId = modelId ?? data.conversation.modelId;
+  const {
+    enabled: searchEnabled,
+    setEnabled: setSearchEnabled,
+    reset: resetSearchEnabled,
+  } = useSearchMode(effectiveModelId);
 
   const sendMutation = useMutation({
     mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
@@ -128,7 +177,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         },
       }),
     onSuccess: () => {
-      setSearchEnabled(false); // per-message choice
+      resetSearchEnabled();
       void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
     },
   });
@@ -181,7 +230,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       // the very attachments the message just took ownership of.
       editUploads.markClaimed();
       setEditState(null);
-      setSearchEnabled(false);
+      resetSearchEnabled();
       setRetryEpoch((epoch) => epoch + 1);
     },
   });
@@ -258,6 +307,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return grouped;
   }, [data.toolCalls]);
+
+  const compactionsByMessage = useMemo(() => {
+    const grouped = new Map<string, CompactionActivity[]>();
+    for (const row of data.compactionEvents) {
+      const activity = toCompactionActivity(row);
+      const list = grouped.get(row.messageId);
+      if (list) list.push(activity);
+      else grouped.set(row.messageId, [activity]);
+    }
+    return grouped;
+  }, [data.compactionEvents]);
 
   // messageId -> id of the next assistant message after it, in one pass.
   const nextAssistantAfter = useMemo(() => {
@@ -342,6 +402,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const display: DisplayMessage[] = visibleMessages.map((m) => {
     const reasoning = m.reasoning ?? "";
     const toolActivities = toolCallsByMessage.get(m.id) ?? [];
+    const compactionActivities = compactionsByMessage.get(m.id) ?? [];
     const retryTarget = m.role === "assistant" ? m.id : responseAfter(m.id);
     const inheritedSources = [...inheritedByIndex.values()];
     for (const activity of toolActivities) {
@@ -363,6 +424,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       reasoningSeen: reasoning.length > 0,
       toolActivities,
       inheritedSources,
+      compactionActivities,
       ...(attachmentsByMessage.has(m.id) ? { attachments: attachmentsByMessage.get(m.id)! } : {}),
       ...(m.role === "user" && m.status === "complete"
         ? {
@@ -413,6 +475,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       reasoning: stream.reasoning,
       reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
       toolActivities: stream.tools.length > 0 ? stream.tools : toolActivities,
+      compactionActivities: stream.compactions,
     };
     // Status comes from the stream, not the row: the refetched row says
     // complete while the last words are still landing.
@@ -484,7 +547,7 @@ export function NewChatView({ user }: { user: { name: string } }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modelId, setModelId] = useState<string | null>(null);
-  const [searchEnabled, setSearchEnabled] = useState(false);
+  const { enabled: searchEnabled, setEnabled: setSearchEnabled } = useSearchMode(modelId);
   // Flipped the moment the first message actually leaves: the composer drops
   // into the position it occupies in ChatView, so the route swap that follows
   // lands on geometry that already matches.

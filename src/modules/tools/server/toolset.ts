@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { Toolkit } from "effect/unstable/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
+import type { UrlAuthority } from "./url-authority.ts";
 import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";
 import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
 
@@ -15,15 +16,14 @@ export interface PreparedWebToolkit {
 // shared citation indexer. `undefined` when none do — the stream engine then
 // runs without tools at all.
 //
-// The two tools are armed differently on purpose. Search is a mode the user
-// opts into per message (`requestSearch`), because it is slow, chatty and
-// changes how the model answers. Reading a page the user already named is not
-// a mode — it is what "what does this link say?" means — so the reader is
-// offered whenever an admin has it enabled, with no user opt-in.
+// Search follows the user's per-message preference. The reader rides with an
+// armed search so the model can open its hits, and is also offered independently
+// when user text or prior tool results seeded URL authority.
 export const prepareWebToolkit: (input: {
   webSearch: WebSearchExecutor["Service"];
   urlReader: UrlReaderExecutor["Service"];
   indexer: SourceIndexer;
+  authority: UrlAuthority;
   /** The composer's web toggle: search is offered only when the user asked. */
   requestSearch: boolean;
 }) => Effect.Effect<PreparedWebToolkit | undefined> = Effect.fn("tools.prepareWebToolkit")(
@@ -34,12 +34,15 @@ export const prepareWebToolkit: (input: {
     const unavailable = () => Effect.succeed(null);
     const search = input.requestSearch
       ? yield* input.webSearch
-          .handler(input.indexer)
+          .handler(input.indexer, input.authority)
           .pipe(Effect.catchTag("ToolUnavailable", unavailable))
       : null;
-    const reader = yield* input.urlReader
-      .handler(input.indexer)
-      .pipe(Effect.catchTag("ToolUnavailable", unavailable));
+    const reader =
+      search !== null || input.authority.seeded
+        ? yield* input.urlReader
+            .handler(input.indexer, input.authority)
+            .pipe(Effect.catchTag("ToolUnavailable", unavailable))
+        : null;
 
     const tools = { search: search !== null, reader: reader !== null };
     if (search && reader) {

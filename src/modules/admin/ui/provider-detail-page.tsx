@@ -8,24 +8,18 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import {
-  createModel,
-  deleteModel,
-  deleteProvider,
-  updateModel,
-  updateProvider,
-} from "../server/functions.ts";
+import { useRef, useState } from "react";
+import { createModel, deleteModel, deleteProvider, updateProvider } from "../server/functions.ts";
 import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
-import { ModelAccessControl } from "./model-access-control.tsx";
+import { groupsQuery } from "./groups-page.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
-import { ModelPricingControl } from "./model-pricing-control.tsx";
+import { ModelEditDialog } from "./model-edit-dialog.tsx";
 import {
-  CAPABILITY_META,
-  type Capabilities,
-  CapabilityIcons,
-  ContextBadge,
-} from "~/modules/providers/ui/capability-icons.tsx";
+  emptyModelSettingsDraft,
+  ModelSettingsFields,
+  modelSettingsFromDraft,
+} from "./model-settings-form.tsx";
+import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { modelsQuery, PROVIDER_PRESETS, providersQuery } from "./providers-page.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -46,16 +40,7 @@ import {
 import { useConfirm } from "~/ui/confirm.tsx";
 import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
-
-const MODEL_TYPES = ["chat", "embedding", "image", "audio"] as const;
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const navigate = useNavigate();
@@ -63,13 +48,19 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const { data: providers } = useSuspenseQuery(providersQuery);
   const { data: allModels } = useSuspenseQuery(modelsQuery);
   const [addingModel, setAddingModel] = useState(false);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const confirm = useConfirm();
 
   const provider = providers.find((p) => p.id === providerId);
   const models = allModels.filter((m) => m.providerId === providerId);
+  const editingModel = models.find((model) => model.id === editingModelId);
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin"] });
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin"] }),
+      queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+    ]);
 
   const toggleProvider = useMutation({
     mutationFn: (enabled: boolean) => updateProvider({ data: { providerId, enabled } }),
@@ -82,11 +73,6 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       await invalidate();
       await navigate({ to: "/admin/providers" });
     },
-  });
-
-  const toggleModel = useMutation({
-    mutationFn: (input: { modelId: string; enabled: boolean }) => updateModel({ data: input }),
-    onSuccess: invalidate,
   });
 
   const removeModel = useMutation({
@@ -207,21 +193,16 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                     <CapabilityIcons capabilities={model.capabilities} />
                   </span>
                 </div>
-                <ModelPricingControl
-                  modelId={model.id}
-                  modelName={model.displayName}
-                  pricing={model.pricing}
-                />
-                <ModelAccessControl
-                  modelId={model.id}
-                  modelName={model.displayName}
-                  access={model.access}
-                />
-                <Switch
-                  checked={model.enabled}
-                  onCheckedChange={(enabled) => toggleModel.mutate({ modelId: model.id, enabled })}
-                  aria-label={`${model.displayName} enabled`}
-                />
+                <Badge variant="outline">{model.access === "public" ? "Public" : "Private"}</Badge>
+                {!model.enabled ? <Badge variant="outline">disabled</Badge> : null}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Edit ${model.displayName}`}
+                  onClick={() => setEditingModelId(model.id)}
+                >
+                  <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -249,12 +230,16 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
 
       <AddModelDialog providerId={providerId} open={addingModel} onOpenChange={setAddingModel} />
 
+      {editingModel ? (
+        <ModelEditDialog model={editingModel} onClose={() => setEditingModelId(null)} />
+      ) : null}
+
       <EditProviderDialog provider={provider} open={editing} onOpenChange={setEditing} />
     </AdminPage>
   );
 }
 
-function AddModelDialog({
+export function AddModelDialog({
   providerId,
   open,
   onOpenChange,
@@ -264,16 +249,11 @@ function AddModelDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const { data: groups } = useSuspenseQuery(groupsQuery);
+  const selectedId = useRef<string | null>(null);
   const [pick, setPick] = useState<CatalogPick | null>(null);
   const [typed, setTyped] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [customType, setCustomType] = useState<CatalogPick["type"]>("chat");
-  const [capabilities, setCapabilities] = useState<Capabilities>({
-    reasoning: false,
-    tools: false,
-    vision: false,
-    files: false,
-  });
+  const [draft, setDraft] = useState(emptyModelSettingsDraft);
 
   // Selecting from the popup (incl. the creatable row) is the primary path;
   // raw typed text works as a manual entry even without an explicit selection.
@@ -283,137 +263,125 @@ function AddModelDialog({
       : typed.trim()
         ? { id: typed.trim(), name: typed.trim(), type: "chat", contextLength: null, custom: true }
         : null;
-  const isCustom = effective?.custom ?? false;
+  const settings = modelSettingsFromDraft(draft);
+
+  const reset = () => {
+    selectedId.current = null;
+    setPick(null);
+    setTyped("");
+    setDraft(emptyModelSettingsDraft());
+  };
 
   const add = useMutation({
-    mutationFn: (input: { pick: CatalogPick; displayName: string }) =>
-      createModel({
+    mutationFn: () => {
+      if (effective === null || settings === null) throw new Error("Invalid model settings");
+      return createModel({
         data: {
           providerId,
-          modelKey: input.pick.id,
-          displayName: input.displayName || input.pick.name,
-          type: input.pick.custom ? customType : input.pick.type,
-          capabilities,
-          ...(input.pick.contextLength ? { contextLength: input.pick.contextLength } : {}),
-          // Catalog prices ride along so cost estimates work out of the box.
-          ...(input.pick.pricing ? { pricing: input.pick.pricing } : {}),
+          modelKey: effective.id,
+          ...settings,
         },
-      }),
-    onSuccess: () => {
-      // Close immediately; the list refreshes in the background.
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin"] }),
+        queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+      ]);
+      reset();
       onOpenChange(false);
-      setPick(null);
-      setTyped("");
-      setDisplayName("");
-      setCustomType("chat");
-      setCapabilities({ reasoning: false, tools: false, vision: false, files: false });
-      void queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Add model</DialogTitle>
           <DialogDescription>
             Search the provider's live catalog, or type a model id if the catalog is unavailable.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (effective !== null && settings !== null) add.mutate();
+          }}
+        >
           <Field>
             <FieldLabel>Model</FieldLabel>
             <ModelCombobox
               providerId={providerId}
               onPick={(picked) => {
+                selectedId.current = picked.id;
                 setPick(picked);
                 setTyped(picked.id);
-                setDisplayName(picked.custom ? "" : picked.name);
-                // Auto-detected from the catalog; still editable below.
-                setCapabilities(
-                  picked.capabilities ?? {
-                    reasoning: false,
-                    tools: false,
-                    vision: false,
-                    files: false,
-                  },
-                );
+                setDraft((current) => ({
+                  ...current,
+                  displayName: picked.name,
+                  type: picked.type,
+                  contextLength: picked.contextLength === null ? "" : String(picked.contextLength),
+                  embeddingDimensions: "",
+                  capabilities: picked.capabilities ?? current.capabilities,
+                  inputPrice:
+                    picked.pricing === null || picked.pricing === undefined
+                      ? ""
+                      : String(picked.pricing.input),
+                  outputPrice:
+                    picked.pricing?.output === null || picked.pricing?.output === undefined
+                      ? ""
+                      : String(picked.pricing.output),
+                }));
               }}
-              onInput={setTyped}
+              onInput={(value) => {
+                setTyped(value);
+                if (value === selectedId.current) return;
+                selectedId.current = null;
+                setPick(null);
+                setDraft({ ...emptyModelSettingsDraft(), displayName: value.trim() });
+              }}
             />
           </Field>
-          {isCustom ? (
-            <Field>
-              <FieldLabel>Type</FieldLabel>
-              <Select
-                value={customType}
-                onValueChange={(t) => t && setCustomType(t as CatalogPick["type"])}
-                items={MODEL_TYPES.map((t) => ({ value: t, label: t }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODEL_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : null}
-          <Field>
-            <FieldLabel>Display name</FieldLabel>
-            <Input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={effective?.id ?? "Shown in the model picker"}
-            />
-          </Field>
+
           {effective ? (
-            <Field>
-              <FieldLabel>Capabilities</FieldLabel>
-              <div className="flex flex-col gap-2">
-                {CAPABILITY_META.map((cap) => (
-                  <label key={cap.key} className="flex items-center gap-2 text-sm">
-                    <Switch
-                      checked={capabilities[cap.key]}
-                      onCheckedChange={(checked) =>
-                        setCapabilities((c) => ({ ...c, [cap.key]: checked }))
-                      }
-                    />
-                    <HugeiconsIcon icon={cap.icon} className="text-muted-foreground size-4" />
-                    {cap.label}
-                  </label>
-                ))}
-              </div>
-              {!isCustom ? (
-                <p className="text-muted-foreground text-xs">Detected from the catalog.</p>
-              ) : null}
-            </Field>
+            <>
+              <ModelSettingsFields draft={draft} setDraft={setDraft} groups={groups} />
+              <p className="text-muted-foreground text-xs">
+                {effective.id}
+                {effective.custom ? " · custom model" : " · catalog defaults are editable"}
+              </p>
+            </>
           ) : null}
-          {effective ? (
-            <p className="text-muted-foreground text-xs">
-              {effective.id} · {isCustom ? customType : effective.type}
-              {effective.contextLength
-                ? ` · ${Math.round(effective.contextLength / 1000)}k context`
-                : ""}
-              {isCustom ? " · custom model" : ""}
-            </p>
+
+          {add.isError ? (
+            <p className="text-destructive text-sm">Could not add the model.</p>
           ) : null}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!effective || add.isPending}
-            onClick={() => effective && add.mutate({ pick: effective, displayName })}
-          >
-            {add.isPending ? "Adding…" : "Add model"}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                reset();
+                onOpenChange(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={effective === null || settings === null || add.isPending}
+            >
+              {add.isPending ? "Adding…" : "Add model"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

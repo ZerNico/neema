@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { groupsQuery } from "~/modules/admin/ui/groups-page.tsx";
-import { modelAccessQuery } from "~/modules/admin/ui/model-access-control.tsx";
+import { modelAccessQuery } from "~/modules/admin/ui/model-edit-dialog.tsx";
 import { ProviderDetailPage } from "~/modules/admin/ui/provider-detail-page.tsx";
 import { modelsQuery, providersQuery } from "~/modules/admin/ui/providers-page.tsx";
 

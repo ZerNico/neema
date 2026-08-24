@@ -34,6 +34,6 @@ VALUES (
 	'web_search',
 	'web_search',
 	false,
-	'{"backend":"searxng","baseUrl":"http://localhost:8081","maxResults":8,"maxPagesFetched":3,"perPageCharCap":12000}'
+	'{"backend":"searxng","baseUrl":"http://localhost:8081","maxResults":8}'
 )
 ON CONFLICT ("name") DO NOTHING;

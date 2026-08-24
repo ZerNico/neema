@@ -8,7 +8,7 @@ export type UsageEventRow = typeof usageEvents.$inferSelect;
 
 export interface UsageEventInput {
   userId: string;
-  kind: "chat" | "title";
+  kind: "chat" | "title" | "compaction";
   modelId: string | null;
   modelName: string;
   conversationId?: string;
@@ -37,9 +37,10 @@ export interface UsageScope {
 export interface UsageSummary {
   /** Chat generations only — title runs are counted in tokens, not here. */
   messages: number;
-  /** Every generation attempt, chat and title alike — the error-rate divisor. */
+  /** Every generation attempt of any kind — the error-rate divisor. */
   attempts: number;
   titleGenerations: number;
+  compactionGenerations: number;
   errorAttempts: number;
   abortedAttempts: number;
   inputTokens: number;
@@ -136,6 +137,7 @@ export class AnalyticsRepo extends Context.Service<
               ...sums,
               ...detail,
               titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
+              compactionGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'compaction')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null)::int`,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
@@ -148,6 +150,7 @@ export class AnalyticsRepo extends Context.Service<
             messages: row.messages,
             attempts: row.attempts,
             titleGenerations: row.titleGenerations,
+            compactionGenerations: row.compactionGenerations,
             errorAttempts: row.errorAttempts,
             abortedAttempts: row.abortedAttempts,
             inputTokens: row.inputTokens,

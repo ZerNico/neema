@@ -1,4 +1,9 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import type {
+  ModelCapabilities,
+  ModelPricing,
+  ModelType,
+} from "~/modules/providers/model-config.ts";
 
 export type JsonValue =
   | string
@@ -33,18 +38,21 @@ export const models = pgTable(
     // provider-side identifier, e.g. "anthropic/claude-sonnet-5"
     modelKey: text("model_key").notNull(),
     displayName: text("display_name").notNull(),
-    type: text({ enum: ["chat", "embedding", "image", "audio"] }).notNull(),
+    type: text({ enum: ["chat", "embedding"] })
+      .$type<ModelType>()
+      .notNull(),
     contextLength: integer("context_length"),
+    embeddingDimensions: integer("embedding_dimensions"),
     // Auto-detected from the provider catalog where possible, admin-overridable.
     capabilities: jsonb()
-      .$type<{ reasoning: boolean; tools: boolean; vision: boolean; files: boolean }>()
+      .$type<ModelCapabilities>()
       .notNull()
       .default({ reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     // USD per 1M tokens; prefilled from the provider catalog where it carries
     // prices (OpenRouter), admin-editable. Null = unknown — usage costs then
     // rely on provider-reported numbers or stay unknown.
-    pricing: jsonb().$type<{ input: number; output: number }>(),
+    pricing: jsonb().$type<ModelPricing>(),
     // "public": every user sees and can use it. "groups": only members of the
     // groups linked via model_group_access (admins always bypass).
     access: text({ enum: ["public", "groups"] })

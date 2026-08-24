@@ -259,6 +259,117 @@ describe("group management", () => {
 });
 
 describe("model visibility", () => {
+  it("creates complete model settings and private group links together", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const groupRepo = yield* GroupRepo;
+        const providerRepo = yield* ProviderRepo;
+        const group = yield* groupRepo.createGroup(`Create settings ${uuidv7()}`);
+        const model = yield* providerRepo.createModel({
+          providerId,
+          modelKey: `embedding-${uuidv7()}`,
+          displayName: "Created embedding",
+          type: "embedding",
+          contextLength: 8192,
+          embeddingDimensions: 1536,
+          capabilities: { reasoning: false, tools: false, vision: true, files: false },
+          pricing: { input: 0.02, output: null },
+          enabled: false,
+          access: "groups",
+          groupIds: [group.id],
+        });
+        return {
+          model,
+          groupId: group.id,
+          access: (yield* providerRepo.listModelAccess()).filter((row) => row.modelId === model.id),
+        };
+      }),
+    );
+
+    expect(result.model).toMatchObject({
+      displayName: "Created embedding",
+      type: "embedding",
+      contextLength: 8192,
+      embeddingDimensions: 1536,
+      capabilities: { reasoning: false, tools: false, vision: true, files: false },
+      pricing: { input: 0.02, output: null },
+      enabled: false,
+      access: "groups",
+    });
+    expect(result.access).toEqual([{ modelId: result.model.id, groupId: result.groupId }]);
+  });
+
+  it("rolls back model creation when a private group does not exist", async () => {
+    const modelKey = `rollback-${uuidv7()}`;
+    await expect(
+      run(
+        ProviderRepo.use((repo) =>
+          repo.createModel({
+            providerId,
+            modelKey,
+            displayName: "Never persisted",
+            type: "chat",
+            contextLength: null,
+            embeddingDimensions: null,
+            capabilities: { reasoning: false, tools: false, vision: false, files: false },
+            pricing: null,
+            enabled: true,
+            access: "groups",
+            groupIds: [uuidv7()],
+          }),
+        ),
+      ),
+    ).rejects.toThrow();
+
+    const rows = await run(
+      Db.use((db) =>
+        db.select({ id: models.id }).from(models).where(eq(models.modelKey, modelKey)),
+      ),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("updates model settings and private group links together", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const groupRepo = yield* GroupRepo;
+        const providerRepo = yield* ProviderRepo;
+        const modelId = yield* makeModel();
+        const group = yield* groupRepo.createGroup(`Settings ${uuidv7()}`);
+
+        yield* providerRepo.updateModel(modelId, {
+          displayName: "Edited model",
+          type: "chat",
+          contextLength: 200_000,
+          embeddingDimensions: null,
+          capabilities: { reasoning: true, tools: true, vision: false, files: true },
+          pricing: { input: 3, output: 12 },
+          enabled: false,
+          access: "groups",
+          groupIds: [group.id],
+        });
+
+        return {
+          modelId,
+          groupId: group.id,
+          model: yield* providerRepo.getModel(modelId),
+          access: (yield* providerRepo.listModelAccess()).filter((row) => row.modelId === modelId),
+        };
+      }),
+    );
+
+    expect(result.model).toMatchObject({
+      displayName: "Edited model",
+      type: "chat",
+      contextLength: 200_000,
+      capabilities: { reasoning: true, tools: true, vision: false, files: true },
+      pricing: { input: 3, output: 12 },
+      enabled: false,
+      access: "groups",
+    });
+    expect(result.access).toEqual([{ modelId: result.modelId, groupId: result.groupId }]);
+  });
+
   it("shows public models to everyone and private ones to members only", async () => {
     const result = await run(
       Effect.gen(function* () {

@@ -3,10 +3,10 @@ import { Context, Effect, Layer, type Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
+import { normalizeModelSettings, type ModelSettings } from "../model-config.ts";
 import { KeyCipher } from "./crypto.ts";
 
 export type ProviderKind = "openrouter" | "openai-compatible";
-export type ModelType = "chat" | "embedding" | "image" | "audio";
 
 export type ModelRow = typeof models.$inferSelect;
 export type ModelAccess = ModelRow["access"];
@@ -55,7 +55,7 @@ export class ProviderRepo extends Context.Service<
      * getModel and fold those into the same ModelNotFound.
      */
     isModelAccessible(userId: string, modelId: string): Effect.Effect<boolean>;
-    /** Atomically sets access and replaces the allowed-group links. */
+    /** Sets access independently for internal callers and access-policy tests. */
     updateModelAccess(
       modelId: string,
       access: ModelAccess,
@@ -63,27 +63,15 @@ export class ProviderRepo extends Context.Service<
     ): Effect.Effect<void>;
     listModelAccess(): Effect.Effect<Array<{ modelId: string; groupId: string }>>;
     getModel(modelId: string): Effect.Effect<ModelRow | null>;
-    createModel(input: {
-      providerId: string;
-      modelKey: string;
-      displayName: string;
-      type: ModelType;
-      contextLength?: number;
-      capabilities?: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
-      pricing?: { input: number; output: number };
-      metadata?: Record<string, import("~/db/schema/providers.ts").JsonValue>;
-    }): Effect.Effect<ModelRow>;
-    updateModel(
-      modelId: string,
-      patch: Partial<{
-        displayName: string;
-        type: ModelType;
-        contextLength: number;
-        capabilities: { reasoning: boolean; tools: boolean; vision: boolean; files: boolean };
-        pricing: { input: number; output: number } | null;
-        enabled: boolean;
-      }>,
-    ): Effect.Effect<void>;
+    createModel(
+      input: {
+        providerId: string;
+        modelKey: string;
+        metadata?: Record<string, import("~/db/schema/providers.ts").JsonValue>;
+      } & ModelSettings,
+    ): Effect.Effect<ModelRow>;
+    /** Updates model settings and replaces allowed-group links atomically. */
+    updateModel(modelId: string, input: ModelSettings): Effect.Effect<void>;
     deleteModel(modelId: string): Effect.Effect<void>;
   }
 >()("chat/providers/ProviderRepo") {
@@ -222,8 +210,6 @@ export class ProviderRepo extends Context.Service<
                     .update(models)
                     .set({ access, updatedAt: new Date() })
                     .where(eq(models.id, modelId));
-                  // Replace wholesale: the editor submits the complete set, and
-                  // the lists are small enough that diffing buys nothing.
                   yield* tx.delete(modelGroupAccess).where(eq(modelGroupAccess.modelId, modelId));
                   if (access === "groups" && groupIds.length > 0) {
                     yield* tx
@@ -253,19 +239,47 @@ export class ProviderRepo extends Context.Service<
         }),
 
         createModel: Effect.fn("ProviderRepo.createModel")(function* (input) {
-          const rows = yield* db
-            .insert(models)
-            .values({ id: uuidv7(), ...input })
-            .returning()
+          const { providerId, modelKey, metadata, ...rawSettings } = input;
+          const { groupIds, ...settings } = normalizeModelSettings(rawSettings);
+          const modelId = uuidv7();
+
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const rows = yield* tx
+                  .insert(models)
+                  .values({ id: modelId, providerId, modelKey, metadata, ...settings })
+                  .returning();
+                if (settings.access === "groups" && groupIds.length > 0) {
+                  yield* tx
+                    .insert(modelGroupAccess)
+                    .values(groupIds.map((groupId) => ({ modelId, groupId })));
+                }
+                return rows[0]!;
+              }),
+            )
             .pipe(Effect.orDie);
-          return rows[0]!;
         }),
 
-        updateModel: Effect.fn("ProviderRepo.updateModel")(function* (modelId, patch) {
+        updateModel: Effect.fn("ProviderRepo.updateModel")(function* (modelId, input) {
+          const { groupIds, ...settings } = normalizeModelSettings(input);
           yield* db
-            .update(models)
-            .set({ ...patch, updatedAt: new Date() })
-            .where(eq(models.id, modelId))
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* tx
+                  .update(models)
+                  .set({ ...settings, updatedAt: new Date() })
+                  .where(eq(models.id, modelId));
+                // Replace wholesale: the editor submits the complete set, and
+                // the lists are small enough that diffing buys nothing.
+                yield* tx.delete(modelGroupAccess).where(eq(modelGroupAccess.modelId, modelId));
+                if (settings.access === "groups" && groupIds.length > 0) {
+                  yield* tx
+                    .insert(modelGroupAccess)
+                    .values(groupIds.map((groupId) => ({ modelId, groupId })));
+                }
+              }),
+            )
             .pipe(Effect.orDie);
         }),
 

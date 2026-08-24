@@ -6,6 +6,7 @@ import { ToolsRepo } from "./repo.ts";
 import { SearchBackend, type SearchHit } from "./search.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
 import { prepareWebToolkit } from "./toolset.ts";
+import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
@@ -13,8 +14,6 @@ const searchConfig = {
   backend: "searxng" as const,
   baseUrl: "http://localhost:8081",
   maxResults: 5,
-  maxPagesFetched: 1,
-  perPageCharCap: 1000,
 };
 
 const FakeRepo = (readerEnabled: boolean) =>
@@ -25,7 +24,7 @@ const FakeRepo = (readerEnabled: boolean) =>
       getWebSearch: () => Effect.succeed({ enabled: true, config: searchConfig, secret: null }),
       getDocumentParser: () => Effect.succeed(null),
       getUrlReader: () =>
-        Effect.succeed({ enabled: readerEnabled, config: { perPageCharCap: 1000 } }),
+        Effect.succeed({ enabled: readerEnabled, config: { perPageCharCap: 20_000 } }),
       updateTool: () => Effect.succeed(null),
     }),
   );
@@ -41,7 +40,6 @@ const FakeBackend = Layer.succeed(
   }),
 );
 
-// Redirect simulation: pages under /moved extract at a different final URL.
 const FakeExtractor = Layer.succeed(
   PageExtractor,
   PageExtractor.of({
@@ -57,17 +55,42 @@ const FakeExtractor = Layer.succeed(
   }),
 );
 
-const layers = (readerEnabled: boolean) =>
+const RejectingExtractor = Layer.succeed(
+  PageExtractor,
+  PageExtractor.of({
+    extract: () => Effect.die("disallowed URL reached the extractor"),
+  }),
+);
+
+const LargeExtractor = Layer.succeed(
+  PageExtractor,
+  PageExtractor.of({
+    extract: (input) =>
+      Effect.succeed({
+        url: input.url,
+        title: "Large page",
+        content: "x".repeat(20_000),
+        truncated: false,
+      }),
+  }),
+);
+
+const layers = (readerEnabled: boolean, extractor = FakeExtractor) =>
   Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
-    Layer.provide(Layer.mergeAll(FakeRepo(readerEnabled), FakeBackend, FakeExtractor)),
+    Layer.provide(Layer.mergeAll(FakeRepo(readerEnabled), FakeBackend, extractor)),
   );
 
-const prepared = (indexer: SourceIndexer, requestSearch = true) =>
+const prepared = (
+  indexer: SourceIndexer,
+  authorityUrls: ReadonlyArray<string>,
+  requestSearch = true,
+) =>
   Effect.gen(function* () {
     return yield* prepareWebToolkit({
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
+      authority: createUrlAuthority(authorityUrls),
       requestSearch,
     });
   });
@@ -83,99 +106,156 @@ const runTool = (toolkit: Toolkit.WithHandler<any>, name: string, params: object
   });
 
 describe("UrlReaderExecutor", () => {
-  it.effect("reads a page into the shared result shape, citing the final URL", () =>
+  it.effect("reads several pages in one call and cites redirect destinations", () =>
     Effect.gen(function* () {
-      const toolkit = (yield* prepared(createSourceIndexer([])))!.toolkit;
-      const results = yield* runTool(toolkit, "read_url", { url: "https://blog.example/moved" });
+      const toolkit = (yield* prepared(createSourceIndexer([]), [
+        "https://blog.example/moved",
+        "https://docs.example/start",
+      ]))!.toolkit;
+      const results = yield* runTool(toolkit, "read_url", {
+        urls: ["https://blog.example/moved", "https://docs.example/start"],
+      });
 
-      // Preliminary "reading" progress first, then the real result.
       expect(results.length).toBeGreaterThan(1);
-      expect(results[0]!.pages).toEqual([{ url: "https://blog.example/moved", status: "reading" }]);
-
       const final = results.at(-1)!;
       expect(final.ok).toBe(true);
-      expect(final.results[0]).toMatchObject({
-        index: 1,
-        url: "https://blog.example/final",
-        title: "A Page Title",
-        content: "# Heading\n\nThe extracted body of the page.",
-        snippet: "Heading",
-      });
-      expect(final.sources).toEqual([
-        {
-          index: 1,
-          url: "https://blog.example/final",
-          title: "A Page Title",
-          snippet: "Heading",
-          read: true,
-        },
+      expect(final.pagesFetched).toBe(2);
+      expect(final.results.map((result) => result.url)).toEqual([
+        "https://blog.example/final",
+        "https://docs.example/start",
       ]);
+      expect(final.sources?.map((source) => source.index)).toEqual([1, 2]);
+      expect(final.failures).toEqual([]);
     }).pipe(Effect.provide(layers(true))),
   );
 
-  it.effect("falls back to the hostname when the page has no title", () =>
+  it.effect("enforces the aggregate character budget fairly across a full batch", () =>
     Effect.gen(function* () {
-      const toolkit = (yield* prepared(createSourceIndexer([])))!.toolkit;
-      const results = yield* runTool(toolkit, "read_url", { url: "https://untitled.example/x" });
-      expect(results.at(-1)!.sources?.[0]).toMatchObject({ title: "untitled.example" });
+      const urls = Array.from({ length: 5 }, (_, index) => `https://large${index}.example/`);
+      const toolkit = (yield* prepared(createSourceIndexer([]), urls, false))!.toolkit;
+      const final = (yield* runTool(toolkit, "read_url", { urls })).at(-1)!;
+
+      expect(final.results).toHaveLength(5);
+      expect(
+        final.results.reduce((total, result) => total + (result.content?.length ?? 0), 0),
+      ).toBeLessThanOrEqual(60_000);
+      expect(final.results.every((result) => result.truncated)).toBe(true);
+    }).pipe(Effect.provide(layers(true, LargeExtractor))),
+  );
+
+  it.effect("falls back to the hostname when a page has no title", () =>
+    Effect.gen(function* () {
+      const toolkit = (yield* prepared(
+        createSourceIndexer([]),
+        ["https://untitled.example/x"],
+        false,
+      ))!.toolkit;
+      const final = (yield* runTool(toolkit, "read_url", {
+        urls: ["https://untitled.example/x"],
+      })).at(-1)!;
+      expect(final.sources?.[0]).toMatchObject({ title: "untitled.example" });
     }).pipe(Effect.provide(layers(true))),
   );
 
-  it.effect("returns a model-readable failure when extraction fails", () =>
+  it.effect("keeps successful pages and returns each failed URL's reason", () =>
     Effect.gen(function* () {
-      const toolkit = (yield* prepared(createSourceIndexer([])))!.toolkit;
-      const results = yield* runTool(toolkit, "read_url", { url: "https://boom.example/" });
-      const final = results.at(-1)!;
-      expect(final).toMatchObject({ ok: false, error: "fetch failed: 503" });
-      expect(final.pages).toEqual([{ url: "https://boom.example/", status: "error" }]);
-      expect(final.sources).toBeUndefined();
+      const toolkit = (yield* prepared(
+        createSourceIndexer([]),
+        ["https://good.example/", "https://boom.example/"],
+        false,
+      ))!.toolkit;
+      const final = (yield* runTool(toolkit, "read_url", {
+        urls: ["https://good.example/", "https://boom.example/"],
+      })).at(-1)!;
+
+      expect(final.ok).toBe(true);
+      expect(final.pagesFetched).toBe(1);
+      expect(final.failures).toEqual([
+        { target: "https://boom.example/", error: "fetch failed: 503" },
+      ]);
+      expect(final.pages?.find((page) => page.url === "https://boom.example/")).toMatchObject({
+        status: "error",
+        error: "fetch failed: 503",
+      });
+      expect(final.error).toContain("https://boom.example/");
     }).pipe(Effect.provide(layers(true))),
   );
 
-  it.effect("shares one citation sequence with web_search", () =>
+  it.effect("opens a result URL after web_search grants authority", () =>
     Effect.gen(function* () {
-      const toolkit = (yield* prepared(createSourceIndexer([])))!.toolkit;
+      const toolkit = (yield* prepared(createSourceIndexer([]), [], true))!.toolkit;
 
-      // Search assigns 1 + 2; a read of a NEW page continues with 3.
-      const search = (yield* runTool(toolkit, "web_search", { query: "anything" })).at(-1)!;
-      expect(search.sources?.map((s) => s.index)).toEqual([1, 2]);
-
-      const fresh = (yield* runTool(toolkit, "read_url", { url: "https://tanstack.com" })).at(-1)!;
-      expect(fresh.sources?.[0]?.index).toBe(3);
-
-      // Reading a page the search already indexed reuses its number.
-      const repeat = (yield* runTool(toolkit, "read_url", { url: "https://effect.website" })).at(
+      const search = (yield* runTool(toolkit, "web_search", { queries: ["effect libraries"] })).at(
         -1,
       )!;
-      expect(repeat.sources?.[0]?.index).toBe(1);
+      expect(search.sources?.map((source) => source.index)).toEqual([1, 2]);
+
+      const read = (yield* runTool(toolkit, "read_url", { urls: ["https://drizzle.team"] })).at(
+        -1,
+      )!;
+      expect(read.ok).toBe(true);
+      expect(read.sources?.[0]?.index).toBe(2);
     }).pipe(Effect.provide(layers(true))),
   );
 
   it.effect("stays out of the toolkit while disabled, leaving search alone", () =>
     Effect.gen(function* () {
-      const preparedToolkit = yield* prepared(createSourceIndexer([]));
+      const preparedToolkit = yield* prepared(createSourceIndexer([]), [], true);
       expect(preparedToolkit?.tools).toEqual({ search: true, reader: false });
     }).pipe(Effect.provide(layers(false))),
   );
 
-  // The reader is not a mode the user opts into: an admin enabling it is the
-  // only gate, so it must be armed on a generation that never asked to search.
-  it.effect("is armed without the search toggle, and search is not", () =>
+  it.effect("is omitted when neither search nor seeded URL authority applies", () =>
     Effect.gen(function* () {
-      const preparedToolkit = yield* prepared(createSourceIndexer([]), false);
-      expect(preparedToolkit?.tools).toEqual({ search: false, reader: true });
-
-      const results = yield* runTool(preparedToolkit!.toolkit, "read_url", {
-        url: "https://blog.example/x",
-      });
-      expect(results.at(-1)!.sources?.[0]?.index).toBe(1);
+      expect(yield* prepared(createSourceIndexer([]), [], false)).toBeUndefined();
     }).pipe(Effect.provide(layers(true))),
   );
 
-  // Neither tool applies: the stream engine then runs with no toolkit at all.
-  it.effect("yields no toolkit when search is unasked and the reader is off", () =>
+  it.effect("is armed for user URLs without enabling search", () =>
     Effect.gen(function* () {
-      expect(yield* prepared(createSourceIndexer([]), false)).toBeUndefined();
-    }).pipe(Effect.provide(layers(false))),
+      const preparedToolkit = yield* prepared(
+        createSourceIndexer([]),
+        ["https://blog.example/x"],
+        false,
+      );
+      expect(preparedToolkit?.tools).toEqual({ search: false, reader: true });
+
+      const final = (yield* runTool(preparedToolkit!.toolkit, "read_url", {
+        urls: ["https://blog.example/x"],
+      })).at(-1)!;
+      expect(final.sources?.[0]).toMatchObject({ index: 1, url: "https://blog.example/x" });
+    }).pipe(Effect.provide(layers(true))),
+  );
+
+  it.effect("accepts canonical equivalents of authority URLs", () =>
+    Effect.gen(function* () {
+      const toolkit = (yield* prepared(createSourceIndexer([]), ["https://blog.example/x"], false))!
+        .toolkit;
+      const final = (yield* runTool(toolkit, "read_url", {
+        urls: ["https://blog.example:443/x#section"],
+      })).at(-1)!;
+
+      expect(final.ok).toBe(true);
+      expect(final.targets).toEqual(["https://blog.example:443/x#section"]);
+      expect(final.sources?.[0]?.url).toBe("https://blog.example/x");
+    }).pipe(Effect.provide(layers(true))),
+  );
+
+  it.effect("rejects an entirely invented batch before invoking the extractor", () =>
+    Effect.gen(function* () {
+      const toolkit = (yield* prepared(
+        createSourceIndexer([]),
+        ["https://allowed.example/"],
+        false,
+      ))!.toolkit;
+      const final = (yield* runTool(toolkit, "read_url", {
+        urls: ["https://invented.example/", "https://also-invented.example/"],
+      })).at(-1)!;
+
+      expect(final.ok).toBe(false);
+      expect(final.pagesFetched).toBe(0);
+      expect(final.failures).toHaveLength(2);
+      expect(final.error).toContain("user message or from this conversation's search results");
+    }).pipe(Effect.provide(layers(true, RejectingExtractor))),
   );
 });

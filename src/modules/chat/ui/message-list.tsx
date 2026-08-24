@@ -3,9 +3,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
-import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
+import type { CompactionActivity, ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { CitationChip } from "./citation-chip.tsx";
+import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
 import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations.ts";
 import { MessageActions } from "./message-actions.tsx";
@@ -132,6 +133,8 @@ export interface DisplayMessage {
    * cannot know where the visitor's days begin.
    */
   dayLabel?: string | null;
+  /** Durable and live compaction occurrences inside this assistant response. */
+  compactionActivities?: CompactionActivity[];
   /** Local send time for the action row; absent until hydration. */
   time?: MessageTime | null;
   editedAt?: Date | null;
@@ -315,12 +318,71 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
+function AssistantActivityTimeline({
+  tools,
+  compactions,
+}: {
+  tools: ToolActivity[];
+  compactions: CompactionActivity[];
+}) {
+  // oxlint-disable-next-line no-array-sort -- fresh array
+  const orderedTools = [...tools].sort(
+    (a, b) => (a.turnIndex ?? 0) - (b.turnIndex ?? 0) || (a.callIndex ?? 0) - (b.callIndex ?? 0),
+  );
+  // oxlint-disable-next-line no-array-sort -- fresh array
+  const orderedCompactions = [...compactions].sort(
+    (a, b) => a.beforeTurnIndex - b.beforeTurnIndex || a.passIndex - b.passIndex,
+  );
+  const maxTurn = Math.max(
+    -1,
+    ...orderedTools.map((activity) => activity.turnIndex ?? 0),
+    ...orderedCompactions.map((activity) => activity.beforeTurnIndex),
+  );
+  const nodes: React.ReactNode[] = [];
+  let toolGroup: ToolActivity[] = [];
+  const flushTools = () => {
+    if (toolGroup.length === 0) return;
+    nodes.push(
+      <ToolActivityBlock
+        key={`tools-${toolGroup.map((activity) => activity.callId).join("-")}`}
+        activities={toolGroup}
+      />,
+    );
+    toolGroup = [];
+  };
+
+  for (let turn = 0; turn <= maxTurn; turn++) {
+    for (const activity of orderedCompactions.filter(
+      (candidate) => candidate.beforeTurnIndex === turn,
+    )) {
+      flushTools();
+      nodes.push(
+        <CompactionBlock
+          key={activity.eventId}
+          status={activity.status}
+          outcome={activity.outcome}
+          summary={activity.summary}
+          className="mb-2"
+        />,
+      );
+    }
+    toolGroup.push(...orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn));
+  }
+  flushTools();
+  return nodes;
+}
+
 function AssistantBubble({ message }: { message: DisplayMessage }) {
   const streaming = message.status === "streaming";
   const toolRunning = message.toolActivities.some((a) => a.status === "running");
   // "Thinking" is the phase before any visible answer text arrives — but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
+  // "Compacting…" is already the live signal; "Thinking…" underneath it would
+  // claim the model is working when nothing has been sent to it yet.
+  const compacting = (message.compactionActivities ?? []).some(
+    (activity) => activity.status === "running",
+  );
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
 
   // The message's citable set: its own searched sources (always shown, even
@@ -350,9 +412,12 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}
-        <ToolActivityBlock activities={message.toolActivities} />
+        <AssistantActivityTimeline
+          tools={message.toolActivities}
+          compactions={message.compactionActivities ?? []}
+        />
         {streaming && message.content.length === 0 ? (
-          showReasoning || toolRunning ? null : (
+          showReasoning || toolRunning || compacting ? null : (
             <span className="text-muted-foreground animate-pulse">Thinking…</span>
           )
         ) : sources.length > 0 ? (

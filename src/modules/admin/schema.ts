@@ -19,38 +19,74 @@ export const ProviderIdInput = Schema.Struct({
   providerId: Schema.String,
 });
 
-// USD per 1M tokens. Null clears a stored price (unknown again).
-const PricingSchema = Schema.Struct({
-  input: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
-  output: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+const NonNegativePrice = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+const ChatPricingSchema = Schema.Struct({
+  input: NonNegativePrice,
+  output: NonNegativePrice,
 });
 
-const CapabilitiesSchema = Schema.Struct({
+const EmbeddingPricingSchema = Schema.Struct({
+  input: NonNegativePrice,
+  output: Schema.Null,
+});
+
+const ChatCapabilitiesSchema = Schema.Struct({
   reasoning: Schema.Boolean,
   tools: Schema.Boolean,
   vision: Schema.Boolean,
   files: Schema.Boolean,
 });
 
-export const CreateModelInput = Schema.Struct({
-  providerId: Schema.String,
-  modelKey: Schema.String.check(Schema.isMinLength(1)),
-  displayName: Schema.String.check(Schema.isMinLength(1)),
-  type: Schema.Literals(["chat", "embedding", "image", "audio"]),
-  contextLength: Schema.optionalKey(Schema.Number),
-  capabilities: Schema.optionalKey(CapabilitiesSchema),
-  pricing: Schema.optionalKey(PricingSchema),
+const EmbeddingCapabilitiesSchema = Schema.Struct({
+  reasoning: Schema.Literal(false),
+  tools: Schema.Literal(false),
+  vision: Schema.Boolean,
+  files: Schema.Literal(false),
 });
 
-export const UpdateModelInput = Schema.Struct({
-  modelId: Schema.String,
-  displayName: Schema.optionalKey(Schema.String),
-  type: Schema.optionalKey(Schema.Literals(["chat", "embedding", "image", "audio"])),
-  contextLength: Schema.optionalKey(Schema.Number),
-  capabilities: Schema.optionalKey(CapabilitiesSchema),
-  pricing: Schema.optionalKey(Schema.NullOr(PricingSchema)),
-  enabled: Schema.optionalKey(Schema.Boolean),
-});
+const CommonModelSettings = {
+  displayName: Schema.String.check(Schema.isMinLength(1)),
+  contextLength: Schema.NullOr(PositiveInteger),
+  enabled: Schema.Boolean,
+  access: Schema.Literals(["public", "groups"]),
+  groupIds: Schema.Array(Schema.String),
+};
+
+const ChatModelSettings = {
+  ...CommonModelSettings,
+  type: Schema.Literal("chat"),
+  embeddingDimensions: Schema.Null,
+  capabilities: ChatCapabilitiesSchema,
+  pricing: Schema.NullOr(ChatPricingSchema),
+};
+
+const EmbeddingModelSettings = {
+  ...CommonModelSettings,
+  type: Schema.Literal("embedding"),
+  embeddingDimensions: Schema.NullOr(PositiveInteger),
+  capabilities: EmbeddingCapabilitiesSchema,
+  pricing: Schema.NullOr(EmbeddingPricingSchema),
+};
+
+export const CreateModelInput = Schema.Union([
+  Schema.Struct({
+    providerId: Schema.String,
+    modelKey: Schema.String.check(Schema.isMinLength(1)),
+    ...ChatModelSettings,
+  }),
+  Schema.Struct({
+    providerId: Schema.String,
+    modelKey: Schema.String.check(Schema.isMinLength(1)),
+    ...EmbeddingModelSettings,
+  }),
+]);
+
+export const UpdateModelInput = Schema.Union([
+  Schema.Struct({ modelId: Schema.String, ...ChatModelSettings }),
+  Schema.Struct({ modelId: Schema.String, ...EmbeddingModelSettings }),
+]);
 
 export const ModelIdInput = Schema.Struct({
   modelId: Schema.String,
@@ -72,10 +108,4 @@ export const GroupIdInput = Schema.Struct({
 export const GroupMemberInput = Schema.Struct({
   groupId: Schema.String,
   userId: Schema.String,
-});
-
-export const UpdateModelAccessInput = Schema.Struct({
-  modelId: Schema.String,
-  access: Schema.Literals(["public", "groups"]),
-  groupIds: Schema.Array(Schema.String),
 });

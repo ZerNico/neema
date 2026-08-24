@@ -1,0 +1,1164 @@
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { execSync } from "node:child_process";
+import { PgClient } from "@effect/sql-pg";
+import { eq } from "drizzle-orm";
+import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Prompt, Response as AiResponse } from "effect/unstable/ai";
+import { uuidv7 } from "uuidv7";
+import {
+  conversationCompactionCheckpoints,
+  messages as messagesTable,
+  models,
+  usageEvents,
+} from "~/db/schema/index.ts";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { prepareCompactedHistory, type CompactionDeps } from "~/modules/chat/server/compaction.ts";
+import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { KeyCipher } from "~/modules/providers/server/crypto.ts";
+import {
+  AiGateway,
+  ProviderContextOverflow,
+  ProviderUnreachable,
+  type ChatStreamPart,
+} from "~/modules/providers/server/gateway.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
+import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { Db } from "~/server/db.ts";
+
+// ProviderRepo decrypts stored keys through KeyCipher, which reads this.
+process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+
+let container: StartedPostgreSqlContainer;
+/** No declared window: the estimator falls back to its default. */
+let modelId: string;
+/** A window small enough that a handful of long turns overflow it. */
+let smallModelId: string;
+let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | AnalyticsRepo | StreamEngine | Db, unknown>;
+
+/**
+ * The one fake in the end-to-end block: every prompt the engine would have
+ * sent, plus switches for the two provider behaviours worth exercising —
+ * a refused oversized prompt, and a model that cannot write a summary.
+ */
+const gateway = {
+  streamPrompts: [] as string[],
+  summaryPrompts: [] as string[],
+  summary: "SUMMARY OF EARLIER TURNS",
+  summaryFails: false,
+  toolRoundResult: null as string | null,
+  overflowOnCalls: [] as number[],
+  partialOverflowOnCalls: [] as number[],
+  /** How many stream calls to reject as too long before letting one through. */
+  overflowsLeft: 0,
+  /** What the provider claims it counted, so calibration has something real. */
+  reportedInputTokens: 9_999,
+  reset() {
+    gateway.streamPrompts = [];
+    gateway.summaryPrompts = [];
+    gateway.summary = "SUMMARY OF EARLIER TURNS";
+    gateway.summaryFails = false;
+    gateway.toolRoundResult = null;
+    gateway.overflowOnCalls = [];
+    gateway.partialOverflowOnCalls = [];
+    gateway.overflowsLeft = 0;
+    gateway.reportedInputTokens = 9_999;
+  },
+};
+
+const TOOL_SOURCE_URL = "https://example.com/current-source";
+
+const FakeGateway = Layer.succeed(AiGateway, {
+  fetchCatalog: () => Effect.succeed([]),
+  generateText: (input) =>
+    Effect.suspend(() => {
+      gateway.summaryPrompts.push(JSON.stringify(input.prompt));
+      return gateway.summaryFails
+        ? Effect.fail(new ProviderUnreachable({ providerId: "p", message: "summary died" }))
+        : Effect.succeed({
+            text: gateway.summary,
+            usage: emptyUsage(),
+            finishMetadata: undefined,
+          });
+    }),
+  streamChat: (input) =>
+    Stream.suspend(() => {
+      gateway.streamPrompts.push(JSON.stringify(input.prompt));
+      const callNumber = gateway.streamPrompts.length;
+      const overflow = () =>
+        new ProviderContextOverflow({ providerId: "p", message: "maximum context length" });
+      if (gateway.partialOverflowOnCalls.includes(callNumber)) {
+        return Stream.make({
+          type: "text-delta",
+          id: "partial",
+          delta: "partial",
+        } as never as ChatStreamPart).pipe(Stream.concat(Stream.fail(overflow())));
+      }
+      if (gateway.overflowsLeft > 0 || gateway.overflowOnCalls.includes(callNumber)) {
+        if (gateway.overflowsLeft > 0) gateway.overflowsLeft -= 1;
+        return Stream.fail(overflow());
+      }
+      if (gateway.toolRoundResult !== null && gateway.streamPrompts.length === 1) {
+        const result = {
+          ok: true,
+          targets: ["large context probe"],
+          resultCount: 1,
+          pagesFetched: 0,
+          results: [
+            {
+              index: 1,
+              url: TOOL_SOURCE_URL,
+              title: "Current source",
+              snippet: "A source discovered during this generation.",
+              body: gateway.toolRoundResult,
+            },
+          ],
+          failures: [],
+          sources: [
+            {
+              index: 1,
+              url: TOOL_SOURCE_URL,
+              title: "Current source",
+              snippet: "A source discovered during this generation.",
+              read: false,
+            },
+          ],
+        };
+        return Stream.make(
+          AiResponse.makePart("tool-call", {
+            id: "call_1",
+            name: "web_search",
+            params: { queries: ["large context probe"] },
+            providerExecuted: false,
+          }) as ChatStreamPart,
+          AiResponse.toolResultPart({
+            id: "call_1",
+            name: "web_search",
+            isFailure: false,
+            result,
+            encodedResult: result,
+            providerExecuted: false,
+            preliminary: false,
+          }) as ChatStreamPart,
+          {
+            type: "finish",
+            reason: "tool-calls",
+            usage: {
+              inputTokens: { total: gateway.reportedInputTokens },
+              outputTokens: { total: 12 },
+            },
+          } as never as ChatStreamPart,
+        );
+      }
+      return Stream.make(
+        { type: "text-delta", id: "t", delta: "answered" } as never as ChatStreamPart,
+        {
+          type: "finish",
+          reason: "stop",
+          usage: {
+            inputTokens: { total: gateway.reportedInputTokens },
+            outputTokens: { total: 12 },
+          },
+        } as never as ChatStreamPart,
+      );
+    }),
+});
+
+// Nothing here carries an attachment or arms a web tool; these stubs only
+// exist to close the layer graph.
+const FakeBlobStore = Layer.succeed(BlobStore, {
+  put: () => Effect.die("no blobs in these tests"),
+  get: () => Effect.die("no blobs in these tests"),
+  delete: () => Effect.void,
+  exists: () => Effect.succeed(false),
+  deletePrefix: () => Effect.void,
+});
+const FakeDocumentParser = Layer.succeed(DocumentParser, {
+  parsePdf: () => Effect.die("no documents in these tests"),
+  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+});
+const unavailable = (tool: "web_search" | "read_url") => () =>
+  Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
+const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
+  handler: () =>
+    Effect.succeed((params: { readonly queries: ReadonlyArray<string> }) =>
+      Effect.succeed({
+        ok: true as const,
+        targets: params.queries,
+        resultCount: 0,
+        pagesFetched: 0,
+        results: [],
+        failures: [],
+        sources: [],
+      }),
+    ),
+  availability: () => Effect.succeed({ configured: true, enabled: true }),
+});
+const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
+  handler: unavailable("read_url"),
+  availability: () => Effect.succeed({ configured: false, enabled: false }),
+});
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  const url = container.getConnectionUri();
+  execSync("pnpm drizzle-kit migrate", {
+    cwd: new URL("../..", import.meta.url).pathname,
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: "pipe",
+  });
+
+  const InfraLayer = Db.layer.pipe(
+    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
+  );
+  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(InfraLayer),
+  );
+  const AppLayer = StreamEngine.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        FakeGateway,
+        FakeWebSearch,
+        FakeUrlReader,
+        FakeBlobStore,
+        FakeDocumentParser,
+        SyncBus.layer,
+      ).pipe(Layer.provideMerge(ReposLayer)),
+    ),
+  );
+  runtime = ManagedRuntime.make(AppLayer);
+
+  modelId = uuidv7();
+  smallModelId = uuidv7();
+  const providerId = uuidv7();
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.execute(
+        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+         values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
+      );
+      yield* db.insert(models).values([
+        { id: modelId, providerId, modelKey: "m", displayName: "M", type: "chat" },
+        {
+          id: smallModelId,
+          providerId,
+          modelKey: "small",
+          displayName: "Small Window",
+          type: "chat",
+          contextLength: TINY_CONTEXT,
+          capabilities: { reasoning: false, tools: true, vision: false, files: false },
+        },
+      ]);
+    }),
+  );
+}, 180_000);
+
+afterAll(async () => {
+  await runtime?.dispose();
+  await container?.stop();
+});
+
+const run = <A, E>(effect: Effect.Effect<A, E, ChatRepo | AnalyticsRepo | StreamEngine | Db>) =>
+  runtime.runPromise(effect as never) as Promise<A>;
+
+const makeUser = Effect.fn("test.makeUser")(function* () {
+  const db = yield* Db;
+  const userId = uuidv7();
+  yield* db.execute(
+    `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+  );
+  return userId;
+});
+
+const emptyUsage = () =>
+  new AiResponse.Usage({
+    inputTokens: {
+      uncached: undefined,
+      total: undefined,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+  });
+
+/**
+ * A conversation of completed turns, alternating user/assistant. Every message
+ * is long enough that a handful of them blow past the tiny window the tests
+ * configure, so the trigger fires on message count rather than on prose luck.
+ */
+const seedConversation = Effect.fn("test.seedConversation")(function* (
+  userId: string,
+  turns: number,
+) {
+  const repo = yield* ChatRepo;
+  const first = yield* repo.createTurn({
+    userId,
+    conversationId: null,
+    modelId,
+    content: `question 0 ${"x".repeat(2000)}`,
+    attachmentIds: [],
+  });
+  yield* repo.finalizeMessage({
+    messageId: first.assistant.id,
+    status: "complete",
+    content: `answer 0 ${"y".repeat(2000)}`,
+  });
+  for (let turn = 1; turn < turns; turn++) {
+    const next = yield* repo.createTurn({
+      userId,
+      conversationId: first.conversation.id,
+      modelId,
+      content: `question ${turn} ${"x".repeat(2000)}`,
+      attachmentIds: [],
+    });
+    yield* repo.finalizeMessage({
+      messageId: next.assistant.id,
+      status: "complete",
+      content: `answer ${turn} ${"y".repeat(2000)}`,
+    });
+  }
+  return first.conversation.id;
+});
+
+/** The real repo and ledger; only the model is faked. */
+const depsWith = (
+  repo: ChatRepo["Service"],
+  analytics: AnalyticsRepo["Service"],
+  summary: string,
+) => {
+  const generateText = vi.fn((_call: { modelId: string; prompt: Prompt.Prompt }) =>
+    Effect.succeed({ text: summary, usage: emptyUsage(), finishMetadata: undefined }),
+  );
+  const deps: CompactionDeps = {
+    gateway: { generateText },
+    repo,
+    providers: { getModel: () => Effect.succeed(null) },
+    analytics,
+  };
+  return { deps, generateText };
+};
+
+const historyOf = Effect.fn("test.historyOf")(function* (conversationId: string) {
+  const repo = yield* ChatRepo;
+  const rows = yield* repo.listMessages(conversationId);
+  return {
+    messageId: rows.filter((m) => m.role === "assistant").at(-1)!.id,
+    messages: rows.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+    renderedMessages: rows.map((m) => ({
+      role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content: [{ type: "text" as const, text: m.content }],
+    })),
+  };
+});
+
+/** Small enough that half a dozen 400-character turns cannot fit. */
+const TINY_CONTEXT = 4_000;
+
+const prepare = Effect.fn("test.prepare")(function* (input: {
+  userId: string;
+  conversationId: string;
+  summary?: string;
+}) {
+  const repo = yield* ChatRepo;
+  const analytics = yield* AnalyticsRepo;
+  const { deps, generateText } = depsWith(
+    repo,
+    analytics,
+    input.summary ?? "Earlier: they set up the database and picked Postgres 17.",
+  );
+  const history = yield* historyOf(input.conversationId);
+  const decision = yield* prepareCompactedHistory(deps, {
+    userId: input.userId,
+    conversationId: input.conversationId,
+    messageId: history.messageId,
+    modelId,
+    contextLength: TINY_CONTEXT,
+    messages: history.messages,
+    renderedMessages: history.renderedMessages,
+    fixedPrefix: [],
+    webToolsEnabled: false,
+  });
+  return { decision, generateText, history };
+});
+
+const checkpointsOf = Effect.fn("test.checkpointsOf")(function* (conversationId: string) {
+  const db = yield* Db;
+  return yield* db
+    .select()
+    .from(conversationCompactionCheckpoints)
+    .where(eq(conversationCompactionCheckpoints.conversationId, conversationId))
+    .orderBy(conversationCompactionCheckpoints.createdAt);
+});
+
+describe("context compaction", () => {
+  it("summarizes past the trigger and leaves the stored transcript untouched", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const before = yield* historyOf(conversationId);
+        const { decision, generateText } = yield* prepare({ userId, conversationId });
+        return {
+          decision,
+          promptedWith: generateText.mock.calls.length,
+          rows: yield* checkpointsOf(conversationId),
+          after: yield* historyOf(conversationId),
+          before,
+        };
+      }),
+    );
+
+    expect(result.decision.mode).toBe("checkpoint");
+    expect(result.promptedWith).toBe(1);
+    expect(result.rows).toHaveLength(1);
+    // The boundary is a real message, and the verbatim tail starts right after.
+    const boundaryIndex = result.before.messages.findIndex(
+      (m) => m.id === result.rows[0]!.throughMessageId,
+    );
+    expect(boundaryIndex).toBeGreaterThanOrEqual(0);
+    expect(result.decision.startIndex).toBe(boundaryIndex + 1);
+    // The tail always opens on a question, never mid-turn.
+    expect(result.before.messages[result.decision.startIndex]!.role).toBe("user");
+    expect(result.decision.injectedMessages).toHaveLength(1);
+    // Nothing was rewritten, deleted, or reordered.
+    expect(result.after.messages).toEqual(result.before.messages);
+  });
+
+  it("folds the previous summary into the next one and keeps both rows", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const first = yield* prepare({ userId, conversationId, summary: "FIRST SUMMARY" });
+
+        // More turns, so the next pass has to advance the boundary again.
+        for (let turn = 8; turn < 14; turn++) {
+          const next = yield* repo.createTurn({
+            userId,
+            conversationId,
+            modelId,
+            content: `question ${turn} ${"x".repeat(2000)}`,
+            attachmentIds: [],
+          });
+          yield* repo.finalizeMessage({
+            messageId: next.assistant.id,
+            status: "complete",
+            content: `answer ${turn} ${"y".repeat(2000)}`,
+          });
+        }
+
+        const second = yield* prepare({ userId, conversationId, summary: "SECOND SUMMARY" });
+        const rows = yield* checkpointsOf(conversationId);
+        const history = yield* historyOf(conversationId);
+        const position = (id: string) => history.messages.findIndex((m) => m.id === id);
+        return {
+          firstBoundary: position(first.decision.checkpoint!.throughMessageId),
+          secondBoundary: position(second.decision.checkpoint!.throughMessageId),
+          rows: rows.length,
+          secondPrompt: JSON.stringify(second.generateText.mock.calls[0]![0].prompt),
+          injected: JSON.stringify(second.decision.injectedMessages),
+        };
+      }),
+    );
+
+    expect(result.rows).toBe(2); // superseded rows are kept, for branches
+    expect(result.secondBoundary).toBeGreaterThan(result.firstBoundary);
+    // Progressive, not from scratch: the second pass is told what the first
+    // one concluded and only reads what has aged since.
+    expect(result.secondPrompt).toContain("FIRST SUMMARY");
+    expect(result.injected).toContain("SECOND SUMMARY");
+    expect(result.injected).not.toContain("FIRST SUMMARY");
+  });
+
+  it("records one compaction row in the ledger per summary", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        yield* prepare({ userId, conversationId });
+        return yield* db
+          .select({ kind: usageEvents.kind, status: usageEvents.status })
+          .from(usageEvents)
+          .where(eq(usageEvents.conversationId, conversationId));
+      }),
+    );
+    expect(rows).toEqual([{ kind: "compaction", status: "complete" }]);
+  });
+
+  it("falls back to truncation when the model cannot produce a summary", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const analytics = yield* AnalyticsRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const history = yield* historyOf(conversationId);
+        const deps: CompactionDeps = {
+          gateway: {
+            generateText: () =>
+              Effect.fail(
+                new (class extends Error {
+                  readonly _tag = "ProviderUnreachable";
+                })("nope") as never,
+              ),
+          },
+          repo,
+          providers: { getModel: () => Effect.succeed(null) },
+          analytics,
+        };
+        const decision = yield* prepareCompactedHistory(deps, {
+          userId,
+          conversationId,
+          messageId: history.messageId,
+          modelId,
+          contextLength: TINY_CONTEXT,
+          messages: history.messages,
+          renderedMessages: history.renderedMessages,
+          fixedPrefix: [],
+          webToolsEnabled: false,
+        });
+        const ledger = yield* db
+          .select({ kind: usageEvents.kind, status: usageEvents.status })
+          .from(usageEvents)
+          .where(eq(usageEvents.conversationId, conversationId));
+        return {
+          decision,
+          ledger,
+          checkpoints: yield* checkpointsOf(conversationId),
+          count: history.messages.length,
+        };
+      }),
+    );
+
+    // The answer still gets generated — just against fewer turns.
+    expect(result.decision.mode).toBe("truncated");
+    expect(result.decision.startIndex).toBeGreaterThan(0);
+    expect(result.decision.estimatedInputTokens).toBeLessThanOrEqual(result.decision.budget.input);
+    expect(result.checkpoints).toHaveLength(0);
+    expect(result.ledger).toEqual([{ kind: "compaction", status: "error" }]);
+  });
+
+  it("drops a checkpoint whose boundary a retry rewinds, in the same transaction", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const { decision } = yield* prepare({ userId, conversationId });
+        const boundaryId = decision.checkpoint!.throughMessageId;
+        const history = yield* historyOf(conversationId);
+        const index = history.messages.findIndex((m) => m.id === boundaryId);
+
+        // Retrying the boundary message itself: the row survives with its id,
+        // so only the explicit invalidation can clear the summary.
+        const target =
+          history.messages[index]!.role === "assistant"
+            ? history.messages[index]!
+            : history.messages[index + 1]!;
+        const targetIndex = history.messages.indexOf(target);
+        yield* repo.resetMessageForRetry({
+          userId,
+          messageId: target.id,
+          modelId,
+          deleteMessageIds: history.messages.slice(targetIndex + 1).map((m) => m.id),
+          invalidateCheckpointThroughMessageIds: history.messages
+            .slice(targetIndex)
+            .map((m) => m.id),
+        });
+        return {
+          remaining: yield* checkpointsOf(conversationId),
+          boundaryStillThere: (yield* repo.getMessage(boundaryId)) !== null,
+        };
+      }),
+    );
+    expect(result.boundaryStillThere).toBe(true);
+    expect(result.remaining).toHaveLength(0);
+  });
+
+  it("removes prior compaction activity when retry reuses an assistant row", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        yield* prepare({ userId, conversationId });
+        const history = yield* historyOf(conversationId);
+        const messageId = history.messageId;
+        const before = yield* repo.listCompactionEvents([messageId]);
+
+        yield* repo.resetMessageForRetry({
+          userId,
+          messageId,
+          modelId,
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+
+        return {
+          before,
+          after: yield* repo.listCompactionEvents([messageId]),
+        };
+      }),
+    );
+
+    expect(result.before).toHaveLength(1);
+    expect(result.after).toHaveLength(0);
+  });
+
+  it("copies only the checkpoints inside a branch's prefix, with fresh ids", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const { decision } = yield* prepare({ userId, conversationId });
+        const source = decision.checkpoint!;
+        // Ensure there is an unambiguous later boundary beyond a valid fork
+        // point, regardless of how tightly the planner sized the first tail.
+        for (let turn = 8; turn < 10; turn++) {
+          const next = yield* repo.createTurn({
+            userId,
+            conversationId,
+            modelId,
+            content: `question ${turn} ${"x".repeat(2000)}`,
+            attachmentIds: [],
+          });
+          yield* repo.finalizeMessage({
+            messageId: next.assistant.id,
+            status: "complete",
+            content: `answer ${turn} ${"y".repeat(2000)}`,
+          });
+        }
+        const history = yield* historyOf(conversationId);
+        const boundaryIndex = history.messages.findIndex((m) => m.id === source.throughMessageId);
+
+        // A checkpoint the branch cuts *before* — it describes messages the
+        // copy does not have, so it must not come along.
+        const laterBoundary = history.messages.at(-2)!;
+        yield* repo.insertCompactionCheckpoint({
+          conversationId,
+          throughMessageId: laterBoundary.id,
+          modelId,
+          summary: "TOO LATE",
+        });
+
+        // Fork just after the first boundary, before the later one. Branching
+        // is only allowed from an assistant message, so take the next one.
+        const forkPoint = history.messages.find(
+          (m, index) => index > boundaryIndex && m.role === "assistant",
+        )!;
+        const branch = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: conversationId,
+          throughMessageId: forkPoint.id,
+        });
+        const copied = yield* checkpointsOf(branch.id);
+        const branchHistory = yield* historyOf(branch.id);
+        return {
+          copied,
+          source,
+          remappedIsInBranch: branchHistory.messages.some(
+            (m) => m.id === copied[0]?.throughMessageId,
+          ),
+        };
+      }),
+    );
+
+    expect(result.copied).toHaveLength(1);
+    expect(result.copied[0]!.summary).toBe(result.source.summary);
+    expect(result.copied[0]!.id).not.toBe(result.source.id);
+    // The boundary was remapped onto the clone, not left pointing at the source.
+    expect(result.copied[0]!.throughMessageId).not.toBe(result.source.throughMessageId);
+    expect(result.remappedIsInBranch).toBe(true);
+  });
+
+  it("copies completed compaction activity onto the cloned assistant", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        yield* prepare({ userId, conversationId });
+        const sourceHistory = yield* historyOf(conversationId);
+        const sourceEvent = (yield* repo.listCompactionEvents([sourceHistory.messageId]))[0]!;
+
+        const branch = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: conversationId,
+          throughMessageId: sourceHistory.messageId,
+        });
+        const branchHistory = yield* historyOf(branch.id);
+        const branchEvent = (yield* repo.listCompactionEvents([branchHistory.messageId]))[0]!;
+        const branchCheckpoints = yield* checkpointsOf(branch.id);
+
+        return { sourceEvent, branchEvent, branchCheckpoints };
+      }),
+    );
+
+    expect(result.branchEvent).toMatchObject({
+      status: "complete",
+      outcome: result.sourceEvent.outcome,
+      beforeTurnIndex: result.sourceEvent.beforeTurnIndex,
+      passIndex: result.sourceEvent.passIndex,
+    });
+    expect(result.branchEvent.id).not.toBe(result.sourceEvent.id);
+    expect(result.branchEvent.messageId).not.toBe(result.sourceEvent.messageId);
+    expect(result.branchEvent.checkpointId).toBe(result.branchCheckpoints[0]?.id);
+    expect(result.branchEvent.checkpointId).not.toBe(result.sourceEvent.checkpointId);
+  });
+
+  it("loses a checkpoint when its boundary message is deleted", async () => {
+    const remaining = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const { decision } = yield* prepare({ userId, conversationId });
+        yield* repo.deleteMessages([decision.checkpoint!.throughMessageId]);
+        return yield* checkpointsOf(conversationId);
+      }),
+    );
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("orders messages by (created_at, id) when timestamps collide", async () => {
+    const order = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 2);
+        // uuidv7 is time-ordered, so ascending ids are insertion order.
+        const ids = [uuidv7(), uuidv7(), uuidv7()];
+        const stamp = new Date("2026-08-24T10:00:00.000Z");
+        for (const id of ids) {
+          yield* db.insert(messagesTable).values({
+            id,
+            conversationId,
+            role: "user",
+            content: id,
+            createdAt: stamp,
+          });
+        }
+        const rows = yield* repo.listMessages(conversationId);
+        return { seen: rows.filter((m) => ids.includes(m.id)).map((m) => m.id), ids };
+      }),
+    );
+    // Insertion order, not whatever order Postgres felt like returning.
+    expect(order.seen).toEqual(order.ids);
+  });
+
+  it("leaves a short conversation entirely alone", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 2);
+        const repo = yield* ChatRepo;
+        const analytics = yield* AnalyticsRepo;
+        const { deps, generateText } = depsWith(repo, analytics, "unused");
+        const history = yield* historyOf(conversationId);
+        const decision = yield* prepareCompactedHistory(deps, {
+          userId,
+          conversationId,
+          messageId: history.messageId,
+          modelId,
+          // The model's real window, not the artificial one.
+          contextLength: 128_000,
+          messages: history.messages,
+          renderedMessages: history.renderedMessages,
+          fixedPrefix: [],
+          webToolsEnabled: false,
+        });
+        return { decision, summarized: generateText.mock.calls.length };
+      }),
+    );
+    expect(result.decision.mode).toBe("full");
+    expect(result.decision.startIndex).toBe(0);
+    expect(result.decision.injectedMessages).toHaveLength(0);
+    expect(result.summarized).toBe(0);
+  });
+
+  it("keeps a user-led tail within the hard input budget", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 10);
+        const { decision, history } = yield* prepare({ userId, conversationId });
+        return { decision, firstRole: history.messages[decision.startIndex]?.role };
+      }),
+    );
+    expect(result.firstRole).toBe("user");
+    expect(result.decision.estimatedInputTokens).toBeLessThanOrEqual(result.decision.budget.input);
+  });
+});
+
+/** Runs one generation to completion; `subscribe` ends at a terminal status. */
+const generate = Effect.fn("test.generate")(function* (input: {
+  userId: string;
+  conversationId: string;
+  messageId: string;
+  modelId: string;
+  searchEnabled?: boolean;
+}) {
+  const engine = yield* StreamEngine;
+  const { searchEnabled = false, ...generation } = input;
+  yield* engine.startGeneration({ ...generation, searchEnabled });
+  yield* engine.subscribe(input.messageId, 0).pipe(Stream.runDrain);
+});
+
+/** A fresh turn on an already-long conversation, ready to be generated into. */
+const askAgain = Effect.fn("test.askAgain")(function* (userId: string, conversationId: string) {
+  const repo = yield* ChatRepo;
+  const turn = yield* repo.createTurn({
+    userId,
+    conversationId,
+    modelId: smallModelId,
+    content: `question latest ${"z".repeat(2000)}`,
+    attachmentIds: [],
+  });
+  return turn.assistant.id;
+});
+
+describe("compaction inside a generation", () => {
+  beforeEach(() => {
+    gateway.reset();
+  });
+
+  it("summarizes before the answer streams and sends summary + tail, not the whole log", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const before = yield* historyOf(conversationId);
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        return {
+          message: yield* repo.getMessage(messageId),
+          checkpoints: yield* checkpointsOf(conversationId),
+          chunks: yield* repo.chunksAfter(messageId, 0),
+          events: yield* repo.listCompactionEvents([messageId]),
+          storedBefore: before.messages.length,
+          storedAfter: (yield* historyOf(conversationId)).messages.length,
+        };
+      }),
+    );
+
+    // The summary was written first, and only then was the answer requested.
+    expect(gateway.summaryPrompts).toHaveLength(1);
+    expect(gateway.streamPrompts).toHaveLength(1);
+    expect(result.checkpoints).toHaveLength(1);
+
+    const prompt = gateway.streamPrompts[0]!;
+    expect(prompt).toContain("SUMMARY OF EARLIER TURNS");
+    expect(prompt).toContain("question latest");
+    // The oldest turn is represented by the summary, not by its own text.
+    expect(prompt).not.toContain("question 0 ");
+    expect(result.message?.status).toBe("complete");
+    expect(result.message?.content).toBe("answered");
+    // Two rows added by the new turn; nothing removed to make room.
+    expect(result.storedAfter).toBe(result.storedBefore + 2);
+
+    // The pass is dead air on the client, so it is announced as chunks —
+    // persisted, so a reload mid-pass replays it like any other marker.
+    const markers = result.chunks
+      .filter((chunk) => chunk.kind === "compaction")
+      .map((chunk) => JSON.parse(chunk.delta) as Record<string, unknown>);
+    expect(markers[0]).toMatchObject({
+      v: 1,
+      phase: "start",
+      beforeTurnIndex: 0,
+      passIndex: 0,
+      scope: "history",
+    });
+    expect(markers[1]).toMatchObject({
+      v: 1,
+      phase: "result",
+      eventId: markers[0]?.eventId,
+      beforeTurnIndex: 0,
+      passIndex: 0,
+      scope: "history",
+      ok: true,
+      outcome: "summary",
+    });
+    expect(markers[1]?.summary).toBe(result.checkpoints[0]?.summary);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      id: markers[0]?.eventId,
+      status: "complete",
+      outcome: "summary",
+      checkpointId: result.checkpoints[0]?.id,
+    });
+    // Ahead of the answer's first token, which is the whole point.
+    expect(result.chunks[0]?.kind).toBe("compaction");
+    expect(result.chunks.at(-1)?.kind).toBe("text");
+  }, 60_000);
+
+  it("summarizes a complete tool round before the continuation call", async () => {
+    const rawSentinel = `RAW_PAGE_BODY_SENTINEL_${"r".repeat(20_000)}`;
+    gateway.toolRoundResult = rawSentinel;
+    gateway.summary = "ACTIVE ROUND SUMMARY";
+
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const turn = yield* repo.createTurn({
+          userId,
+          conversationId: null,
+          modelId: smallModelId,
+          content: "Find the current source.",
+          attachmentIds: [],
+        });
+        yield* generate({
+          userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          modelId: smallModelId,
+          searchEnabled: true,
+        });
+
+        return {
+          message: yield* repo.getMessage(turn.assistant.id),
+          chunks: yield* repo.chunksAfter(turn.assistant.id, 0),
+          events: yield* repo.listCompactionEvents([turn.assistant.id]),
+          toolCalls: yield* repo.listToolCalls([turn.assistant.id]),
+        };
+      }),
+    );
+
+    expect(gateway.streamPrompts).toHaveLength(2);
+    expect(gateway.summaryPrompts).toHaveLength(1);
+    expect(gateway.summaryPrompts[0]).toContain("RAW_PAGE_BODY_SENTINEL_");
+    expect(gateway.summaryPrompts[0]).toContain(TOOL_SOURCE_URL);
+
+    const continuation = gateway.streamPrompts[1]!;
+    expect(continuation).toContain("ACTIVE ROUND SUMMARY");
+    expect(continuation).not.toContain("RAW_PAGE_BODY_SENTINEL_");
+    // Source authority and citation numbering come from application state, not
+    // from the generated summary that replaced the raw tool transcript.
+    expect(continuation).toContain(TOOL_SOURCE_URL);
+    expect(continuation).toContain("[^1]");
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      beforeTurnIndex: 1,
+      passIndex: 0,
+      scope: "active_rounds",
+      status: "complete",
+      outcome: "summary",
+      summary: "ACTIVE ROUND SUMMARY",
+      checkpointId: null,
+    });
+    expect(result.toolCalls).toHaveLength(1);
+    expect(JSON.stringify(result.toolCalls[0]?.result)).not.toContain("RAW_PAGE_BODY_SENTINEL_");
+    expect(result.message).toMatchObject({ status: "complete", content: "answered" });
+
+    const activity = result.chunks.filter(
+      (chunk) => chunk.kind === "tool" || chunk.kind === "compaction",
+    );
+    expect(activity.map((chunk) => chunk.kind)).toEqual([
+      "tool",
+      "tool",
+      "compaction",
+      "compaction",
+    ]);
+    expect(
+      activity
+        .filter((chunk) => chunk.kind === "tool")
+        .map((chunk) => JSON.parse(chunk.delta).phase),
+    ).toEqual(["start", "result"]);
+    expect(JSON.stringify(result.chunks)).not.toContain("RAW_PAGE_BODY_SENTINEL_");
+  }, 60_000);
+
+  it("recovers an untouched later-round overflow without rerunning the tool", async () => {
+    gateway.toolRoundResult = "LATER_OVERFLOW_RAW_RESULT";
+    gateway.summary = "LATER OVERFLOW SUMMARY";
+    gateway.reportedInputTokens = 100;
+    gateway.overflowOnCalls = [2];
+
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const turn = yield* repo.createTurn({
+          userId,
+          conversationId: null,
+          modelId: smallModelId,
+          content: "Find the current source.",
+          attachmentIds: [],
+        });
+        yield* generate({
+          userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          modelId: smallModelId,
+          searchEnabled: true,
+        });
+        return {
+          message: yield* repo.getMessage(turn.assistant.id),
+          chunks: yield* repo.chunksAfter(turn.assistant.id, 0),
+          events: yield* repo.listCompactionEvents([turn.assistant.id]),
+        };
+      }),
+    );
+
+    expect(gateway.streamPrompts).toHaveLength(3);
+    expect(gateway.streamPrompts[1]).toContain("LATER_OVERFLOW_RAW_RESULT");
+    expect(gateway.streamPrompts[2]).toContain("LATER OVERFLOW SUMMARY");
+    expect(gateway.streamPrompts[2]).not.toContain("LATER_OVERFLOW_RAW_RESULT");
+    expect(gateway.summaryPrompts).toHaveLength(1);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      beforeTurnIndex: 1,
+      scope: "active_rounds",
+      status: "complete",
+      outcome: "summary",
+    });
+    expect(
+      result.chunks
+        .filter((chunk) => chunk.kind === "tool")
+        .map((chunk) => JSON.parse(chunk.delta).phase),
+    ).toEqual(["start", "result"]);
+    expect(result.message).toMatchObject({ status: "complete", content: "answered" });
+  }, 60_000);
+
+  it("does not retry a later-round overflow after output has started", async () => {
+    gateway.toolRoundResult = "PARTIAL_OVERFLOW_RAW_RESULT";
+    gateway.reportedInputTokens = 100;
+    gateway.partialOverflowOnCalls = [2];
+
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const turn = yield* repo.createTurn({
+          userId,
+          conversationId: null,
+          modelId: smallModelId,
+          content: "Find the current source.",
+          attachmentIds: [],
+        });
+        yield* generate({
+          userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          modelId: smallModelId,
+          searchEnabled: true,
+        });
+        return {
+          message: yield* repo.getMessage(turn.assistant.id),
+          chunks: yield* repo.chunksAfter(turn.assistant.id, 0),
+          events: yield* repo.listCompactionEvents([turn.assistant.id]),
+        };
+      }),
+    );
+
+    expect(gateway.streamPrompts).toHaveLength(2);
+    expect(gateway.summaryPrompts).toHaveLength(0);
+    expect(result.events).toHaveLength(0);
+    expect(
+      result.chunks
+        .filter((chunk) => chunk.kind === "tool")
+        .map((chunk) => JSON.parse(chunk.delta).phase),
+    ).toEqual(["start", "result"]);
+    expect(result.message).toMatchObject({ status: "error", content: "partial" });
+  }, 60_000);
+
+  it("persists the calibration pair so the next estimate can be corrected", async () => {
+    const usage = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        return (yield* repo.getMessage(messageId))?.usage;
+      }),
+    );
+    // What the provider counted for the first call, beside what we predicted
+    // for that same prompt — either alone calibrates nothing.
+    expect(usage?.firstInputTokens).toBe(9_999);
+    expect(usage?.estimatedFirstInputTokens).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("retries a refused prompt once, with fewer turns", async () => {
+    gateway.overflowsLeft = 1;
+    const message = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        return yield* repo.getMessage(messageId);
+      }),
+    );
+
+    expect(gateway.streamPrompts).toHaveLength(2);
+    // The retry is strictly smaller — resending the rejected prompt would
+    // just be refused again.
+    expect(gateway.streamPrompts[1]!.length).toBeLessThan(gateway.streamPrompts[0]!.length);
+    // The newest question survives the shrink; it is the one being answered.
+    expect(gateway.streamPrompts[1]!).toContain("question latest");
+    expect(message?.status).toBe("complete");
+    expect(message?.content).toBe("answered");
+  }, 60_000);
+
+  it("gives up after the second refusal instead of shrinking forever", async () => {
+    gateway.overflowsLeft = 2;
+    const message = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        return yield* repo.getMessage(messageId);
+      }),
+    );
+    expect(gateway.streamPrompts).toHaveLength(2);
+    expect(message?.status).toBe("error");
+  }, 60_000);
+
+  it("still answers when the model cannot write a summary", async () => {
+    gateway.summaryFails = true;
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 8);
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        return {
+          message: yield* repo.getMessage(messageId),
+          checkpoints: yield* checkpointsOf(conversationId),
+          ledger: yield* db
+            .select({ kind: usageEvents.kind, status: usageEvents.status })
+            .from(usageEvents)
+            .where(eq(usageEvents.conversationId, conversationId)),
+        };
+      }),
+    );
+
+    // Truncated rather than summarized, but the user still gets an answer.
+    expect(result.checkpoints).toHaveLength(0);
+    expect(result.message?.status).toBe("complete");
+    expect(result.message?.content).toBe("answered");
+    expect(gateway.streamPrompts[0]!).toContain("question latest");
+    expect(result.ledger).toContainEqual({ kind: "compaction", status: "error" });
+    expect(result.ledger).toContainEqual({ kind: "chat", status: "complete" });
+  }, 60_000);
+});

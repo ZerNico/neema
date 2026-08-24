@@ -2,10 +2,11 @@ import { doublePrecision, index, integer, pgTable, text, timestamp } from "drizz
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
-// Append-only usage ledger: one row per generation attempt (chat answer or
-// title), written at finalize time and never updated. Retry adds a new row,
-// branching copies nothing, deleting a conversation leaves it intact — which
-// is exactly why analytics reads this and not `messages.usage`.
+// Append-only usage ledger: one row per generation attempt (chat answer,
+// title, or context compaction), written at finalize time and never updated.
+// Retry adds a new row, branching copies nothing, deleting a conversation
+// leaves it intact — which is exactly why analytics reads this and not
+// `messages.usage`.
 
 export const usageEvents = pgTable(
   "usage_events",
@@ -14,7 +15,7 @@ export const usageEvents = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    kind: text({ enum: ["chat", "title"] }).notNull(),
+    kind: text({ enum: ["chat", "title", "compaction"] }).notNull(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     // displayName snapshot so a deleted model still labels its history
     modelName: text("model_name").notNull(),
