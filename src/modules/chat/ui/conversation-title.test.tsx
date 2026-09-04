@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConversationTitle,
@@ -10,6 +10,7 @@ const TITLE = "Postgres vs SQLite";
 
 // Hand-driven rAF: the reveal is time-based, so the test has to own the clock.
 let frames: Array<FrameRequestCallback> = [];
+let resizeObservers: Array<() => void> = [];
 let now = 0;
 
 const advance = (ms: number) => {
@@ -18,6 +19,12 @@ const advance = (ms: number) => {
   frames = [];
   act(() => {
     for (const frame of due) frame(now);
+  });
+};
+
+const resize = () => {
+  act(() => {
+    for (const notify of resizeObservers) notify();
   });
 };
 
@@ -30,29 +37,55 @@ const reducedMotion = (matches: boolean) => {
 
 beforeEach(() => {
   frames = [];
+  resizeObservers = [];
   now = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     frames.push(callback);
     return frames.length;
   });
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal(
+    "ResizeObserver",
+    class ResizeObserverMock implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObservers.push(() => callback([], this));
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 const renderTitle = (
   title: string | null,
   registry: TitleRevealRegistry = createTitleRevealRegistry(),
+  createdAt?: Date | string | number,
 ) => {
+  const props = createdAt === undefined ? {} : { createdAt };
   const view = render(
-    <ConversationTitle conversationId="conv-1" title={title} registry={registry} />,
+    <ConversationTitle conversationId="conv-1" title={title} registry={registry} {...props} />,
   );
   const rerender = (next: string | null) =>
-    view.rerender(<ConversationTitle conversationId="conv-1" title={next} registry={registry} />);
+    view.rerender(
+      <ConversationTitle conversationId="conv-1" title={next} registry={registry} {...props} />,
+    );
   return { ...view, rerender, registry };
 };
 
-const node = () => document.querySelector("[data-title-state]")!;
+const node = () => document.querySelector<HTMLElement>("[data-title-state]")!;
+const textNode = () => document.querySelector<HTMLElement>("[data-title-text]")!;
+
+const makeOverflow = (viewportWidth = 100, textWidth = 220) => {
+  Object.defineProperty(node(), "clientWidth", { configurable: true, value: viewportWidth });
+  Object.defineProperty(textNode(), "scrollWidth", { configurable: true, value: textWidth });
+  resize();
+};
 
 describe("ConversationTitle", () => {
   it("shows a labelled placeholder while the title is being generated", () => {
@@ -66,6 +99,54 @@ describe("ConversationTitle", () => {
     expect(node()).toHaveAttribute("data-title-state", "ready");
     expect(node()).toHaveTextContent(TITLE);
     expect(frames).toHaveLength(0);
+  });
+
+  it("fades and scrolls only the overflowing sidebar title", () => {
+    renderTitle(TITLE, createTitleRevealRegistry(), "2026-08-22T12:00:00Z");
+
+    expect(node()).not.toHaveClass("truncate");
+    expect(node()).not.toHaveAttribute("data-title-overflowing");
+
+    makeOverflow();
+    expect(node()).toHaveAttribute("data-title-overflowing", "true");
+    expect(node().style.maskImage).toContain("calc(100% - 1rem)");
+
+    fireEvent.pointerEnter(node());
+    expect(node()).toHaveAttribute("data-title-scrolling", "true");
+    expect(textNode().style.transform).toBe("translateX(-132px)");
+    expect(textNode().style.transitionDuration).toBe("4125ms");
+
+    fireEvent.pointerLeave(node());
+    expect(node()).not.toHaveAttribute("data-title-scrolling");
+    expect(textNode().style.transform).toBe("translateX(0)");
+    expect(textNode().style.transitionDuration).toBe("180ms");
+  });
+
+  it("does not move an overflowing title when reduced motion is preferred", () => {
+    reducedMotion(true);
+    renderTitle(TITLE, createTitleRevealRegistry(), "2026-08-22T12:00:00Z");
+    makeOverflow();
+
+    fireEvent.pointerEnter(node());
+    expect(node()).not.toHaveAttribute("data-title-scrolling");
+    expect(textNode().style.transform).toBe("translateX(0)");
+  });
+
+  it("shows every sidebar title and its creation age in an arrowless preview", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T14:00:00Z"));
+    renderTitle(TITLE, createTitleRevealRegistry(), "2026-08-22T12:00:00Z");
+
+    expect(node()).not.toHaveAttribute("data-title-overflowing");
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+    fireEvent.focus(node());
+
+    const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-content"]')!;
+    expect(tooltip).toBeInTheDocument();
+    expect(tooltip.parentElement).toHaveAttribute("data-side", "right");
+    expect(within(tooltip).getByText(TITLE)).toBeInTheDocument();
+    expect(within(tooltip).getByText("Created 2 hours ago")).toBeInTheDocument();
+    expect(tooltip.querySelector('[data-slot="tooltip-arrow"]')).toBeNull();
   });
 
   it("types the title in when generation resolves", () => {

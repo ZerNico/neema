@@ -5,6 +5,7 @@ import {
   buildMessageStamps,
   clockLabel,
   dayLabel,
+  relativeAgeLabel,
 } from "./timestamps.ts";
 
 // en-GB keeps the labels 24-hour and day-first, which pins the assertions
@@ -119,6 +120,22 @@ describe("buildMessageStamps", () => {
     );
     expect(stamps.has("a")).toBe(false);
     expect(stamps.get("b")?.dayLabel).toBe("Today");
+  });
+});
+
+describe("relativeAgeLabel", () => {
+  it("uses compact relative units across age ranges", () => {
+    expect(relativeAgeLabel(at("2026-08-22T13:59:30"), NOW, LOCALE)).toBe("just now");
+    expect(relativeAgeLabel(at("2026-08-22T13:48:00"), NOW, LOCALE)).toBe("12 minutes ago");
+    expect(relativeAgeLabel(at("2026-08-22T11:00:00"), NOW, LOCALE)).toBe("3 hours ago");
+    expect(relativeAgeLabel(at("2026-08-21T14:00:00"), NOW, LOCALE)).toBe("yesterday");
+    expect(relativeAgeLabel(at("2026-06-22T14:00:00"), NOW, LOCALE)).toBe("2 months ago");
+    expect(relativeAgeLabel(at("2024-08-22T14:00:00"), NOW, LOCALE)).toBe("2 years ago");
+  });
+
+  it("handles clock skew and unreadable values", () => {
+    expect(relativeAgeLabel(at("2026-08-22T16:00:00"), NOW, LOCALE)).toBe("in 2 hours");
+    expect(relativeAgeLabel("not a date", NOW, LOCALE)).toBe("");
   });
 });
 

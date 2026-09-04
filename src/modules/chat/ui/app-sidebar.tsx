@@ -19,7 +19,6 @@ import { ConversationMenu, useConversationActions } from "./conversation-actions
 import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
-import { describeActivity } from "./timestamps.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { buttonVariants } from "~/ui/primitives/button";
 import {
@@ -207,11 +206,11 @@ function ConversationList() {
                 <SidebarMenuItem key={conversation.id}>
                   <SidebarMenuButton
                     isActive={conversation.id === activeId}
+                    className="[&>span:last-child]:!text-clip"
                     render={
                       <Link
                         to="/chat/$conversationId"
                         params={{ conversationId: conversation.id }}
-                        {...(hydrated ? { title: describeActivity(conversation) } : {})}
                       />
                     }
                   >
@@ -231,6 +230,7 @@ function ConversationList() {
                       conversationId={conversation.id}
                       title={conversation.title}
                       registry={revealRegistry}
+                      {...(hydrated ? { createdAt: conversation.createdAt } : {})}
                     />
                   </SidebarMenuButton>
                   <ConversationMenu

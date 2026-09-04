@@ -10,6 +10,7 @@ interface Formatters {
   readonly dayMonth: Intl.DateTimeFormat;
   readonly dayMonthYear: Intl.DateTimeFormat;
   readonly full: Intl.DateTimeFormat;
+  readonly relative: Intl.RelativeTimeFormat;
 }
 
 // Constructing an Intl.DateTimeFormat is the expensive part; a chat can hold
@@ -30,6 +31,7 @@ const formatters = (locale?: string): Formatters => {
       year: "numeric",
     }),
     full: new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short" }),
+    relative: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }),
   };
   cache.set(locale ?? "", made);
   return made;
@@ -130,6 +132,33 @@ const optionalDate = (value: Date | string | number | null | undefined): Date | 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 };
+
+/** Compact relative age for sidebar previews, e.g. "12 minutes ago". */
+export function relativeAgeLabel(
+  value: Date | string | number,
+  now: Date = new Date(),
+  locale?: string,
+): string {
+  const date = optionalDate(value);
+  if (!date) return "";
+
+  const seconds = (date.getTime() - now.getTime()) / 1_000;
+  const absoluteSeconds = Math.abs(seconds);
+  if (absoluteSeconds < 60) return "just now";
+
+  const [amount, unit]: [number, Intl.RelativeTimeFormatUnit] =
+    absoluteSeconds < 3_600
+      ? [seconds / 60, "minute"]
+      : absoluteSeconds < DAY_MS / 1_000
+        ? [seconds / 3_600, "hour"]
+        : absoluteSeconds < 30 * (DAY_MS / 1_000)
+          ? [seconds / (DAY_MS / 1_000), "day"]
+          : absoluteSeconds < 365 * (DAY_MS / 1_000)
+            ? [seconds / (30 * (DAY_MS / 1_000)), "month"]
+            : [seconds / (365 * (DAY_MS / 1_000)), "year"];
+
+  return normalize(formatters(locale).relative.format(Math.round(amount), unit));
+}
 
 /** Sidebar row tooltip: when the chat was last active, in full. */
 export function describeActivity(conversation: DatedConversation, locale?: string): string {
