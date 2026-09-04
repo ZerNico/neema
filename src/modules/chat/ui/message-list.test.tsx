@@ -637,6 +637,87 @@ describe("MessageBubble actions", () => {
     expect(await screen.findByText(/append-only/)).toBeInTheDocument();
   });
 
+  it("keeps a completed search collapsed when a later turn starts reading", () => {
+    renderPlain({
+      status: "streaming",
+      content: "",
+      toolActivities: [
+        {
+          callId: "search-1",
+          name: "web_search",
+          turnIndex: 0,
+          callIndex: 0,
+          targets: ["effect"],
+          status: "complete",
+          resultCount: 1,
+          sources: [
+            {
+              index: 1,
+              url: "https://effect.website/search-result",
+              title: "Search-only result",
+              snippet: "Search snippet",
+              read: false,
+            },
+          ],
+        },
+        {
+          callId: "read-1",
+          name: "read_url",
+          turnIndex: 1,
+          callIndex: 0,
+          targets: ["https://effect.website/search-result"],
+          status: "running",
+          pages: [
+            {
+              url: "https://effect.website/search-result",
+              title: "Reading this page",
+              status: "reading",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: /Searched the web/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: /Reading pages/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.queryByText("Search-only result")).not.toBeInTheDocument();
+    expect(screen.getByText("Reading this page")).toBeInTheDocument();
+  });
+
+  it("keeps parallel calls from the same model turn in one block", () => {
+    renderPlain({
+      status: "streaming",
+      content: "",
+      toolActivities: [
+        {
+          callId: "search-1",
+          name: "web_search",
+          turnIndex: 0,
+          callIndex: 0,
+          targets: ["effect"],
+          status: "complete",
+        },
+        {
+          callId: "read-1",
+          name: "read_url",
+          turnIndex: 0,
+          callIndex: 1,
+          targets: ["https://effect.website"],
+          status: "running",
+        },
+      ],
+    });
+
+    expect(screen.getAllByRole("button", { name: /Searching the web/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Searched the web/ })).toBeNull();
+  });
+
   it("orders tool, compaction, then later tool by model turn", () => {
     renderPlain({
       toolActivities: [

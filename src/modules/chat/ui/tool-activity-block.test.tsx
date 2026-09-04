@@ -94,4 +94,42 @@ describe("ToolActivityBlock", () => {
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
     await waitFor(() => expect(screen.queryByText("Effect blog")).not.toBeInTheDocument());
   });
+
+  it("hides completed sibling rows while another call in the turn is running", () => {
+    const searchOnly = {
+      ...completeSearch,
+      sources: [
+        {
+          index: 2,
+          url: "https://example.com/search-only",
+          title: "Search-only result",
+          snippet: "Only the search returned this row",
+          read: false,
+        },
+      ],
+    };
+
+    render(<ToolActivityBlock activities={[searchOnly, runningRead]} />);
+
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText("Search-only result")).not.toBeInTheDocument();
+    expect(screen.getByText("Drizzle docs")).toBeInTheDocument();
+  });
+
+  it("scopes manual disclosure choices to the running or completed phase", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ToolActivityBlock activities={[runningRead]} />);
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<ToolActivityBlock activities={[completeRead]} />);
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+
+    rerender(<ToolActivityBlock activities={[runningRead]} />);
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+  });
 });

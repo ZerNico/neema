@@ -15,7 +15,7 @@ export interface CitableSource {
 export const webToolsSystemHint = (tools: { search: boolean; reader: boolean }): string =>
   [
     tools.search
-      ? "Use web_search to look up current information. It returns snippets only, not page content. Search with several focused queries in one call when useful, then use read_url to open the most relevant results before answering."
+      ? "Use web_search to look up current information. It returns snippets only, not page content. Start with one focused query. Use several queries in one call only when the request is broad, ambiguous, comparative, or genuinely multi-part, then use read_url to open the most relevant results before answering."
       : "",
     tools.reader
       ? "Use read_url to open one or more HTTP(S) URLs in a single call. It accepts URLs from user messages and web_search results in this conversation. Never invent a URL."

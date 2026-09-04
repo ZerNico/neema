@@ -77,7 +77,13 @@ const quotedTargets = (targets: ReadonlyArray<string>): string => {
   return targets.length > 2 ? `${joined}, +${targets.length - 2} more` : joined;
 };
 
-function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpen: boolean }) {
+function ActivityEntry({
+  activity,
+  showDetails,
+}: {
+  activity: ToolActivity;
+  showDetails: boolean;
+}) {
   const running = activity.status === "running";
   const reader = activity.name === "read_url";
   const pages = activity.pages ?? [];
@@ -113,7 +119,7 @@ function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpe
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5">{headline}</div>
-      {autoOpen && (pages.length > 0 || sources.length > 0) ? (
+      {showDetails && (pages.length > 0 || sources.length > 0) ? (
         <ul className="flex flex-col gap-1 pl-0.5">
           {reader
             ? pages.map((page) => <PageRow key={page.url} page={page} active={running} />)
@@ -129,14 +135,12 @@ function ActivityEntry({ activity, autoOpen }: { activity: ToolActivity; autoOpe
 // afterwards a collapsed summary that expands to the source list.
 export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }) {
   const anyRunning = activities.some((activity) => activity.status === "running");
-  const [expanded, setExpanded] = useState(anyRunning);
-  // Auto-expand while a call runs, auto-collapse when the last one finishes
-  // (derived during render — no effect needed).
-  const [wasRunning, setWasRunning] = useState(anyRunning);
-  if (wasRunning !== anyRunning) {
-    setWasRunning(anyRunning);
-    setExpanded(anyRunning);
-  }
+  // Open automatically while this turn runs and close when it finishes. A
+  // manual choice applies only to the phase in which it was made, matching the
+  // reasoning disclosure without render-time state updates.
+  const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);
+  const expanded =
+    override !== null && override.during === anyRunning ? override.value : anyRunning;
 
   if (activities.length === 0) return null;
 
@@ -173,7 +177,11 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
         : `Searched and read${suffix}`;
 
   return (
-    <Collapsible open={expanded} onOpenChange={setExpanded} className="mb-2">
+    <Collapsible
+      open={expanded}
+      onOpenChange={(next) => setOverride({ during: anyRunning, value: next })}
+      className="mb-2"
+    >
       <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors">
         <HugeiconsIcon
           icon={GlobalSearchIcon}
@@ -191,7 +199,11 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
       <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
         <div className="border-border text-muted-foreground mt-2 flex flex-col gap-3 border-l-2 pl-3 text-sm">
           {activities.map((activity) => (
-            <ActivityEntry key={activity.callId} activity={activity} autoOpen />
+            <ActivityEntry
+              key={activity.callId}
+              activity={activity}
+              showDetails={expanded && (!anyRunning || activity.status === "running")}
+            />
           ))}
         </div>
       </CollapsibleContent>

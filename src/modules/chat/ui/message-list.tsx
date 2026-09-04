@@ -339,23 +339,11 @@ function AssistantActivityTimeline({
     ...orderedCompactions.map((activity) => activity.beforeTurnIndex),
   );
   const nodes: React.ReactNode[] = [];
-  let toolGroup: ToolActivity[] = [];
-  const flushTools = () => {
-    if (toolGroup.length === 0) return;
-    nodes.push(
-      <ToolActivityBlock
-        key={`tools-${toolGroup.map((activity) => activity.callId).join("-")}`}
-        activities={toolGroup}
-      />,
-    );
-    toolGroup = [];
-  };
 
   for (let turn = 0; turn <= maxTurn; turn++) {
     for (const activity of orderedCompactions.filter(
       (candidate) => candidate.beforeTurnIndex === turn,
     )) {
-      flushTools();
       nodes.push(
         <CompactionBlock
           key={activity.eventId}
@@ -366,9 +354,13 @@ function AssistantActivityTimeline({
         />,
       );
     }
-    toolGroup.push(...orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn));
+
+    const turnTools = orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn);
+    if (turnTools.length > 0) {
+      nodes.push(<ToolActivityBlock key={`tools-${turn}`} activities={turnTools} />);
+    }
   }
-  flushTools();
+
   return nodes;
 }
 

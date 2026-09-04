@@ -32,10 +32,12 @@ describe("webToolsSystemHint", () => {
     expect(hint).not.toContain("Use web_search to look up");
   });
 
-  it("explains the snippet-search then batch-read flow", () => {
+  it("defaults to one focused query and reserves multi-query search for broad requests", () => {
     const hint = webToolsSystemHint({ search: true, reader: true });
     expect(hint).toContain("returns snippets only, not page content");
-    expect(hint).toContain("several focused queries in one call");
+    expect(hint).toContain("Start with one focused query");
+    expect(hint).toContain("Use several queries in one call only when");
+    expect(hint).toContain("broad, ambiguous, comparative, or genuinely multi-part");
     expect(hint).toContain("use read_url to open the most relevant results");
   });
 });
