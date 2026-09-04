@@ -13,6 +13,10 @@ See README.md for architecture; this file records the sharp edges.
 - `vitest` must be v4 (peer of `@effect/vitest` rc).
 - `@tanstack/charts` is pre-alpha — pinned exact (no caret); its API may change
   between releases, so re-probe the analytics charts on any bump.
+- `rolldown` is overridden to `1.2.1`: 1.2.2–1.2.5 can emit an undeclared
+  `ssr_exports` from Nitro's split SSR bundle ([#10734](https://github.com/rolldown/rolldown/issues/10734)).
+  Keep the override until [#10743](https://github.com/rolldown/rolldown/pull/10743) ships in a
+  release that passes the production module check and built-server smoke test.
 
 ## Effect 4 API notes (differs from most Effect 3 docs online)
 
