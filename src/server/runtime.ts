@@ -8,6 +8,8 @@ import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
+import { MemoryRepo } from "~/modules/memory/server/repo.ts";
+import { MemoryService } from "~/modules/memory/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -31,6 +33,7 @@ const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).p
 const ReposLayer = Layer.mergeAll(
   AnalyticsRepo.layer,
   ChatRepo.layer,
+  MemoryRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,
   GroupRepo.layer,
@@ -45,8 +48,9 @@ const CoreLayer = Layer.mergeAll(
   AttachmentService.layer,
   DocumentParser.layer,
 ).pipe(Layer.provideMerge(ReposLayer));
+const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(CoreLayer));
 const AppLayer = ChatService.layer.pipe(
-  Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(CoreLayer))),
+  Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(CoreWithMemoryLayer))),
 );
 
 const memoMap = Layer.makeMemoMapUnsafe();

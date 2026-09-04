@@ -19,6 +19,7 @@ export function useSync() {
       if (opened) {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+        void queryClient.invalidateQueries({ queryKey: ["memory"] });
       }
       opened = true;
     });
@@ -36,6 +37,9 @@ export function useSync() {
             // another's. Only active queries refetch, and these events fire
             // per rename/title/delete — not per token.
             void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+            // Saved memories embed source titles and whether the source still
+            // exists, so rename/delete events must refresh their provenance.
+            void queryClient.invalidateQueries({ queryKey: ["memory"] });
           }
           break;
         case "message.created":
@@ -44,6 +48,13 @@ export function useSync() {
             queryKey: ["conversation", event.conversationId],
           });
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          // Edits are announced as message events; provenance derives whether
+          // the saved source content still matches the current message.
+          void queryClient.invalidateQueries({ queryKey: ["memory"] });
+          break;
+        case "memory.changed":
+        case "memory.policy.changed":
+          void queryClient.invalidateQueries({ queryKey: ["memory"] });
           break;
       }
     });

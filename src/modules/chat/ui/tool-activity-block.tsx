@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import type { ToolActivity, ToolPageStatus, ToolSource } from "../client/use-message-stream.ts";
+import type { ToolPageStatus, ToolSource, WebToolActivity } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import { cn } from "~/ui/utils";
@@ -81,7 +81,7 @@ function ActivityEntry({
   activity,
   showDetails,
 }: {
-  activity: ToolActivity;
+  activity: WebToolActivity;
   showDetails: boolean;
 }) {
   const running = activity.status === "running";
@@ -133,7 +133,7 @@ function ActivityEntry({
 // ChatGPT-style tool activity above an assistant answer: while running, a
 // live pane with per-source favicon rows streaming their fetch status;
 // afterwards a collapsed summary that expands to the source list.
-export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }) {
+export function ToolActivityBlock({ activities }: { activities: WebToolActivity[] }) {
   const anyRunning = activities.some((activity) => activity.status === "running");
   // Open automatically while this turn runs and close when it finishes. A
   // manual choice applies only to the phase in which it was made, matching the

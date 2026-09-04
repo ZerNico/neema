@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { isNotFound, notFound } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "./_app.chat.$conversationId.tsx";
@@ -88,6 +89,20 @@ describe("chat route loader", () => {
 
     expect(conversationMock).toHaveBeenCalledTimes(1);
     expect(modelsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a missing server conversation as route not-found", async () => {
+    conversationMock.mockRejectedValue(notFound());
+    modelsMock.mockResolvedValue([] as never);
+
+    await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
+  });
+
+  it("rejects malformed missing-conversation data before rendering the view", async () => {
+    conversationMock.mockResolvedValue({ conversation: undefined, messages: [] } as never);
+    modelsMock.mockResolvedValue([] as never);
+
+    await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
   });
 });
 

@@ -7,6 +7,7 @@ import { ToolsPage } from "./tools-page.tsx";
 import {
   testSearchConnection,
   updateDocumentParserTool,
+  updateMemoryTool,
   updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
@@ -14,10 +15,12 @@ import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { toast } from "sonner";
 
 vi.mock("../server/functions.ts", () => ({
+  getMemoryTool: vi.fn(),
   getWebSearchTool: vi.fn(),
   getUrlReaderTool: vi.fn(),
   getDocumentParserTool: vi.fn(),
   testSearchConnection: vi.fn(),
+  updateMemoryTool: vi.fn(),
   updateWebSearchTool: vi.fn(),
   updateUrlReaderTool: vi.fn(),
   updateDocumentParserTool: vi.fn(),
@@ -61,6 +64,7 @@ const renderPage = ({
   webSearch = tool("web_search", { backend: "searxng", baseUrl: "http://searx", maxResults: 8 }),
 }: { webSearch?: ReturnType<typeof tool> | null } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["admin", "tools", "memory"], tool("memory", {}));
   client.setQueryData(["admin", "tools", "web-search"], webSearch);
   client.setQueryData(
     ["admin", "tools", "url-reader"],
@@ -88,6 +92,18 @@ beforeEach(() => {
 });
 
 describe("ToolsPage", () => {
+  it("updates the single instance-wide memory switch", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateMemoryTool).mockResolvedValue(undefined as never);
+    renderPage();
+
+    await user.click(screen.getByRole("switch", { name: "Memory enabled" }));
+
+    await waitFor(() =>
+      expect(updateMemoryTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+    );
+  });
+
   it("submits the web search form on Enter and keeps the label while pending", async () => {
     const user = userEvent.setup();
     const pending = deferred<unknown>();

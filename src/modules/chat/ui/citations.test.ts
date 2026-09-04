@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectSources, prepareCitedMarkdown } from "./citations.ts";
-import type { ToolSource } from "../client/use-message-stream.ts";
+import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 
 const source = (index: number, url: string): ToolSource => ({
   index,
@@ -8,6 +8,15 @@ const source = (index: number, url: string): ToolSource => ({
   title: `Title ${index}`,
   snippet: "",
   read: true,
+});
+
+const webActivity = (callId: string, sources?: ToolSource[]): ToolActivity => ({
+  family: "web",
+  callId,
+  name: "web_search",
+  targets: [],
+  status: "complete",
+  ...(sources ? { sources } : {}),
 });
 
 describe("prepareCitedMarkdown", () => {
@@ -48,12 +57,27 @@ describe("prepareCitedMarkdown", () => {
 });
 
 describe("collectSources", () => {
-  it("merges activities, dedupes by index and sorts", () => {
+  it("merges web activities, dedupes by index and sorts", () => {
     const merged = collectSources([
-      { sources: [source(2, "https://b.dev"), source(1, "https://a.dev")] },
-      { sources: [source(2, "https://b.dev"), source(3, "https://c.dev")] },
-      {},
+      webActivity("one", [source(2, "https://b.dev"), source(1, "https://a.dev")]),
+      webActivity("two", [source(2, "https://b.dev"), source(3, "https://c.dev")]),
+      webActivity("three"),
     ]);
     expect(merged.map((s) => s.index)).toEqual([1, 2, 3]);
+  });
+
+  it("ignores memory activities even if malformed input carries sources", () => {
+    const malformedMemory = {
+      family: "memory",
+      callId: "memory-1",
+      name: "save_memory",
+      status: "complete",
+      outcome: "created",
+      sources: [source(9, "https://should-never-appear.dev")],
+    } as ToolActivity;
+
+    expect(
+      collectSources([malformedMemory, webActivity("web", [source(1, "https://a.dev")])]),
+    ).toEqual([source(1, "https://a.dev")]);
   });
 });

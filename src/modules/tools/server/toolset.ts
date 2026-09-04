@@ -1,9 +1,21 @@
 import { Effect } from "effect";
-import { Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/unstable/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
 import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";
 import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
+
+// Tool families build their definitions and handlers independently, then the
+// stream engine combines whichever groups apply to one generation.
+export interface ToolGroup {
+  readonly toolkit: Toolkit.Any;
+  readonly handlers: Record<string, unknown>;
+}
+
+export interface PreparedWebTools {
+  tools: { search: boolean; reader: boolean };
+  group: ToolGroup;
+}
 
 export interface PreparedWebToolkit {
   tools: { search: boolean; reader: boolean };
@@ -12,26 +24,41 @@ export interface PreparedWebToolkit {
   toolkit: Toolkit.WithHandler<any>;
 }
 
-// The web toolkit for one generation: whichever tools apply, wired to one
-// shared citation indexer. `undefined` when none do — the stream engine then
-// runs without tools at all.
+type DynamicToolkit = Toolkit.Toolkit<Record<string, Tool.Any>>;
+
+const unavailable = () => Effect.succeed(null);
+
+// The Effect toolkit API is statically typed around a fixed tuple of tools,
+// while this boundary deliberately combines runtime-optional groups. Keep the
+// cast here rather than spreading `any` through every executor and caller.
+export const mergeToolGroups = Effect.fn("tools.mergeToolGroups")(function* (
+  groups: ReadonlyArray<ToolGroup>,
+) {
+  if (groups.length === 0) return undefined;
+
+  const toolkit = Toolkit.merge(...groups.map((group) => group.toolkit)) as DynamicToolkit;
+  const handlers = Object.assign({}, ...groups.map((group) => group.handlers));
+  return yield* toolkit.pipe(Effect.provide(toolkit.toLayer(handlers as never)));
+});
+
+// The web tools for one generation: whichever tools apply, wired to one shared
+// citation indexer. `undefined` when neither applies.
 //
 // Search follows the user's per-message preference. The reader rides with an
 // armed search so the model can open its hits, and is also offered independently
 // when user text or prior tool results seeded URL authority.
-export const prepareWebToolkit: (input: {
+export const prepareWebTools: (input: {
   webSearch: WebSearchExecutor["Service"];
   urlReader: UrlReaderExecutor["Service"];
   indexer: SourceIndexer;
   authority: UrlAuthority;
   /** The composer's web toggle: search is offered only when the user asked. */
   requestSearch: boolean;
-}) => Effect.Effect<PreparedWebToolkit | undefined> = Effect.fn("tools.prepareWebToolkit")(
+}) => Effect.Effect<PreparedWebTools | undefined> = Effect.fn("tools.prepareWebTools")(
   function* (input) {
     // An unavailable tool is skipped, not fatal: validation only guarantees the
     // tools the user explicitly asked for, and an admin flipping one off
     // mid-conversation should degrade the toolkit, not kill the generation.
-    const unavailable = () => Effect.succeed(null);
     const search = input.requestSearch
       ? yield* input.webSearch
           .handler(input.indexer, input.authority)
@@ -46,28 +73,45 @@ export const prepareWebToolkit: (input: {
 
     const tools = { search: search !== null, reader: reader !== null };
     if (search && reader) {
-      const toolkit = Toolkit.make(webSearchTool, urlReaderTool);
       return {
         tools,
-        toolkit: yield* toolkit.pipe(
-          Effect.provide(toolkit.toLayer({ web_search: search, read_url: reader })),
-        ),
+        group: {
+          toolkit: Toolkit.make(webSearchTool, urlReaderTool),
+          handlers: { web_search: search, read_url: reader },
+        },
       };
     }
     if (search) {
-      const toolkit = Toolkit.make(webSearchTool);
       return {
         tools,
-        toolkit: yield* toolkit.pipe(Effect.provide(toolkit.toLayer({ web_search: search }))),
+        group: {
+          toolkit: Toolkit.make(webSearchTool),
+          handlers: { web_search: search },
+        },
       };
     }
     if (reader) {
-      const toolkit = Toolkit.make(urlReaderTool);
       return {
         tools,
-        toolkit: yield* toolkit.pipe(Effect.provide(toolkit.toLayer({ read_url: reader }))),
+        group: {
+          toolkit: Toolkit.make(urlReaderTool),
+          handlers: { read_url: reader },
+        },
       };
     }
     return undefined;
+  },
+);
+
+// Backward-compatible wrapper for tests and callers that only need web tools.
+// The stream engine uses `prepareWebTools` directly once it can add other groups.
+export const prepareWebToolkit: (
+  input: Parameters<typeof prepareWebTools>[0],
+) => Effect.Effect<PreparedWebToolkit | undefined> = Effect.fn("tools.prepareWebToolkit")(
+  function* (input) {
+    const prepared = yield* prepareWebTools(input);
+    if (!prepared) return undefined;
+    const toolkit = yield* mergeToolGroups([prepared.group]);
+    return toolkit ? { tools: prepared.tools, toolkit } : undefined;
   },
 );

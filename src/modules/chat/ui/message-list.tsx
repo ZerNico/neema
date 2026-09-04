@@ -3,12 +3,19 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
-import type { CompactionActivity, ToolActivity, ToolSource } from "../client/use-message-stream.ts";
+import {
+  isMemoryToolActivity,
+  isWebToolActivity,
+  type CompactionActivity,
+  type ToolActivity,
+  type ToolSource,
+} from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
 import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations.ts";
+import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
@@ -374,8 +381,15 @@ const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
     }
 
     const turnTools = orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn);
-    if (turnTools.length > 0) {
-      nodes.push(<ToolActivityBlock key={`tools-${turn}`} activities={turnTools} />);
+    const webTools = turnTools.filter(isWebToolActivity);
+    let webBlockAdded = false;
+    for (const activity of turnTools) {
+      if (isMemoryToolActivity(activity)) {
+        nodes.push(<MemoryActivityBlock key={activity.callId} activity={activity} />);
+      } else if (!webBlockAdded) {
+        nodes.push(<ToolActivityBlock key={`tools-${turn}`} activities={webTools} />);
+        webBlockAdded = true;
+      }
     }
   }
 

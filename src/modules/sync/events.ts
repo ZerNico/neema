@@ -28,13 +28,29 @@ export const SyncEvent = Schema.Union([
     messageId: Schema.String,
     status: Schema.Literals(["streaming", "complete", "error", "aborted"]),
   }),
+  Schema.Struct({
+    type: Schema.Literal("memory.changed"),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("memory.policy.changed"),
+  }),
 ]);
 
 export type SyncEvent = typeof SyncEvent.Type;
 
-export const UserSyncEnvelope = Schema.Struct({
-  userId: Schema.String,
-  event: SyncEvent,
-});
+// Most events target one user's browser sessions. Instance-wide policy changes
+// use the global variant so every authenticated SSE subscriber can refetch its
+// own authorized view without enumerating users or putting data on the wire.
+export const SyncEnvelope = Schema.Union([
+  Schema.Struct({
+    scope: Schema.Literal("user"),
+    userId: Schema.String,
+    event: SyncEvent,
+  }),
+  Schema.Struct({
+    scope: Schema.Literal("global"),
+    event: SyncEvent,
+  }),
+]);
 
-export type UserSyncEnvelope = typeof UserSyncEnvelope.Type;
+export type SyncEnvelope = typeof SyncEnvelope.Type;

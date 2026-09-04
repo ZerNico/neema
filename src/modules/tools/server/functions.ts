@@ -1,10 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   TestSearchConnectionInput,
   UpdateDocumentParserToolInput,
+  UpdateMemoryToolInput,
   UpdateUrlReaderToolInput,
   UpdateWebSearchToolInput,
 } from "../schema.ts";
@@ -13,6 +15,33 @@ import { SearchBackend } from "./search.ts";
 import { WebSearchExecutor } from "./web-search.ts";
 
 const standard = Schema.toStandardSchemaV1;
+
+export const getMemoryTool = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("memory"))));
+
+export const updateMemoryTool = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateMemoryToolInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ToolsRepo;
+        const sync = yield* SyncBus;
+        const result = yield* repo.setToolEnabled("memory", data.enabled);
+        if (result.changed) {
+          yield* sync
+            .publishGlobal({ type: "memory.policy.changed" })
+            .pipe(
+              Effect.catchCause(() =>
+                Effect.logWarning("memory policy changed but sync publication failed"),
+              ),
+            );
+        }
+        return result.tool;
+      }),
+    ),
+  );
 
 export const getWebSearchTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])

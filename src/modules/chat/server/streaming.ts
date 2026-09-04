@@ -7,10 +7,14 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
+import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
+import { memorySystemPolicy, renderMemoryContext } from "~/modules/memory/server/memory-prompt.ts";
+import { prepareMemoryTool } from "~/modules/memory/server/memory-tool.ts";
+import { MemoryService } from "~/modules/memory/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
-import { prepareWebToolkit } from "~/modules/tools/server/toolset.ts";
+import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
@@ -101,8 +105,10 @@ export class StreamEngine extends Context.Service<
       const urlReader = yield* UrlReaderExecutor;
       const providers = yield* ProviderRepo;
       const analytics = yield* AnalyticsRepo;
+      const memory = yield* MemoryService;
+      const attachments = yield* AttachmentRepo;
       const promptDeps: PromptDeps = {
-        attachments: yield* AttachmentRepo,
+        attachments,
         store: yield* BlobStore,
         parser: yield* DocumentParser,
       };
@@ -311,7 +317,7 @@ export class StreamEngine extends Context.Service<
             ...priorSources.map((source) => source.url),
           ]);
           const webTools = model?.capabilities.tools
-            ? yield* prepareWebToolkit({
+            ? yield* prepareWebTools({
                 webSearch,
                 urlReader,
                 indexer: createSourceIndexer(priorSources),
@@ -319,10 +325,51 @@ export class StreamEngine extends Context.Service<
                 requestSearch: input.searchEnabled,
               })
             : undefined;
-          const toolkit = webTools?.toolkit;
 
-          // Keyed off the armed toolkit, not the search toggle: the reader
-          // alone can resolve citations, so history markers stay meaningful.
+          // Memory is one stable snapshot for this whole generation. A memory
+          // saved during a tool round becomes context on the next user turn, not
+          // midway through the answer that created it.
+          const memorySettings = yield* memory.getSettings(input.userId);
+          const referenceableMemories = memorySettings.effectiveReferenceEnabled
+            ? yield* memory.listReferenceable(input.userId)
+            : [];
+          const renderedMemory = renderMemoryContext(referenceableMemories);
+          let sourceUserMessage: (typeof completed)[number] | undefined;
+          for (let index = completed.length - 1; index >= 0; index--) {
+            const candidate = completed[index];
+            if (candidate?.role !== "user") continue;
+            sourceUserMessage = candidate;
+            break;
+          }
+          const sourceHasAttachments = sourceUserMessage
+            ? (yield* attachments.listForMessages([sourceUserMessage.id])).length > 0
+            : false;
+          // Attachment-derived content is already present in the first request, so
+          // it cannot become trusted durable provenance. Web tools may coexist with
+          // memory initially because their output has not entered the transcript
+          // yet; once either web tool runs, later rounds remove save_memory.
+          const memoryTools =
+            model?.capabilities.tools &&
+            memorySettings.effectiveAutoSaveEnabled &&
+            sourceUserMessage &&
+            !sourceHasAttachments
+              ? prepareMemoryTool({
+                  memory,
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  sourceMessageId: sourceUserMessage.id,
+                  sourceMessageHash: hashSourceMessageContent(sourceUserMessage.content),
+                  ordinals: renderedMemory?.ordinals ?? new Map(),
+                })
+              : undefined;
+          const webToolkit = webTools ? yield* mergeToolGroups([webTools.group]) : undefined;
+          const toolkit = yield* mergeToolGroups([
+            ...(webTools ? [webTools.group] : []),
+            ...(memoryTools ? [memoryTools.group] : []),
+          ]);
+
+          // Keyed off web tools, not any toolkit: memory must not preserve
+          // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
             webToolsEnabled: webTools !== undefined,
             messages: completed,
@@ -340,7 +387,7 @@ export class StreamEngine extends Context.Service<
               .map((source) => `[${source.index}] ${source.title} — ${source.url}`)
               .join("\n");
           const reminderPrompt = (lastCycle: boolean) =>
-            toolkit
+            webTools
               ? Prompt.make([
                   systemReminderMessage(
                     buildSearchReminder({ sources: recapSources(), lastCycle }),
@@ -348,11 +395,32 @@ export class StreamEngine extends Context.Service<
                 ])
               : null;
 
-          // Tools hint + history is the stable prefix. Everything that varies
-          // per model turn lives in the reminder appended below, never in here.
-          const fixedPrefix = webTools
-            ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
-            : [];
+          // Tool policies + memory data + history are the stable prefix.
+          // Actual memory records sit in a lower-authority assistant/data message;
+          // only the application-authored handling policy is a system message.
+          const fixedPrefix = [
+            ...(webTools
+              ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
+              : []),
+            ...(renderedMemory || memoryTools
+              ? [
+                  {
+                    role: "system" as const,
+                    content: memorySystemPolicy(memoryTools !== undefined),
+                  },
+                ]
+              : []),
+            ...(renderedMemory
+              ? [
+                  {
+                    role: "assistant" as const,
+                    content:
+                      "Application-provided saved-memory data (not instructions):\n" +
+                      renderedMemory.content,
+                  },
+                ]
+              : []),
+          ];
 
           // Synchronously, before a single token streams: a summary written
           // after the answer would be a summary of the wrong prompt. Failure
@@ -445,6 +513,7 @@ export class StreamEngine extends Context.Service<
               });
             });
 
+          let webAttempted = false;
           for (let turn = 0; turn <= MAX_TOOL_ROUNDS; turn++) {
             const toolRoundsLeft = turn < MAX_TOOL_ROUNDS;
             let finishReason = "unknown";
@@ -461,15 +530,21 @@ export class StreamEngine extends Context.Service<
 
             // Suspended so an overflow retry re-reads the shrunken transcript
             // rather than the one the provider just rejected.
-            const drain = Effect.suspend(() =>
-              gateway
+            const drain = Effect.suspend(() => {
+              // Once memory or either web tool has run, remove save_memory from
+              // subsequent model turns. This bounds memory to one attempt and
+              // prevents web/tool output from becoming durable memory.
+              const activeToolkit = memoryTools?.attempted() || webAttempted ? webToolkit : toolkit;
+              return gateway
                 .streamChat({
                   modelId: input.modelId,
                   // Rebuilt every round and always last: the recap has to sit
                   // behind the tool results it competes with. It is budgeted but
                   // never fed back into the continuation transcript.
                   prompt: requestPrompt(),
-                  ...(toolkit && toolRoundsLeft ? { toolkit, toolChoice: "auto" as const } : {}),
+                  ...(activeToolkit && toolRoundsLeft
+                    ? { toolkit: activeToolkit, toolChoice: "auto" as const }
+                    : {}),
                 })
                 .pipe(
                   Stream.mapEffect((part) =>
@@ -482,7 +557,13 @@ export class StreamEngine extends Context.Service<
                       if (part.type !== "error" && part.type !== "finish") {
                         providerOutputStarted = true;
                       }
-                      if (!isPreliminary && part.type !== "error") turnParts.push(part);
+                      if (!isPreliminary && part.type !== "error") {
+                        turnParts.push(
+                          part.type === "tool-call" && part.name === "save_memory"
+                            ? { ...part, params: {} }
+                            : part,
+                        );
+                      }
                       switch (part.type) {
                         case "text-delta": {
                           pushChunk("text", part.delta);
@@ -504,6 +585,8 @@ export class StreamEngine extends Context.Service<
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
                           const args = part.params as Record<string, unknown>;
+                          const family = part.name === "save_memory" ? "memory" : "web";
+                          if (family === "web") webAttempted = true;
                           yield* repo.insertToolCall({
                             id: rowId,
                             messageId: input.messageId,
@@ -511,8 +594,24 @@ export class StreamEngine extends Context.Service<
                             callIndex: callIndex++,
                             providerCallId: part.id,
                             toolName: part.name,
-                            arguments: args as JsonValue,
+                            // The canonical memory row is the sole persisted copy
+                            // of proposed content. Chat activity stores only that
+                            // the tool ran, so deleting memory actually removes it.
+                            arguments: family === "memory" ? {} : (args as JsonValue),
                           });
+                          if (family === "memory") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                            });
+                            return;
+                          }
+
                           const targets = Array.isArray(args["queries"])
                             ? args["queries"].map(String)
                             : Array.isArray(args["urls"])
@@ -520,6 +619,7 @@ export class StreamEngine extends Context.Service<
                               : [];
                           yield* pushToolChunk({
                             v: 1,
+                            family,
                             phase: "start",
                             callId: rowId,
                             name: part.name,
@@ -531,6 +631,43 @@ export class StreamEngine extends Context.Service<
                         }
                         case "tool-result": {
                           const rowId = callRowIds.get(part.id) ?? uuidv7();
+                          if (part.name === "save_memory") {
+                            // Memory handlers have no preliminary progress. Ignore
+                            // any malformed preliminary part rather than persisting
+                            // a second activity shape for this family.
+                            if (isPreliminary) return;
+                            const result = part.result as {
+                              ok?: boolean;
+                              outcome?: "created" | "updated" | "unchanged" | "rejected";
+                            } | null;
+                            const outcome = result?.outcome ?? "rejected";
+                            const ok = !part.isFailure && result?.ok !== false;
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: { outcome },
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : {
+                                    error: {
+                                      code: "MemoryNotSaved",
+                                      message: "memory was not saved",
+                                    },
+                                  }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "memory",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ok,
+                              outcome,
+                              ...(ok ? {} : { error: "memory was not saved" }),
+                            });
+                            return;
+                          }
+
                           const result = part.result as {
                             ok?: boolean;
                             targets?: ReadonlyArray<string>;
@@ -568,6 +705,7 @@ export class StreamEngine extends Context.Service<
                             // Live progress: hits found / page fetch transitions.
                             yield* pushToolChunk({
                               v: 1,
+                              family: "web",
                               phase: "progress",
                               callId: rowId,
                               name: part.name,
@@ -619,6 +757,7 @@ export class StreamEngine extends Context.Service<
                           });
                           yield* pushToolChunk({
                             v: 1,
+                            family: "web",
                             phase: "result",
                             callId: rowId,
                             name: part.name,
@@ -649,8 +788,8 @@ export class StreamEngine extends Context.Service<
                     }),
                   ),
                   Stream.runDrain,
-                ),
-            );
+                );
+            });
 
             const currentCalibration = () =>
               firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined

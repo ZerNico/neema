@@ -23,6 +23,7 @@ const FakeRepo = Layer.succeed(
     getWebSearch: () => Effect.succeed({ enabled: true, config, secret: null }),
     getDocumentParser: () => Effect.succeed(null),
     getUrlReader: () => Effect.succeed(null),
+    setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
     updateTool: () => Effect.succeed(null),
   }),
 );

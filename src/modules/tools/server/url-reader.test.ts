@@ -25,6 +25,7 @@ const FakeRepo = (readerEnabled: boolean) =>
       getDocumentParser: () => Effect.succeed(null),
       getUrlReader: () =>
         Effect.succeed({ enabled: readerEnabled, config: { perPageCharCap: 20_000 } }),
+      setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
       updateTool: () => Effect.succeed(null),
     }),
   );

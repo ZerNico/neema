@@ -3,5 +3,6 @@ export * from "./attachments.ts";
 export * from "./auth.ts";
 export * from "./chat.ts";
 export * from "./groups.ts";
+export * from "./memory.ts";
 export * from "./providers.ts";
 export * from "./tools.ts";

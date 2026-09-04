@@ -21,6 +21,7 @@ describe("applyToolChunk", () => {
   it("creates a running activity from a start envelope", () => {
     expect(applyToolChunk([], start)).toEqual([
       {
+        family: "web",
         callId: "c1",
         name: "web_search",
         turnIndex: 0,
@@ -61,8 +62,11 @@ describe("applyToolChunk", () => {
       }),
     );
 
-    expect(tools[0]).toMatchObject({ status: "running", resultCount: 0 });
-    expect(tools[0]!.pages?.map((page) => page.status)).toEqual(["reading", "pending"]);
+    expect(tools[0]).toMatchObject({ family: "web", status: "running", resultCount: 0 });
+    const activity = tools[0];
+    expect(activity?.family).toBe("web");
+    if (!activity || activity.family !== "web") throw new Error("expected web activity");
+    expect(activity.pages?.map((page) => page.status)).toEqual(["reading", "pending"]);
     expect(tools).toHaveLength(1);
   });
 
@@ -72,13 +76,17 @@ describe("applyToolChunk", () => {
       tools,
       env({
         phase: "progress",
+        family: "web",
         callId: "c1",
         name: "web_search",
         summary: {},
         pages: [],
       }),
     );
-    expect(tools[0]!.targets).toEqual(["effect ts", "effect schema"]);
+    const activity = tools[0];
+    expect(activity?.family).toBe("web");
+    if (!activity || activity.family !== "web") throw new Error("expected web activity");
+    expect(activity.targets).toEqual(["effect ts", "effect schema"]);
   });
 
   it("finalizes on a result envelope", () => {
@@ -86,6 +94,7 @@ describe("applyToolChunk", () => {
       applyToolChunk([], start),
       env({
         phase: "result",
+        family: "web",
         callId: "c1",
         name: "web_search",
         ok: true,
@@ -108,6 +117,7 @@ describe("applyToolChunk", () => {
 
     expect(tools).toEqual<ToolActivity[]>([
       {
+        family: "web",
         callId: "c1",
         name: "web_search",
         turnIndex: 0,
@@ -134,6 +144,7 @@ describe("applyToolChunk", () => {
       [],
       env({
         phase: "result",
+        family: "web",
         callId: "c1",
         name: "web_search",
         ok: false,
@@ -144,9 +155,81 @@ describe("applyToolChunk", () => {
     expect(tools[0]).toMatchObject({ status: "error", error: "searxng unreachable" });
   });
 
+  it("upserts summary-only memory activity without retaining arguments", () => {
+    const memoryStart = env({
+      family: "memory",
+      phase: "start",
+      callId: "memory-1",
+      name: "save_memory",
+      turnIndex: 1,
+      callIndex: 2,
+      args: { content: "never retain this" },
+    });
+    const memoryResult = env({
+      family: "memory",
+      phase: "result",
+      callId: "memory-1",
+      name: "save_memory",
+      ok: true,
+      outcome: "created",
+    });
+
+    const running = applyToolChunk([], memoryStart);
+    const complete = applyToolChunk(running, memoryResult);
+    const replayed = applyToolChunk(complete, memoryResult);
+
+    expect(running).toEqual([
+      {
+        family: "memory",
+        callId: "memory-1",
+        name: "save_memory",
+        turnIndex: 1,
+        callIndex: 2,
+        status: "running",
+      },
+    ]);
+    expect(complete).toEqual([
+      {
+        family: "memory",
+        callId: "memory-1",
+        name: "save_memory",
+        turnIndex: 1,
+        callIndex: 2,
+        status: "complete",
+        outcome: "created",
+      },
+    ]);
+    expect(replayed).toEqual(complete);
+    expect(replayed).toHaveLength(1);
+  });
+
+  it("treats a missing family as web, including on old tool names", () => {
+    const tools = applyToolChunk(
+      [],
+      env({
+        phase: "start",
+        callId: "legacy",
+        name: "save_memory",
+        args: { targets: ["legacy target"] },
+      }),
+    );
+
+    expect(tools).toEqual([
+      {
+        family: "web",
+        callId: "legacy",
+        name: "save_memory",
+        turnIndex: 0,
+        callIndex: 0,
+        targets: ["legacy target"],
+        status: "running",
+      },
+    ]);
+  });
+
   it("ignores malformed or unversioned envelopes", () => {
     const seed: ToolActivity[] = [
-      { callId: "c1", name: "web_search", targets: ["q"], status: "running" },
+      { family: "web", callId: "c1", name: "web_search", targets: ["q"], status: "running" },
     ];
     expect(applyToolChunk(seed, "not json")).toBe(seed);
     expect(applyToolChunk(seed, env({ phase: "start", name: "web_search" }))).toBe(seed);

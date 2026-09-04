@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
+import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -19,20 +20,39 @@ export interface ToolSource {
   read: boolean;
 }
 
-// Live view of one tool call, upserted by callId from tool chunk envelopes.
-export interface ToolActivity {
+interface ToolActivityBase {
   callId: string;
   name: string;
   turnIndex?: number;
   callIndex?: number;
-  targets: string[];
   status: "running" | "complete" | "error";
+  error?: string;
+}
+
+// Live/durable view of one web tool call, upserted by callId from tool chunks.
+export interface WebToolActivity extends ToolActivityBase {
+  family: "web";
+  targets: string[];
   resultCount?: number;
   pagesFetched?: number;
   pages?: ToolPageStatus[];
   sources?: ToolSource[];
-  error?: string;
 }
+
+// Memory activity is deliberately summary-only. User memory content and every
+// web-only field stay out of both stream state and the rendered activity row.
+export interface MemoryToolActivity extends ToolActivityBase {
+  family: "memory";
+  outcome?: MemoryActivityOutcome;
+}
+
+export type ToolActivity = WebToolActivity | MemoryToolActivity;
+
+export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
+  activity.family === "web";
+
+export const isMemoryToolActivity = (activity: ToolActivity): activity is MemoryToolActivity =>
+  activity.family === "memory";
 
 // One durable/live compaction occurrence. Position is relative to model/tool
 // turns inside this assistant response, not to the historical checkpoint it
@@ -79,6 +99,29 @@ type Action =
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
+const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
+  "created",
+  "updated",
+  "unchanged",
+  "rejected",
+]);
+
+export const toMemoryActivityOutcome = (value: unknown): MemoryActivityOutcome | undefined => {
+  if (typeof value !== "string") return undefined;
+  if (MEMORY_OUTCOMES.has(value as MemoryActivityOutcome)) return value as MemoryActivityOutcome;
+  if (value === "duplicate") return "unchanged";
+  if (
+    value === "limit_reached" ||
+    value === "not_found" ||
+    value === "protected" ||
+    value === "disabled" ||
+    value === "source_changed"
+  ) {
+    return "rejected";
+  }
+  return undefined;
+};
+
 // Parses a tool chunk envelope defensively: malformed rows must not crash the
 // stream; the chunk still advances lastSeq so resume cursors stay correct.
 export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivity[] {
@@ -90,6 +133,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
   }
   const e = envelope as {
     v?: number;
+    family?: string;
     phase?: string;
     callId?: string;
     name?: string;
@@ -97,65 +141,99 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
     callIndex?: number;
     args?: { targets?: string[] };
     ok?: boolean;
-    summary?: { targets?: string[]; resultCount?: number; pagesFetched?: number };
+    outcome?: unknown;
+    summary?: {
+      targets?: string[];
+      resultCount?: number;
+      pagesFetched?: number;
+      outcome?: unknown;
+    };
     pages?: ToolPageStatus[];
     sources?: ToolSource[];
     error?: string;
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
+  if (e.family !== undefined && e.family !== "web" && e.family !== "memory") return tools;
 
-  const upsert = (next: Partial<ToolActivity> & { callId: string; name: string }) => {
-    const idx = tools.findIndex((t) => t.callId === next.callId);
-    if (idx === -1) {
+  // Historical envelopes predate the discriminator and are all web activity.
+  const family = e.family === "memory" ? "memory" : "web";
+  const index = tools.findIndex((activity) => activity.callId === e.callId);
+  const existing = index === -1 ? undefined : tools[index];
+  if (existing && existing.family !== family) return tools;
+
+  if (family === "memory") {
+    if (e.phase === "start") {
+      if (existing) return tools;
       return [
         ...tools,
         {
-          targets: [],
-          status: "running" as const,
+          family: "memory",
+          callId: e.callId,
+          name: e.name,
           turnIndex: e.turnIndex ?? 0,
           callIndex: e.callIndex ?? tools.length,
-          ...next,
+          status: "running",
         },
       ];
     }
-    return tools.map((t, i) => (i === idx ? { ...t, ...next } : t));
+    if (e.phase !== "result" || typeof e.ok !== "boolean") return tools;
+
+    const outcome = toMemoryActivityOutcome(e.summary?.outcome ?? e.outcome);
+    const next: MemoryToolActivity = {
+      family: "memory",
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.ok ? "complete" : "error",
+      ...(outcome ? { outcome } : {}),
+      ...(typeof e.error === "string" ? { error: e.error } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  const upsertWeb = (next: Partial<WebToolActivity>): ToolActivity[] => {
+    const activity: WebToolActivity = {
+      family: "web",
+      callId: e.callId!,
+      name: e.name!,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      targets: existing && isWebToolActivity(existing) ? existing.targets : [],
+      status: existing?.status ?? "running",
+      ...next,
+    };
+    return index === -1
+      ? [...tools, activity]
+      : tools.map((current, activityIndex) => (activityIndex === index ? activity : current));
   };
 
   if (e.phase === "start") {
-    if (tools.some((t) => t.callId === e.callId)) return tools;
-    return [
-      ...tools,
-      {
-        callId: e.callId,
-        name: e.name,
-        turnIndex: e.turnIndex ?? 0,
-        callIndex: e.callIndex ?? tools.length,
-        targets: e.args?.targets ?? [],
-        status: "running",
-      },
-    ];
+    if (existing) return tools;
+    return upsertWeb({
+      targets: e.args?.targets ?? [],
+      status: "running",
+    });
   }
   if (e.phase === "progress") {
-    return upsert({
-      callId: e.callId,
-      name: e.name,
+    return upsertWeb({
       status: "running",
       ...(e.summary?.targets ? { targets: e.summary.targets } : {}),
       ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
       ...(e.pages !== undefined ? { pages: e.pages } : {}),
     });
   }
-  if (e.phase === "result") {
-    return upsert({
-      callId: e.callId,
-      name: e.name,
+  if (e.phase === "result" && typeof e.ok === "boolean") {
+    return upsertWeb({
       targets: e.summary?.targets ?? [],
       status: e.ok ? "complete" : "error",
       ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
       ...(e.summary?.pagesFetched !== undefined ? { pagesFetched: e.summary.pagesFetched } : {}),
       ...(e.pages !== undefined ? { pages: e.pages } : {}),
       ...(e.sources !== undefined ? { sources: e.sources } : {}),
-      ...(e.error !== undefined ? { error: e.error } : {}),
+      ...(typeof e.error === "string" ? { error: e.error } : {}),
     });
   }
   return tools;

@@ -1,4 +1,4 @@
-import type { ToolSource } from "../client/use-message-stream.ts";
+import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 
 /** Matches the href streamdown gives a GFM footnote reference. */
 export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
@@ -34,11 +34,10 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
 }
 
 /** Deduplicates sources by citation index, lowest first. */
-export function collectSources(
-  activities: ReadonlyArray<{ sources?: ToolSource[] }>,
-): ToolSource[] {
+export function collectSources(activities: ReadonlyArray<ToolActivity>): ToolSource[] {
   const byIndex = new Map<number, ToolSource>();
   for (const activity of activities) {
+    if (activity.family !== "web") continue;
     for (const source of activity.sources ?? []) {
       if (!byIndex.has(source.index)) byIndex.set(source.index, source);
     }

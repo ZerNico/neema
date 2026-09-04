@@ -1,10 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { ToolActivity } from "../client/use-message-stream.ts";
+import type { WebToolActivity } from "../client/use-message-stream.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
 
-const completeSearch: ToolActivity = {
+const completeSearch: WebToolActivity = {
+  family: "web",
   callId: "call-1",
   name: "web_search",
   targets: ["Effect 4", "Effect TypeScript"],
@@ -21,7 +22,8 @@ const completeSearch: ToolActivity = {
   ],
 };
 
-const runningRead: ToolActivity = {
+const runningRead: WebToolActivity = {
+  family: "web",
   callId: "call-2",
   name: "read_url",
   targets: ["https://effect.website/blog", "https://drizzle.team/docs"],
@@ -40,7 +42,7 @@ const runningRead: ToolActivity = {
   ],
 };
 
-const completeRead: ToolActivity = {
+const completeRead: WebToolActivity = {
   ...runningRead,
   status: "complete",
   pagesFetched: 2,

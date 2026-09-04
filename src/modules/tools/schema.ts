@@ -105,10 +105,21 @@ const ToolSummary = Schema.Struct({
   pagesFetched: Schema.optionalKey(Schema.Number),
 });
 
-// Envelope persisted in message_chunks.delta for kind:"tool" markers.
+export const MemoryActivityOutcome = Schema.Literals([
+  "created",
+  "updated",
+  "unchanged",
+  "rejected",
+]);
+export type MemoryActivityOutcome = typeof MemoryActivityOutcome.Type;
+
+// Envelope persisted in message_chunks.delta for kind:"tool" markers. `family`
+// is required on newly written markers; the client still treats its absence on
+// historical web markers as family:"web".
 export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),
+    family: Schema.Literals(["web"]),
     phase: Schema.Literals(["start"]),
     callId: Schema.String,
     name: Schema.String,
@@ -118,6 +129,7 @@ export const ToolChunkEnvelope = Schema.Union([
   }),
   Schema.Struct({
     v: Schema.Literals([1]),
+    family: Schema.Literals(["web"]),
     phase: Schema.Literals(["progress"]),
     callId: Schema.String,
     name: Schema.String,
@@ -126,6 +138,7 @@ export const ToolChunkEnvelope = Schema.Union([
   }),
   Schema.Struct({
     v: Schema.Literals([1]),
+    family: Schema.Literals(["web"]),
     phase: Schema.Literals(["result"]),
     callId: Schema.String,
     name: Schema.String,
@@ -136,10 +149,34 @@ export const ToolChunkEnvelope = Schema.Union([
     failures: Schema.optionalKey(Schema.Array(WebToolFailure)),
     error: Schema.optionalKey(Schema.String),
   }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    family: Schema.Literals(["memory"]),
+    phase: Schema.Literals(["start"]),
+    callId: Schema.String,
+    name: Schema.String,
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    family: Schema.Literals(["memory"]),
+    phase: Schema.Literals(["result"]),
+    callId: Schema.String,
+    name: Schema.String,
+    ok: Schema.Boolean,
+    outcome: Schema.optionalKey(MemoryActivityOutcome),
+    error: Schema.optionalKey(Schema.String),
+  }),
 ]);
 export type ToolChunkEnvelope = typeof ToolChunkEnvelope.Type;
 
 // Admin server-fn inputs
+export const UpdateMemoryToolInput = Schema.Struct({
+  enabled: Schema.Boolean,
+});
+export type UpdateMemoryToolInput = typeof UpdateMemoryToolInput.Type;
+
 export const UpdateWebSearchToolInput = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   baseUrl: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),

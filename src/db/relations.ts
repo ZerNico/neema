@@ -9,6 +9,33 @@ export const relations = defineRelations(schema, (r) => ({
     attachmentBlobs: r.many.attachmentBlobs(),
     groupMemberships: r.many.groupMembers(),
     usageEvents: r.many.usageEvents(),
+    memorySettings: r.one.memorySettings({
+      from: r.user.id,
+      to: r.memorySettings.userId,
+    }),
+    memories: r.many.memories(),
+  },
+  memorySettings: {
+    user: r.one.user({
+      from: r.memorySettings.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+  },
+  memories: {
+    user: r.one.user({
+      from: r.memories.userId,
+      to: r.user.id,
+      optional: false,
+    }),
+    sourceConversation: r.one.conversations({
+      from: r.memories.sourceConversationId,
+      to: r.conversations.id,
+    }),
+    sourceMessage: r.one.messages({
+      from: r.memories.sourceMessageId,
+      to: r.messages.id,
+    }),
   },
   session: {
     user: r.one.user({
@@ -28,6 +55,7 @@ export const relations = defineRelations(schema, (r) => ({
       to: r.models.id,
     }),
     messages: r.many.messages(),
+    sourceMemories: r.many.memories(),
   },
   messages: {
     conversation: r.one.conversations({
@@ -42,6 +70,7 @@ export const relations = defineRelations(schema, (r) => ({
     chunks: r.many.messageChunks(),
     toolCalls: r.many.messageToolCalls(),
     attachments: r.many.messageAttachments(),
+    sourceMemories: r.many.memories(),
   },
   messageChunks: {
     message: r.one.messages({

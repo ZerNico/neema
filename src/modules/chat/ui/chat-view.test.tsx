@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatView } from "./chat-view.tsx";
+import { ChatView, toActivity } from "./chat-view.tsx";
 import {
   branchConversation,
   getConversationWithMessages,
@@ -95,7 +95,8 @@ vi.mock("./composer.tsx", () => ({
   ),
 }));
 
-vi.mock("../client/use-message-stream.ts", () => ({
+vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../client/use-message-stream.ts")>()),
   useMessageStream: () => ({
     text: "",
     reasoning: "",
@@ -229,6 +230,61 @@ const renderView = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("toActivity", () => {
+  const row = {
+    id: "tool-1",
+    arguments: {},
+    result: {},
+    status: "complete" as const,
+    turnIndex: 1,
+    callIndex: 2,
+    error: null,
+  };
+
+  it("hydrates save_memory as summary-only memory activity", () => {
+    expect(
+      toActivity({
+        ...row,
+        toolName: "save_memory",
+        arguments: { content: "private memory" },
+        result: {
+          outcome: "updated",
+          content: "private memory",
+          sources: [{ url: "https://should-not-appear.dev" }],
+        },
+      }),
+    ).toEqual({
+      family: "memory",
+      callId: "tool-1",
+      name: "save_memory",
+      turnIndex: 1,
+      callIndex: 2,
+      status: "complete",
+      outcome: "updated",
+    });
+  });
+
+  it("hydrates existing tool names as web activity", () => {
+    expect(
+      toActivity({
+        ...row,
+        toolName: "web_search",
+        arguments: { queries: ["effect"] },
+        result: { resultCount: 2 },
+      }),
+    ).toEqual({
+      family: "web",
+      callId: "tool-1",
+      name: "web_search",
+      turnIndex: 1,
+      callIndex: 2,
+      targets: ["effect"],
+      status: "complete",
+      resultCount: 2,
+    });
+  });
 });
 
 describe("ChatView search mode", () => {

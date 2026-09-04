@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
@@ -45,6 +45,10 @@ export class ToolsRepo extends Context.Service<
         clearSecret?: boolean;
       },
     ): Effect.Effect<PublicTool | null>;
+    setToolEnabled(
+      name: string,
+      enabled: boolean,
+    ): Effect.Effect<{ tool: PublicTool | null; changed: boolean }>;
   }
 >()("chat/tools/ToolsRepo") {
   static readonly layer = Layer.effect(
@@ -89,6 +93,22 @@ export class ToolsRepo extends Context.Service<
           if (!row) return null;
           const config = yield* decodeUrlReaderConfig(row.config).pipe(Effect.orDie);
           return { enabled: row.enabled, config };
+        }),
+
+        setToolEnabled: Effect.fn("ToolsRepo.setToolEnabled")(function* (name, enabled) {
+          const rows = yield* db
+            .update(tools)
+            .set({ enabled, updatedAt: new Date() })
+            .where(and(eq(tools.name, name), ne(tools.enabled, enabled)))
+            .returning()
+            .pipe(Effect.orDie);
+          if (rows[0]) return { tool: toPublic(rows[0]), changed: true } as const;
+
+          const current = yield* getRow(name);
+          return {
+            tool: current ? toPublic(current) : null,
+            changed: false,
+          } as const;
         }),
 
         updateTool: Effect.fn("ToolsRepo.updateTool")(function* (name, patch) {

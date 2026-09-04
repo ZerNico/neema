@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
-import { SyncEvent, UserSyncEnvelope } from "./events.ts";
+import { SyncEnvelope, SyncEvent } from "./events.ts";
 
-const decodeEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(UserSyncEnvelope));
-const encodeEnvelope = Schema.encodeEffect(Schema.fromJsonString(UserSyncEnvelope));
+const decodeEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(SyncEnvelope));
+const encodeEnvelope = Schema.encodeEffect(Schema.fromJsonString(SyncEnvelope));
 
 describe("sync events", () => {
   it.effect("roundtrips an envelope through its JSON wire format", () =>
@@ -14,17 +14,45 @@ describe("sync events", () => {
         messageId: "m1",
         status: "complete",
       };
-      const wire = yield* encodeEnvelope({ userId: "u1", event });
+      const wire = yield* encodeEnvelope({ scope: "user", userId: "u1", event });
       expect(typeof wire).toBe("string");
       const decoded = yield* decodeEnvelope(wire);
-      expect(decoded).toEqual({ userId: "u1", event });
+      expect(decoded).toEqual({ scope: "user", userId: "u1", event });
+    }),
+  );
+
+  it.effect("roundtrips memory invalidations", () =>
+    Effect.gen(function* () {
+      const wire = yield* encodeEnvelope({
+        scope: "user",
+        userId: "u1",
+        event: { type: "memory.changed" },
+      });
+      expect(yield* decodeEnvelope(wire)).toEqual({
+        scope: "user",
+        userId: "u1",
+        event: { type: "memory.changed" },
+      });
+    }),
+  );
+
+  it.effect("roundtrips global memory policy invalidations", () =>
+    Effect.gen(function* () {
+      const wire = yield* encodeEnvelope({
+        scope: "global",
+        event: { type: "memory.policy.changed" },
+      });
+      expect(yield* decodeEnvelope(wire)).toEqual({
+        scope: "global",
+        event: { type: "memory.policy.changed" },
+      });
     }),
   );
 
   it.effect("rejects unknown event types", () =>
     Effect.gen(function* () {
       const result = yield* decodeEnvelope(
-        JSON.stringify({ userId: "u1", event: { type: "nope" } }),
+        JSON.stringify({ scope: "user", userId: "u1", event: { type: "nope" } }),
       ).pipe(Effect.flip);
       expect(result._tag).toBe("SchemaError");
     }),

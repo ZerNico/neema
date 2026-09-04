@@ -29,6 +29,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor, ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
+import { FakeMemoryService } from "./fake-memory.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -115,6 +116,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeMemoryService,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),

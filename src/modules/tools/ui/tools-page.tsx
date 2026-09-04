@@ -1,4 +1,9 @@
-import { FileValidationIcon, GlobalSearchIcon, Link01Icon } from "@hugeicons/core-free-icons";
+import {
+  Brain02Icon,
+  FileValidationIcon,
+  GlobalSearchIcon,
+  Link01Icon,
+} from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import type { AnyFieldApi } from "@tanstack/react-form";
 import { Schema } from "effect";
@@ -16,13 +21,20 @@ import { Switch } from "~/ui/primitives/switch";
 import { cn } from "~/ui/utils";
 import {
   getDocumentParserTool,
+  getMemoryTool,
   getUrlReaderTool,
   getWebSearchTool,
   testSearchConnection,
   updateDocumentParserTool,
+  updateMemoryTool,
   updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
+
+export const memoryToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "memory"],
+  queryFn: () => getMemoryTool(),
+});
 
 export const webSearchToolQuery = queryOptions({
   queryKey: ["admin", "tools", "web-search"],
@@ -126,10 +138,60 @@ const useInvalidateTools = (availabilityKey: string) => {
 export function ToolsPage() {
   return (
     <Page title="Tools" description="Assistant tools available in chats.">
+      <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
       <DocumentParserSection />
     </Page>
+  );
+}
+
+function MemorySection() {
+  const { data: tool } = useSuspenseQuery(memoryToolQuery);
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => updateMemoryTool({ data: { enabled } }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
+        queryClient.invalidateQueries({ queryKey: ["memory"] }),
+      ]),
+    onError: () => toast.error("Could not update memory."),
+  });
+
+  if (!tool) {
+    return (
+      <Section title="Memory">
+        <EmptyState
+          icon={Brain02Icon}
+          title="This tool isn't set up yet."
+          description="Memory will appear here once it is available on this instance."
+        />
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Memory">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Assistant memory</span>
+            <span className="text-muted-foreground text-xs">
+              Globally allow saved memories to be referenced and tool-capable models to save new
+              ones automatically. User preferences and manual memory management remain available
+              while this is off.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+            aria-label="Memory enabled"
+          />
+        </ListRow>
+      </ListCard>
+    </Section>
   );
 }
 

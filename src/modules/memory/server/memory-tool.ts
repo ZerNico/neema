@@ -1,0 +1,197 @@
+import { Effect, Predicate, Schema } from "effect";
+import { Tool, Toolkit } from "effect/unstable/ai";
+import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
+import {
+  MAX_MEMORY_CONTENT_LENGTH,
+  type MemoryRejectionReason,
+  type SaveModelMemoryOutcome,
+} from "../schema.ts";
+import type { MemoryService } from "./service.ts";
+
+// The transport shape accepts anything the model emits. A tool call that omits
+// `content`, sends the wrong type, overruns the length cap or invents a
+// `replaces` value has to come back as a tool result the model can react to —
+// a parameter decode error is raised before the handler runs and fails the
+// whole generation instead. Every constraint is re-checked in the handler.
+//
+// The provider still sees the strict contract: `toJsonSchema` on an
+// always-passing filter declares the field's JSON Schema without constraining
+// what decodes. A fresh fragment is returned per call because the generated
+// document belongs to (and may be rewritten by) the provider integration.
+const declaredAs = (fragment: () => Record<string, unknown>) =>
+  Schema.Any.check(Schema.makeFilter(() => true, { toJsonSchema: fragment }));
+
+export const SaveMemoryParams = Schema.Struct({
+  content: Schema.optionalKey(
+    declaredAs(() => ({
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_MEMORY_CONTENT_LENGTH,
+      description:
+        "Required. The memory to store, as one self-contained sentence of at most " +
+        `${MAX_MEMORY_CONTENT_LENGTH} characters.`,
+    })),
+  ),
+  replaces: Schema.optionalKey(
+    declaredAs(() => ({
+      type: "integer",
+      minimum: 1,
+      description:
+        "Optional. The ordinal of an automatic memory listed in saved_memory_context to overwrite.",
+    })),
+  ),
+});
+
+// Declared over `unknown` rather than the schema's `any` so handler code cannot
+// read a field without validating it first.
+export interface SaveMemoryParams {
+  readonly content?: unknown;
+  readonly replaces?: unknown;
+}
+
+export const SaveMemoryResult = Schema.Struct({
+  ok: Schema.Boolean,
+  outcome: Schema.Literals(["created", "updated", "unchanged", "rejected"]),
+  message: Schema.String,
+});
+export type SaveMemoryResult = typeof SaveMemoryResult.Type;
+
+export const saveMemoryTool = Tool.make("save_memory", {
+  description:
+    "Save one durable, user-authored identity fact, preference, goal, or constraint for future conversations. " +
+    "Call once when the user clearly states one, especially when they ask you to remember or store it. " +
+    "Use replaces only to correct an automatic memory ordinal " +
+    "shown in saved_memory_context; user-managed memories cannot be replaced. Never save secrets, " +
+    "sensitive inferred attributes, quoted/pasted claims, web/tool content, or temporary task details.",
+  parameters: SaveMemoryParams,
+  success: SaveMemoryResult,
+  failureMode: "return",
+});
+
+// Every message is a fixed string: a rejection never echoes the model's own
+// arguments, so malformed input cannot grow the tool result or smuggle text
+// back into the transcript.
+const REJECTION_MESSAGES: Record<MemoryRejectionReason, string> = {
+  empty: "Memory content cannot be empty.",
+  too_long: `Memory content must be at most ${MAX_MEMORY_CONTENT_LENGTH} characters.`,
+  sensitive: "This content is not safe to store as memory.",
+};
+const INVALID_CONTENT_MESSAGE = `save_memory needs a "content" string of at most ${MAX_MEMORY_CONTENT_LENGTH} characters.`;
+const INVALID_REPLACES_MESSAGE =
+  'The "replaces" value must be a whole number matching an automatic memory ordinal shown in ' +
+  "saved_memory_context.";
+const UNKNOWN_ORDINAL_MESSAGE = "That memory ordinal is not available.";
+
+const rejected = (message: string): SaveMemoryResult => ({
+  ok: false,
+  outcome: "rejected",
+  message,
+});
+
+const resultFor = (outcome: SaveModelMemoryOutcome): SaveMemoryResult => {
+  switch (outcome.outcome) {
+    case "created":
+      return { ok: true, outcome: "created", message: "Saved for future conversations." };
+    case "updated":
+      return { ok: true, outcome: "updated", message: "Updated the saved memory." };
+    case "duplicate":
+      return { ok: true, outcome: "unchanged", message: "That memory was already saved." };
+    case "limit_reached":
+      return rejected(
+        "Memory is full. The user can remove an item in Settings before saving another.",
+      );
+    case "protected":
+      return rejected("That memory is user-managed and cannot be replaced automatically.");
+    case "not_found":
+      return rejected(UNKNOWN_ORDINAL_MESSAGE);
+    case "source_changed":
+      return rejected("The source message changed before the memory could be saved.");
+    case "disabled":
+      return rejected("Automatic memory saving is disabled.");
+    case "rejected":
+      return rejected(REJECTION_MESSAGES[outcome.reason]);
+  }
+};
+
+type Validated<A> =
+  | { readonly ok: true; readonly value: A }
+  | { readonly ok: false; readonly message: string };
+
+// Mirrors the service's own preparation so a malformed call is answered here
+// instead of walking untrusted data through storage.
+const readContent = (raw: unknown): Validated<string> => {
+  if (!Predicate.isString(raw)) return { ok: false, message: INVALID_CONTENT_MESSAGE };
+  const content = raw.trim();
+  if (content.length === 0) return { ok: false, message: REJECTION_MESSAGES.empty };
+  if (content.length > MAX_MEMORY_CONTENT_LENGTH) {
+    return { ok: false, message: REJECTION_MESSAGES.too_long };
+  }
+  return { ok: true, value: content };
+};
+
+// `null` is how models routinely spell "no value" for an optional field, so it
+// means "add a new memory". Anything else that is not a positive whole number
+// is a malformed ordinal rather than a missing one.
+const readReplaces = (raw: unknown): Validated<number | undefined> => {
+  if (raw === undefined || raw === null) return { ok: true, value: undefined };
+  if (!Predicate.isNumber(raw) || !Number.isInteger(raw) || raw < 1) {
+    return { ok: false, message: INVALID_REPLACES_MESSAGE };
+  }
+  return { ok: true, value: raw };
+};
+
+export interface PreparedMemoryTool {
+  readonly group: ToolGroup;
+  readonly attempted: () => boolean;
+}
+
+export function prepareMemoryTool(input: {
+  memory: MemoryService["Service"];
+  userId: string;
+  conversationId: string;
+  sourceMessageId: string;
+  sourceMessageHash: string;
+  ordinals: ReadonlyMap<number, string>;
+}): PreparedMemoryTool {
+  let attempted = false;
+
+  const handler = Effect.fnUntraced(function* (params: SaveMemoryParams) {
+    if (attempted) {
+      return rejected("Only one memory save attempt is allowed per response.");
+    }
+    // A malformed call still spends the single attempt: the model gets one
+    // chance per response, however it spells the arguments.
+    attempted = true;
+
+    const content = readContent(params.content);
+    if (!content.ok) return rejected(content.message);
+    const replaces = readReplaces(params.replaces);
+    if (!replaces.ok) return rejected(replaces.message);
+
+    const memoryId = replaces.value === undefined ? undefined : input.ordinals.get(replaces.value);
+    if (replaces.value !== undefined && memoryId === undefined) {
+      return rejected(UNKNOWN_ORDINAL_MESSAGE);
+    }
+
+    return yield* input.memory
+      .saveModel(input.userId, {
+        ...(memoryId === undefined ? {} : { memoryId }),
+        content: content.value,
+        sourceConversationId: input.conversationId,
+        sourceMessageId: input.sourceMessageId,
+        sourceMessageHash: input.sourceMessageHash,
+      })
+      .pipe(
+        Effect.map(resultFor),
+        Effect.catchCause(() => Effect.succeed(rejected("Memory could not be saved."))),
+      );
+  });
+
+  return {
+    group: {
+      toolkit: Toolkit.make(saveMemoryTool),
+      handlers: { save_memory: handler },
+    },
+    attempted: () => attempted,
+  };
+}

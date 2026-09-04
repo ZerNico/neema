@@ -74,6 +74,7 @@ describe("useSync", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
   });
 
   it("still applies ordinary events after reconnecting", () => {
@@ -91,5 +92,39 @@ describe("useSync", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
   });
+
+  it.each([
+    {
+      type: "conversation.updated",
+      conversationId: "c1",
+    },
+    {
+      type: "conversation.deleted",
+      conversationId: "c1",
+    },
+    {
+      type: "message.created",
+      conversationId: "c1",
+      messageId: "m1",
+    },
+  ] as const)("refreshes memory provenance after $type", (event) => {
+    const { invalidate, source } = renderSync();
+
+    source.emit("sync", event);
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+  });
+
+  it.each(["memory.changed", "memory.policy.changed"] as const)(
+    "invalidates the memory prefix for %s",
+    (type) => {
+      const { invalidate, source } = renderSync();
+
+      source.emit("sync", { type });
+
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+    },
+  );
 });

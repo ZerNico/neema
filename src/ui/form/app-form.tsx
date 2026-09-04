@@ -4,6 +4,7 @@ import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
+import { Textarea } from "~/ui/primitives/textarea";
 
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();
@@ -49,6 +50,44 @@ function TextField({
   );
 }
 
+function TextareaField({
+  label,
+  description,
+  placeholder,
+  rows = 4,
+}: {
+  label: string;
+  description?: string;
+  placeholder?: string;
+  rows?: number;
+}) {
+  const field = useFieldContext<string>();
+  const showError = field.state.meta.isTouched && !field.state.meta.isValid;
+  return (
+    <Field data-invalid={showError || undefined}>
+      <FieldLabel htmlFor={field.name}>{label}</FieldLabel>
+      <Textarea
+        id={field.name}
+        name={field.name}
+        placeholder={placeholder}
+        rows={rows}
+        value={field.state.value}
+        onBlur={field.handleBlur}
+        onChange={(event) => field.handleChange(event.target.value)}
+        aria-invalid={showError || undefined}
+      />
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
+      {showError ? (
+        <FieldError
+          errors={field.state.meta.errors.map((error) => ({
+            message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
+          }))}
+        />
+      ) : null}
+    </Field>
+  );
+}
+
 // Submit button wired to the form's canSubmit/isSubmitting. Keeps its label
 // while pending (a spinner slides in ahead of it) so the button never
 // reflows — the shadcn "Button with Spinner" pattern.
@@ -78,6 +117,6 @@ function SubmitButton({
 export const { useAppForm, withForm } = createFormHook({
   fieldContext,
   formContext,
-  fieldComponents: { TextField },
+  fieldComponents: { TextField, TextareaField },
   formComponents: { SubmitButton },
 });

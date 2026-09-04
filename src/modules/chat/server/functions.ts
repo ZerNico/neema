@@ -1,3 +1,4 @@
+import { notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
@@ -56,9 +57,9 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
   .handler(({ data, context }) =>
     runtime.runPromise(
       loadConversationDetail(context.session.user.id, data.conversationId).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
+        // Preserve missing-resource semantics across the server-function
+        // boundary so route loaders can render their not-found state.
+        Effect.catchTag("ConversationNotFound", () => Effect.die(notFound())),
       ),
     ),
   );

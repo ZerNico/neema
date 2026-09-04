@@ -227,6 +227,7 @@ describe("MessageBubble attachments", () => {
 // citations silently turning back into raw markdown.
 describe("MessageBubble citations", () => {
   const searchActivity: ToolActivity = {
+    family: "web",
     callId: "call-1",
     name: "web_search",
     targets: ["effect 4"],
@@ -700,12 +701,44 @@ describe("MessageBubble actions", () => {
     expect(await screen.findByText(/append-only/)).toBeInTheDocument();
   });
 
+  it("renders each memory call as a compact row and suppresses Thinking while one runs", () => {
+    renderPlain({
+      status: "streaming",
+      content: "",
+      toolActivities: [
+        {
+          family: "memory",
+          callId: "memory-1",
+          name: "save_memory",
+          turnIndex: 0,
+          callIndex: 0,
+          status: "complete",
+          outcome: "created",
+        },
+        {
+          family: "memory",
+          callId: "memory-2",
+          name: "save_memory",
+          turnIndex: 0,
+          callIndex: 1,
+          status: "running",
+        },
+      ],
+    });
+
+    expect(screen.getByText("Saved to memory")).toBeInTheDocument();
+    expect(screen.getByText("Saving to memory…")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.queryByRole("button", { name: /memory/i })).toBeNull();
+  });
+
   it("keeps a completed search collapsed when a later turn starts reading", () => {
     renderPlain({
       status: "streaming",
       content: "",
       toolActivities: [
         {
+          family: "web",
           callId: "search-1",
           name: "web_search",
           turnIndex: 0,
@@ -724,6 +757,7 @@ describe("MessageBubble actions", () => {
           ],
         },
         {
+          family: "web",
           callId: "read-1",
           name: "read_url",
           turnIndex: 1,
@@ -759,6 +793,7 @@ describe("MessageBubble actions", () => {
       content: "",
       toolActivities: [
         {
+          family: "web",
           callId: "search-1",
           name: "web_search",
           turnIndex: 0,
@@ -767,6 +802,7 @@ describe("MessageBubble actions", () => {
           status: "complete",
         },
         {
+          family: "web",
           callId: "read-1",
           name: "read_url",
           turnIndex: 0,
@@ -785,6 +821,7 @@ describe("MessageBubble actions", () => {
     renderPlain({
       toolActivities: [
         {
+          family: "web",
           callId: "search-1",
           name: "web_search",
           turnIndex: 0,
@@ -793,6 +830,7 @@ describe("MessageBubble actions", () => {
           status: "complete",
         },
         {
+          family: "web",
           callId: "read-1",
           name: "read_url",
           turnIndex: 1,

@@ -14,6 +14,7 @@ const repoLayer = (
       getWebSearch: () => Effect.succeed(null),
       getUrlReader: () => Effect.succeed(null),
       getDocumentParser: () => Effect.succeed(row),
+      setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
       updateTool: () => Effect.succeed(null),
     }),
   );

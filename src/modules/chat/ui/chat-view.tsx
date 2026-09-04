@@ -6,6 +6,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
 import {
   applyCompactionChunk,
+  toMemoryActivityOutcome,
   useMessageStream,
   type CompactionActivity,
   type ToolActivity,
@@ -32,8 +33,10 @@ import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
 
-// Durable message_tool_calls row → the client-side activity shape.
-function toActivity(row: {
+// Durable message_tool_calls row → the same family-discriminated shape used by
+// live chunks. The tool name is the durable discriminator; old web rows never
+// carried a family field of their own.
+export function toActivity(row: {
   id: string;
   toolName: string;
   arguments: unknown;
@@ -43,6 +46,21 @@ function toActivity(row: {
   callIndex: number;
   error: { code: string; message: string } | null;
 }): ToolActivity {
+  if (row.toolName === "save_memory") {
+    const result = (row.result ?? {}) as { outcome?: unknown };
+    const outcome = toMemoryActivityOutcome(result.outcome);
+    return {
+      family: "memory",
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...(outcome ? { outcome } : {}),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+
   const args = (row.arguments ?? {}) as { queries?: string[]; urls?: string[] };
   const result = (row.result ?? {}) as {
     targets?: string[];
@@ -52,6 +70,7 @@ function toActivity(row: {
     sources?: ToolSource[];
   };
   return {
+    family: "web",
     callId: row.id,
     name: row.toolName,
     turnIndex: row.turnIndex,
@@ -437,6 +456,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
       const inheritedSources = [...inheritedByIndex.values()];
       for (const activity of toolActivities) {
+        if (activity.family !== "web") continue;
         for (const source of activity.sources ?? []) {
           if (!inheritedByIndex.has(source.index)) inheritedByIndex.set(source.index, source);
         }
