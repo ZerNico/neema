@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
@@ -27,7 +28,7 @@ function AppLayout() {
   return (
     <ConfirmProvider>
       <SidebarProvider>
-        <AppSidebar user={user} />
+        <SessionAppSidebar initialUser={user} />
         <SidebarInset className="h-svh overflow-hidden">
           <DetailPanelProvider>
             <header className="flex h-12 shrink-0 items-center gap-2 px-3">
@@ -46,4 +47,13 @@ function AppLayout() {
       </SidebarProvider>
     </ConfirmProvider>
   );
+}
+
+export function SessionAppSidebar({
+  initialUser,
+}: {
+  initialUser: Parameters<typeof AppSidebar>[0]["user"];
+}) {
+  const { data: sessionUser } = useQuery(sessionUserQuery);
+  return <AppSidebar user={sessionUser ?? initialUser} />;
 }

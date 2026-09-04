@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "./profile-page.tsx";
-import { authClient } from "~/modules/auth/client.ts";
+import { authClient, sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
 import { toast } from "sonner";
 
 vi.mock("~/modules/auth/client.ts", () => ({
@@ -28,6 +28,19 @@ vi.mock("@tanstack/react-router", () => ({
 const useSessionMock = vi.mocked(authClient.useSession);
 const updateUserMock = vi.mocked(authClient.updateUser);
 const changePasswordMock = vi.mocked(authClient.changePassword);
+const SESSION_USER: SessionData["user"] = {
+  id: "u1",
+  name: "Nico",
+  email: "nico@example.com",
+  emailVerified: true,
+  image: null,
+  role: "admin",
+  banned: false,
+  banReason: null,
+  banExpires: null,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  updatedAt: new Date("2026-01-01T00:00:00Z"),
+};
 
 // A promise that only resolves when the test says so, to observe the pending
 // state of a submit button.
@@ -39,20 +52,20 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
-const renderPage = () => {
-  const client = new QueryClient();
+const renderPage = (client = new QueryClient()) => {
   render(
     <QueryClientProvider client={client}>
       <ProfilePage />
     </QueryClientProvider>,
   );
+  return client;
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   useSessionMock.mockReturnValue({
     data: {
-      user: { id: "u1", name: "Nico", email: "nico@example.com", role: "admin" },
+      user: SESSION_USER,
       session: {},
     },
     isPending: false,
@@ -83,6 +96,30 @@ describe("ProfilePage", () => {
     await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
   });
 
+  it("updates the cached session user immediately after saving", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient();
+    client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    updateUserMock.mockResolvedValue({ error: null } as never);
+    renderPage(client);
+
+    const input = screen.getByLabelText("Display name");
+    await user.clear(input);
+    await user.type(input, "  Nico F  ");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateUserMock).toHaveBeenCalledWith({ name: "Nico F" }));
+    expect(client.getQueryData(sessionUserQuery.queryKey)).toEqual({
+      ...SESSION_USER,
+      name: "Nico F",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: sessionUserQuery.queryKey,
+      exact: true,
+    });
+  });
+
   it("shows a field error instead of submitting an empty name", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -95,14 +132,19 @@ describe("ProfilePage", () => {
     expect(updateUserMock).not.toHaveBeenCalled();
   });
 
-  it("toasts when the profile cannot be saved", async () => {
+  it("toasts without changing the cached user when the profile cannot be saved", async () => {
     const user = userEvent.setup();
+    const client = new QueryClient();
+    client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
     updateUserMock.mockResolvedValue({ error: { message: "nope" } } as never);
-    renderPage();
+    renderPage(client);
 
     await user.type(screen.getByLabelText("Display name"), "!{Enter}");
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not save the profile."));
+    expect(client.getQueryData(sessionUserQuery.queryKey)).toEqual(SESSION_USER);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("renders the admin badge in sentence case", () => {

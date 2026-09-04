@@ -49,11 +49,16 @@ function ProfileForms({
         toast.error("Could not save the profile.");
         return;
       }
+      queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
+        current ? { ...current, name } : current,
+      );
       nameForm.reset({ name });
-      // The shell reads the name from the cached session, not from this
-      // component's store — without this it keeps the old one until the entry
-      // goes stale.
-      void queryClient.invalidateQueries({ queryKey: sessionUserQuery.queryKey });
+      // The shell observes this cache, so the patch above updates it immediately;
+      // refetch in the background to reconcile with the authoritative session.
+      void queryClient.invalidateQueries({
+        queryKey: sessionUserQuery.queryKey,
+        exact: true,
+      });
     },
   });
 

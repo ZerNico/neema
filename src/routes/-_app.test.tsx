@@ -1,16 +1,33 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Route } from "./_app.tsx";
+import { Route, SessionAppSidebar } from "./_app.tsx";
+import { sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
 import { getSessionUser } from "~/modules/auth/server/functions.ts";
 
 vi.mock("~/modules/auth/server/functions.ts", () => ({ getSessionUser: vi.fn() }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
-// The shell is covered by its own tests; the route only guards it.
-vi.mock("~/modules/chat/ui/app-sidebar.tsx", () => ({ AppSidebar: () => <div /> }));
+vi.mock("~/modules/chat/ui/app-sidebar.tsx", () => ({
+  AppSidebar: ({ user }: { user: { name: string } }) => (
+    <div data-testid="sidebar-user">{user.name}</div>
+  ),
+}));
 
 const sessionMock = vi.mocked(getSessionUser);
 
-const user = { id: "u1", name: "Ada", email: "ada@example.com", role: "user" };
+const user: SessionData["user"] = {
+  id: "u1",
+  name: "Ada",
+  email: "ada@example.com",
+  emailVerified: true,
+  image: null,
+  role: "user",
+  banned: false,
+  banReason: null,
+  banExpires: null,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  updatedAt: new Date("2026-01-01T00:00:00Z"),
+};
 
 const runBeforeLoad = (queryClient: QueryClient) =>
   // Only the field beforeLoad reads; the router supplies the rest.
@@ -68,5 +85,27 @@ describe("app shell guard", () => {
       options: { to: "/login" },
     });
     expect(sessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates the sidebar when the cached session user changes", async () => {
+    const queryClient = newClient();
+    queryClient.setQueryData(sessionUserQuery.queryKey, user);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionAppSidebar initialUser={user} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Ada");
+
+    act(() => {
+      queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
+        current ? { ...current, name: "Grace" } : current,
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Grace"));
+    expect(sessionMock).not.toHaveBeenCalled();
   });
 });
