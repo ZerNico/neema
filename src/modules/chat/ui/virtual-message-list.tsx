@@ -6,6 +6,9 @@ import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 
+const BOTTOM_THRESHOLD = 48;
+const ESTIMATED_MESSAGE_HEIGHT = 96;
+
 // Virtualized, bottom-anchored message list. Only visible messages render
 // (long chats stay cheap), heights are measured dynamically (markdown blocks
 // vary wildly), and the list follows streaming output while the user is at
@@ -26,9 +29,16 @@ export function VirtualMessageList({
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 96,
+    estimateSize: () => ESTIMATED_MESSAGE_HEIGHT,
+    // Begin with the ending range on the very first render. Without an initial
+    // offset, the mount effect first renders and measures the beginning of a
+    // long chat, then walks through several expensive markdown slices on its
+    // way to the bottom.
+    initialOffset: () => messages.length * ESTIMATED_MESSAGE_HEIGHT,
     overscan: 6,
     getItemKey: (index) => messages[index]!.id,
+    anchorTo: "end",
+    scrollEndThreshold: BOTTOM_THRESHOLD,
   });
 
   // When an item above the viewport resizes (e.g. images/code settle),
@@ -37,13 +47,15 @@ export function VirtualMessageList({
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     item.start < (instance.scrollOffset ?? 0);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
-    pinnedRef.current = true;
-    setAtBottom(true);
-  }, []);
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      if (!scrollRef.current) return;
+      pinnedRef.current = true;
+      setAtBottom(true);
+      virtualizer.scrollToEnd({ behavior });
+    },
+    [virtualizer],
+  );
 
   // Track whether the user is at (or near) the bottom.
   useEffect(() => {
@@ -51,7 +63,7 @@ export function VirtualMessageList({
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const nearBottom = distance < 48;
+      const nearBottom = distance <= BOTTOM_THRESHOLD;
       setAtBottom(nearBottom);
       pinnedRef.current = nearBottom;
     };
@@ -64,15 +76,6 @@ export function VirtualMessageList({
   useEffect(() => {
     if (pinnedRef.current) scrollToBottom();
   }, [messages.length, followKey, scrollToBottom]);
-
-  // Land at the bottom on first mount — and stay there while the virtualizer
-  // replaces its initial size estimates with real measured heights. Rows are
-  // measured as they render, so the total size keeps growing for a few frames
-  // after mount; a single mount-time scroll would end up mid-list.
-  const totalSize = virtualizer.getTotalSize();
-  useEffect(() => {
-    if (pinnedRef.current) scrollToBottom();
-  }, [totalSize, scrollToBottom]);
 
   const items = virtualizer.getVirtualItems();
 

@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -14,6 +13,7 @@ import {
   RetryMessageInput,
   SendMessageInput,
 } from "../schema.ts";
+import { loadConversationDetail } from "./conversation-detail.ts";
 import { ChatRepo } from "./repo.ts";
 import { ChatService } from "./service.ts";
 
@@ -55,46 +55,7 @@ export const getConversationWithMessages = createServerFn({ method: "GET" })
   .validator(standard(ConversationIdInput))
   .handler(({ data, context }) =>
     runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const attachmentRepo = yield* AttachmentRepo;
-        const conversation = yield* repo.getConversation(
-          context.session.user.id,
-          data.conversationId,
-        );
-        const messages = yield* repo.listMessages(conversation.id);
-        // For streaming messages the client resumes via SSE using the chunks
-        // persisted so far; ship them inline so the first paint is complete.
-        const streaming = messages.find((m) => m.status === "streaming");
-        const pendingChunks = streaming ? yield* repo.chunksAfter(streaming.id, 0) : [];
-        const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
-        // Durable generation activity for all assistant messages. Tool results
-        // are summaries only; compaction events carry generated summaries and
-        // safe ordering metadata, never the transcript they summarized.
-        const toolCalls = yield* repo.listToolCalls(assistantIds);
-        const compactionEvents = yield* repo.listCompactionEvents(assistantIds);
-        // Flat, like tool calls — the view groups by messageId.
-        const attachments = yield* attachmentRepo.listForMessages(
-          messages.filter((m) => m.role === "user").map((m) => m.id),
-        );
-        // The source of a branch, for the "branched from" link. Read through
-        // the same ownership check, and null when it has been deleted since.
-        const branchedFrom = conversation.branchedFrom
-          ? yield* repo.getConversation(context.session.user.id, conversation.branchedFrom).pipe(
-              Effect.map((source) => ({ conversationId: source.id, title: source.title })),
-              Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
-            )
-          : null;
-        return {
-          conversation,
-          messages,
-          pendingChunks,
-          toolCalls,
-          compactionEvents,
-          attachments,
-          branchedFrom,
-        };
-      }).pipe(
+      loadConversationDetail(context.session.user.id, data.conversationId).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),
         ),

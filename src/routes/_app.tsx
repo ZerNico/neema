@@ -1,5 +1,5 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
-import { getSession } from "~/modules/auth/server/functions.ts";
+import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
@@ -8,10 +8,10 @@ import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: async () => {
-    const session = await getSession();
-    if (!session) throw redirect({ to: "/login" });
-    return { user: session.user };
+  beforeLoad: async ({ context }) => {
+    const user = await context.queryClient.ensureQueryData(sessionUserQuery);
+    if (!user) throw redirect({ to: "/login" });
+    return { user };
   },
   loader: async ({ context }) => {
     await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery(""));

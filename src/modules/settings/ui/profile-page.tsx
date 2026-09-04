@@ -1,6 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { authClient } from "~/modules/auth/client.ts";
+import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
 import { AdminPage, ListCard, ListRow } from "~/modules/admin/ui/admin-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
@@ -10,6 +10,7 @@ import { Input } from "~/ui/primitives/input";
 
 export function ProfilePage() {
   const session = authClient.useSession();
+  const queryClient = useQueryClient();
   const user = session.data?.user;
 
   const [name, setName] = useState<string | null>(null);
@@ -24,7 +25,13 @@ export function ProfilePage() {
       const { error } = await authClient.updateUser({ name: effectiveName.trim() });
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => setName(null),
+    onSuccess: () => {
+      setName(null);
+      // The shell reads the name from the cached session, not from this
+      // component's store — without this it keeps the old one until the entry
+      // goes stale.
+      void queryClient.invalidateQueries({ queryKey: sessionUserQuery.queryKey });
+    },
   });
 
   const changePassword = useMutation({

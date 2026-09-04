@@ -10,7 +10,7 @@ import {
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
@@ -51,6 +51,7 @@ export function AppSidebar({
   user: { id: string; name: string; email: string; role?: string | null | undefined };
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const conversationsPages = useSuspenseInfiniteQuery(conversationsInfiniteQuery(""));
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
@@ -209,6 +210,11 @@ export function AppSidebar({
                 <DropdownMenuItem
                   onClick={async () => {
                     await authClient.signOut();
+                    // The cache outlives the route, so signing out has to empty
+                    // it: the session, this list of conversations and every
+                    // conversation read through it all belong to the account
+                    // that just left.
+                    queryClient.clear();
                     await navigate({ to: "/login" });
                   }}
                 >
