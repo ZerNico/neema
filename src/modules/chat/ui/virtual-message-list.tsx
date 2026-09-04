@@ -21,11 +21,14 @@ export function VirtualMessageList({
   messages: DisplayMessage[];
   followKey: number;
 }) {
+  "use no memo";
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   // Whether auto-follow is engaged; detaches when the user scrolls up.
   const pinnedRef = useRef(true);
 
+  // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual exposes a mutable imperative instance
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
