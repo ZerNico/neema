@@ -1,11 +1,19 @@
+import { FileValidationIcon, GlobalSearchIcon, Link01Icon } from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import type { AnyFieldApi } from "@tanstack/react-form";
+import { Schema } from "effect";
 import { useState } from "react";
-import { AdminPage, ListCard, ListRow } from "~/modules/admin/ui/admin-shell.tsx";
+import { toast } from "sonner";
+import { useConfirm } from "~/ui/confirm.tsx";
+import { useAppForm } from "~/ui/form/app-form.tsx";
+import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
+import { cn } from "~/ui/utils";
 import {
   getDocumentParserTool,
   getUrlReaderTool,
@@ -35,185 +43,297 @@ type TestResult =
   | { ok: true; resultCount: number; latencyMs: number }
   | { ok: false; error: string };
 
-export function ToolsPage() {
+// Number inputs are kept as strings in form state (what the <input> holds);
+// the schema parses and range-checks them, so a typo shows as a field error
+// instead of silently disabling Save.
+const integerBetween = (minimum: number, maximum: number) =>
+  Schema.NumberFromString.check(
+    Schema.isInt({ message: "Enter a whole number." }),
+    Schema.isBetween({ minimum, maximum }, { message: `Between ${minimum} and ${maximum}.` }),
+  );
+
+const WebSearchForm = Schema.Struct({
+  baseUrl: Schema.String.check(Schema.isMinLength(1, { message: "Enter the base URL." })),
+  secret: Schema.String,
+  maxResults: integerBetween(1, 20),
+});
+
+const UrlReaderForm = Schema.Struct({
+  perPageCharCap: integerBetween(1000, 20000),
+});
+
+const DocumentParserForm = Schema.Struct({
+  maxChars: integerBetween(1000, 500_000),
+  maxPages: integerBetween(1, 2000),
+});
+
+const fieldErrors = (field: AnyFieldApi) =>
+  field.state.meta.errors.map((e: unknown) => ({
+    message:
+      typeof e === "string" ? e : ((e as { message?: string } | undefined)?.message ?? "Invalid"),
+  }));
+
+/** Number input with min/max — TextField only covers text-like controls. */
+function NumberField({
+  field,
+  label,
+  description,
+  min,
+  max,
+  step,
+  className,
+}: {
+  field: AnyFieldApi;
+  label: string;
+  description?: string;
+  min: number;
+  max: number;
+  step?: number;
+  className?: string;
+}) {
+  const showError = field.state.meta.errors.length > 0;
+  return (
+    <Field className={className} data-invalid={showError || undefined}>
+      <FieldLabel htmlFor={field.name}>{label}</FieldLabel>
+      <Input
+        id={field.name}
+        name={field.name}
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={step}
+        value={field.state.value}
+        onBlur={field.handleBlur}
+        onChange={(e) => field.handleChange(e.target.value)}
+        aria-invalid={showError || undefined}
+      />
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
+      {showError ? <FieldError errors={fieldErrors(field)} /> : null}
+    </Field>
+  );
+}
+
+const useInvalidateTools = (availabilityKey: string) => {
   const queryClient = useQueryClient();
-  const { data: tool } = useSuspenseQuery(webSearchToolQuery);
-
-  // null = untouched → falls back to the stored value
-  const [baseUrl, setBaseUrl] = useState<string | null>(null);
-  const [secret, setSecret] = useState("");
-  const [maxResults, setMaxResults] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-
-  const config = (tool?.config ?? {}) as {
-    baseUrl?: string;
-    maxResults?: number;
-  };
-
-  const effectiveBaseUrl = baseUrl ?? config.baseUrl ?? "";
-  const effectiveMaxResults = maxResults ?? String(config.maxResults ?? 8);
-
-  const invalidate = () =>
+  return () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
-      queryClient.invalidateQueries({ queryKey: ["tools", "web-search", "availability"] }),
+      queryClient.invalidateQueries({ queryKey: ["tools", availabilityKey, "availability"] }),
     ]);
+};
+
+export function ToolsPage() {
+  return (
+    <Page title="Tools" description="Assistant tools available in chats.">
+      <WebSearchSection />
+      <UrlReaderSection />
+      <DocumentParserSection />
+    </Page>
+  );
+}
+
+function WebSearchSection() {
+  const { data: tool } = useSuspenseQuery(webSearchToolQuery);
+  const confirm = useConfirm();
+  const invalidate = useInvalidateTools("web-search");
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  const config = (tool?.config ?? {}) as { baseUrl?: string; maxResults?: number };
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateWebSearchTool({ data: { enabled } }),
     onSuccess: invalidate,
-  });
-
-  const save = useMutation({
-    mutationFn: () =>
-      updateWebSearchTool({
-        data: {
-          baseUrl: effectiveBaseUrl,
-          maxResults: Number(effectiveMaxResults),
-          ...(secret ? { secret } : {}),
-        },
-      }),
-    onSuccess: async () => {
-      setSecret("");
-      setBaseUrl(null);
-      setMaxResults(null);
-      await invalidate();
-    },
+    onError: () => toast.error("Could not update web search."),
   });
 
   const clearSecret = useMutation({
     mutationFn: () => updateWebSearchTool({ data: { clearSecret: true } }),
     onSuccess: invalidate,
+    onError: () => toast.error("Could not clear the secret."),
   });
 
   const test = useMutation({
-    mutationFn: () =>
-      testSearchConnection({ data: { baseUrl: effectiveBaseUrl, ...(secret ? { secret } : {}) } }),
+    mutationFn: (input: { baseUrl: string; secret: string }) =>
+      testSearchConnection({
+        data: { baseUrl: input.baseUrl, ...(input.secret ? { secret: input.secret } : {}) },
+      }),
     onSuccess: (result) => setTestResult(result),
+    onError: () => toast.error("Could not test the connection."),
+  });
+
+  const form = useAppForm({
+    defaultValues: {
+      baseUrl: config.baseUrl ?? "",
+      secret: "",
+      maxResults: String(config.maxResults ?? 8),
+    },
+    validators: { onSubmit: Schema.toStandardSchemaV1(WebSearchForm) },
+    onSubmit: async ({ value }) => {
+      try {
+        await updateWebSearchTool({
+          data: {
+            baseUrl: value.baseUrl,
+            maxResults: Number(value.maxResults),
+            ...(value.secret ? { secret: value.secret } : {}),
+          },
+        });
+      } catch {
+        toast.error("Could not save the web search settings.");
+        return;
+      }
+      form.reset({ baseUrl: value.baseUrl, secret: "", maxResults: value.maxResults });
+      await invalidate();
+    },
   });
 
   if (!tool) {
     return (
-      <AdminPage title="Tools" description="Assistant tools available in chats.">
-        <p className="text-muted-foreground text-sm">
-          The web_search tool row is missing — run database migrations.
-        </p>
-      </AdminPage>
+      <Section title="Web search">
+        <EmptyState
+          icon={GlobalSearchIcon}
+          title="This tool isn't set up yet."
+          description="Web search will appear here once it is available on this instance."
+        />
+      </Section>
     );
   }
 
-  const numbersValid = Number(effectiveMaxResults) >= 1 && Number(effectiveMaxResults) <= 20;
-
   return (
-    <AdminPage title="Tools" description="Assistant tools available in chats.">
-      <section className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Web search
-        </h2>
-        <ListCard>
-          <ListRow>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium">Web search</span>
-              <span className="text-muted-foreground text-xs">
-                SearXNG-backed search returning titles and snippets. Models with tool support get a
-                search toggle in the composer.
-              </span>
-            </div>
-            <Switch
-              checked={tool.enabled}
-              onCheckedChange={(checked) => toggle.mutate(checked)}
-              disabled={toggle.isPending}
-            />
-          </ListRow>
+    <Section title="Web search">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Web search</span>
+            <span className="text-muted-foreground text-xs">
+              SearXNG-backed search returning titles and snippets. Models with tool support get a
+              search toggle in the composer.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+            aria-label="Web search enabled"
+          />
+        </ListRow>
 
-          <ListRow className="flex-col items-stretch gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs">Backend</span>
-              <Badge>SearXNG</Badge>
-            </div>
-            <Field>
-              <FieldLabel>Base URL</FieldLabel>
-              <Input
-                value={effectiveBaseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://localhost:8081"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>
-                Bearer secret{" "}
-                <span className="text-muted-foreground font-normal">
-                  {tool.secretConfigured ? "(configured — leave empty to keep)" : "(optional)"}
-                </span>
-              </FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  className="flex-1"
+        <ListRow className="flex-col items-stretch gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">Backend</span>
+            <Badge variant="outline">SearXNG</Badge>
+          </div>
+          <form
+            noValidate
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void form.handleSubmit();
+            }}
+          >
+            <form.AppField name="baseUrl">
+              {(field) => (
+                <field.TextField label="Base URL" type="url" placeholder="http://localhost:8081" />
+              )}
+            </form.AppField>
+            <form.Field name="secret">
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor={field.name}>Bearer secret</FieldLabel>
+                  <div className="flex gap-2">
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      type="password"
+                      autoComplete="off"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      className="flex-1"
+                    />
+                    {tool.secretConfigured ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={clearSecret.isPending}
+                        aria-busy={clearSecret.isPending || undefined}
+                        onClick={async () => {
+                          const confirmed = await confirm({
+                            title: "Clear the stored secret?",
+                            description:
+                              "Web search will call SearXNG without a bearer token until a new secret is saved.",
+                            confirmLabel: "Clear",
+                          });
+                          if (confirmed) clearSecret.mutate();
+                        }}
+                      >
+                        {clearSecret.isPending ? (
+                          <Spinner data-icon="inline-start" aria-hidden />
+                        ) : null}
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                  <FieldDescription>
+                    {tool.secretConfigured
+                      ? "A secret is stored. Leave empty to keep it."
+                      : "Optional."}
+                  </FieldDescription>
+                </Field>
+              )}
+            </form.Field>
+            <form.Field
+              name="maxResults"
+              validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1, 20)) }}
+            >
+              {(field) => (
+                <NumberField
+                  field={field}
+                  label="Max results per query"
+                  min={1}
+                  max={20}
+                  className="max-w-48"
                 />
-                {tool.secretConfigured ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => clearSecret.mutate()}
-                    disabled={clearSecret.isPending}
-                  >
-                    Clear
-                  </Button>
-                ) : null}
-              </div>
-            </Field>
-            <Field className="max-w-48">
-              <FieldLabel>Max results per query</FieldLabel>
-              <Input
-                type="number"
-                min={1}
-                max={20}
-                value={effectiveMaxResults}
-                onChange={(e) => setMaxResults(e.target.value)}
-              />
-            </Field>
+              )}
+            </form.Field>
             {testResult ? (
               <p
-                className={
-                  testResult.ok ? "text-muted-foreground text-xs" : "text-destructive text-xs"
-                }
+                role="status"
+                className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
               >
                 {testResult.ok
-                  ? `Connection ok — ${testResult.resultCount} results in ${testResult.latencyMs}ms`
-                  : `Connection failed: ${testResult.error}`}
+                  ? `Connection ok — ${testResult.resultCount} results in ${testResult.latencyMs}ms.`
+                  : `Could not connect: ${testResult.error}`}
               </p>
             ) : null}
             <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={() => save.mutate()}
-                disabled={!effectiveBaseUrl.trim() || !numbersValid || save.isPending}
-              >
-                {save.isPending ? "Saving…" : "Save"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setTestResult(null);
-                  test.mutate();
-                }}
-                disabled={!effectiveBaseUrl.trim() || test.isPending}
-              >
-                {test.isPending ? "Testing…" : "Test connection"}
-              </Button>
+              <form.AppForm>
+                <form.SubmitButton size="sm">Save</form.SubmitButton>
+              </form.AppForm>
+              <form.Subscribe selector={(s) => [s.values.baseUrl, s.values.secret] as const}>
+                {([baseUrl, secret]) => (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!baseUrl.trim() || test.isPending}
+                    aria-busy={test.isPending || undefined}
+                    onClick={() => {
+                      setTestResult(null);
+                      test.mutate({ baseUrl, secret });
+                    }}
+                  >
+                    {test.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+                    Test connection
+                  </Button>
+                )}
+              </form.Subscribe>
             </div>
-          </ListRow>
-        </ListCard>
-      </section>
-
-      <UrlReaderSection />
-      <DocumentParserSection />
-    </AdminPage>
+          </form>
+        </ListRow>
+      </ListCard>
+    </Section>
   );
 }
 
@@ -221,52 +341,46 @@ export function ToolsPage() {
 // Fetches go out from this server with SSRF guarding (private addresses and
 // redirects to them are refused); the page is extracted to markdown locally.
 function UrlReaderSection() {
-  const queryClient = useQueryClient();
   const { data: tool } = useSuspenseQuery(urlReaderToolQuery);
+  const invalidate = useInvalidateTools("web-search");
 
-  const [perPageCharCap, setPerPageCharCap] = useState<string | null>(null);
   const config = (tool?.config ?? {}) as { perPageCharCap?: number };
-  const effectiveCharCap = perPageCharCap ?? String(config.perPageCharCap ?? 12000);
-
-  const invalidate = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
-      queryClient.invalidateQueries({ queryKey: ["tools", "web-search", "availability"] }),
-    ]);
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateUrlReaderTool({ data: { enabled } }),
     onSuccess: invalidate,
+    onError: () => toast.error("Could not update the URL reader."),
   });
 
-  const save = useMutation({
-    mutationFn: () => updateUrlReaderTool({ data: { perPageCharCap: Number(effectiveCharCap) } }),
-    onSuccess: async () => {
-      setPerPageCharCap(null);
+  const form = useAppForm({
+    defaultValues: { perPageCharCap: String(config.perPageCharCap ?? 12000) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(UrlReaderForm) },
+    onSubmit: async ({ value }) => {
+      try {
+        await updateUrlReaderTool({ data: { perPageCharCap: Number(value.perPageCharCap) } });
+      } catch {
+        toast.error("Could not save the URL reader settings.");
+        return;
+      }
+      form.reset({ perPageCharCap: value.perPageCharCap });
       await invalidate();
     },
   });
 
   if (!tool) {
     return (
-      <section className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          URL reader
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          The read_url tool row is missing — run database migrations.
-        </p>
-      </section>
+      <Section title="URL reader">
+        <EmptyState
+          icon={Link01Icon}
+          title="This tool isn't set up yet."
+          description="The URL reader will appear here once it is available on this instance."
+        />
+      </Section>
     );
   }
 
-  const capValid = Number(effectiveCharCap) >= 1000 && Number(effectiveCharCap) <= 20000;
-
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-        URL reader
-      </h2>
+    <Section title="URL reader">
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -286,27 +400,39 @@ function UrlReaderSection() {
           />
         </ListRow>
         <ListRow className="flex-col items-stretch gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel>Per-page character cap</FieldLabel>
-              <Input
-                type="number"
-                min={1000}
-                max={20000}
-                step={1000}
-                value={effectiveCharCap}
-                onChange={(e) => setPerPageCharCap(e.target.value)}
-              />
-            </Field>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => save.mutate()} disabled={!capValid || save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </div>
+          <form
+            noValidate
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void form.handleSubmit();
+            }}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <form.Field
+                name="perPageCharCap"
+                validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1000, 20000)) }}
+              >
+                {(field) => (
+                  <NumberField
+                    field={field}
+                    label="Per-page character cap"
+                    min={1000}
+                    max={20000}
+                    step={1000}
+                  />
+                )}
+              </form.Field>
+            </div>
+            <div className="flex gap-2">
+              <form.AppForm>
+                <form.SubmitButton size="sm">Save</form.SubmitButton>
+              </form.AppForm>
+            </div>
+          </form>
         </ListRow>
       </ListCard>
-    </section>
+    </Section>
   );
 }
 
@@ -314,63 +440,51 @@ function UrlReaderSection() {
 // Kept local on purpose — the alternative would ship the user's document to a
 // third-party parser.
 function DocumentParserSection() {
-  const queryClient = useQueryClient();
   const { data: tool } = useSuspenseQuery(documentParserToolQuery);
-
-  const [maxChars, setMaxChars] = useState<string | null>(null);
-  const [maxPages, setMaxPages] = useState<string | null>(null);
+  const invalidate = useInvalidateTools("document-parsing");
 
   const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
-  const effectiveMaxChars = maxChars ?? String(config.maxChars ?? 120000);
-  const effectiveMaxPages = maxPages ?? String(config.maxPages ?? 200);
-
-  const invalidate = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
-      queryClient.invalidateQueries({ queryKey: ["tools", "document-parsing", "availability"] }),
-    ]);
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateDocumentParserTool({ data: { enabled } }),
     onSuccess: invalidate,
+    onError: () => toast.error("Could not update document parsing."),
   });
 
-  const save = useMutation({
-    mutationFn: () =>
-      updateDocumentParserTool({
-        data: { maxChars: Number(effectiveMaxChars), maxPages: Number(effectiveMaxPages) },
-      }),
-    onSuccess: async () => {
-      setMaxChars(null);
-      setMaxPages(null);
+  const form = useAppForm({
+    defaultValues: {
+      maxChars: String(config.maxChars ?? 120000),
+      maxPages: String(config.maxPages ?? 200),
+    },
+    validators: { onSubmit: Schema.toStandardSchemaV1(DocumentParserForm) },
+    onSubmit: async ({ value }) => {
+      try {
+        await updateDocumentParserTool({
+          data: { maxChars: Number(value.maxChars), maxPages: Number(value.maxPages) },
+        });
+      } catch {
+        toast.error("Could not save the document parsing settings.");
+        return;
+      }
+      form.reset({ maxChars: value.maxChars, maxPages: value.maxPages });
       await invalidate();
     },
   });
 
   if (!tool) {
     return (
-      <section className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Document parsing
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          The document_parser tool row is missing — run database migrations.
-        </p>
-      </section>
+      <Section title="Document parsing">
+        <EmptyState
+          icon={FileValidationIcon}
+          title="This tool isn't set up yet."
+          description="Document parsing will appear here once it is available on this instance."
+        />
+      </Section>
     );
   }
 
-  const numbersValid =
-    Number(effectiveMaxChars) >= 1000 &&
-    Number(effectiveMaxChars) <= 500000 &&
-    Number(effectiveMaxPages) >= 1 &&
-    Number(effectiveMaxPages) <= 2000;
-
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-        Document parsing
-      </h2>
+    <Section title="Document parsing">
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -384,48 +498,55 @@ function DocumentParserSection() {
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
+            aria-label="Document parsing enabled"
           />
         </ListRow>
 
         <ListRow className="flex-col items-stretch gap-3">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs">Backend</span>
-            <Badge>{tool.kind === "local" ? "Local (unpdf)" : tool.kind}</Badge>
+            <Badge variant="outline">{tool.kind === "local" ? "Local (unpdf)" : tool.kind}</Badge>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel>Max characters</FieldLabel>
-              <Input
-                type="number"
-                min={1000}
-                max={500000}
-                step={1000}
-                value={effectiveMaxChars}
-                onChange={(e) => setMaxChars(e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Max pages</FieldLabel>
-              <Input
-                type="number"
-                min={1}
-                max={2000}
-                value={effectiveMaxPages}
-                onChange={(e) => setMaxPages(e.target.value)}
-              />
-            </Field>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => save.mutate()}
-              disabled={!numbersValid || save.isPending}
-            >
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </div>
+          <form
+            noValidate
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void form.handleSubmit();
+            }}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <form.Field
+                name="maxChars"
+                validators={{
+                  onSubmit: Schema.toStandardSchemaV1(integerBetween(1000, 500_000)),
+                }}
+              >
+                {(field) => (
+                  <NumberField
+                    field={field}
+                    label="Max characters"
+                    min={1000}
+                    max={500000}
+                    step={1000}
+                  />
+                )}
+              </form.Field>
+              <form.Field
+                name="maxPages"
+                validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1, 2000)) }}
+              >
+                {(field) => <NumberField field={field} label="Max pages" min={1} max={2000} />}
+              </form.Field>
+            </div>
+            <div className="flex gap-2">
+              <form.AppForm>
+                <form.SubmitButton size="sm">Save</form.SubmitButton>
+              </form.AppForm>
+            </div>
+          </form>
         </ListRow>
       </ListCard>
-    </section>
+    </Section>
   );
 }

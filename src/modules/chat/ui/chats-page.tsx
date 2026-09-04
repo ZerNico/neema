@@ -1,7 +1,6 @@
 import {
   BubbleChatIcon,
   GitBranchIcon,
-  Loading03Icon,
   MoreHorizontalIcon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -10,20 +9,17 @@ import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { conversationsInfiniteQuery } from "../client/queries.ts";
-import { ConversationMenuItems, useConversationActions } from "./conversation-actions.tsx";
+import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
 import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { activityStamp, describeActivity } from "./timestamps.ts";
-import { AdminPage, EmptyState } from "~/modules/admin/ui/admin-shell.tsx";
-import { Button } from "~/ui/primitives/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "~/ui/primitives/dropdown-menu";
+import { EmptyState, Page } from "~/ui/page-shell.tsx";
+import { Button, buttonVariants } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
+import { Spinner } from "~/ui/primitives/spinner";
 import { useHydrated } from "~/ui/use-hydrated.ts";
+import { cn } from "~/ui/utils";
 
 // Only consumer of a debounce in the repo, so it lives here rather than
 // becoming another shared helper.
@@ -67,7 +63,7 @@ export function ChatsPage() {
   const empty = conversations.length === 0 && !pages.isPending;
 
   return (
-    <AdminPage
+    <Page
       title="Chats"
       description="Every conversation you've had, newest first."
       rootPath="/"
@@ -94,9 +90,9 @@ export function ChatsPage() {
             title="No chats yet"
             description="Start one from the composer and it will show up here."
             action={
-              <Button nativeButton={false} render={<Link to="/" />}>
+              <Link to="/" className={cn(buttonVariants({ variant: "outline" }))}>
                 New chat
-              </Button>
+              </Link>
             }
           />
         )
@@ -117,20 +113,20 @@ export function ChatsPage() {
                     <Link
                       to="/chat/$conversationId"
                       params={{ conversationId: conversation.id }}
-                      className="hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-lg px-3 py-2.5 pr-11 text-sm transition-colors"
+                      className="hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/30 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors outline-none focus-visible:ring-3"
                       {...(hydrated ? { title: describeActivity(conversation) } : {})}
                     >
                       {/* Same slot precedence as the sidebar: generation is
                           transient and outranks lineage for the moment. */}
                       {conversation.generating ? (
-                        <HugeiconsIcon
-                          icon={Loading03Icon}
-                          className="text-muted-foreground size-3.5 shrink-0 animate-spin"
+                        <Spinner
                           aria-label="Generating"
+                          className="text-muted-foreground size-3.5 shrink-0"
                         />
                       ) : conversation.branchedFrom ? (
                         <HugeiconsIcon
                           icon={GitBranchIcon}
+                          strokeWidth={2}
                           className="text-muted-foreground size-3.5 shrink-0"
                           aria-label="Branched conversation"
                         />
@@ -146,23 +142,20 @@ export function ChatsPage() {
                         {hydrated ? activityStamp(conversation) : ""}
                       </span>
                     </Link>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Actions for ${conversation.title ?? "New chat"}`}
-                            className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100"
-                          />
-                        }
-                      >
-                        <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <ConversationMenuItems conversation={conversation} actions={actions} />
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <ConversationMenu
+                      conversation={conversation}
+                      actions={actions}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Actions for ${conversation.title ?? "New chat"}`}
+                          className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100"
+                        />
+                      }
+                    >
+                      <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                    </ConversationMenu>
                   </li>
                 ))}
               </ul>
@@ -176,6 +169,6 @@ export function ChatsPage() {
         </div>
       )}
       {actions.renameDialog}
-    </AdminPage>
+    </Page>
   );
 }

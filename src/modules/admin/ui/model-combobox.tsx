@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchProviderCatalog } from "../server/functions.ts";
+import { MODEL_TYPE_LABELS } from "./model-settings-form.tsx";
 import type {
   ModelCapabilities,
   ModelPricing,
@@ -35,13 +36,18 @@ export interface CatalogPick {
 // selection flow.
 export function ModelCombobox({
   providerId,
+  inputId,
   onPick,
   onInput,
+  disabled = false,
 }: {
   providerId: string;
+  /** Forwarded to the text input so a FieldLabel can point at it. */
+  inputId?: string;
   onPick: (model: CatalogPick) => void;
   /** Fires on every keystroke with the raw text, for free-text fallback. */
   onInput?: (text: string) => void;
+  disabled?: boolean;
 }) {
   const [input, setInput] = useState("");
 
@@ -67,6 +73,7 @@ export function ModelCombobox({
   return (
     <Combobox
       items={items}
+      disabled={disabled}
       itemToStringLabel={(item: CatalogPick) => item.id}
       onValueChange={(value: CatalogPick | null) => {
         if (value) onPick(value);
@@ -77,22 +84,27 @@ export function ModelCombobox({
       }}
     >
       <ComboboxInput
+        id={inputId}
         placeholder={
           catalog.isLoading
             ? "Loading models…"
             : catalog.data?.ok === false
-              ? "Catalog unavailable — type a model id"
-              : "Search models or type an id…"
+              ? "Catalog unavailable — type a model ID"
+              : "Search models or type an ID…"
         }
       />
       <ComboboxContent>
-        <ComboboxEmpty>Type a model id to add it.</ComboboxEmpty>
+        <ComboboxEmpty>Type a model ID to add it.</ComboboxEmpty>
         <ComboboxList>
           {(item: CatalogPick) =>
             item.custom ? (
               <ComboboxItem key="__custom__" value={item}>
                 <span className="flex items-center gap-2">
-                  <HugeiconsIcon icon={PlusSignIcon} className="text-muted-foreground size-4" />
+                  <HugeiconsIcon
+                    icon={PlusSignIcon}
+                    strokeWidth={2}
+                    className="text-muted-foreground size-4"
+                  />
                   <span>
                     Add “<span className="font-medium">{item.id}</span>” as custom model
                   </span>
@@ -105,7 +117,7 @@ export function ModelCombobox({
                   <span className="text-muted-foreground text-xs">
                     {item.name}
                     {item.contextLength ? ` · ${Math.round(item.contextLength / 1000)}k ctx` : ""}
-                    {` · ${item.type}`}
+                    {` · ${MODEL_TYPE_LABELS[item.type]}`}
                   </span>
                 </span>
               </ComboboxItem>

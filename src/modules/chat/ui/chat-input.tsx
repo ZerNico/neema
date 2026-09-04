@@ -2,7 +2,6 @@ import {
   ArrowUp02Icon,
   Attachment01Icon,
   GlobalSearchIcon,
-  Loading03Icon,
   PlusSignIcon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
@@ -29,6 +28,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { Kbd } from "~/ui/primitives/kbd";
+import { Spinner } from "~/ui/primitives/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
 export const ChatInput = forwardRef<
@@ -50,6 +52,7 @@ export const ChatInput = forwardRef<
     /** Owner-held upload state; omitted renders the plus button disabled. */
     attachments?: AttachmentUploads | undefined;
     placeholder?: string;
+    textareaLabel?: string;
     autoFocus?: boolean;
     submitLabel?: string;
     className?: string;
@@ -70,6 +73,7 @@ export const ChatInput = forwardRef<
     onSearchEnabledChange,
     attachments,
     placeholder = "Message…",
+    textareaLabel,
     autoFocus = false,
     submitLabel = "Send",
     className,
@@ -155,12 +159,7 @@ export const ChatInput = forwardRef<
 
   return (
     <div
-      className={cn(
-        "relative",
-        CHAT_INPUT_SHELL_CLASS,
-        dragging ? "border-ring/60" : "",
-        className,
-      )}
+      className={cn("relative", CHAT_INPUT_SHELL_CLASS, dragging && "border-ring/60", className)}
       onDragEnter={(event) => {
         if (!acceptDrop(event)) return;
         event.preventDefault();
@@ -226,6 +225,7 @@ export const ChatInput = forwardRef<
         onSubmit={submit}
         onCancel={onCancel}
         placeholder={noModels ? "No models configured — ask an admin" : placeholder}
+        {...(textareaLabel ? { ariaLabel: textareaLabel } : {})}
         autoFocus={autoFocus}
         disabled={noModels || textareaDisabled}
       />
@@ -245,22 +245,29 @@ export const ChatInput = forwardRef<
               }}
             />
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Add attachment"
-                    disabled={controlsDisabled || attachments.isFull}
-                    className="text-muted-foreground size-8 rounded-full"
-                  />
-                }
-              >
-                <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
-              </DropdownMenuTrigger>
+              <Tooltip>
+                <DropdownMenuTrigger
+                  render={
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="Add attachment"
+                          disabled={controlsDisabled || attachments.isFull}
+                          className="text-muted-foreground"
+                        />
+                      }
+                    />
+                  }
+                >
+                  <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+                </DropdownMenuTrigger>
+                <TooltipContent>Add attachment</TooltipContent>
+              </Tooltip>
               <DropdownMenuContent align="start">
                 <DropdownMenuItem onClick={pickFiles}>
-                  <HugeiconsIcon icon={Attachment01Icon} className="size-4" />
+                  <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
                   Attach files
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -268,13 +275,13 @@ export const ChatInput = forwardRef<
           </>
         ) : (
           <Button
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             aria-label="Add attachment"
             disabled
-            className="text-muted-foreground size-8 rounded-full"
+            className="text-muted-foreground"
           >
-            <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
           </Button>
         )}
         {searchAvailable ? (
@@ -286,14 +293,13 @@ export const ChatInput = forwardRef<
             onClick={() => onSearchEnabledChange(!searchEnabled)}
             disabled={controlsDisabled}
             className={cn(
-              "h-8 gap-1.5 rounded-full px-2.5",
               searchEnabled
                 ? "bg-accent text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" />
-            <span className="text-sm max-[420px]:sr-only">Search</span>
+            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
+            <span className="max-[420px]:sr-only">Search</span>
           </Button>
         ) : null}
         <ModelPicker
@@ -305,11 +311,7 @@ export const ChatInput = forwardRef<
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Change model"
-              className={cn(
-                "text-muted-foreground hover:text-foreground hover:bg-accent h-8 min-w-0 max-w-52 gap-1.5",
-                "rounded-full px-2.5",
-              )}
+              className="text-muted-foreground hover:text-foreground hover:bg-accent min-w-0 max-w-52 gap-1.5"
             />
           }
         >
@@ -324,36 +326,48 @@ export const ChatInput = forwardRef<
           {onStop ? (
             // Deliberately outside the `canSubmit` gate: the composer is
             // disabled precisely while there is something to stop.
-            <Button
-              size="icon"
-              onClick={onStop}
-              aria-label="Stop generating"
-              className="size-8 rounded-full"
-            >
-              <HugeiconsIcon icon={StopIcon} className="size-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button size="icon-sm" onClick={onStop} aria-label="Stop generating" />}
+              >
+                <HugeiconsIcon icon={StopIcon} strokeWidth={2} />
+              </TooltipTrigger>
+              <TooltipContent>Stop generating</TooltipContent>
+            </Tooltip>
           ) : (
-            <Button
-              size="icon"
-              onClick={submit}
-              disabled={!canSubmit}
-              aria-label={attachments?.queued ? "Sending after uploads finish" : submitLabel}
-              aria-busy={attachments?.queued || undefined}
-              className="size-8 rounded-full"
-            >
-              <HugeiconsIcon
-                icon={attachments?.queued ? Loading03Icon : ArrowUp02Icon}
-                className={cn("size-4", attachments?.queued ? "animate-spin" : "")}
-              />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    onClick={submit}
+                    disabled={!canSubmit}
+                    aria-label={attachments?.queued ? "Sending after uploads finish" : submitLabel}
+                    aria-busy={attachments?.queued || undefined}
+                  />
+                }
+              >
+                {attachments?.queued ? (
+                  <Spinner aria-hidden />
+                ) : (
+                  <HugeiconsIcon icon={ArrowUp02Icon} strokeWidth={2} />
+                )}
+              </TooltipTrigger>
+              {/* Enter submits (chat-textarea.tsx); Shift+Enter breaks the line. */}
+              <TooltipContent>
+                {attachments?.queued ? "Sending after uploads finish" : submitLabel}
+                <Kbd>Enter</Kbd>
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
       </div>
       {dragging ? (
         // pointer-events-none so dragleave/drop still reach the shell.
-        <div className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[1.125rem] border-2 border-dashed backdrop-blur-[2px]">
+        // Inset by 0.25rem, so the radius is the shell's minus that inset.
+        <div className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[calc(1.375rem-0.25rem)] border-2 border-dashed backdrop-blur-[2px]">
           <span className="text-foreground flex items-center gap-2 text-sm font-medium">
-            <HugeiconsIcon icon={Attachment01Icon} className="size-4" />
+            <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
             Drop files to attach
           </span>
         </div>

@@ -64,7 +64,7 @@ describe("MessageBubble", () => {
     expect(screen.getByText("Thinking…")).toBeInTheDocument();
   });
 
-  it("shows an error note for failed generations", () => {
+  it("shows a friendly alert for failed generations", () => {
     render(
       <MessageBubble
         message={{
@@ -78,7 +78,73 @@ describe("MessageBubble", () => {
         }}
       />,
     );
-    expect(screen.getByText("Generation failed.")).toBeInTheDocument();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveAttribute("aria-atomic", "true");
+    expect(within(alert).getByText("Couldn’t generate a response")).toBeInTheDocument();
+    expect(within(alert).queryByText("Technical details")).toBeNull();
+    expect(within(alert).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("summarizes rate limits while preserving technical details and retry", () => {
+    const onRetry = vi.fn();
+    const error =
+      "Cause([Fail(ProviderUnreachable: OpenRouterClient.createChatCompletionStream: Rate limit exceeded. Retry after 2s)])";
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "3",
+          role: "assistant",
+          content: "partial",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "error",
+          error,
+          onRetry,
+        }}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText("Provider is temporarily busy")).toBeInTheDocument();
+    expect(within(alert).getByText(/Try again in 2 seconds/)).toBeInTheDocument();
+
+    const detailsTrigger = within(alert).getByRole("button", { name: "Technical details" });
+    expect(detailsTrigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(detailsTrigger);
+    expect(detailsTrigger).toHaveAttribute("aria-expanded", "true");
+    expect(within(alert).queryByText(error)).toBeNull();
+    expect(within(alert).getByText("Rate limit exceeded. Retry after 2s")).toHaveClass(
+      "[overflow-wrap:anywhere]",
+    );
+    expect(container.querySelector('[data-slot="collapsible-content"]')).toHaveClass(
+      "transition-[height,opacity]",
+      "data-ending-style:h-0",
+    );
+
+    within(alert).getByRole("button", { name: "Try again" }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("disables retry while another action is pending", () => {
+    render(
+      <MessageBubble
+        message={{
+          id: "3",
+          role: "assistant",
+          content: "",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "error",
+          onRetry: vi.fn(),
+          retryDisabled: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
   });
 });
 
@@ -432,15 +498,13 @@ describe("MessageBubble actions", () => {
     expect(onEdit).toHaveBeenCalledOnce();
   });
 
-  it("renders the controlled inline editor and wires its actions", () => {
-    const onDraftChange = vi.fn();
+  it("keeps the inline edit draft local and wires its actions", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     renderPlain({
       role: "user",
       editState: {
-        draft: "updated message",
-        onDraftChange,
+        initialDraft: "updated message",
         onSave,
         onCancel,
         saveDisabled: false,
@@ -453,16 +517,16 @@ describe("MessageBubble actions", () => {
       },
     });
 
-    const editor = screen.getByRole("textbox");
+    const editor = screen.getByRole("textbox", { name: "Edit message" });
     expect(editor).toHaveValue("updated message");
     fireEvent.change(editor, { target: { value: "new draft" } });
-    expect(onDraftChange).toHaveBeenCalledWith("new draft");
+    expect(editor).toHaveValue("new draft");
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search the web" })).toBeInTheDocument();
     expect(screen.getByText("Test Model")).toBeInTheDocument();
     screen.getByRole("button", { name: "Save edit" }).click();
     screen.getByRole("button", { name: "Cancel" }).click();
-    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave).toHaveBeenCalledWith("new draft");
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
@@ -470,8 +534,7 @@ describe("MessageBubble actions", () => {
     renderPlain({
       role: "user",
       editState: {
-        draft: "   ",
-        onDraftChange: vi.fn(),
+        initialDraft: "   ",
         onSave: vi.fn(),
         onCancel: vi.fn(),
         saveDisabled: false,

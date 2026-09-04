@@ -1,9 +1,7 @@
-"use client";
-
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
-import { cn } from "~/ui/utils";
+import { cn } from "cn";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";

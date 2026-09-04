@@ -1,9 +1,11 @@
-import { MoreVerticalIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { authClient } from "~/modules/auth/client.ts";
-import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
 import { membershipsQuery } from "./groups-page.tsx";
+import { useConfirm } from "~/ui/confirm.tsx";
+import { ErrorState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -15,8 +17,12 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Skeleton } from "~/ui/primitives/skeleton";
 
+// Group badges shown per row before collapsing into a "+N more" badge.
+const MAX_GROUP_BADGES = 2;
+
 export function UsersPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const session = authClient.useSession();
   // Read-only here; membership is edited on the group detail pages.
   const memberships = useQuery(membershipsQuery);
@@ -40,6 +46,7 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
+    onError: () => toast.error("Could not change the role."),
   });
 
   const ban = useMutation({
@@ -47,7 +54,11 @@ export function UsersPage() {
       const { error } = await authClient.admin.banUser({ userId });
       if (error) throw new Error(error.message);
     },
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await invalidate();
+      toast.success("User banned.");
+    },
+    onError: () => toast.error("Could not ban the user."),
   });
 
   const unban = useMutation({
@@ -56,10 +67,11 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
+    onError: () => toast.error("Could not unban the user."),
   });
 
   return (
-    <AdminPage title="Users" description="Everyone with an account on this instance.">
+    <Page title="Users" description="Everyone with an account on this instance.">
       {users.isLoading ? (
         <ListCard>
           {[0, 1, 2].map((i) => (
@@ -73,21 +85,16 @@ export function UsersPage() {
           ))}
         </ListCard>
       ) : users.isError ? (
-        <EmptyState
-          icon={UserMultipleIcon}
-          title="Could not load users"
-          description={users.error.message}
-          action={
-            <Button size="sm" variant="outline" onClick={() => users.refetch()}>
-              Retry
-            </Button>
-          }
-        />
+        <ErrorState title="Could not load users" onRetry={() => users.refetch()} />
       ) : (
         <ListCard>
           {users.data?.map((user) => {
             const isSelf = user.id === session.data?.user.id;
             const isAdmin = user.role === "admin";
+            const groupNames = (memberships.data ?? [])
+              .filter((membership) => membership.userId === user.id)
+              .map((membership) => membership.groupName);
+            const hiddenGroups = groupNames.length - MAX_GROUP_BADGES;
             return (
               <ListRow key={user.id}>
                 <Avatar className="size-9">
@@ -95,21 +102,24 @@ export function UsersPage() {
                 </Avatar>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="flex items-center gap-2 text-sm font-medium">
-                    {user.name}
+                    <span className="min-w-0 truncate">{user.name}</span>
                     {isSelf ? <span className="text-muted-foreground text-xs">(you)</span> : null}
                   </span>
                   <span className="text-muted-foreground truncate text-xs">{user.email}</span>
                 </div>
-                {(memberships.data ?? [])
-                  .filter((membership) => membership.userId === user.id)
-                  .map((membership) => (
-                    <Badge key={membership.groupId} variant="secondary">
-                      {membership.groupName}
-                    </Badge>
-                  ))}
-                {user.banned ? <Badge variant="destructive">banned</Badge> : null}
+                {groupNames.slice(0, MAX_GROUP_BADGES).map((groupName) => (
+                  <Badge key={groupName} variant="secondary">
+                    {groupName}
+                  </Badge>
+                ))}
+                {hiddenGroups > 0 ? (
+                  <Badge variant="secondary" title={groupNames.slice(MAX_GROUP_BADGES).join(", ")}>
+                    +{hiddenGroups} more
+                  </Badge>
+                ) : null}
+                {user.banned ? <Badge variant="destructive">Banned</Badge> : null}
                 <Badge variant={isAdmin ? "default" : "outline"}>
-                  {isAdmin ? "admin" : "user"}
+                  {isAdmin ? "Admin" : "User"}
                 </Badge>
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -122,7 +132,7 @@ export function UsersPage() {
                       />
                     }
                   >
-                    <HugeiconsIcon icon={MoreVerticalIcon} className="size-4" />
+                    <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
@@ -134,10 +144,24 @@ export function UsersPage() {
                     </DropdownMenuItem>
                     {user.banned ? (
                       <DropdownMenuItem onClick={() => unban.mutate(user.id)}>
-                        Unban
+                        Unban user
                       </DropdownMenuItem>
                     ) : (
-                      <DropdownMenuItem variant="destructive" onClick={() => ban.mutate(user.id)}>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={async () => {
+                          if (
+                            await confirm({
+                              title: `Ban ${user.name}?`,
+                              description:
+                                "They are signed out everywhere and cannot sign in again until unbanned. Their data stays.",
+                              confirmLabel: "Ban user",
+                            })
+                          ) {
+                            ban.mutate(user.id);
+                          }
+                        }}
+                      >
                         Ban user
                       </DropdownMenuItem>
                     )}
@@ -148,6 +172,6 @@ export function UsersPage() {
           })}
         </ListCard>
       )}
-    </AdminPage>
+    </Page>
   );
 }

@@ -28,8 +28,12 @@ const setup = (range: UsageRangeEncoded = { kind: "preset", days: 30 }) => {
   return { onChange, user };
 };
 
+// The trigger has no aria-label: its visible text *is* the range, so the
+// button is found by that text.
+const trigger = () => screen.getByRole("button", { name: /Last \d+ days|–/ });
+
 const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByLabelText("Date range"));
+  await user.click(trigger());
 };
 
 /**
@@ -45,7 +49,7 @@ const day = (iso: string): HTMLElement => {
 describe("UsageRangePicker", () => {
   it("labels the trigger with the active preset", () => {
     setup({ kind: "preset", days: 7 });
-    expect(screen.getByLabelText("Date range")).toHaveTextContent("Last 7 days");
+    expect(trigger()).toHaveTextContent("Last 7 days");
   });
 
   it("labels the trigger with the inclusive end day of a custom range", () => {
@@ -56,7 +60,7 @@ describe("UsageRangePicker", () => {
       from: "2026-08-10T00:00:00.000Z",
       to: "2026-08-16T00:00:00.000Z",
     });
-    expect(screen.getByLabelText("Date range")).toHaveTextContent("Aug 10 – Aug 15, 2026");
+    expect(trigger()).toHaveTextContent("Aug 10 – Aug 15, 2026");
   });
 
   it("emits a tagged preset and closes", async () => {

@@ -14,6 +14,7 @@ export const ChatTextarea = forwardRef<
     onSubmit: () => void;
     onCancel?: (() => void) | undefined;
     placeholder?: string;
+    ariaLabel?: string;
     autoFocus?: boolean;
     disabled?: boolean;
     className?: string;
@@ -25,6 +26,7 @@ export const ChatTextarea = forwardRef<
     onSubmit,
     onCancel,
     placeholder,
+    ariaLabel,
     autoFocus = false,
     disabled = false,
     className,
@@ -65,6 +67,7 @@ export const ChatTextarea = forwardRef<
         }
       }}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       autoFocus={autoFocus}
       disabled={disabled}
       className={cn(

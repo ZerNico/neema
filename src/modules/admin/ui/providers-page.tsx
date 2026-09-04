@@ -2,20 +2,21 @@ import { ArrowRight01Icon, CloudServerIcon, PlusSignIcon } from "@hugeicons/core
 import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
-import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
+import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import {
   Select,
@@ -24,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { Spinner } from "~/ui/primitives/spinner";
 
 export const providersQuery = queryOptions({
   queryKey: ["admin", "providers"],
@@ -40,18 +42,25 @@ export const PROVIDER_PRESETS = {
   "openai-compatible": { label: "OpenAI-compatible", baseUrl: "" },
 } as const;
 
+type ProviderKind = keyof typeof PROVIDER_PRESETS;
+
+const PROVIDER_KIND_ITEMS = (Object.keys(PROVIDER_PRESETS) as ProviderKind[]).map((value) => ({
+  value,
+  label: PROVIDER_PRESETS[value].label,
+}));
+
 export function ProvidersPage() {
   const { data: providers } = useSuspenseQuery(providersQuery);
   const { data: models } = useSuspenseQuery(modelsQuery);
   const [adding, setAdding] = useState(false);
 
   return (
-    <AdminPage
+    <Page
       title="Providers"
       description="AI providers this instance can talk to."
       actions={
         <Button size="sm" onClick={() => setAdding(true)}>
-          <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
           Add provider
         </Button>
       }
@@ -63,7 +72,7 @@ export function ProvidersPage() {
           description="Connect a provider like OpenRouter to make models available for chat."
           action={
             <Button size="sm" onClick={() => setAdding(true)}>
-              <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
               Add provider
             </Button>
           }
@@ -79,14 +88,14 @@ export function ProvidersPage() {
                 params={{ providerId: provider.id }}
                 className="block"
               >
-                <ListRow className="hover:bg-accent/50 transition-colors">
-                  <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
-                    <HugeiconsIcon icon={CloudServerIcon} className="size-4" />
+                <ListRow interactive>
+                  <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+                    <HugeiconsIcon icon={CloudServerIcon} strokeWidth={2} className="size-4" />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       {provider.name}
-                      {!provider.enabled ? <Badge variant="outline">disabled</Badge> : null}
+                      {!provider.enabled ? <Badge variant="outline">Disabled</Badge> : null}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
                       {PROVIDER_PRESETS[provider.kind].label} ·{" "}
@@ -95,6 +104,7 @@ export function ProvidersPage() {
                   </div>
                   <HugeiconsIcon
                     icon={ArrowRight01Icon}
+                    strokeWidth={2}
                     className="text-muted-foreground size-4 shrink-0"
                   />
                 </ListRow>
@@ -104,7 +114,7 @@ export function ProvidersPage() {
         </ListCard>
       )}
       <AddProviderDialog open={adding} onOpenChange={setAdding} />
-    </AdminPage>
+    </Page>
   );
 }
 
@@ -115,11 +125,12 @@ function AddProviderDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const id = useId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<{
     name: string;
-    kind: keyof typeof PROVIDER_PRESETS;
+    kind: ProviderKind;
     baseUrl: string;
     apiKey: string;
   }>({
@@ -128,11 +139,28 @@ function AddProviderDialog({
     baseUrl: PROVIDER_PRESETS.openrouter.baseUrl,
     apiKey: "",
   });
+  const complete = Boolean(draft.name.trim() && draft.baseUrl.trim() && draft.apiKey.trim());
+  const reset = () =>
+    setDraft({
+      name: "OpenRouter",
+      kind: "openrouter",
+      baseUrl: PROVIDER_PRESETS.openrouter.baseUrl,
+      apiKey: "",
+    });
 
   const add = useMutation({
-    mutationFn: () => createProvider({ data: draft }),
+    mutationFn: () =>
+      createProvider({
+        data: {
+          ...draft,
+          name: draft.name.trim(),
+          baseUrl: draft.baseUrl.trim(),
+          apiKey: draft.apiKey.trim(),
+        },
+      }),
     onSuccess: async (provider) => {
       await queryClient.invalidateQueries({ queryKey: ["admin"] });
+      reset();
       onOpenChange(false);
       // Jump straight into the detail page so models can be added immediately.
       await navigate({
@@ -143,7 +171,16 @@ function AddProviderDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          if (add.isPending) return;
+          reset();
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add provider</DialogTitle>
@@ -151,78 +188,93 @@ function AddProviderDialog({
             The API key is encrypted at rest and never shown again.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel>Kind</FieldLabel>
-            <Select
-              value={draft.kind}
-              onValueChange={(kind) => {
-                if (!kind) return;
-                const k = kind as keyof typeof PROVIDER_PRESETS;
-                setDraft((d) => ({
-                  ...d,
-                  kind: k,
-                  baseUrl: PROVIDER_PRESETS[k].baseUrl || d.baseUrl,
-                  name:
-                    d.name === "" || d.name === PROVIDER_PRESETS[d.kind].label
-                      ? PROVIDER_PRESETS[k].label
-                      : d.name,
-                }));
-              }}
-              items={Object.entries(PROVIDER_PRESETS).map(([value, preset]) => ({
-                value,
-                label: preset.label,
-              }))}
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (complete) add.mutate();
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${id}-kind`}>Kind</FieldLabel>
+              <Select
+                value={draft.kind}
+                onValueChange={(kind) => {
+                  if (!kind) return;
+                  const k = kind as ProviderKind;
+                  setDraft((d) => ({
+                    ...d,
+                    kind: k,
+                    baseUrl: PROVIDER_PRESETS[k].baseUrl || d.baseUrl,
+                    name:
+                      d.name === "" || d.name === PROVIDER_PRESETS[d.kind].label
+                        ? PROVIDER_PRESETS[k].label
+                        : d.name,
+                  }));
+                }}
+                items={PROVIDER_KIND_ITEMS}
+                disabled={add.isPending}
+              >
+                <SelectTrigger id={`${id}-kind`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROVIDER_KIND_ITEMS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+              <Input
+                id={`${id}-name`}
+                value={draft.name}
+                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                placeholder="OpenRouter"
+                disabled={add.isPending}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${id}-base-url`}>Base URL</FieldLabel>
+              <Input
+                id={`${id}-base-url`}
+                value={draft.baseUrl}
+                onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
+                placeholder="https://openrouter.ai/api/v1"
+                disabled={add.isPending}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${id}-api-key`}>API key</FieldLabel>
+              <Input
+                id={`${id}-api-key`}
+                type="password"
+                autoComplete="off"
+                value={draft.apiKey}
+                onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value }))}
+                disabled={add.isPending}
+              />
+            </Field>
+          </FieldGroup>
+          {add.isError ? <FieldError>Could not add the provider.</FieldError> : null}
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
+              Cancel
+            </DialogClose>
+            <Button
+              type="submit"
+              disabled={!complete || add.isPending}
+              aria-busy={add.isPending || undefined}
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(PROVIDER_PRESETS).map(([value, preset]) => (
-                  <SelectItem key={value} value={value}>
-                    {preset.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel>Name</FieldLabel>
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder="OpenRouter"
-            />
-          </Field>
-          <Field>
-            <FieldLabel>Base URL</FieldLabel>
-            <Input
-              value={draft.baseUrl}
-              onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
-              placeholder="https://openrouter.ai/api/v1"
-            />
-          </Field>
-          <Field>
-            <FieldLabel>API key</FieldLabel>
-            <Input
-              type="password"
-              autoComplete="off"
-              value={draft.apiKey}
-              onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value }))}
-            />
-          </Field>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!draft.name || !draft.baseUrl || !draft.apiKey || add.isPending}
-            onClick={() => add.mutate()}
-          >
-            {add.isPending ? "Adding…" : "Add provider"}
-          </Button>
-        </DialogFooter>
+              {add.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+              Add provider
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

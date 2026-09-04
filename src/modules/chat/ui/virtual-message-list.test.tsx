@@ -29,6 +29,7 @@ type CapturedOptions = {
   anchorTo?: string;
   initialOffset?: number | (() => number);
   scrollEndThreshold?: number;
+  useAnimationFrameWithResizeObserver?: boolean;
   getScrollElement: () => HTMLDivElement | null;
 };
 
@@ -68,10 +69,29 @@ describe("VirtualMessageList", () => {
       typeof options.initialOffset === "function" ? options.initialOffset() : options.initialOffset,
     ).toBe(96);
     expect(options.scrollEndThreshold).toBe(48);
+    expect(options.useAnimationFrameWithResizeObserver).toBe(true);
     expect(options.getScrollElement()).toHaveClass("overflow-y-auto");
+    expect(options.getScrollElement()).toHaveClass("[overflow-anchor:none]");
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);
     expect(mocks.scrollToEnd).toHaveBeenCalledWith({ behavior: "auto" });
     expect(rawScrollTo).not.toHaveBeenCalled();
+  });
+
+  it("adjusts only for rows fully above the viewport", () => {
+    render(<VirtualMessageList messages={messages} followKey={0} />);
+
+    const shouldAdjust = (
+      virtualizer as typeof virtualizer & {
+        shouldAdjustScrollPositionOnItemSizeChange: (
+          item: { start: number; end: number },
+          delta: number,
+          instance: { scrollOffset: number | null },
+        ) => boolean;
+      }
+    ).shouldAdjustScrollPositionOnItemSizeChange;
+
+    expect(shouldAdjust({ start: 10, end: 80 }, 20, { scrollOffset: 100 })).toBe(true);
+    expect(shouldAdjust({ start: 80, end: 120 }, 20, { scrollOffset: 100 })).toBe(false);
   });
 
   it("follows streamed growth while pinned", () => {

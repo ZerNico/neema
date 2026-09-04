@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Button } from "~/ui/primitives/button";
+import { Spinner } from "~/ui/primitives/spinner";
 
 /**
  * Bottom-of-list loader for an infinite query. The button is the real control
@@ -47,8 +48,10 @@ export function InfiniteSentinel({
         className="text-muted-foreground w-full"
         onClick={onLoadMore}
         disabled={isFetching}
+        aria-busy={isFetching || undefined}
       >
-        {isFetching ? "Loading…" : "Load more"}
+        {isFetching ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+        {isFetching ? "Loading more" : "Load more"}
       </Button>
     </div>
   );

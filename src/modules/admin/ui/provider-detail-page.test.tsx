@@ -62,11 +62,11 @@ describe("AddModelDialog", () => {
     await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
 
     const typeSelect = screen.getByLabelText("Type");
-    expect(typeSelect).toHaveTextContent("chat");
+    expect(typeSelect).toHaveTextContent("Chat");
     typeSelect.click();
-    expect(screen.queryByRole("option", { name: "image" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "audio" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("option", { name: "embedding" }));
+    expect(screen.queryByRole("option", { name: "Image" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Audio" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("option", { name: "Embedding" }));
 
     expect(screen.getByLabelText("Max input tokens")).toHaveValue(128_000);
     expect(screen.getByLabelText("Dimensions")).toBeInTheDocument();

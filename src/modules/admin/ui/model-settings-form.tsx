@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { Dispatch, SetStateAction } from "react";
+import { useId, type Dispatch, type SetStateAction } from "react";
 import {
   EMPTY_CAPABILITIES,
   MODEL_TYPES,
@@ -22,7 +22,15 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "~/ui/primitives/combobox";
-import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  FieldTitle,
+} from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import {
   Select,
@@ -32,6 +40,20 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
+
+// Sentence-case labels for the type enum wherever it is shown to a person
+// (badges, selects). The enum values themselves stay lowercase on the wire.
+export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
+  chat: "Chat",
+  embedding: "Embedding",
+};
+
+const MODEL_TYPE_ITEMS = MODEL_TYPES.map((value) => ({ value, label: MODEL_TYPE_LABELS[value] }));
+
+const ACCESS_ITEMS: { value: ModelAccess; label: string }[] = [
+  { value: "public", label: "Public" },
+  { value: "groups", label: "Private" },
+];
 
 export interface PickableGroup {
   id: string;
@@ -130,13 +152,16 @@ export function ModelSettingsFields({
   groups,
   modelKey,
   autoFocusDisplayName = false,
+  disabled = false,
 }: {
   draft: ModelSettingsDraft;
   setDraft: Dispatch<SetStateAction<ModelSettingsDraft>>;
   groups: PickableGroup[];
   modelKey?: string;
   autoFocusDisplayName?: boolean;
+  disabled?: boolean;
 }) {
+  const id = useId();
   const groupAnchor = useComboboxAnchor();
   const contextInvalid =
     draft.contextLength.trim() !== "" && parsePositiveInteger(draft.contextLength) === undefined;
@@ -159,32 +184,32 @@ export function ModelSettingsFields({
 
   return (
     <>
-      <section className="flex flex-col gap-4">
-        <h3 className="text-sm font-medium">General</h3>
+      <FieldSet className="gap-4" disabled={disabled}>
+        <FieldLegend variant="label">General</FieldLegend>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor="model-display-name">Display name</FieldLabel>
+            <FieldLabel htmlFor={`${id}-display-name`}>Display name</FieldLabel>
             <Input
-              id="model-display-name"
+              id={`${id}-display-name`}
               value={draft.displayName}
               onChange={(event) => patch({ displayName: event.target.value })}
               autoFocus={autoFocusDisplayName}
             />
           </Field>
           <Field>
-            <FieldLabel>Type</FieldLabel>
+            <FieldLabel htmlFor={`${id}-type`}>Type</FieldLabel>
             <Select
               value={draft.type}
               onValueChange={(value) => value && patch({ type: value as ModelType })}
-              items={MODEL_TYPES.map((value) => ({ value, label: value }))}
+              items={MODEL_TYPE_ITEMS}
             >
-              <SelectTrigger aria-label="Type">
+              <SelectTrigger id={`${id}-type`} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {MODEL_TYPES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
+                {MODEL_TYPE_ITEMS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -192,17 +217,17 @@ export function ModelSettingsFields({
           </Field>
           {modelKey === undefined ? null : (
             <Field>
-              <FieldLabel htmlFor="model-key">Model ID</FieldLabel>
-              <Input id="model-key" value={modelKey} readOnly />
+              <FieldLabel htmlFor={`${id}-model-key`}>Model ID</FieldLabel>
+              <Input id={`${id}-model-key`} value={modelKey} readOnly />
               <FieldDescription>The provider-side identifier cannot be changed.</FieldDescription>
             </Field>
           )}
           <Field data-invalid={contextInvalid}>
-            <FieldLabel htmlFor="model-context-length">
+            <FieldLabel htmlFor={`${id}-context-length`}>
               {draft.type === "chat" ? "Context length" : "Max input tokens"}
             </FieldLabel>
             <Input
-              id="model-context-length"
+              id={`${id}-context-length`}
               type="number"
               min={1}
               step={1}
@@ -211,7 +236,7 @@ export function ModelSettingsFields({
               placeholder="Unknown"
               aria-invalid={contextInvalid}
             />
-            <FieldDescription className="text-xs">
+            <FieldDescription>
               {draft.type === "chat"
                 ? "Maximum context window in tokens. Leave empty if unknown."
                 : "Leave empty if unknown."}
@@ -219,9 +244,9 @@ export function ModelSettingsFields({
           </Field>
           {draft.type === "embedding" ? (
             <Field data-invalid={dimensionsInvalid}>
-              <FieldLabel htmlFor="model-embedding-dimensions">Dimensions</FieldLabel>
+              <FieldLabel htmlFor={`${id}-embedding-dimensions`}>Dimensions</FieldLabel>
               <Input
-                id="model-embedding-dimensions"
+                id={`${id}-embedding-dimensions`}
                 type="number"
                 min={1}
                 step={1}
@@ -230,75 +255,82 @@ export function ModelSettingsFields({
                 placeholder="Provider default"
                 aria-invalid={dimensionsInvalid}
               />
-              <FieldDescription className="text-xs">
-                Leave empty to use the provider default.
-              </FieldDescription>
+              <FieldDescription>Leave empty to use the provider default.</FieldDescription>
             </Field>
           ) : null}
         </div>
-        <label className="flex items-center justify-between gap-4 rounded-lg border p-3 text-sm">
-          <span className="flex flex-col gap-0.5">
-            <span className="font-medium">Enabled</span>
-            <span className="text-muted-foreground text-xs">
-              Disabled models are unavailable to application features.
-            </span>
-          </span>
-          <Switch
-            checked={draft.enabled}
-            onCheckedChange={(enabled) => patch({ enabled })}
-            aria-label="Model enabled"
-          />
-        </label>
-      </section>
+        <FieldLabel htmlFor={`${id}-enabled`}>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldTitle id={`${id}-enabled-title`}>Enabled</FieldTitle>
+              <FieldDescription>
+                Disabled models are unavailable to application features.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id={`${id}-enabled`}
+              aria-labelledby={`${id}-enabled-title`}
+              checked={draft.enabled}
+              onCheckedChange={(enabled) => patch({ enabled })}
+            />
+          </Field>
+        </FieldLabel>
+      </FieldSet>
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h3 className="text-sm font-medium">Capabilities</h3>
-          {draft.type === "embedding" ? (
-            <p className="text-muted-foreground text-xs">
-              Multimodal embedding models can accept images as input.
-            </p>
-          ) : null}
-        </div>
+      <FieldSet className="gap-3" disabled={disabled}>
+        <FieldLegend variant="label">Capabilities</FieldLegend>
+        {draft.type === "embedding" ? (
+          <FieldDescription>
+            Multimodal embedding models can accept images as input.
+          </FieldDescription>
+        ) : null}
         <div className="grid gap-2 sm:grid-cols-2">
-          {visibleCapabilities.map((capability) => (
-            <label
-              key={capability.key}
-              className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm"
-            >
-              <span className="flex items-center gap-2">
-                <HugeiconsIcon icon={capability.icon} className="text-muted-foreground size-4" />
-                {draft.type === "embedding" ? "Image input" : capability.label}
-              </span>
-              <Switch
-                checked={draft.capabilities[capability.key]}
-                onCheckedChange={(checked) =>
-                  patch({
-                    capabilities: {
-                      ...draft.capabilities,
-                      [capability.key]: checked,
-                    },
-                  })
-                }
-                aria-label={`${draft.type === "embedding" ? "Image input" : capability.label} capability`}
-              />
-            </label>
-          ))}
+          {visibleCapabilities.map((capability) => {
+            const label = draft.type === "embedding" ? "Image input" : capability.label;
+            const switchId = `${id}-capability-${capability.key}`;
+            return (
+              <FieldLabel key={capability.key} htmlFor={switchId}>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldTitle id={`${switchId}-title`}>
+                      <HugeiconsIcon
+                        icon={capability.icon}
+                        strokeWidth={2}
+                        className="text-muted-foreground size-4"
+                      />
+                      {label}
+                    </FieldTitle>
+                  </FieldContent>
+                  <Switch
+                    id={switchId}
+                    aria-labelledby={`${switchId}-title`}
+                    checked={draft.capabilities[capability.key]}
+                    onCheckedChange={(checked) =>
+                      patch({
+                        capabilities: {
+                          ...draft.capabilities,
+                          [capability.key]: checked,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+              </FieldLabel>
+            );
+          })}
         </div>
-      </section>
+      </FieldSet>
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h3 className="text-sm font-medium">Pricing</h3>
-          <p className="text-muted-foreground text-xs">
-            USD per 1M tokens, used when the provider does not report its billed cost.
-          </p>
-        </div>
+      <FieldSet className="gap-3" disabled={disabled}>
+        <FieldLegend variant="label">Pricing</FieldLegend>
+        <FieldDescription>
+          USD per 1M tokens, used when the provider does not report its billed cost.
+        </FieldDescription>
         <div className="grid grid-cols-2 gap-3">
           <Field data-invalid={inputPriceInvalid || partialChatPricing}>
-            <FieldLabel htmlFor="model-input-price">Input $/1M</FieldLabel>
+            <FieldLabel htmlFor={`${id}-input-price`}>Input $/1M</FieldLabel>
             <Input
-              id="model-input-price"
+              id={`${id}-input-price`}
               inputMode="decimal"
               value={draft.inputPrice}
               onChange={(event) => patch({ inputPrice: event.target.value })}
@@ -308,9 +340,9 @@ export function ModelSettingsFields({
           </Field>
           {draft.type === "chat" ? (
             <Field data-invalid={outputPriceInvalid || partialChatPricing}>
-              <FieldLabel htmlFor="model-output-price">Output $/1M</FieldLabel>
+              <FieldLabel htmlFor={`${id}-output-price`}>Output $/1M</FieldLabel>
               <Input
-                id="model-output-price"
+                id={`${id}-output-price`}
                 inputMode="decimal"
                 value={draft.outputPrice}
                 onChange={(event) => patch({ outputPrice: event.target.value })}
@@ -320,31 +352,31 @@ export function ModelSettingsFields({
             </Field>
           ) : null}
         </div>
-        <p className="text-muted-foreground text-xs">
+        <FieldDescription>
           {draft.type === "chat"
             ? "Leave both empty if pricing is unknown."
             : "Leave empty if pricing is unknown."}
-        </p>
-      </section>
+        </FieldDescription>
+      </FieldSet>
 
-      <section className="flex flex-col gap-4">
-        <h3 className="text-sm font-medium">Access</h3>
+      <FieldSet className="gap-4" disabled={disabled}>
+        <FieldLegend variant="label">Access</FieldLegend>
         <Field>
-          <FieldLabel>Visibility</FieldLabel>
+          <FieldLabel htmlFor={`${id}-access`}>Visibility</FieldLabel>
           <Select
             value={draft.access}
             onValueChange={(value) => value && patch({ access: value as ModelAccess })}
-            items={[
-              { value: "public", label: "Public" },
-              { value: "groups", label: "Private" },
-            ]}
+            items={ACCESS_ITEMS}
           >
-            <SelectTrigger aria-label="Visibility">
+            <SelectTrigger id={`${id}-access`} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="public">Public</SelectItem>
-              <SelectItem value="groups">Private</SelectItem>
+              {ACCESS_ITEMS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <FieldDescription>
@@ -355,7 +387,7 @@ export function ModelSettingsFields({
         </Field>
         {draft.access === "groups" ? (
           <Field>
-            <FieldLabel>Allowed groups</FieldLabel>
+            <FieldLabel htmlFor={`${id}-groups`}>Allowed groups</FieldLabel>
             <Combobox
               multiple
               items={groups}
@@ -377,14 +409,17 @@ export function ModelSettingsFields({
                           {group.name}
                         </ComboboxChip>
                       ))}
-                      <ComboboxChipsInput placeholder={value.length ? "" : "Add groups…"} />
+                      <ComboboxChipsInput
+                        id={`${id}-groups`}
+                        placeholder={value.length ? "" : "Add groups…"}
+                      />
                     </>
                   )}
                 </ComboboxValue>
               </ComboboxChips>
               <ComboboxContent anchor={groupAnchor} side="bottom">
                 <ComboboxEmpty>
-                  {groups.length === 0 ? "No groups exist yet" : "No groups match"}
+                  {groups.length === 0 ? "No groups exist yet." : "No groups match."}
                 </ComboboxEmpty>
                 <ComboboxList>
                   {(group: PickableGroup) => (
@@ -396,13 +431,11 @@ export function ModelSettingsFields({
               </ComboboxContent>
             </Combobox>
             {draft.selectedGroups.length === 0 ? (
-              <p className="text-muted-foreground text-xs">
-                Visible to admins only until a group is added.
-              </p>
+              <FieldDescription>Visible to admins only until a group is added.</FieldDescription>
             ) : null}
           </Field>
         ) : null}
-      </section>
+      </FieldSet>
     </>
   );
 }

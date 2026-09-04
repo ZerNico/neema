@@ -1,8 +1,7 @@
-import { Loading03Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { chatModelsQuery, conversationQuery } from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 
 export const Route = createFileRoute("/_app/chat/$conversationId")({
   // Both blocking queries start together. The model list is a suspense read
@@ -34,12 +33,8 @@ function ChatPage() {
 
 function ChatPending() {
   return (
-    <div role="status" className="flex h-full items-center justify-center">
-      <HugeiconsIcon
-        icon={Loading03Icon}
-        className="text-muted-foreground size-5 animate-spin"
-        aria-label="Loading conversation"
-      />
+    <div className="flex h-full items-center justify-center">
+      <Spinner aria-label="Loading conversation" className="size-5 text-muted-foreground" />
     </div>
   );
 }

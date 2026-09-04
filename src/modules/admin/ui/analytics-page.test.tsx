@@ -100,6 +100,10 @@ const data = {
   ],
 };
 
+// The range trigger carries no aria-label: its visible text is the active
+// range, so it is found by that text (same handle as usage-dashboard.test).
+const rangeTrigger = () => screen.getByRole("button", { name: /Last \d+ days|–/ });
+
 const renderPage = (override?: Partial<typeof data>) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "analytics", 30], { ...data, ...override });
@@ -134,7 +138,7 @@ describe("AnalyticsPage", () => {
     renderPage();
 
     expect(await screen.findByText("1.5M")).toBeInTheDocument();
-    await user.click(screen.getByLabelText("Date range"));
+    await user.click(rangeTrigger());
     await user.click(screen.getByText("Last 7 days"));
 
     expect(screen.getByText("1.5M")).toBeInTheDocument();
@@ -185,7 +189,7 @@ describe("AnalyticsPage", () => {
     expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Messages per day" })).not.toBeInTheDocument();
     // The range select stays usable to widen the window.
-    expect(screen.getByLabelText("Date range")).toBeInTheDocument();
+    expect(rangeTrigger()).toBeInTheDocument();
   });
 
   it("shows an em dash and a floor hint when cost is incomplete", async () => {

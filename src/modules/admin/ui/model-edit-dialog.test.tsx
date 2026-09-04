@@ -54,15 +54,15 @@ const renderDialog = (
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "groups"], groups);
   client.setQueryData(["admin", "model-access"], accessRows);
-  const onClose = vi.fn();
+  const onOpenChange = vi.fn();
   const view = render(
     <QueryClientProvider client={client}>
       <Suspense fallback={null}>
-        <ModelEditDialog model={{ ...model, ...overrides }} onClose={onClose} />
+        <ModelEditDialog model={{ ...model, ...overrides }} open onOpenChange={onOpenChange} />
       </Suspense>
     </QueryClientProvider>,
   );
-  return { onClose, ...view };
+  return { onOpenChange, ...view };
 };
 
 beforeEach(() => {
@@ -74,7 +74,7 @@ beforeEach(() => {
 
 describe("ModelEditDialog", () => {
   it("initializes every setting and saves one complete model update", async () => {
-    const { onClose } = renderDialog();
+    const { onOpenChange } = renderDialog();
 
     expect(await screen.findByLabelText("Display name")).toHaveValue("Tiny Chat");
     expect(screen.getByLabelText("Model ID")).toHaveValue("anthropic/tiny-chat");
@@ -91,8 +91,8 @@ describe("ModelEditDialog", () => {
     });
     fireEvent.change(screen.getByLabelText("Input $/1M"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Output $/1M"), { target: { value: "12" } });
-    fireEvent.click(screen.getByRole("switch", { name: /Model enabled/ }));
-    fireEvent.click(screen.getByRole("switch", { name: /Vision capability/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "Enabled" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Vision" }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
@@ -111,7 +111,7 @@ describe("ModelEditDialog", () => {
         },
       }),
     );
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("shows only embedding settings and submits input-only pricing", async () => {
@@ -124,7 +124,7 @@ describe("ModelEditDialog", () => {
 
     expect(await screen.findByLabelText("Max input tokens")).toHaveValue(128_000);
     expect(screen.getByLabelText("Dimensions")).toHaveValue(1536);
-    expect(screen.getByRole("switch", { name: /Image input capability/ })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Image input" })).toBeChecked();
     expect(screen.queryByText("Tool calling")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Output $/1M")).not.toBeInTheDocument();
 
@@ -206,11 +206,24 @@ describe("ModelEditDialog", () => {
 
   it("keeps the dialog open and shows a save error", async () => {
     updateMock.mockRejectedValue(new Error("nope") as never);
-    const { onClose } = renderDialog();
+    const { onOpenChange } = renderDialog();
 
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText("Could not save the model settings.")).toBeInTheDocument();
-    expect(onClose).not.toHaveBeenCalled();
+    const error = await screen.findByText("Could not save the model.");
+    expect(error).toHaveAttribute("role", "alert");
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the label and shows a spinner while saving", async () => {
+    updateMock.mockImplementation(() => new Promise(() => {}) as never);
+    renderDialog();
+
+    const save = await screen.findByRole("button", { name: "Save changes" });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(save).toHaveAttribute("aria-busy", "true"));
+    expect(save).toBeDisabled();
+    expect(save).toHaveTextContent("Save changes");
   });
 });

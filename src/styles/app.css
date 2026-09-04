@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "streamdown/styles.css";
 /* KaTeX markup comes from rehype-katex, which pins katex to 0.16 — keep the
@@ -43,6 +45,10 @@
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -78,6 +84,8 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --success: oklch(0.627 0.194 149.214);
+  --warning: oklch(0.769 0.188 70.08);
   /* Chart series (dataviz palette, validated vs #fff surface): blue, orange,
      aqua, magenta. Slot order is the CVD-safety mechanism — never reorder or
      cycle. Slot 4 is magenta, not the amber a 4-colour palette reaches for
@@ -118,6 +126,8 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --success: oklch(0.723 0.219 149.579);
+  --warning: oklch(0.828 0.189 84.429);
   /* Same hues re-stepped for the dark card surface (#171717), not a flip. */
   --chart-1: #3987e5;
   --chart-2: #d95926;
@@ -139,6 +149,12 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+  /* Tailwind v4 dropped cursor: pointer on buttons; shadcn's `init --pointer`
+     restores it for anything that acts like a button. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 
   /* Thin, theme-aware scrollbars (ChatGPT/Claude style): trackless with a

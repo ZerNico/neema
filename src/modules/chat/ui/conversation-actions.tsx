@@ -3,19 +3,28 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { DropdownMenuItem } from "~/ui/primitives/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
+import { Spinner } from "~/ui/primitives/spinner";
 import { useConfirm } from "~/ui/confirm.tsx";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 export interface ActionableConversation {
   readonly id: string;
@@ -51,13 +60,20 @@ export function useConversationActions(): ConversationActions {
       // away; on /chats there is no conversationId param at all.
       if (activeId === conversationId) await navigate({ to: "/" });
     },
+    onError: () => toast.error("Could not delete the chat."),
   });
 
   const renameMutation = useMutation({
     mutationFn: (input: { conversationId: string; title: string }) =>
       renameConversation({ data: input }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      setRenaming(null);
+    },
+    onError: () => toast.error("Could not rename the chat."),
   });
+
+  const title = renaming?.title.trim() ?? "";
 
   return {
     startRename: (conversation) =>
@@ -74,34 +90,50 @@ export function useConversationActions(): ConversationActions {
       }
     },
     renameDialog: (
-      <Dialog open={renaming !== null} onOpenChange={(open) => !open && setRenaming(null)}>
+      <Dialog
+        open={renaming !== null}
+        onOpenChange={(open) => !open && !renameMutation.isPending && setRenaming(null)}
+      >
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rename chat</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renaming?.title ?? ""}
-            onChange={(e) => setRenaming((r) => (r ? { ...r, title: e.target.value } : r))}
-            autoFocus
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (renaming && renaming.title.trim()) {
-                  renameMutation.mutate({
-                    conversationId: renaming.id,
-                    title: renaming.title.trim(),
-                  });
-                  setRenaming(null);
-                }
-              }}
-            >
-              Save
-            </Button>
-          </DialogFooter>
+          {/* A form so Enter in the field saves, like any rename prompt. */}
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (renaming && title) {
+                renameMutation.mutate({ conversationId: renaming.id, title });
+              }
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Rename chat</DialogTitle>
+              <DialogDescription>
+                The new title shows in the sidebar and on the chats page.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={renaming?.title ?? ""}
+              onChange={(e) => setRenaming((r) => (r ? { ...r, title: e.target.value } : r))}
+              aria-label="Chat title"
+              disabled={renameMutation.isPending}
+              autoFocus
+            />
+            <DialogFooter>
+              <DialogClose
+                render={<Button variant="outline" disabled={renameMutation.isPending} />}
+              >
+                Cancel
+              </DialogClose>
+              <Button
+                type="submit"
+                disabled={!title || renameMutation.isPending}
+                aria-busy={renameMutation.isPending || undefined}
+              >
+                {renameMutation.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     ),
@@ -119,13 +151,39 @@ export function ConversationMenuItems({
   return (
     <>
       <DropdownMenuItem onClick={() => actions.startRename(conversation)}>
-        <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+        <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
         Rename
       </DropdownMenuItem>
       <DropdownMenuItem variant="destructive" onClick={() => actions.confirmDelete(conversation)}>
-        <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+        <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         Delete
       </DropdownMenuItem>
     </>
+  );
+}
+
+/**
+ * The per-row menu with its placement fixed here, so the sidebar and the
+ * chats page open it the same way. `trigger` is the element the menu button
+ * renders as (the DropdownMenuTrigger idiom); `children` is its icon.
+ */
+export function ConversationMenu({
+  conversation,
+  actions,
+  trigger,
+  children,
+}: {
+  conversation: ActionableConversation;
+  actions: ConversationActions;
+  trigger: ReactElement<Record<string, unknown>>;
+  children: ReactNode;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={trigger}>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="end">
+        <ConversationMenuItems conversation={conversation} actions={actions} />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

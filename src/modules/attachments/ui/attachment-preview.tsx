@@ -10,7 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { cn } from "~/ui/utils";
+import { Spinner } from "~/ui/primitives/spinner";
+import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
@@ -106,7 +107,7 @@ function TextPreview({ url, language }: { url: string; language: string }) {
   }, [url]);
 
   if (state.status === "loading") {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
+    return <Spinner aria-label="Loading preview" className="text-muted-foreground" />;
   }
   if (state.status === "error") {
     return <p className="text-destructive text-sm">Could not load this file.</p>;
@@ -151,28 +152,26 @@ function ViewToggle({
   rendered: boolean;
   onChange: (rendered: boolean) => void;
 }) {
-  const option = (value: boolean, label: string) => (
-    <button
-      type="button"
-      onClick={() => onChange(value)}
-      aria-pressed={rendered === value}
-      className={cn(
-        "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-        rendered === value
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <div className="flex justify-end">
-      <div className="bg-muted inline-flex rounded-lg p-0.5">
-        {option(true, "Rendered")}
-        {option(false, "Plain")}
-      </div>
+      <ToggleGroup
+        aria-label="Preview mode"
+        value={[rendered ? "rendered" : "plain"]}
+        multiple={false}
+        onValueChange={(value) => {
+          if (value[0]) onChange(value[0] === "rendered");
+        }}
+        size="sm"
+        spacing={0.5}
+        className="bg-muted rounded-full p-0.5"
+      >
+        <ToggleGroupItem value="rendered" className="h-7 rounded-full px-2.5 text-xs">
+          Rendered
+        </ToggleGroupItem>
+        <ToggleGroupItem value="plain" className="h-7 rounded-full px-2.5 text-xs">
+          Plain
+        </ToggleGroupItem>
+      </ToggleGroup>
     </div>
   );
 }

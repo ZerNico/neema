@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import { Button } from "~/ui/primitives/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "~/ui/primitives/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useIsMobile } from "~/ui/use-mobile";
 import { cn } from "~/ui/utils";
 
@@ -122,9 +123,22 @@ export function DetailPanelRail({ className }: { className?: string }) {
         {state.subtitle ? (
           <span className="text-muted-foreground shrink-0 text-xs">{state.subtitle}</span>
         ) : null}
-        <Button variant="ghost" size="icon-sm" onClick={panel.close} aria-label="Close panel">
-          <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={panel.close}
+                aria-label="Close panel"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+          </TooltipTrigger>
+          <TooltipContent>Close panel</TooltipContent>
+        </Tooltip>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">{state.body}</div>
     </aside>

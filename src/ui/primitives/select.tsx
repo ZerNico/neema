@@ -1,9 +1,7 @@
-"use client";
-
 import * as React from "react";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 
-import { cn } from "~/ui/utils";
+import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   UnfoldMoreIcon,

@@ -1,7 +1,6 @@
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { startTransition, useState } from "react";
-import { AdminPage, EmptyState } from "./admin-shell.tsx";
 import { adminUsageQuery } from "~/modules/analytics/client/queries.ts";
 import { DEFAULT_USAGE_RANGE, type UsageRangeEncoded } from "~/modules/analytics/schema.ts";
 import {
@@ -10,6 +9,7 @@ import {
   UsageRangePicker,
   UsersTable,
 } from "~/modules/analytics/ui/usage-dashboard.tsx";
+import { EmptyState, Page } from "~/ui/page-shell.tsx";
 
 export function AnalyticsPage() {
   const [range, setRange] = useState<UsageRangeEncoded>(DEFAULT_USAGE_RANGE);
@@ -22,9 +22,10 @@ export function AnalyticsPage() {
   };
 
   return (
-    <AdminPage
+    <Page
       title="Analytics"
       description="Token usage, messages and cost across the instance. Every generation attempt counts — including retries and title runs."
+      width="wide"
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
       {data.daily.length === 0 ? (
@@ -50,6 +51,6 @@ export function AnalyticsPage() {
           </ChartCard>
         </>
       )}
-    </AdminPage>
+    </Page>
   );
 }

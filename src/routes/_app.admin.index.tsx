@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-// On mobile /admin is the nav screen itself (AdminShell hides content at the
+// On mobile /admin is the nav screen itself (SectionShell hides content at the
 // root). On desktop the nav is always visible, so land on providers instead
 // of an empty pane. Viewport is unknown during SSR, hence the client effect.
 export const Route = createFileRoute("/_app/admin/")({

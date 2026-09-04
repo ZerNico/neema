@@ -3,12 +3,24 @@ import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
+import { buttonVariants } from "~/ui/primitives/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "~/ui/primitives/card";
+import { FieldError } from "~/ui/primitives/field";
+import { cn } from "~/ui/utils";
 
 const RegisterSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  email: Schema.String.check(Schema.isMinLength(3)),
-  password: Schema.String.check(Schema.isMinLength(8)),
+  name: Schema.String.check(Schema.isMinLength(1, { message: "Enter your name." })),
+  email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
+  password: Schema.String.check(
+    Schema.isMinLength(8, { message: "Password must be at least 8 characters." }),
+  ),
 });
 
 export const Route = createFileRoute("/register")({
@@ -30,7 +42,7 @@ function RegisterPage() {
         password: value.password,
       });
       if (error) {
-        setServerError(error.message ?? "Registration failed");
+        setServerError(error.message ?? "Could not create the account.");
         return;
       }
       await navigate({ to: "/" });
@@ -42,6 +54,7 @@ function RegisterPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Create account</CardTitle>
+          <CardDescription>Create your account.</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -62,18 +75,20 @@ function RegisterPage() {
                 <field.TextField label="Password" type="password" autoComplete="new-password" />
               )}
             </form.AppField>
-            {serverError ? <p className="text-destructive text-sm">{serverError}</p> : null}
+            {serverError ? <FieldError>{serverError}</FieldError> : null}
             <form.AppForm>
-              <form.SubmitButton>Create account</form.SubmitButton>
+              <form.SubmitButton className="w-full">Create account</form.SubmitButton>
             </form.AppForm>
           </form>
-          <p className="text-muted-foreground mt-4 text-sm">
+        </CardContent>
+        <CardFooter>
+          <p className="text-muted-foreground text-sm">
             Already have an account?{" "}
-            <Link to="/login" className="text-foreground underline">
+            <Link to="/login" className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}>
               Sign in
             </Link>
           </p>
-        </CardContent>
+        </CardFooter>
       </Card>
     </div>
   );

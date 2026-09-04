@@ -1,12 +1,10 @@
-"use client";
-
 import * as React from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { useIsMobile } from "~/ui/use-mobile";
-import { cn } from "~/ui/utils";
+import { cn } from "cn";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Separator } from "~/ui/primitives/separator";

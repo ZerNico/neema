@@ -26,8 +26,8 @@ export function CapabilityIcons({
   return (
     <span className={cn("text-muted-foreground flex items-center gap-1", className)}>
       {active.map((c) => (
-        <span key={c.key} title={c.label} aria-label={c.label}>
-          <HugeiconsIcon icon={c.icon} className="size-3.5" />
+        <span key={c.key} role="img" title={c.label} aria-label={c.label}>
+          <HugeiconsIcon icon={c.icon} strokeWidth={2} className="size-3.5" />
         </span>
       ))}
     </span>

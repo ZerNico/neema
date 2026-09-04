@@ -2,7 +2,7 @@ import { GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
 import {
   applyCompactionChunk,
@@ -95,14 +95,18 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
   const [modelId, setModelId] = useState<string | null>(null);
-  const [editState, setEditState] = useState<{ messageId: string; draft: string } | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   // One instance, mounted for the whole view: an edit opens by seeding it, so
   // the chips survive the ChatInput remount that swapping the bubble causes.
   const editUploads = useAttachmentUploads();
-  const activeEditState =
-    editState && data.messages.some((message) => message.id === editState.messageId)
-      ? editState
-      : null;
+  const seedEditUploads = editUploads.seed;
+  const resetEditUploads = editUploads.reset;
+  const submitEditUploads = editUploads.submit;
+  const editUploadCount = editUploads.items.length;
+  const activeEditingMessage =
+    editingMessageId === null
+      ? null
+      : (data.messages.find((message) => message.id === editingMessageId) ?? null);
   // Bumped on retry/edit: the assistant id usually stays the same, so the
   // stream hook needs a separate signal to resubscribe from seq 0.
   const [retryEpoch, setRetryEpoch] = useState(0);
@@ -229,11 +233,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       // Claimed by the edited message now — dropping the chips must not delete
       // the very attachments the message just took ownership of.
       editUploads.markClaimed();
-      setEditState(null);
+      setEditingMessageId(null);
       resetSearchEnabled();
       setRetryEpoch((epoch) => epoch + 1);
     },
   });
+
+  const mutateRetry = retryMutation.mutate;
+  const mutateBranch = branchMutation.mutate;
+  const mutateEdit = editMutation.mutate;
+  const editPending = editMutation.isPending;
 
   // Retry rewinds the conversation to that response: retrying anything but
   // the last one deletes the messages after it, so it asks first.
@@ -249,20 +258,26 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending ||
-    activeEditState !== null;
-  const retry = async (messageId: string, modelId?: string) => {
-    if (
-      messageId !== lastAssistantId &&
-      !(await confirm({
-        title: "Retry this response?",
-        description: "All messages after it will be removed.",
-        confirmLabel: "Retry",
-      }))
-    ) {
-      return;
-    }
-    retryMutation.mutate(modelId === undefined ? { messageId } : { messageId, modelId });
-  };
+    activeEditingMessage !== null;
+  const retry = useCallback(
+    async (messageId: string, pickedModelId?: string) => {
+      if (
+        messageId !== lastAssistantId &&
+        !(await confirm({
+          title: "Retry this response?",
+          description: "All messages after it will be removed.",
+          confirmLabel: "Retry",
+        }))
+      ) {
+        return;
+      }
+      mutateRetry(
+        pickedModelId === undefined ? { messageId } : { messageId, modelId: pickedModelId },
+      );
+    },
+    [confirm, lastAssistantId, mutateRetry],
+  );
+  const branchAt = useCallback((messageId: string) => mutateBranch(messageId), [mutateBranch]);
 
   // Only offered for a generation this client can actually see running.
   const stoppableId = stream.status === "streaming" ? streamingMessage?.id : undefined;
@@ -332,22 +347,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     return next;
   }, [data.messages]);
 
-  const openEdit = (message: { id: string; content: string }) => {
-    setEditState({ messageId: message.id, draft: message.content });
-    // Seeded as existing/claimed: removing one only drops it from the
-    // replacement set, it is released by the save itself.
-    editUploads.seed(attachmentsByMessage.get(message.id) ?? []);
-  };
+  const openEdit = useCallback(
+    (messageId: string) => {
+      setEditingMessageId(messageId);
+      // Seeded as existing/claimed: removing one only drops it from the
+      // replacement set, it is released by the save itself.
+      seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
+    },
+    [attachmentsByMessage, seedEditUploads],
+  );
 
-  const closeEdit = () => {
-    setEditState(null);
+  const closeEdit = useCallback(() => {
+    setEditingMessageId(null);
     // Anything uploaded for this edit and never sent is deleted here.
-    editUploads.reset();
-  };
-
-  // Retrying a user message regenerates the assistant response that follows
-  // it (the retry target is always an assistant message server-side).
-  const responseAfter = (messageId: string) => nextAssistantAfter.get(messageId);
+    resetEditUploads();
+  }, [resetEditUploads]);
 
   // Which model wrote each answer — null once its row is gone. The retry menu
   // marks it, and a retry that omits a model reuses it server-side.
@@ -356,136 +370,197 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     [data.messages],
   );
 
-  const saveEdit = async () => {
-    if (!activeEditState) return;
-    const content = activeEditState.draft.trim();
-    if (!effectiveModelId || editMutation.isPending) return;
-    if (!content && editUploads.items.length === 0) return;
+  const saveEdit = useCallback(
+    async (draft: string) => {
+      if (!activeEditingMessage) return;
+      const content = draft.trim();
+      if (!effectiveModelId || editPending) return;
+      if (!content && editUploadCount === 0) return;
 
-    const messageIndex = data.messages.findIndex(
-      (message) => message.id === activeEditState.messageId,
-    );
-    const after = data.messages.slice(messageIndex + 1);
-    const responseIndex = after.findIndex((message) => message.role === "assistant");
-    const removesLaterTurns =
-      responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
-    if (
-      removesLaterTurns &&
-      !(await confirm({
-        title: "Edit this message?",
-        description: "All messages after its response will be removed.",
-        confirmLabel: "Save and regenerate",
-      }))
-    ) {
-      return;
-    }
-
-    // Queues behind any upload still in flight, then sends the full ordered
-    // replacement set — omitted ids are released server-side.
-    editUploads.submit((attachmentIds) => {
-      if (!content && attachmentIds.length === 0) return;
-      editMutation.mutate({
-        messageId: activeEditState.messageId,
-        content,
-        modelId: effectiveModelId,
-        searchEnabled,
-        attachmentIds,
-      });
-    });
-  };
-
-  // Citation numbering is conversation-scoped: markers in a message may point
-  // at sources searched by an earlier one, so each message inherits everything
-  // discovered before it (in message order, dedup by index).
-  const inheritedByIndex = new Map<number, ToolSource>();
-
-  const display: DisplayMessage[] = visibleMessages.map((m) => {
-    const reasoning = m.reasoning ?? "";
-    const toolActivities = toolCallsByMessage.get(m.id) ?? [];
-    const compactionActivities = compactionsByMessage.get(m.id) ?? [];
-    const retryTarget = m.role === "assistant" ? m.id : responseAfter(m.id);
-    const inheritedSources = [...inheritedByIndex.values()];
-    for (const activity of toolActivities) {
-      for (const source of activity.sources ?? []) {
-        if (!inheritedByIndex.has(source.index)) inheritedByIndex.set(source.index, source);
+      const messageIndex = data.messages.findIndex(
+        (message) => message.id === activeEditingMessage.id,
+      );
+      const after = data.messages.slice(messageIndex + 1);
+      const responseIndex = after.findIndex((message) => message.role === "assistant");
+      const removesLaterTurns =
+        responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
+      if (
+        removesLaterTurns &&
+        !(await confirm({
+          title: "Edit this message?",
+          description: "All messages after its response will be removed.",
+          confirmLabel: "Save and regenerate",
+        }))
+      ) {
+        return;
       }
-    }
-    const stamp = stamps?.get(m.id);
-    const base: DisplayMessage = {
-      ...m,
-      error: m.error?.message ?? null,
-      ...(stamp
-        ? {
-            dayLabel: stamp.dayLabel,
-            time: { iso: stamp.iso, clock: stamp.clock, absolute: stamp.absolute },
-          }
-        : {}),
-      reasoning,
-      reasoningSeen: reasoning.length > 0,
-      toolActivities,
-      inheritedSources,
-      compactionActivities,
-      ...(attachmentsByMessage.has(m.id) ? { attachments: attachmentsByMessage.get(m.id)! } : {}),
-      ...(m.role === "user" && m.status === "complete"
-        ? {
-            onEdit: () => openEdit(m),
-            editDisabled: actionsDisabled,
-          }
-        : {}),
-      ...(activeEditState?.messageId === m.id
-        ? {
+
+      // Queues behind any upload still in flight, then sends the full ordered
+      // replacement set — omitted ids are released server-side.
+      submitEditUploads((attachmentIds) => {
+        if (!content && attachmentIds.length === 0) return;
+        mutateEdit({
+          messageId: activeEditingMessage.id,
+          content,
+          modelId: effectiveModelId,
+          searchEnabled,
+          attachmentIds,
+        });
+      });
+    },
+    [
+      activeEditingMessage,
+      confirm,
+      data.messages,
+      editPending,
+      editUploadCount,
+      effectiveModelId,
+      mutateEdit,
+      searchEnabled,
+      submitEditUploads,
+    ],
+  );
+
+  // Durable rows change only with query data or global action availability. Live
+  // stream and edit state are layered below so every unrelated row keeps its
+  // object identity across stream chunks and local editor updates.
+  const baseDisplay = useMemo(() => {
+    // Citation numbering is conversation-scoped: each message inherits every
+    // source discovered before it, deduplicated by index and message order.
+    const inheritedByIndex = new Map<number, ToolSource>();
+
+    return visibleMessages.map((message): DisplayMessage => {
+      const reasoning = message.reasoning ?? "";
+      const toolActivities = toolCallsByMessage.get(message.id) ?? [];
+      const compactionActivities = compactionsByMessage.get(message.id) ?? [];
+      const retryTarget =
+        message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
+      const inheritedSources = [...inheritedByIndex.values()];
+      for (const activity of toolActivities) {
+        for (const source of activity.sources ?? []) {
+          if (!inheritedByIndex.has(source.index)) inheritedByIndex.set(source.index, source);
+        }
+      }
+      const stamp = stamps?.get(message.id);
+
+      return {
+        ...message,
+        error: message.error?.message ?? null,
+        ...(stamp
+          ? {
+              dayLabel: stamp.dayLabel,
+              time: { iso: stamp.iso, clock: stamp.clock, absolute: stamp.absolute },
+            }
+          : {}),
+        reasoning,
+        reasoningSeen: reasoning.length > 0,
+        toolActivities,
+        inheritedSources,
+        compactionActivities,
+        ...(attachmentsByMessage.has(message.id)
+          ? { attachments: attachmentsByMessage.get(message.id)! }
+          : {}),
+        ...(message.role === "user" && message.status === "complete"
+          ? {
+              onEdit: () => openEdit(message.id),
+              editDisabled: actionsDisabled,
+            }
+          : {}),
+        // Only the answer itself can be forked, and only once it is finished —
+        // the server insists on the same, this just keeps the row honest.
+        ...(message.role === "assistant" && message.status !== "streaming"
+          ? {
+              onBranch: () => branchAt(message.id),
+              branchDisabled: actionsDisabled,
+            }
+          : {}),
+        ...(retryTarget !== undefined
+          ? {
+              onRetry: () => void retry(retryTarget),
+              onRetryWith: (pickedModelId: string) => void retry(retryTarget, pickedModelId),
+              retryModelId: modelByMessage.get(retryTarget) ?? null,
+              retryDisabled: actionsDisabled,
+            }
+          : {}),
+      };
+    });
+  }, [
+    actionsDisabled,
+    attachmentsByMessage,
+    branchAt,
+    compactionsByMessage,
+    modelByMessage,
+    nextAssistantAfter,
+    openEdit,
+    retry,
+    stamps,
+    toolCallsByMessage,
+    visibleMessages,
+  ]);
+
+  const liveId = streamingMessage?.id ?? (stream.status === "streaming" ? overlayId : null);
+  const display = useMemo(
+    () =>
+      baseDisplay.map((base): DisplayMessage => {
+        let projected = base;
+
+        if (activeEditingMessage?.id === base.id) {
+          projected = {
+            ...projected,
             editState: {
-              draft: activeEditState.draft,
-              onDraftChange: (draft: string) =>
-                setEditState((current) => (current ? { ...current, draft } : null)),
-              onSave: () => void saveEdit(),
+              initialDraft: activeEditingMessage.content,
+              onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
-              saveDisabled: editMutation.isPending,
-              controlsDisabled: editMutation.isPending,
+              saveDisabled: editPending,
+              controlsDisabled: editPending,
               modelId: effectiveModelId,
               onModelChange: setModelId,
               searchEnabled,
               onSearchEnabledChange: setSearchEnabled,
               attachments: editUploads,
             },
-          }
-        : {}),
-      // Only the answer itself can be forked, and only once it is finished —
-      // the server insists on the same, this just keeps the row honest.
-      ...(m.role === "assistant" && m.status !== "streaming"
-        ? {
-            onBranch: () => branchMutation.mutate(m.id),
-            branchDisabled: actionsDisabled,
-          }
-        : {}),
-      ...(retryTarget !== undefined
-        ? {
-            onRetry: () => void retry(retryTarget),
-            onRetryWith: (pickedModelId: string) => void retry(retryTarget, pickedModelId),
-            retryModelId: modelByMessage.get(retryTarget) ?? null,
-            retryDisabled: actionsDisabled,
-          }
-        : {}),
-    };
-    const liveId = streamingMessage?.id ?? (stream.status === "streaming" ? overlayId : null);
-    if (m.id !== liveId) return base;
-    // Overlay live stream state onto the streaming message row.
-    const live = {
-      ...base,
-      reasoning: stream.reasoning,
-      reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
-      toolActivities: stream.tools.length > 0 ? stream.tools : toolActivities,
-      compactionActivities: stream.compactions,
-    };
-    // Status comes from the stream, not the row: the refetched row says
-    // complete while the last words are still landing.
-    if (stream.status === "streaming")
-      return { ...live, content: stream.text, status: "streaming" };
-    if (stream.text.length > m.content.length) {
-      return { ...live, content: stream.text, status: stream.status };
-    }
-    return live;
-  });
+          };
+        }
+
+        if (base.id !== liveId) return projected;
+
+        // Overlay live stream state onto only the active assistant row.
+        const live = {
+          ...projected,
+          reasoning: stream.reasoning,
+          reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
+          toolActivities: stream.tools.length > 0 ? stream.tools : base.toolActivities,
+          compactionActivities: stream.compactions,
+        };
+        // Status comes from the stream, not the row: the refetched row says
+        // complete while the last words are still landing.
+        if (stream.status === "streaming") {
+          return { ...live, content: stream.text, status: "streaming" };
+        }
+        if (stream.text.length > base.content.length) {
+          return { ...live, content: stream.text, status: stream.status };
+        }
+        return live;
+      }),
+    [
+      activeEditingMessage,
+      baseDisplay,
+      closeEdit,
+      editPending,
+      editUploads,
+      effectiveModelId,
+      liveId,
+      saveEdit,
+      searchEnabled,
+      setSearchEnabled,
+      stream.compactions,
+      stream.reasoning,
+      stream.reasoningSeen,
+      stream.status,
+      stream.text,
+      stream.tools,
+    ],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -521,7 +596,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
             {...(stoppableId ? { onStop: () => stopMutation.mutate(stoppableId) } : {})}
             disabled={actionsDisabled}
-            textareaDisabled={activeEditState !== null}
+            textareaDisabled={activeEditingMessage !== null}
             controlsDisabled={mutationPending}
             modelId={effectiveModelId}
             onModelChange={setModelId}

@@ -2,20 +2,22 @@ import { ArrowRight01Icon, PlusSignIcon, UserGroupIcon } from "@hugeicons/core-f
 import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { createGroup, listGroupMemberships, listGroups } from "../server/functions.ts";
-import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
+import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { Spinner } from "~/ui/primitives/spinner";
 
 export const groupsQuery = queryOptions({
   queryKey: ["admin", "groups"],
@@ -27,17 +29,29 @@ export const membershipsQuery = queryOptions({
   queryFn: () => listGroupMemberships(),
 });
 
+// The group server functions answer a taken name with a bare 409 Response
+// (`Effect.die(new Response(..., { status: 409 }))`), which the server-fn
+// client surfaces as an untyped Error carrying the response text. There is no
+// tagged field to check on the client, so the sniffing lives here alone.
+export const isConflict = (error: unknown): boolean => {
+  if (error instanceof Response) return error.status === 409;
+  if (error instanceof Error) {
+    return error.message.includes("409") || /already taken/i.test(error.message);
+  }
+  return false;
+};
+
 export function GroupsPage() {
   const { data: groups } = useSuspenseQuery(groupsQuery);
   const [adding, setAdding] = useState(false);
 
   return (
-    <AdminPage
+    <Page
       title="Groups"
       description="User groups that private models can be shared with."
       actions={
         <Button size="sm" onClick={() => setAdding(true)}>
-          <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
           New group
         </Button>
       }
@@ -49,7 +63,7 @@ export function GroupsPage() {
           description="Create a group, add users to it, and share private models with it."
           action={
             <Button size="sm" onClick={() => setAdding(true)}>
-              <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
               New group
             </Button>
           }
@@ -63,18 +77,19 @@ export function GroupsPage() {
               params={{ groupId: group.id }}
               className="block"
             >
-              <ListRow className="hover:bg-accent/50 transition-colors">
-                <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
-                  <HugeiconsIcon icon={UserGroupIcon} className="size-4" />
+              <ListRow interactive>
+                <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+                  <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} className="size-4" />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium">{group.name}</span>
+                  <span className="truncate text-sm font-medium">{group.name}</span>
                   <span className="text-muted-foreground text-xs">
                     {group.memberCount === 1 ? "1 member" : `${group.memberCount} members`}
                   </span>
                 </div>
                 <HugeiconsIcon
                   icon={ArrowRight01Icon}
+                  strokeWidth={2}
                   className="text-muted-foreground size-4 shrink-0"
                 />
               </ListRow>
@@ -83,7 +98,7 @@ export function GroupsPage() {
         </ListCard>
       )}
       <AddGroupDialog open={adding} onOpenChange={setAdding} />
-    </AdminPage>
+    </Page>
   );
 }
 
@@ -94,6 +109,7 @@ function AddGroupDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const id = useId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -109,41 +125,58 @@ function AddGroupDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          if (save.isPending) return;
+          setName("");
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New group</DialogTitle>
           <DialogDescription>Name it after the people it collects.</DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-6"
           onSubmit={(event) => {
             event.preventDefault();
             if (name.trim()) save.mutate();
           }}
         >
-          <Field>
-            <FieldLabel htmlFor="group-name">Name</FieldLabel>
-            <Input
-              id="group-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Engineering"
-              autoFocus
-            />
-          </Field>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+              <Input
+                id={`${id}-name`}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Engineering"
+                disabled={save.isPending}
+                autoFocus
+              />
+            </Field>
+          </FieldGroup>
           {save.isError ? (
-            <p className="text-destructive text-sm">
-              {save.error.message.includes("409")
+            <FieldError>
+              {isConflict(save.error)
                 ? "A group with this name already exists."
                 : "Could not create the group."}
-            </p>
+            </FieldError>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
-            </Button>
-            <Button type="submit" disabled={!name.trim() || save.isPending}>
+            </DialogClose>
+            <Button
+              type="submit"
+              disabled={!name.trim() || save.isPending}
+              aria-busy={save.isPending || undefined}
+            >
+              {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
               Create group
             </Button>
           </DialogFooter>

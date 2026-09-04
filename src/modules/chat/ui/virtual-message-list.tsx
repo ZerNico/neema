@@ -39,13 +39,14 @@ export function VirtualMessageList({
     getItemKey: (index) => messages[index]!.id,
     anchorTo: "end",
     scrollEndThreshold: BOTTOM_THRESHOLD,
+    useAnimationFrameWithResizeObserver: true,
   });
 
   // When an item above the viewport resizes (e.g. images/code settle),
   // keep the visual position stable instead of jumping. Instance-level
   // property in virtual-core, not a constructor option.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-    item.start < (instance.scrollOffset ?? 0);
+    item.end <= (instance.scrollOffset ?? 0);
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
@@ -90,7 +91,7 @@ export function VirtualMessageList({
       <div
         ref={scrollRef}
         className={cn(
-          "h-full overflow-y-auto pb-8 [scrollbar-gutter:stable_both-edges]",
+          "h-full overflow-y-auto pb-8 [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]",
           "[mask-image:linear-gradient(to_bottom,black_calc(100%-1.5rem),transparent)]",
         )}
       >

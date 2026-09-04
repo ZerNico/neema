@@ -3,11 +3,23 @@ import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
+import { buttonVariants } from "~/ui/primitives/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "~/ui/primitives/card";
+import { FieldError } from "~/ui/primitives/field";
+import { cn } from "~/ui/utils";
 
 const LoginSchema = Schema.Struct({
-  email: Schema.String.check(Schema.isMinLength(3)),
-  password: Schema.String.check(Schema.isMinLength(8)),
+  email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
+  password: Schema.String.check(
+    Schema.isMinLength(8, { message: "Password must be at least 8 characters." }),
+  ),
 });
 
 export const Route = createFileRoute("/login")({
@@ -28,7 +40,7 @@ function LoginPage() {
         password: value.password,
       });
       if (error) {
-        setServerError(error.message ?? "Sign in failed");
+        setServerError(error.message ?? "Could not sign in.");
         return;
       }
       await navigate({ to: "/" });
@@ -40,6 +52,7 @@ function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
+          <CardDescription>Welcome back.</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -57,18 +70,20 @@ function LoginPage() {
                 <field.TextField label="Password" type="password" autoComplete="current-password" />
               )}
             </form.AppField>
-            {serverError ? <p className="text-destructive text-sm">{serverError}</p> : null}
+            {serverError ? <FieldError>{serverError}</FieldError> : null}
             <form.AppForm>
-              <form.SubmitButton>Sign in</form.SubmitButton>
+              <form.SubmitButton className="w-full">Sign in</form.SubmitButton>
             </form.AppForm>
           </form>
-          <p className="text-muted-foreground mt-4 text-sm">
+        </CardContent>
+        <CardFooter>
+          <p className="text-muted-foreground text-sm">
             No account?{" "}
-            <Link to="/register" className="text-foreground underline">
+            <Link to="/register" className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}>
               Register
             </Link>
           </p>
-        </CardContent>
+        </CardFooter>
       </Card>
     </div>
   );

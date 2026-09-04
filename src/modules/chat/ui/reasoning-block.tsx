@@ -1,6 +1,6 @@
 import { ArrowDown01Icon, AiBrain01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
@@ -14,7 +14,7 @@ import { cn } from "~/ui/utils";
 // - Visible reasoning, finished: collapsed one-line summary, expandable.
 // - Hidden reasoning (encrypted/redacted): indicator only while thinking;
 //   nothing expandable afterwards.
-export function ReasoningBlock({
+export const ReasoningBlock = memo(function ReasoningBlock({
   reasoning,
   active,
 }: {
@@ -88,4 +88,4 @@ export function ReasoningBlock({
       </CollapsibleContent>
     </Collapsible>
   );
-}
+});

@@ -1,32 +1,55 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { Schema } from "effect";
 import { useState } from "react";
+import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
-import { AdminPage, ListCard, ListRow } from "~/modules/admin/ui/admin-shell.tsx";
+import { useAppForm } from "~/ui/form/app-form.tsx";
+import { ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
-import { Button } from "~/ui/primitives/button";
-import { Field, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
+import { FieldError } from "~/ui/primitives/field";
+
+const NameSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1, { message: "Enter a display name." })),
+});
+
+const PasswordSchema = Schema.Struct({
+  currentPassword: Schema.String.check(
+    Schema.isMinLength(1, { message: "Enter your current password." }),
+  ),
+  newPassword: Schema.String.check(
+    Schema.isMinLength(8, { message: "New password must be at least 8 characters." }),
+  ),
+});
+
+type PasswordStatus = { kind: "success" | "error"; message: string };
 
 export function ProfilePage() {
   const session = authClient.useSession();
-  const queryClient = useQueryClient();
   const user = session.data?.user;
+  if (!user) return null;
+  return <ProfileForms user={user} />;
+}
 
-  const [name, setName] = useState<string | null>(null);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordStatus, setPasswordStatus] = useState<string | null>(null);
+function ProfileForms({
+  user,
+}: {
+  user: { name: string; email: string; role?: string | null | undefined };
+}) {
+  const queryClient = useQueryClient();
+  const [passwordStatus, setPasswordStatus] = useState<PasswordStatus | null>(null);
 
-  const effectiveName = name ?? user?.name ?? "";
-
-  const saveName = useMutation({
-    mutationFn: async () => {
-      const { error } = await authClient.updateUser({ name: effectiveName.trim() });
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      setName(null);
+  const nameForm = useAppForm({
+    defaultValues: { name: user.name },
+    validators: { onSubmit: Schema.toStandardSchemaV1(NameSchema) },
+    onSubmit: async ({ value }) => {
+      const name = value.name.trim();
+      const { error } = await authClient.updateUser({ name });
+      if (error) {
+        toast.error("Could not save the profile.");
+        return;
+      }
+      nameForm.reset({ name });
       // The shell reads the name from the cached session, not from this
       // component's store — without this it keeps the old one until the entry
       // goes stale.
@@ -34,38 +57,39 @@ export function ProfilePage() {
     },
   });
 
-  const changePassword = useMutation({
-    mutationFn: async () => {
+  const passwordForm = useAppForm({
+    defaultValues: { currentPassword: "", newPassword: "" },
+    validators: { onSubmit: Schema.toStandardSchemaV1(PasswordSchema) },
+    onSubmit: async ({ value }) => {
+      setPasswordStatus(null);
       const { error } = await authClient.changePassword({
-        currentPassword,
-        newPassword,
+        currentPassword: value.currentPassword,
+        newPassword: value.newPassword,
         revokeOtherSessions: true,
       });
-      if (error) throw new Error(error.message ?? "Password change failed");
+      if (error) {
+        setPasswordStatus({
+          kind: "error",
+          message: error.message ?? "Could not update the password.",
+        });
+        return;
+      }
+      passwordForm.reset();
+      setPasswordStatus({
+        kind: "success",
+        message: "Password updated. Other sessions were signed out.",
+      });
     },
-    onSuccess: () => {
-      setCurrentPassword("");
-      setNewPassword("");
-      setPasswordStatus("Password updated. Other sessions were signed out.");
-    },
-    onError: (error) => setPasswordStatus(error.message),
   });
 
-  if (!user) return null;
-
-  const nameDirty = name !== null && name.trim() !== user.name;
-
   return (
-    <AdminPage
+    <Page
       title="Profile"
       description="Your account on this instance."
       rootPath="/settings"
       rootLabel="Settings"
     >
-      <section className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Account
-        </h2>
+      <Section title="Account">
         <ListCard>
           <ListRow>
             <Avatar className="size-10">
@@ -75,70 +99,81 @@ export function ProfilePage() {
               <span className="text-sm font-medium">{user.name}</span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>
-            {user.role === "admin" ? <Badge>admin</Badge> : null}
+            {user.role === "admin" ? <Badge variant="outline">Admin</Badge> : null}
           </ListRow>
-          <ListRow className="items-end gap-3">
-            <Field className="flex-1">
-              <FieldLabel>Display name</FieldLabel>
-              <Input
-                value={effectiveName}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="name"
-              />
-            </Field>
-            <Button
-              size="sm"
-              disabled={!nameDirty || !effectiveName.trim() || saveName.isPending}
-              onClick={() => saveName.mutate()}
+          <ListRow className="flex-col items-stretch gap-3">
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void nameForm.handleSubmit();
+              }}
             >
-              {saveName.isPending ? "Saving…" : "Save"}
-            </Button>
+              <nameForm.AppField name="name">
+                {(field) => <field.TextField label="Display name" autoComplete="name" />}
+              </nameForm.AppField>
+              <nameForm.AppForm>
+                <div>
+                  <nameForm.Subscribe selector={(s) => s.isDefaultValue}>
+                    {(unchanged) => (
+                      <nameForm.SubmitButton size="sm" disabled={unchanged}>
+                        Save
+                      </nameForm.SubmitButton>
+                    )}
+                  </nameForm.Subscribe>
+                </div>
+              </nameForm.AppForm>
+            </form>
           </ListRow>
         </ListCard>
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Password
-        </h2>
+      <Section title="Password">
         <ListCard>
           <ListRow className="flex-col items-stretch gap-3">
-            <Field>
-              <FieldLabel>Current password</FieldLabel>
-              <Input
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>New password</FieldLabel>
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-            </Field>
-            {passwordStatus ? (
-              <p className="text-muted-foreground text-xs">{passwordStatus}</p>
-            ) : null}
-            <div>
-              <Button
-                size="sm"
-                disabled={!currentPassword || newPassword.length < 8 || changePassword.isPending}
-                onClick={() => {
-                  setPasswordStatus(null);
-                  changePassword.mutate();
-                }}
-              >
-                {changePassword.isPending ? "Updating…" : "Update password"}
-              </Button>
-            </div>
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void passwordForm.handleSubmit();
+              }}
+            >
+              <passwordForm.AppField name="currentPassword">
+                {(field) => (
+                  <field.TextField
+                    label="Current password"
+                    type="password"
+                    autoComplete="current-password"
+                  />
+                )}
+              </passwordForm.AppField>
+              <passwordForm.AppField name="newPassword">
+                {(field) => (
+                  <field.TextField
+                    label="New password"
+                    type="password"
+                    autoComplete="new-password"
+                    description="At least 8 characters."
+                  />
+                )}
+              </passwordForm.AppField>
+              {passwordStatus?.kind === "error" ? (
+                <FieldError>{passwordStatus.message}</FieldError>
+              ) : null}
+              {passwordStatus?.kind === "success" ? (
+                <p role="status" className="text-muted-foreground text-sm">
+                  {passwordStatus.message}
+                </p>
+              ) : null}
+              <passwordForm.AppForm>
+                <div>
+                  <passwordForm.SubmitButton size="sm">Update password</passwordForm.SubmitButton>
+                </div>
+              </passwordForm.AppForm>
+            </form>
           </ListRow>
         </ListCard>
-      </section>
-    </AdminPage>
+      </Section>
+    </Page>
   );
 }

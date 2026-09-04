@@ -13,7 +13,8 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
+import { toast } from "sonner";
 import {
   addGroupMember,
   deleteGroup,
@@ -21,9 +22,10 @@ import {
   removeGroupMember,
   renameGroup,
 } from "../server/functions.ts";
-import { AdminPage, EmptyState, ListCard, ListRow } from "./admin-shell.tsx";
-import { groupsQuery } from "./groups-page.tsx";
+import { groupsQuery, isConflict } from "./groups-page.tsx";
 import { authClient } from "~/modules/auth/client.ts";
+import { useConfirm } from "~/ui/confirm.tsx";
+import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -37,6 +39,7 @@ import {
 } from "~/ui/primitives/combobox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -49,9 +52,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { Skeleton } from "~/ui/primitives/skeleton";
+import { Spinner } from "~/ui/primitives/spinner";
 
 const membersQuery = (groupId: string) =>
   queryOptions({
@@ -96,11 +100,13 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
   const add = useMutation({
     mutationFn: (userId: string) => addGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
+    onError: () => toast.error("Could not add the member."),
   });
 
   const remove = useMutation({
     mutationFn: (userId: string) => removeGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
+    onError: () => toast.error("Could not remove the member."),
   });
 
   const removeWholeGroup = useMutation({
@@ -109,13 +115,14 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       await invalidate();
       await navigate({ to: "/admin/groups" });
     },
+    onError: () => toast.error("Could not delete the group."),
   });
 
   if (!group) {
     return (
-      <AdminPage title="Group not found" backTo="/admin/groups" backLabel="Groups">
+      <Page title="Group not found" backTo="/admin/groups" backLabel="Groups">
         <p className="text-muted-foreground text-sm">This group does not exist anymore.</p>
-      </AdminPage>
+      </Page>
     );
   }
 
@@ -125,7 +132,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     .map((u) => ({ id: u.id, name: u.name, email: u.email }));
 
   return (
-    <AdminPage
+    <Page
       title={group.name}
       backTo="/admin/groups"
       backLabel="Groups"
@@ -134,11 +141,11 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" aria-label="Group actions" />}
           >
-            <HugeiconsIcon icon={MoreVerticalIcon} className="size-4" />
+            <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setRenaming(true)}>
-              <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+              <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
               Rename group
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -156,25 +163,28 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                 }
               }}
             >
-              <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+              <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
               Delete group
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }
     >
-      <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Members
-          </h2>
+      <Section
+        title="Members"
+        actions={
           <AddMemberPicker
             candidates={candidates}
-            disabled={add.isPending}
+            pending={add.isPending}
             onPick={(userId) => add.mutate(userId)}
           />
-        </div>
-        {(members.data ?? []).length === 0 ? (
+        }
+      >
+        {members.isLoading ? (
+          <ListSkeleton />
+        ) : members.isError ? (
+          <ErrorState title="Could not load members" onRetry={() => members.refetch()} />
+        ) : (members.data ?? []).length === 0 ? (
           <EmptyState
             icon={UserGroupIcon}
             title="No members yet"
@@ -188,7 +198,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                   <AvatarFallback>{member.name.slice(0, 2).toUpperCase()}</AvatarFallback>
                 </Avatar>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium">{member.name}</span>
+                  <span className="truncate text-sm font-medium">{member.name}</span>
                   <span className="text-muted-foreground truncate text-xs">{member.email}</span>
                 </div>
                 <Button
@@ -196,15 +206,26 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                   size="icon-sm"
                   aria-label={`Remove ${member.name}`}
                   disabled={remove.isPending}
-                  onClick={() => remove.mutate(member.userId)}
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        title: `Remove ${member.name}?`,
+                        description:
+                          "They lose access to any model shared only with this group. Their account is untouched.",
+                        confirmLabel: "Remove member",
+                      })
+                    ) {
+                      remove.mutate(member.userId);
+                    }
+                  }}
                 >
-                  <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                  <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
                 </Button>
               </ListRow>
             ))}
           </ListCard>
         )}
-      </section>
+      </Section>
 
       <RenameGroupDialog
         groupId={groupId}
@@ -212,7 +233,23 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         open={renaming}
         onOpenChange={setRenaming}
       />
-    </AdminPage>
+    </Page>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <ListCard>
+      {[0, 1, 2].map((i) => (
+        <ListRow key={i}>
+          <Skeleton className="size-9 rounded-full" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-48" />
+          </div>
+        </ListRow>
+      ))}
+    </ListCard>
   );
 }
 
@@ -220,18 +257,19 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
 // them and the field resets, ready for the next addition.
 function AddMemberPicker({
   candidates,
-  disabled,
+  pending,
   onPick,
 }: {
   candidates: PickableUser[];
-  disabled: boolean;
+  pending: boolean;
   onPick: (userId: string) => void;
 }) {
+  const disabled = pending || candidates.length === 0;
   return (
     <Combobox
       items={candidates}
       value={null}
-      disabled={disabled || candidates.length === 0}
+      disabled={disabled}
       onValueChange={(picked: PickableUser | null) => {
         if (picked) onPick(picked.id);
       }}
@@ -243,21 +281,22 @@ function AddMemberPicker({
       autoHighlight
     >
       <ComboboxTrigger
-        render={<Button size="sm" variant="outline" aria-label="Add member" />}
-        disabled={disabled || candidates.length === 0}
+        render={<Button size="sm" aria-busy={pending || undefined} />}
+        disabled={disabled}
       >
+        {pending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
         Add member
       </ComboboxTrigger>
       <ComboboxContent side="bottom" align="end" className="w-72 min-w-72">
         <ComboboxInput placeholder="Search users…" showTrigger={false} />
         <ComboboxEmpty>
-          {candidates.length === 0 ? "Everyone is already a member" : "No users match"}
+          {candidates.length === 0 ? "Everyone is already a member." : "No users match."}
         </ComboboxEmpty>
         <ComboboxList>
           {(user: PickableUser) => (
             <ComboboxItem key={user.id} value={user}>
               <span className="min-w-0 flex-1 truncate">{user.name}</span>
-              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
+              <span className="text-muted-foreground min-w-0 truncate text-xs">{user.email}</span>
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -277,6 +316,7 @@ function RenameGroupDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const id = useId();
   const queryClient = useQueryClient();
   const [name, setName] = useState(currentName);
 
@@ -284,45 +324,63 @@ function RenameGroupDialog({
     mutationFn: () => renameGroup({ data: { groupId, name: name.trim() } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin"] });
+      setName(name.trim());
       onOpenChange(false);
     },
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          if (save.isPending) return;
+          setName(currentName);
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Rename group</DialogTitle>
           <DialogDescription>Model access and members stay as they are.</DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-6"
           onSubmit={(event) => {
             event.preventDefault();
             if (name.trim()) save.mutate();
           }}
         >
-          <Field>
-            <FieldLabel htmlFor="group-rename">Name</FieldLabel>
-            <Input
-              id="group-rename"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoFocus
-            />
-          </Field>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+              <Input
+                id={`${id}-name`}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={save.isPending}
+                autoFocus
+              />
+            </Field>
+          </FieldGroup>
           {save.isError ? (
-            <p className="text-destructive text-sm">
-              {save.error.message.includes("409")
+            <FieldError>
+              {isConflict(save.error)
                 ? "A group with this name already exists."
                 : "Could not rename the group."}
-            </p>
+            </FieldError>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
-            </Button>
-            <Button type="submit" disabled={!name.trim() || save.isPending}>
+            </DialogClose>
+            <Button
+              type="submit"
+              disabled={!name.trim() || save.isPending}
+              aria-busy={save.isPending || undefined}
+            >
+              {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
               Rename
             </Button>
           </DialogFooter>

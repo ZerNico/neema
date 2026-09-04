@@ -23,7 +23,17 @@ import {
 } from "./format.ts";
 import { Button } from "~/ui/primitives/button";
 import { Calendar } from "~/ui/primitives/calendar";
+import { Card, CardContent, CardHeader } from "~/ui/primitives/card";
 import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
+import { Separator } from "~/ui/primitives/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/ui/primitives/table";
 import { cn } from "~/ui/utils";
 
 export const USAGE_RANGES: Array<{ value: UsageRangeDays; label: string }> = [
@@ -53,6 +63,11 @@ const toCustomRange = (range: DateRange): UsageRangeEncoded | null => {
     to: new Date(utcDay(range.to).getTime() + DAY_MS).toISOString(),
   };
 };
+
+// The preset list lives in a Popover (the calendar swaps into the same
+// surface), so the rows borrow DropdownMenuItem's look and focus ring.
+const PRESET_ROW =
+  "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground flex w-full items-center rounded-2xl px-3 py-2 text-left text-sm font-medium transition-colors outline-none select-none";
 
 const rangeLabel = (range: UsageRangeEncoded): string =>
   range.kind === "preset"
@@ -93,13 +108,13 @@ export function UsageRangePicker({
     >
       <PopoverTrigger
         render={
-          <Button variant="outline" className="gap-2" aria-label="Date range">
-            <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-4" />
+          <Button variant="outline">
+            <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} data-icon="inline-start" />
             {rangeLabel(range)}
           </Button>
         }
       />
-      <PopoverContent align="end" className={custom ? "w-auto" : "w-56"}>
+      <PopoverContent align="end" className={cn(custom ? "w-auto" : "w-56 p-1.5")}>
         {custom ? (
           <div className="flex flex-col gap-3">
             <Calendar
@@ -130,7 +145,7 @@ export function UsageRangePicker({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             {USAGE_RANGES.map((preset) => (
               <button
                 key={preset.value}
@@ -140,19 +155,17 @@ export function UsageRangePicker({
                   close();
                 }}
                 className={cn(
-                  "hover:bg-accent rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
-                  range.kind === "preset" && range.days === preset.value && "bg-accent",
+                  PRESET_ROW,
+                  range.kind === "preset" &&
+                    range.days === preset.value &&
+                    "bg-accent text-accent-foreground",
                 )}
               >
                 {preset.label}
               </button>
             ))}
-            <div className="bg-border my-1 h-px" />
-            <button
-              type="button"
-              onClick={() => setCustom(true)}
-              className="hover:bg-accent rounded-md px-2.5 py-1.5 text-left text-sm transition-colors"
-            >
+            <Separator className="my-1" />
+            <button type="button" onClick={() => setCustom(true)} className={PRESET_ROW}>
               Custom range…
             </button>
           </div>
@@ -176,26 +189,28 @@ function StatTile({
   spark?: readonly number[];
 }) {
   return (
-    <div className="border-border bg-background flex min-w-0 flex-col gap-1 overflow-hidden rounded-lg border px-4 py-3">
-      <span className="text-muted-foreground text-xs">{label}</span>
-      {/* The plot gets its own row below. A value such as “218.8K” plus the
+    <Card size="sm" className="min-w-0 gap-1">
+      <CardContent className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-muted-foreground text-xs">{label}</span>
+        {/* The plot gets its own row below. A value such as “218.8K” plus the
           fixed-width sparkline cannot share a narrow four-column KPI card. */}
-      <span className="text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums">
-        {value}
-      </span>
-      <div className="text-muted-foreground flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-xs leading-snug">
-        {/* Direction is stated, never coloured: more tokens is neither good
+        <span className="text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums">
+          {value}
+        </span>
+        <div className="text-muted-foreground flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-xs leading-snug">
+          {/* Direction is stated, never coloured: more tokens is neither good
             nor bad, and the same tile shape carries cost and error rate. */}
-        {delta ? <span className="text-foreground shrink-0 font-medium">{delta}</span> : null}
-        {delta && sub ? <span aria-hidden>·</span> : null}
-        {sub ? <span className="min-w-0 break-words">{sub}</span> : null}
-      </div>
-      {spark ? (
-        <div className="mt-auto flex h-[22px] w-full min-w-0 justify-end overflow-hidden pt-1">
-          <UsageSparkline values={spark} />
+          {delta ? <span className="text-foreground shrink-0 font-medium">{delta}</span> : null}
+          {delta && sub ? <span aria-hidden>·</span> : null}
+          {sub ? <span className="min-w-0 break-words">{sub}</span> : null}
         </div>
-      ) : null}
-    </div>
+        {spark ? (
+          <div className="mt-auto flex h-[22px] w-full min-w-0 justify-end overflow-hidden pt-1">
+            <UsageSparkline values={spark} />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -209,13 +224,13 @@ export function ChartCard({
   children: ReactNode;
 }) {
   return (
-    <section className="border-border bg-background flex flex-col gap-3 rounded-lg border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <Card size="sm" className="gap-3">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-medium">{title}</h2>
         {legend}
-      </div>
-      {children}
-    </section>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">{children}</CardContent>
+    </Card>
   );
 }
 
@@ -456,36 +471,39 @@ export function UsageTable({
   rows: ReadonlyArray<readonly string[]>;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground border-border border-b text-left text-xs">
-            {head.map((label, i) => (
-              <th key={label} className={`py-2 font-medium ${i > 0 ? "text-right" : ""}`}>
-                {label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((cells, rowIndex) => (
-            // Rows are display-only aggregates; index keys are fine.
-            // oxlint-disable-next-line no-array-index-key
-            <tr key={rowIndex} className="border-border border-b last:border-0">
-              {cells.map((cell, i) => (
-                // oxlint-disable-next-line no-array-index-key
-                <td
-                  key={i}
-                  className={`py-2 ${i > 0 ? "text-right tabular-nums" : "max-w-48 truncate"}`}
-                >
-                  {cell}
-                </td>
-              ))}
-            </tr>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          {head.map((label, i) => (
+            <TableHead
+              key={label}
+              className={cn("text-muted-foreground h-9 px-0 text-xs", i > 0 && "text-right")}
+            >
+              {label}
+            </TableHead>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((cells, rowIndex) => (
+          // Rows are display-only aggregates; index keys are fine.
+          // oxlint-disable-next-line no-array-index-key
+          <TableRow key={rowIndex}>
+            {cells.map((cell, i) => (
+              <TableCell
+                key={head[i]}
+                className={cn(
+                  "px-0 py-2",
+                  i > 0 ? "text-right tabular-nums" : "max-w-48 truncate whitespace-normal",
+                )}
+              >
+                {cell}
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 

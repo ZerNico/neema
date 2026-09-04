@@ -1,14 +1,15 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Button } from "~/ui/primitives/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/ui/primitives/alert-dialog";
 
 export interface ConfirmOptions {
   title: string;
@@ -29,7 +30,9 @@ const ConfirmContext = createContext<ConfirmFn | null>(null);
 //   if (await confirm({ title: "Delete model?" })) { ... }
 //
 // Resolves true on confirm, false on cancel/dismiss. One dialog instance per
-// provider; concurrent calls queue naturally since the promise gates the flow.
+// provider; opening another confirmation dismisses the previous one as false.
+// Built on AlertDialog so the browser gets role="alertdialog" and outside
+// clicks don't dismiss — the user has to pick an answer (Escape still cancels).
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
   const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);
@@ -52,27 +55,25 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      <Dialog open={options !== null} onOpenChange={(open) => !open && settle(false)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{options?.title}</DialogTitle>
+      <AlertDialog open={options !== null} onOpenChange={(open) => !open && settle(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{options?.title}</AlertDialogTitle>
             {options?.description ? (
-              <DialogDescription>{options.description}</DialogDescription>
+              <AlertDialogDescription>{options.description}</AlertDialogDescription>
             ) : null}
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => settle(false)}>
-              {options?.cancelLabel ?? "Cancel"}
-            </Button>
-            <Button
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{options?.cancelLabel ?? "Cancel"}</AlertDialogCancel>
+            <AlertDialogAction
               variant={(options?.destructive ?? true) ? "destructive" : "default"}
               onClick={() => settle(true)}
             >
               {options?.confirmLabel ?? "Confirm"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ConfirmContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 import { Analytics01Icon, Brain02Icon, UserCircleIcon } from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
-import { AdminShell } from "~/modules/admin/ui/admin-shell.tsx";
+import { SectionShell } from "~/ui/page-shell.tsx";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsLayout,
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/_app/settings")({
 
 function SettingsLayout() {
   return (
-    <AdminShell
+    <SectionShell
       title="Settings"
       rootPath="/settings"
       items={[
@@ -33,6 +33,6 @@ function SettingsLayout() {
       ]}
     >
       <Outlet />
-    </AdminShell>
+    </SectionShell>
   );
 }

@@ -202,7 +202,7 @@ export function ToolActivityBlock({ activities }: { activities: ToolActivity[] }
             <ActivityEntry
               key={activity.callId}
               activity={activity}
-              showDetails={expanded && (!anyRunning || activity.status === "running")}
+              showDetails={!anyRunning || activity.status === "running"}
             />
           ))}
         </div>

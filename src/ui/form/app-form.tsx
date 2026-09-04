@@ -1,18 +1,22 @@
 import { createFormHook, createFormHookContexts } from "@tanstack/react-form";
+import type { ComponentProps } from "react";
 import { Button } from "~/ui/primitives/button";
-import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { Spinner } from "~/ui/primitives/spinner";
 
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();
 
 function TextField({
   label,
+  description,
   type = "text",
   placeholder,
   autoComplete,
 }: {
   label: string;
+  description?: string;
   type?: string;
   placeholder?: string;
   autoComplete?: string;
@@ -33,6 +37,7 @@ function TextField({
         onChange={(e) => field.handleChange(e.target.value)}
         aria-invalid={showError || undefined}
       />
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
       {showError ? (
         <FieldError
           errors={field.state.meta.errors.map((e) => ({
@@ -44,13 +49,26 @@ function TextField({
   );
 }
 
-function SubmitButton({ children }: { children: React.ReactNode }) {
+// Submit button wired to the form's canSubmit/isSubmitting. Keeps its label
+// while pending (a spinner slides in ahead of it) so the button never
+// reflows — the shadcn "Button with Spinner" pattern.
+function SubmitButton({
+  children,
+  disabled,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "type">) {
   const form = useFormContext();
   return (
     <form.Subscribe selector={(s) => [s.canSubmit, s.isSubmitting] as const}>
       {([canSubmit, isSubmitting]) => (
-        <Button type="submit" disabled={!canSubmit || isSubmitting} className="w-full">
-          {isSubmitting ? "…" : children}
+        <Button
+          type="submit"
+          disabled={disabled || !canSubmit || isSubmitting}
+          aria-busy={isSubmitting || undefined}
+          {...props}
+        >
+          {isSubmitting ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+          {children}
         </Button>
       )}
     </form.Subscribe>

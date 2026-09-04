@@ -1,16 +1,11 @@
-import {
-  Alert02Icon,
-  Cancel01Icon,
-  File01Icon,
-  Loading03Icon,
-  Pdf01Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, Cancel01Icon, File01Icon, Pdf01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode, useState } from "react";
 import type { AttachmentKind } from "../constants.ts";
 import { formatFileSize } from "../constants.ts";
 import { AttachmentPreviewDialog } from "./attachment-preview.tsx";
 import { Button } from "~/ui/primitives/button";
+import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 
 /** The subset of an upload / stored attachment a chip renders. */
@@ -51,15 +46,15 @@ export function AttachmentChip({
 
   const body = (
     <>
-      <span className="bg-muted text-muted-foreground relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg">
+      <span className="bg-muted text-muted-foreground relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl">
         {item.previewUrl ? (
           <img src={item.previewUrl} alt="" className="size-full object-cover" />
         ) : (
-          <HugeiconsIcon icon={KIND_ICON[item.kind]} className="size-4" />
+          <HugeiconsIcon icon={KIND_ICON[item.kind]} strokeWidth={2} className="size-4" />
         )}
         {uploading ? (
           <span className="bg-background/70 absolute inset-0 grid place-items-center">
-            <HugeiconsIcon icon={Loading03Icon} className="size-4 animate-spin" />
+            <Spinner aria-hidden />
           </span>
         ) : null}
       </span>
@@ -67,7 +62,7 @@ export function AttachmentChip({
         <span className="truncate text-xs font-medium">{item.fileName}</span>
         <span
           className={cn(
-            "truncate text-[0.6875rem]",
+            "text-2xs truncate",
             status === "error" ? "text-destructive" : "text-muted-foreground",
           )}
         >
@@ -77,7 +72,11 @@ export function AttachmentChip({
       {problem ? (
         <HugeiconsIcon
           icon={Alert02Icon}
-          className={cn("size-3.5 shrink-0", status === "error" ? "text-destructive" : "")}
+          strokeWidth={2}
+          className={cn(
+            "size-3.5 shrink-0",
+            status === "error" ? "text-destructive" : "text-warning",
+          )}
         />
       ) : null}
     </>
@@ -93,9 +92,9 @@ export function AttachmentChip({
 
   // The subtitle truncates, so the full reason lives on `title` too.
   const shell = cn(
-    "border-border bg-background flex max-w-56 items-center gap-2 rounded-xl border p-1.5 pr-2 shadow-sm",
+    "border-border bg-background flex max-w-56 items-center gap-2 rounded-2xl border p-1.5 pr-2 shadow-sm",
     status === "error" ? "border-destructive/50" : "",
-    warning && status !== "error" ? "border-amber-500/60" : "",
+    warning && status !== "error" ? "border-warning/60" : "",
     className,
   );
 
@@ -107,7 +106,10 @@ export function AttachmentChip({
           target="_blank"
           rel="noreferrer"
           title={problem ?? item.fileName}
-          className={cn(shell, "hover:bg-accent transition-colors")}
+          className={cn(
+            shell,
+            "hover:bg-accent focus-visible:ring-ring/30 transition-colors outline-none focus-visible:ring-3",
+          )}
           // Plain click previews in place; modified clicks keep the browser's
           // open-in-new-tab behavior for the raw file.
           onClick={
@@ -138,7 +140,7 @@ export function AttachmentChip({
           onClick={preview ? () => setPreviewOpen(true) : undefined}
           disabled={!preview}
           className={cn(
-            "flex min-w-0 items-center gap-2",
+            "focus-visible:ring-ring/30 flex min-w-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-3",
             preview ? "cursor-pointer" : "cursor-default",
           )}
         >
@@ -152,7 +154,7 @@ export function AttachmentChip({
             onClick={onRemove}
             className="text-muted-foreground hover:text-foreground -mr-1 size-5 shrink-0 rounded-full"
           >
-            <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
+            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3.5" />
           </Button>
         ) : null}
       </div>

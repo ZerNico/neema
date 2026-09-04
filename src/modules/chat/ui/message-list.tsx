@@ -1,6 +1,6 @@
-import { RefreshIcon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import type { CompactionActivity, ToolActivity, ToolSource } from "../client/use-message-stream.ts";
@@ -20,6 +20,7 @@ import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { Button } from "~/ui/primitives/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import { cn } from "~/ui/utils";
 
 type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
@@ -63,28 +64,27 @@ function citationComponents(
 // Citation rendering needs the detail panel, so it lives in its own component
 // that is only mounted when the message actually has sources — an ordinary
 // answer renders through AssistantMarkdown with no panel dependency at all.
-function CitedAnswer({
-  message,
+const CitedAnswer = memo(function CitedAnswer({
+  messageId,
+  content: rawContent,
   sources,
   streaming,
 }: {
-  message: DisplayMessage;
+  messageId: string;
+  content: string;
   sources: ToolSource[];
   streaming: boolean;
 }) {
-  const openSources = useSourcesPanel(message.id, sources);
+  const openSources = useSourcesPanel(messageId, sources);
   const components = useMemo(
     () => citationComponents(sources, openSources),
     [sources, openSources],
   );
-  const content = useMemo(
-    () => prepareCitedMarkdown(message.content, sources),
-    [message.content, sources],
-  );
+  const content = useMemo(() => prepareCitedMarkdown(rawContent, sources), [rawContent, sources]);
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
-}
+});
 
-function AssistantMarkdown({
+const AssistantMarkdown = memo(function AssistantMarkdown({
   content: rawContent,
   components,
   streaming,
@@ -114,7 +114,7 @@ function AssistantMarkdown({
       {content}
     </Streamdown>
   );
-}
+});
 
 export interface DisplayMessage {
   id: string;
@@ -150,9 +150,8 @@ export interface DisplayMessage {
   onEdit?: () => void;
   editDisabled?: boolean;
   editState?: {
-    draft: string;
-    onDraftChange: (draft: string) => void;
-    onSave: () => void;
+    initialDraft: string;
+    onSave: (draft: string) => void;
     onCancel: () => void;
     saveDisabled: boolean;
     controlsDisabled: boolean;
@@ -191,7 +190,7 @@ function DayDivider({ label }: { label: string }) {
   );
 }
 
-export function MessageBubble({ message }: { message: DisplayMessage }) {
+export const MessageBubble = memo(function MessageBubble({ message }: { message: DisplayMessage }) {
   return (
     <>
       {message.dayLabel ? <DayDivider label={message.dayLabel} /> : null}
@@ -202,36 +201,29 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
       )}
     </>
   );
-}
+});
 
-// Tweens the wrapper's height when `editing` flips. The virtual list measures
-// rows with a ResizeObserver, so a gradual height change carries the rows
-// below along frame by frame — but only `height` may be animated here. A
-// transform would make this a containing block and strand the sticky
-// code-block toolbar inside the message, which is why the row itself is
-// positioned with `top` rather than translateY.
+// Tween only when the row swaps between its bubble and editor. The draft now
+// lives inside InlineMessageEditor, so typing does not rerender this component
+// or restart the measured-height animation.
 function useEditSwapHeight(editing: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const wasEditing = useRef(editing);
   const lastHeight = useRef<number | null>(null);
 
-  // No dependency array: re-measure after every render so the recorded height
-  // tracks draft growth and streaming reflows, not just the edit toggle.
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const height = el.offsetHeight;
+    const element = ref.current;
+    if (!element) return;
+
+    const height = element.offsetHeight;
     if (
       wasEditing.current !== editing &&
       lastHeight.current !== null &&
       lastHeight.current !== height &&
-      typeof el.animate === "function" &&
+      typeof element.animate === "function" &&
       !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     ) {
-      // The outgoing state unmounts in the same commit, so a true cross-fade
-      // has nothing left to fade out; fading the incoming state in from
-      // transparent while the height morphs reads as one.
-      el.animate(
+      element.animate(
         [
           { height: `${lastHeight.current}px`, opacity: 0, overflow: "hidden" },
           { height: `${height}px`, opacity: 1, overflow: "hidden" },
@@ -239,11 +231,52 @@ function useEditSwapHeight(editing: boolean) {
         { duration: 180, easing: "ease-in-out" },
       );
     }
+
     wasEditing.current = editing;
     lastHeight.current = height;
   });
 
   return ref;
+}
+
+function InlineMessageEditor({
+  editState,
+}: {
+  editState: NonNullable<DisplayMessage["editState"]>;
+}) {
+  const [draft, setDraft] = useState(editState.initialDraft);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ChatTextarea sizes itself in its child layout effect first. Focus without
+  // scrolling afterwards so the virtualizer, not the browser, owns row position.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, []);
+
+  return (
+    <div>
+      <ChatInput
+        ref={textareaRef}
+        value={draft}
+        onValueChange={setDraft}
+        onSubmit={() => editState.onSave(draft)}
+        onCancel={editState.onCancel}
+        disabled={editState.saveDisabled}
+        controlsDisabled={editState.controlsDisabled}
+        modelId={editState.modelId}
+        onModelChange={editState.onModelChange}
+        searchEnabled={editState.searchEnabled}
+        onSearchEnabledChange={editState.onSearchEnabledChange}
+        attachments={editState.attachments}
+        placeholder="Edit message…"
+        textareaLabel="Edit message"
+        submitLabel="Save edit"
+      />
+    </div>
+  );
 }
 
 function UserBubble({ message }: { message: DisplayMessage }) {
@@ -252,22 +285,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   return (
     <div ref={wrapperRef} className="w-full">
       {message.editState ? (
-        <ChatInput
-          value={message.editState.draft}
-          onValueChange={message.editState.onDraftChange}
-          onSubmit={message.editState.onSave}
-          onCancel={message.editState.onCancel}
-          disabled={message.editState.saveDisabled}
-          controlsDisabled={message.editState.controlsDisabled}
-          modelId={message.editState.modelId}
-          onModelChange={message.editState.onModelChange}
-          searchEnabled={message.editState.searchEnabled}
-          onSearchEnabledChange={message.editState.onSearchEnabledChange}
-          attachments={message.editState.attachments}
-          placeholder="Edit message…"
-          autoFocus
-          submitLabel="Save edit"
-        />
+        <InlineMessageEditor editState={message.editState} />
       ) : (
         <div className="group/user flex w-full flex-col items-end">
           {message.attachments && message.attachments.length > 0 ? (
@@ -318,7 +336,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
-function AssistantActivityTimeline({
+const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
   tools,
   compactions,
 }: {
@@ -362,6 +380,133 @@ function AssistantActivityTimeline({
   }
 
   return nodes;
+});
+
+const EMPTY_COMPACTION_ACTIVITIES: CompactionActivity[] = [];
+
+const RETRY_AFTER =
+  /retry after\s+(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m)\b/i;
+const RATE_LIMIT = /rate limit|too many requests|(?:http|status(?: code)?)\s*:?\s*429/i;
+
+function retryDelay(error: string): string | null {
+  const match = RETRY_AFTER.exec(error);
+  if (!match) return null;
+
+  const amount = match[1]!;
+  const value = Number(amount);
+  const unit = match[2]!.toLowerCase();
+  if (unit === "ms" || unit.startsWith("millisecond")) {
+    return `${amount} millisecond${value === 1 ? "" : "s"}`;
+  }
+  if (unit === "m" || unit.startsWith("min")) {
+    return `${amount} minute${value === 1 ? "" : "s"}`;
+  }
+  return `${amount} second${value === 1 ? "" : "s"}`;
+}
+
+function generationFailureCopy(error: string | null | undefined) {
+  if (error && RATE_LIMIT.test(error)) {
+    const delay = retryDelay(error);
+    return {
+      title: "Provider is temporarily busy",
+      description: delay
+        ? `This model provider has reached its rate limit. Try again in ${delay}.`
+        : "This model provider has reached its rate limit. Try again in a moment.",
+    };
+  }
+
+  return {
+    title: "Couldn’t generate a response",
+    description: "Try again, or choose another model if the problem continues.",
+  };
+}
+
+const FAILURE_DETAIL_PREFIXES = [
+  /^ProviderUnreachable:\s*/i,
+  /^effect\/ai\/AiError\/AiError:\s*/i,
+  /^[A-Za-z][\w]*Client\.[A-Za-z][\w]*:\s*/,
+];
+
+function generationFailureDetails(error: string): string {
+  let details = error
+    .trim()
+    .replace(/^Cause\(\[Fail\(/, "")
+    .replace(/\)\]\)$/, "");
+
+  for (const prefix of FAILURE_DETAIL_PREFIXES) {
+    details = details.replace(prefix, "");
+  }
+
+  return details || error;
+}
+
+function GenerationFailure({
+  error,
+  onRetry,
+  retryDisabled,
+}: {
+  error: string | null | undefined;
+  onRetry: (() => void) | undefined;
+  retryDisabled: boolean;
+}) {
+  const copy = generationFailureCopy(error);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const details = error ? generationFailureDetails(error) : null;
+
+  return (
+    <div
+      role="alert"
+      aria-atomic="true"
+      className="border-border bg-muted/30 mt-3 rounded-2xl border p-3"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <span className="bg-destructive/10 text-destructive flex size-8 shrink-0 items-center justify-center rounded-full">
+            <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-4" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium leading-5">{copy.title}</p>
+            <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+              {copy.description}
+            </p>
+            {details ? (
+              <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="mt-2">
+                <CollapsibleTrigger className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 flex w-fit items-center gap-1 rounded-lg text-xs font-medium outline-none transition-colors focus-visible:ring-3">
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    strokeWidth={2}
+                    className={cn(
+                      "size-3 transition-transform duration-200 ease-out motion-reduce:transition-none",
+                      detailsOpen && "rotate-180",
+                    )}
+                    aria-hidden
+                  />
+                  Technical details
+                </CollapsibleTrigger>
+                <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
+                  <p className="text-muted-foreground mt-1.5 [overflow-wrap:anywhere] font-mono text-2xs leading-relaxed">
+                    {details}
+                  </p>
+                </CollapsibleContent>
+              </Collapsible>
+            ) : null}
+          </div>
+        </div>
+        {onRetry ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRetry}
+            disabled={retryDisabled}
+            className="ml-11 self-start sm:ml-0"
+          >
+            <HugeiconsIcon icon={RefreshIcon} data-icon="inline-start" aria-hidden />
+            Try again
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function AssistantBubble({ message }: { message: DisplayMessage }) {
@@ -372,31 +517,25 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
-  const compacting = (message.compactionActivities ?? []).some(
-    (activity) => activity.status === "running",
-  );
+  const compactionActivities = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
+  const compacting = compactionActivities.some((activity) => activity.status === "running");
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
 
   // The message's citable set: its own searched sources (always shown, even
   // uncited — they were consulted) plus inherited sources it actually cites.
   // Numbering is conversation-scoped, so indexes never collide across the two.
-  // Memo key covers both inputs that can change while streaming: own sources
-  // arriving and new markers appearing in the text.
-  const citedIndexes = [...message.content.matchAll(/\[\^(\d+)\]/g)].map((m) => Number(m[1]));
-  const sourceKey =
-    message.toolActivities.map((a) => (a.sources ?? []).map((s) => s.index).join(",")).join("|") +
-    `:${[...new Set(citedIndexes)].join(",")}:${(message.inheritedSources ?? []).map((s) => s.index).join(",")}`;
-  // oxlint-disable-next-line react-hooks/exhaustive-deps, react/memo-dependencies -- sourceKey stands in for its inputs
   const sources = useMemo(() => {
     const own = collectSources(message.toolActivities);
-    const ownIndexes = new Set(own.map((s) => s.index));
-    const cited = new Set(citedIndexes);
+    const ownIndexes = new Set(own.map((source) => source.index));
+    const cited = new Set(
+      [...message.content.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1])),
+    );
     const inherited = (message.inheritedSources ?? []).filter(
-      (s) => cited.has(s.index) && !ownIndexes.has(s.index),
+      (source) => cited.has(source.index) && !ownIndexes.has(source.index),
     );
     // oxlint-disable-next-line no-array-sort -- fresh array
     return [...own, ...inherited].sort((a, b) => a.index - b.index);
-  }, [sourceKey]);
+  }, [message.content, message.inheritedSources, message.toolActivities]);
 
   return (
     <div className="flex w-full justify-start">
@@ -406,37 +545,28 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         ) : null}
         <AssistantActivityTimeline
           tools={message.toolActivities}
-          compactions={message.compactionActivities ?? []}
+          compactions={compactionActivities}
         />
         {streaming && message.content.length === 0 ? (
           showReasoning || toolRunning || compacting ? null : (
             <span className="text-muted-foreground animate-pulse">Thinking…</span>
           )
         ) : sources.length > 0 ? (
-          <CitedAnswer message={message} sources={sources} streaming={streaming} />
+          <CitedAnswer
+            messageId={message.id}
+            content={message.content}
+            sources={sources}
+            streaming={streaming}
+          />
         ) : (
           <AssistantMarkdown content={message.content} streaming={streaming} />
         )}
         {message.status === "error" ? (
-          <div className="border-destructive/30 bg-destructive/5 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2">
-            <p className="text-destructive min-w-0 flex-1 text-xs">
-              {/* The stored message is already truncated and stripped of
-                  internals server-side (shortErrorMessage). */}
-              {message.error ? `Generation failed: ${message.error}` : "Generation failed."}
-            </p>
-            {message.onRetry ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={message.onRetry}
-                disabled={message.retryDisabled ?? false}
-                className="text-destructive hover:text-destructive h-7 shrink-0 px-2 text-xs"
-              >
-                <HugeiconsIcon icon={RefreshIcon} className="size-3.5" />
-                Try again
-              </Button>
-            ) : null}
-          </div>
+          <GenerationFailure
+            error={message.error}
+            onRetry={message.onRetry}
+            retryDisabled={message.retryDisabled ?? false}
+          />
         ) : message.status === "aborted" ? (
           <p className="text-muted-foreground mt-2 text-xs">Stopped.</p>
         ) : null}

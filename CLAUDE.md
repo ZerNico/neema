@@ -139,3 +139,35 @@ See README.md for architecture; this file records the sharp edges.
   `useVirtualizer`, inherent to @tanstack/react-virtual); anything beyond it is new.
 - UI primitives in `src/ui/primitives` are shadcn-generated (Base UI, style
   `base-luma`) — regenerate via `pnpm dlx shadcn@latest add <component>`, don't hand-roll.
+  The CLI asks to overwrite `button.tsx` on every add (registry dependency); answer no.
+  It also adds `next-themes` whenever a component's upstream reads the theme
+  (`sonner`) — remove it and wire `~/ui/theme.tsx` instead, as `sonner.tsx` does.
+
+## shadcn / UI conventions
+
+- `src/styles/app.css` must keep `@import "tw-animate-css"` and
+  `@import "shadcn/tailwind.css"` right after `@import "tailwindcss"`. Every
+  `data-open:animate-in` / `fade-in-0` / `zoom-in-95` class in the overlay primitives
+  comes from `tw-animate-css`; without it overlays pop with no transition and nothing
+  errors. `shadcn/tailwind.css` supplies the `data-open`/`data-closed`/... variants.
+  The `button { cursor: pointer }` base rule is shadcn's `init --pointer` snippet —
+  Tailwind v4 dropped it.
+- `cn` is the `cn` package (shadcn's `twMerge(clsx())` replacement); `src/ui/utils.ts`
+  only re-exports it. Primitives import from `"cn"` directly (what the CLI emits).
+- Pending buttons keep their label: `<Spinner data-icon="inline-start" aria-hidden />`
+  ahead of the text, `disabled`, `aria-busy`. Never swap the label for `"Saving…"` —
+  it reflows the button. `form.SubmitButton` in `src/ui/form/app-form.tsx` does this.
+- `Spinner` is `role="status"` on its own; pass `aria-hidden` inside any control that
+  already has a label or `aria-busy`, or assistive tech announces "Loading" twice.
+- Icons inside a labelled `Button`/`Badge` carry `data-icon="inline-start|inline-end"`;
+  the size variants key their optical padding off it. Never `<Button render={<Link/>}
+nativeButton={false}>` for navigation — Base UI forces `role="button"`; use
+  `<Link className={buttonVariants({...})}>`.
+- Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`,
+  `ListCard`/`ListRow`, `EmptyState`, `ErrorState`); admin, settings, tools and the
+  chats index all use it. Confirmations go through `useConfirm()` (AlertDialog);
+  non-inline mutation failures go through `toast` from `sonner` (Toaster mounted in
+  `__root.tsx`).
+- Radius scale is 2xl/3xl/4xl (rows/cards/buttons). Semantic colour tokens only —
+  `success` and `warning` exist alongside `destructive`; `text-2xs` is the one size
+  below `text-xs`.

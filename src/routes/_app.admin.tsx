@@ -6,7 +6,7 @@ import {
   WrenchIcon,
 } from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
-import { AdminShell } from "~/modules/admin/ui/admin-shell.tsx";
+import { SectionShell } from "~/ui/page-shell.tsx";
 
 export const Route = createFileRoute("/_app/admin")({
   beforeLoad: ({ context }) => {
@@ -17,7 +17,9 @@ export const Route = createFileRoute("/_app/admin")({
 
 function AdminLayout() {
   return (
-    <AdminShell
+    <SectionShell
+      title="Admin"
+      rootPath="/admin"
       items={[
         {
           to: "/admin/providers",
@@ -52,6 +54,6 @@ function AdminLayout() {
       ]}
     >
       <Outlet />
-    </AdminShell>
+    </SectionShell>
   );
 }
