@@ -31,7 +31,7 @@ function AppLayout() {
         <SessionAppSidebar initialUser={user} />
         <SidebarInset className="h-svh overflow-hidden">
           <DetailPanelProvider>
-            <header className="flex h-12 shrink-0 items-center gap-2 px-3">
+            <header className="border-border flex h-12 shrink-0 items-center gap-2 border-b px-3">
               <SidebarTrigger />
             </header>
             {/* The detail rail is a sibling of the content, not an overlay:
