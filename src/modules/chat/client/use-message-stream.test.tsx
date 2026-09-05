@@ -27,6 +27,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("useMessageStream ask replay", () => {
+  it("deduplicates question chunks, advances malformed cursors, and completes tool-only responses", () => {
+    const { result, source, invalidate } = renderStream();
+    const questions = [{ question: "What matters most?", options: [], multiSelect: false }];
+    const delta = JSON.stringify({
+      v: 1,
+      family: "ask",
+      phase: "result",
+      callId: "ask-1",
+      name: "ask_user",
+      result: { v: 1, outcome: "presented", questions },
+    });
+    act(() => source.emit("chunk", { seq: 1, kind: "tool", delta }));
+    act(() => source.emit("chunk", { seq: 1, kind: "tool", delta }));
+    act(() => source.emit("chunk", { seq: 2, kind: "tool", delta: "null" }));
+    expect(result.current.tools).toHaveLength(1);
+    expect(result.current.tools[0]).toMatchObject({ family: "ask", status: "complete", questions });
+    expect(result.current.lastSeq).toBe(2);
+    expect(result.current.status).toBe("streaming");
+    act(() => source.emit("done", { status: "complete" }));
+    expect(result.current.status).toBe("complete");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
+  });
+});
+
 describe("useMessageStream smoothing", () => {
   it("holds the reported completion until every word is on screen", () => {
     const { result, invalidate, source } = renderStream();

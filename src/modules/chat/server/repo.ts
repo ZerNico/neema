@@ -13,26 +13,53 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import {
+  type AskUserParams,
+  QuestionResponse,
+  formatQuestionResponse,
+  readPresentedQuestions,
+  readQuestionResponse,
+  readStoredQuestionPresentation,
+} from "~/modules/tools/ask-user-schema.ts";
+import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
   conversationCompactionCheckpoints,
   conversations,
   messageChunks,
+  messageAttachments,
   messageCompactionEvents,
   messages,
   messageToolCalls,
 } from "~/db/schema/index.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import {
   BranchNotAllowed,
   ConversationBusy,
   ConversationNotFound,
   MessageNotFound,
+  InvalidMessage,
+  QuestionUnavailable,
 } from "../errors.ts";
+
+export type TurnContent =
+  | { content: string; questionResponse?: never }
+  | { content?: never; questionResponse: { callId: string; response: QuestionResponse } };
+
+export type EditContent =
+  | { content: string; questionResponse?: never }
+  | { content?: never; questionResponse: QuestionResponse };
+
+export type CreateTurnInput = {
+  userId: string;
+  conversationId: string | null;
+  modelId: string;
+  attachmentIds: ReadonlyArray<string>;
+} & TurnContent;
 
 export type ConversationRow = typeof conversations.$inferSelect;
 /** A list row plus the live state the list surfaces (sidebar spinner). */
@@ -43,6 +70,23 @@ export interface ConversationCursor {
   readonly id: string;
 }
 export type MessageRow = typeof messages.$inferSelect;
+export type HistorySnapshot = ReadonlyArray<
+  Pick<MessageRow, "id" | "status" | "content" | "questionResponse" | "editedAt" | "completedAt">
+>;
+
+const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boolean =>
+  actual.length === expected.length &&
+  actual.every((message, index) => {
+    const previous = expected[index]!;
+    return (
+      message.id === previous.id &&
+      message.status === previous.status &&
+      message.content === previous.content &&
+      JSON.stringify(message.questionResponse) === JSON.stringify(previous.questionResponse) &&
+      message.editedAt?.getTime() === previous.editedAt?.getTime() &&
+      message.completedAt?.getTime() === previous.completedAt?.getTime()
+    );
+  });
 export type ChunkKind = "text" | "reasoning" | "tool" | "compaction";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 // Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -53,6 +97,91 @@ export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
 // `%`, `_` and the escape character itself are literals when someone types
 // them into a search box, not wildcards.
 const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
+
+// Callers hold the conversation lock. Only one successful immutable batch can
+// own the immediately following structured user response.
+const questionForMessage = Effect.fn("ChatRepo.questionForMessage")(function* (
+  tx: DbTx,
+  owner: MessageRow | undefined,
+) {
+  if (owner?.role !== "assistant" || owner.status !== "complete") return null;
+  const calls = yield* tx
+    .select()
+    .from(messageToolCalls)
+    .where(
+      and(
+        eq(messageToolCalls.messageId, owner.id),
+        eq(messageToolCalls.toolName, "ask_user"),
+        eq(messageToolCalls.status, "complete"),
+      ),
+    )
+    .pipe(Effect.orDie);
+  const presented = calls.flatMap((call) => {
+    const questions = readPresentedQuestions(call.result);
+    return questions ? [{ call, questions }] : [];
+  });
+  if (presented.length !== 1) return null;
+  const batch = presented[0]!;
+  if (
+    !readStoredQuestionPresentation(batch.call.arguments, batch.call.result) ||
+    extractUserUrls(
+      batch.questions.flatMap((question) => question.options.map((option) => option.label)),
+    ).length > 0
+  )
+    return null;
+  return batch;
+});
+
+const questionContent = (questions: AskUserParams["questions"], response: QuestionResponse) => {
+  const decoded = Schema.decodeUnknownOption(QuestionResponse)(response);
+  const content = Option.isSome(decoded) ? formatQuestionResponse(questions, decoded.value) : null;
+  return content === null || Option.isNone(decoded)
+    ? Effect.fail(
+        new InvalidMessage({
+          reason: "Answer every question with valid selections or custom text.",
+        }),
+      )
+    : Effect.succeed({ content, questionResponse: { v: 1, response: decoded.value } as JsonValue });
+};
+
+const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
+  tx: DbTx,
+  current: ReadonlyArray<MessageRow>,
+  messageId: string,
+  input: EditContent & { attachmentIds: ReadonlyArray<string> },
+) {
+  const index = current.findIndex((message) => message.id === messageId);
+  const target = current[index];
+  if (target?.role !== "user" || target.status !== "complete")
+    return yield* new InvalidMessage({ reason: "Only completed user messages can be edited." });
+  const previousResponse = readQuestionResponse(target.questionResponse);
+  const batch = previousResponse ? yield* questionForMessage(tx, current[index - 1]) : null;
+  const attached = previousResponse
+    ? yield* tx
+        .select({ id: messageAttachments.attachmentId })
+        .from(messageAttachments)
+        .where(eq(messageAttachments.messageId, messageId))
+        .limit(1)
+        .pipe(Effect.orDie)
+    : [];
+  const structured =
+    previousResponse &&
+    batch &&
+    attached.length === 0 &&
+    formatQuestionResponse(batch.questions, previousResponse) === target.content;
+  if (input.questionResponse) {
+    if (!structured || !batch || input.attachmentIds.length > 0)
+      return yield* new InvalidMessage({
+        reason: "These answers can no longer be edited as a question response.",
+      });
+    return yield* questionContent(batch.questions, input.questionResponse);
+  }
+  if (structured)
+    return yield* new InvalidMessage({
+      reason: "Use Edit answers to change a structured question response.",
+    });
+  return { content: input.content, questionResponse: null };
+});
 
 export class ChatRepo extends Context.Service<
   ChatRepo,
@@ -84,20 +213,18 @@ export class ChatRepo extends Context.Service<
      * to share the transaction — an attachment another tab grabbed first must
      * take the whole turn down rather than leave a half-written one.
      */
-    createTurn(input: {
-      userId: string;
-      conversationId: string | null;
-      modelId: string;
-      content: string;
-      attachmentIds: ReadonlyArray<string>;
-    }): Effect.Effect<
+    createTurn(input: CreateTurnInput): Effect.Effect<
       {
         conversation: ConversationRow;
         conversationCreated: boolean;
         userMessage: MessageRow;
         assistant: MessageRow;
       },
-      ConversationNotFound | ConversationBusy | AttachmentNotAvailable
+      | ConversationNotFound
+      | ConversationBusy
+      | AttachmentNotAvailable
+      | QuestionUnavailable
+      | InvalidMessage
     >;
     updateConversation(
       conversationId: string,
@@ -143,6 +270,7 @@ export class ChatRepo extends Context.Service<
       messageId: string;
       turnIndex: number;
       callIndex: number;
+      textOffset?: number;
       providerCallId: string;
       toolName: string;
       arguments: JsonValue;
@@ -161,6 +289,7 @@ export class ChatRepo extends Context.Service<
       messageId: string;
       beforeTurnIndex: number;
       passIndex: number;
+      textOffset?: number;
       scope: "history" | "active_rounds";
     }): Effect.Effect<void>;
     completeCompactionEvent(input: {
@@ -190,6 +319,7 @@ export class ChatRepo extends Context.Service<
     // Claims and wipes a finished assistant back to a fresh streaming state.
     // The claim, rewind deletes, and optional user edit commit atomically.
     resetMessageForRetry(input: {
+      expectedMessages: HistorySnapshot;
       userId: string;
       messageId: string;
       modelId: string;
@@ -201,30 +331,31 @@ export class ChatRepo extends Context.Service<
        * describes text that no longer exists, so it has to go explicitly.
        */
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-      edit?: {
+      edit?: EditContent & {
         messageId: string;
         conversationId: string;
-        content: string;
         attachmentIds: ReadonlyArray<string>;
       };
     }): Effect.Effect<
       { claimed: boolean; orphanedKeys: ReadonlyArray<string> },
-      AttachmentNotAvailable
+      AttachmentNotAvailable | InvalidMessage
     >;
-    createAssistantForEdit(input: {
-      userId: string;
-      conversationId: string;
-      userMessageId: string;
-      expectedEditedAt: Date | null;
-      content: string;
-      attachmentIds: ReadonlyArray<string>;
-      modelId: string;
-      deleteMessageIds: ReadonlyArray<string>;
-      /** See resetMessageForRetry. */
-      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-    }): Effect.Effect<
+    createAssistantForEdit(
+      input: EditContent & {
+        expectedMessages: HistorySnapshot;
+        userId: string;
+        conversationId: string;
+        userMessageId: string;
+        expectedEditedAt: Date | null;
+        attachmentIds: ReadonlyArray<string>;
+        modelId: string;
+        deleteMessageIds: ReadonlyArray<string>;
+        /** See resetMessageForRetry. */
+        invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
+      },
+    ): Effect.Effect<
       { message: MessageRow; orphanedKeys: ReadonlyArray<string> } | null,
-      AttachmentNotAvailable
+      AttachmentNotAvailable | InvalidMessage
     >;
     // Removes messages entirely (chunks/tool calls go via FK cascade).
     // Returns storage keys to delete after the commit.
@@ -381,6 +512,27 @@ export class ChatRepo extends Context.Service<
                   conversationCreated = true;
                 }
 
+                let content = input.content;
+                let questionResponse: JsonValue | null = null;
+                if (input.questionResponse) {
+                  const { callId, response } = input.questionResponse;
+                  if (!input.conversationId || input.attachmentIds.length > 0)
+                    return yield* new QuestionUnavailable({ callId });
+                  const tail = (yield* tx
+                    .select()
+                    .from(messages)
+                    .where(eq(messages.conversationId, conversation.id))
+                    .orderBy(desc(messages.createdAt), desc(messages.id))
+                    .limit(1)
+                    .pipe(Effect.orDie))[0];
+                  const batch = yield* questionForMessage(tx, tail);
+                  if (!batch || batch.call.id !== callId)
+                    return yield* new QuestionUnavailable({ callId });
+                  const formatted = yield* questionContent(batch.questions, response);
+                  content = formatted.content;
+                  questionResponse = formatted.questionResponse;
+                }
+
                 const userRows = yield* tx
                   .insert(messages)
                   .values({
@@ -388,7 +540,8 @@ export class ChatRepo extends Context.Service<
                     conversationId: conversation.id,
                     role: "user",
                     status: "complete",
-                    content: input.content,
+                    content: content!,
+                    questionResponse,
                   })
                   .returning()
                   .pipe(Effect.orDie);
@@ -849,6 +1002,59 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                const lost = { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
+                // Resolve the parent without locking a message first. Every path
+                // that changes eligibility takes the conversation lock before rows.
+                const target = (yield* tx
+                  .select({ conversationId: messages.conversationId })
+                  .from(messages)
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie))[0];
+                if (!target) return lost;
+                const owned = yield* tx
+                  .select({ id: conversations.id })
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.id, target.conversationId),
+                      eq(conversations.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .pipe(Effect.orDie);
+                if (owned.length === 0) return lost;
+                const current = yield* tx
+                  .select()
+                  .from(messages)
+                  .where(eq(messages.conversationId, target.conversationId))
+                  .orderBy(asc(messages.createdAt), asc(messages.id))
+                  .pipe(Effect.orDie);
+                if (
+                  current.some((message) => message.status === "streaming") ||
+                  !matchesHistory(current, input.expectedMessages)
+                )
+                  return lost;
+                const index = current.findIndex(
+                  (message) => message.id === input.messageId && message.role === "assistant",
+                );
+                if (
+                  index < 0 ||
+                  JSON.stringify(current.slice(index + 1).map((message) => message.id)) !==
+                    JSON.stringify(input.deleteMessageIds)
+                )
+                  return lost;
+                if (
+                  input.edit &&
+                  !current
+                    .slice(0, index)
+                    .some(
+                      (message) => message.id === input.edit?.messageId && message.role === "user",
+                    )
+                )
+                  return lost;
+                const edited = input.edit
+                  ? yield* editedContent(tx, current, input.edit.messageId, input.edit)
+                  : null;
                 const claimed = yield* tx
                   .update(messages)
                   .set({
@@ -872,7 +1078,7 @@ export class ChatRepo extends Context.Service<
                 if (input.edit) {
                   yield* tx
                     .update(messages)
-                    .set({ content: input.edit.content, editedAt: new Date() })
+                    .set({ ...edited!, editedAt: new Date() })
                     .where(eq(messages.id, input.edit.messageId))
                     .pipe(Effect.orDie);
                   orphanedKeys.push(
@@ -931,9 +1137,40 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                const owned = yield* tx
+                  .select({ id: conversations.id })
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.id, input.conversationId),
+                      eq(conversations.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .pipe(Effect.orDie);
+                if (owned.length === 0) return null;
+                const current = yield* tx
+                  .select()
+                  .from(messages)
+                  .where(eq(messages.conversationId, input.conversationId))
+                  .orderBy(asc(messages.createdAt), asc(messages.id))
+                  .pipe(Effect.orDie);
+                if (
+                  current.some((message) => message.status === "streaming") ||
+                  !matchesHistory(current, input.expectedMessages)
+                )
+                  return null;
+                const index = current.findIndex((message) => message.id === input.userMessageId);
+                if (
+                  index < 0 ||
+                  JSON.stringify(current.slice(index + 1).map((message) => message.id)) !==
+                    JSON.stringify(input.deleteMessageIds)
+                )
+                  return null;
+                const edited = yield* editedContent(tx, current, input.userMessageId, input);
                 const claimed = yield* tx
                   .update(messages)
-                  .set({ content: input.content, editedAt: new Date() })
+                  .set({ ...edited, editedAt: new Date() })
                   .where(
                     and(
                       eq(messages.id, input.userMessageId),

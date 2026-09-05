@@ -301,6 +301,7 @@ describe("attachment replacement on edit", () => {
 
         yield* finish(turn.assistant.id);
         const { orphanedKeys } = yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(turn.conversation.id),
           userId,
           messageId: turn.assistant.id,
           modelId,
@@ -358,6 +359,7 @@ describe("attachment replacement on edit", () => {
         // Release just one of them.
         yield* finish(turn.assistant.id);
         const partial = yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(turn.conversation.id),
           userId,
           messageId: turn.assistant.id,
           modelId,

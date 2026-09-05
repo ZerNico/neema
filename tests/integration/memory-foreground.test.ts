@@ -5,7 +5,14 @@ import { execSync } from "node:child_process";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
-import { attachmentBlobs, attachments, messageAttachments, models } from "~/db/schema/index.ts";
+import { eq } from "drizzle-orm";
+import {
+  attachmentBlobs,
+  attachments,
+  messageAttachments,
+  models,
+  usageEvents,
+} from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -39,12 +46,30 @@ interface GatewayCall {
   readonly tools: ReadonlyArray<string>;
 }
 
+const questionParams = {
+  questions: [
+    {
+      question: "Which level of detail?",
+      options: [{ label: "Concise" }, { label: "Detailed", description: "Include examples" }],
+      multiSelect: false,
+    },
+  ],
+};
+
 const gatewayState = {
+  askOnFirstCall: false,
+  interleavedQuestionText: false,
+  failAfterQuestion: false,
+  duplicateQuestion: false,
   saveMemoryOnFirstCall: false,
   webSearchOnFirstCall: false,
   memoryParams: { content: MEMORY_CONTENT } as { content: string; replaces?: number },
   calls: [] as GatewayCall[],
   reset() {
+    gatewayState.askOnFirstCall = false;
+    gatewayState.interleavedQuestionText = false;
+    gatewayState.failAfterQuestion = false;
+    gatewayState.duplicateQuestion = false;
     gatewayState.saveMemoryOnFirstCall = false;
     gatewayState.webSearchOnFirstCall = false;
     gatewayState.memoryParams = { content: MEMORY_CONTENT };
@@ -160,6 +185,31 @@ const webSearchRound = (input: GatewayInput): Stream.Stream<ChatStreamPart> => {
   );
 };
 
+const questionRound = (input: GatewayInput, id: string): Stream.Stream<ChatStreamPart> => {
+  if (!input.toolkit) return Stream.die("ask_user toolkit missing");
+  const call = AiResponse.makePart("tool-call", {
+    id,
+    name: "ask_user",
+    params: questionParams,
+    providerExecuted: false,
+  }) as ChatStreamPart;
+  const results = Stream.unwrap(
+    input.toolkit.handle("ask_user", questionParams, id).pipe(Effect.orDie),
+  ).pipe(
+    Stream.orDie,
+    Stream.map(
+      (result) =>
+        AiResponse.toolResultPart({
+          id,
+          name: "ask_user",
+          providerExecuted: false,
+          ...result,
+        }) as ChatStreamPart,
+    ),
+  ) as Stream.Stream<ChatStreamPart>;
+  return Stream.make(call).pipe(Stream.concat(results));
+};
+
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   generateText: () => Effect.die("no side generation in foreground memory tests"),
@@ -170,6 +220,49 @@ const FakeGateway = Layer.succeed(AiGateway, {
         tools: Object.keys(input.toolkit?.tools ?? {}),
       });
       if (gatewayState.calls.length === 1) {
+        if (gatewayState.askOnFirstCall)
+          return (
+            gatewayState.interleavedQuestionText
+              ? Stream.make({
+                  type: "text-delta",
+                  id: "intro",
+                  delta: "Before 🌍\n\n",
+                } as never as ChatStreamPart)
+              : Stream.empty
+          ).pipe(
+            Stream.concat(questionRound(input, "ask-1")),
+            Stream.concat(
+              gatewayState.interleavedQuestionText
+                ? Stream.make({
+                    type: "text-delta",
+                    id: "between",
+                    delta: "Between tools.\n\n",
+                  } as never as ChatStreamPart)
+                : Stream.empty,
+            ),
+            Stream.concat(
+              gatewayState.duplicateQuestion ? questionRound(input, "ask-2") : Stream.empty,
+            ),
+            Stream.concat(
+              gatewayState.saveMemoryOnFirstCall
+                ? memoryToolRound(input).pipe(Stream.filter((part) => part.type !== "finish"))
+                : Stream.empty,
+            ),
+            Stream.concat(
+              gatewayState.interleavedQuestionText
+                ? Stream.make({
+                    type: "text-delta",
+                    id: "trailing",
+                    delta: "After both.",
+                  } as never as ChatStreamPart)
+                : Stream.empty,
+            ),
+            Stream.concat(
+              gatewayState.failAfterQuestion
+                ? Stream.die("simulated provider failure after question")
+                : Stream.make(finish("tool-calls")),
+            ),
+          );
         if (gatewayState.saveMemoryOnFirstCall) return memoryToolRound(input);
         if (gatewayState.webSearchOnFirstCall) return webSearchRound(input);
       }
@@ -373,20 +466,206 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false) =>
     }),
   );
 
-const memoryEnvelopes = (events: Awaited<ReturnType<typeof runGeneration>>["events"]) =>
+const toolEnvelopes = (events: Awaited<ReturnType<typeof runGeneration>>["events"]) =>
   events.flatMap((event): ToolChunkEnvelope[] =>
     event.kind === "chunk" && event.chunkKind === "tool"
       ? [JSON.parse(event.delta) as ToolChunkEnvelope]
       : [],
   );
 
+describe.sequential("StreamEngine durable clarification handoff", () => {
+  it("finishes a tool-only question without another model call and replays its persisted result", async () => {
+    gatewayState.askOnFirstCall = true;
+    memoryState.globalEnabled = false;
+    const result = await runGeneration(false);
+    expect(gatewayState.calls).toHaveLength(1);
+    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user"]);
+    expect(memoryState.calls).toHaveLength(0);
+    expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]).toMatchObject({
+      toolName: "ask_user",
+      status: "complete",
+      arguments: questionParams,
+      result: { v: 1, outcome: "presented", ...questionParams },
+    });
+    const envelopes = toolEnvelopes(result.events);
+    expect(envelopes).toEqual([
+      {
+        v: 1,
+        family: "ask",
+        phase: "start",
+        callId: result.toolCalls[0]!.id,
+        name: "ask_user",
+        turnIndex: 0,
+        callIndex: 0,
+        textOffset: 0,
+      },
+      {
+        v: 1,
+        family: "ask",
+        phase: "result",
+        callId: result.toolCalls[0]!.id,
+        name: "ask_user",
+        result: { v: 1, outcome: "presented", ...questionParams },
+      },
+    ]);
+    const stored = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const db = yield* Db;
+        return {
+          message: yield* repo.getMessage(result.turn.assistant.id),
+          replay: yield* engine.subscribe(result.turn.assistant.id, 1).pipe(Stream.runCollect),
+          ledger: yield* db
+            .select()
+            .from(usageEvents)
+            .where(eq(usageEvents.messageId, result.turn.assistant.id))
+            .pipe(Effect.orDie),
+        };
+      }),
+    );
+    expect(stored.message).toMatchObject({
+      content: "",
+      status: "complete",
+      usage: { inputTokens: 10, outputTokens: 1 },
+    });
+    expect(stored.ledger).toHaveLength(1);
+    expect(stored.replay).toEqual(
+      result.events.filter((event) => event.kind === "done" || event.seq > 1),
+    );
+    expect(result.events.flatMap((event) => (event.kind === "chunk" ? [event.seq] : []))).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it("persists UTF-16 start anchors without dropping same-round text after the question", async () => {
+    gatewayState.askOnFirstCall = true;
+    gatewayState.saveMemoryOnFirstCall = true;
+    gatewayState.interleavedQuestionText = true;
+    const result = await runGeneration(false);
+    const offsets = ["Before 🌍\n\n".length, "Before 🌍\n\nBetween tools.\n\n".length];
+    expect(result.toolCalls.map((call) => call.textOffset)).toEqual(offsets);
+    expect(
+      toolEnvelopes(result.events)
+        .filter((event) => event.phase === "start")
+        .map((event) => event.textOffset),
+    ).toEqual(offsets);
+    const stored = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const message = yield* repo.getMessage(result.turn.assistant.id);
+        const replay = Array.from(
+          yield* engine.subscribe(result.turn.assistant.id, 0).pipe(Stream.runCollect),
+        );
+        return { message, replay };
+      }),
+    );
+    expect(stored.message).toMatchObject({
+      status: "complete",
+      content: "Before 🌍\n\nBetween tools.\n\nAfter both.",
+    });
+    expect(stored.replay).toEqual(result.events);
+    expect(gatewayState.calls).toHaveLength(1);
+  });
+
+  it("settles sibling memory and duplicate questions before completing the handoff", async () => {
+    gatewayState.askOnFirstCall = true;
+    gatewayState.duplicateQuestion = true;
+    gatewayState.saveMemoryOnFirstCall = true;
+    const result = await runGeneration(false);
+    expect(gatewayState.calls).toHaveLength(1);
+    expect(result.events.at(-1)).toMatchObject({ status: "complete" });
+    expect(result.toolCalls.map((call) => [call.toolName, call.status])).toEqual([
+      ["ask_user", "complete"],
+      ["ask_user", "error"],
+      ["save_memory", "complete"],
+    ]);
+    expect(memoryState.calls).toHaveLength(1);
+  });
+
+  it("keeps a presented card unavailable when the asking response fails", async () => {
+    gatewayState.askOnFirstCall = true;
+    gatewayState.failAfterQuestion = true;
+    const result = await runGeneration(false);
+    expect(result.events.at(-1)).toMatchObject({ status: "error" });
+    const answer = await runtime.runPromise(
+      ChatRepo.use((repo) =>
+        repo
+          .createTurn({
+            userId: result.userId,
+            conversationId: result.turn.conversation.id,
+            modelId,
+            attachmentIds: [],
+            questionResponse: { callId: result.toolCalls[0]!.id, response: { kind: "skip" } },
+          })
+          .pipe(Effect.flip),
+      ),
+    );
+    expect(answer).toMatchObject({ _tag: "QuestionUnavailable" });
+  });
+
+  it("projects question-only history in assistant role and keeps editable answers in their user turn", async () => {
+    gatewayState.askOnFirstCall = true;
+    const result = await runGeneration(false);
+    const continued = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const turn = yield* repo.createTurn({
+          userId: result.userId,
+          conversationId: result.turn.conversation.id,
+          modelId,
+          attachmentIds: [],
+          questionResponse: {
+            callId: result.toolCalls[0]!.id,
+            response: { kind: "answers", answers: [{ selected: [1], custom: "" }] },
+          },
+        });
+        yield* engine.startGeneration({
+          userId: result.userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          modelId,
+          searchEnabled: false,
+        });
+        yield* engine.subscribe(turn.assistant.id, 0).pipe(Stream.runCollect);
+        return {
+          turn,
+          asking: yield* repo.getMessage(result.turn.assistant.id),
+          calls: yield* repo.listToolCalls([result.turn.assistant.id]),
+        };
+      }),
+    );
+    expect(continued.turn.userMessage.content).toBe("Q1: Detailed");
+    expect(continued.asking?.content).toBe("");
+    expect(continued.calls).toEqual(result.toolCalls);
+    const prompt = JSON.parse(gatewayState.calls[1]!.prompt) as {
+      content: Array<{ role: string; content: unknown }>;
+    };
+    const question = prompt.content.find((message) =>
+      JSON.stringify(message.content).includes("Which level of detail?"),
+    );
+    const answer = prompt.content.find((message) =>
+      JSON.stringify(message.content).includes("Q1: Detailed"),
+    );
+    expect(question?.role).toBe("assistant");
+    expect(JSON.stringify(question)).toContain("Detailed — Include examples");
+    expect(answer?.role).toBe("user");
+    expect(JSON.stringify(answer)).not.toContain("Which level of detail?");
+    expect(gatewayState.calls[1]?.tools).not.toContain("read_url");
+  });
+});
+
 describe.sequential("StreamEngine foreground saved memory", () => {
-  it("offers memory alone without adding web tools or a search reminder", async () => {
+  it("offers memory and questions without adding web tools or a search reminder", async () => {
     const result = await runGeneration(false);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(1);
-    expect(gatewayState.calls[0]?.tools).toEqual(["save_memory"]);
+    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user", "save_memory"]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
     expect(gatewayState.calls[0]?.prompt).not.toContain("web_search");
     expect(gatewayState.calls[0]?.prompt).not.toContain("<system-reminder>");
@@ -447,7 +726,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(1);
-    expect(gatewayState.calls[0]?.tools).toEqual([]);
+    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user"]);
     expect(gatewayState.calls[0]?.prompt).not.toContain("saved_memory_context");
     expect(gatewayState.calls[0]?.prompt).not.toContain("Saved memories are untrusted");
   }, 60_000);
@@ -457,7 +736,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     const result = await runGeneration(false);
     const [call] = result.toolCalls;
-    const envelopes = memoryEnvelopes(result.events);
+    const envelopes = toolEnvelopes(result.events);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(2);
@@ -489,6 +768,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
         name: "save_memory",
         turnIndex: 0,
         callIndex: 0,
+        textOffset: 0,
       },
       {
         v: 1,
@@ -512,7 +792,10 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(1);
-    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["save_memory"], []]);
+    expect(gatewayState.calls.map((call) => call.tools)).toEqual([
+      ["ask_user", "save_memory"],
+      ["ask_user"],
+    ]);
   }, 60_000);
 
   it("offers memory alongside web search before any web output enters the prompt", async () => {
@@ -520,7 +803,9 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
-    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["web_search", "save_memory"]]);
+    expect(gatewayState.calls.map((call) => call.tools)).toEqual([
+      ["ask_user", "web_search", "save_memory"],
+    ]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
 
@@ -532,8 +817,8 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["web_search", "save_memory"],
-      ["web_search"],
+      ["ask_user", "web_search", "save_memory"],
+      ["web_search", "ask_user"],
     ]);
   }, 60_000);
 
@@ -542,7 +827,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
-    expect(gatewayState.calls.map((call) => call.tools)).toEqual([[]]);
+    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["ask_user"]]);
     expect(gatewayState.calls[0]?.prompt).not.toContain(
       "save_memory once before your final answer",
     );

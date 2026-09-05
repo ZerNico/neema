@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { MessageBubble } from "./message-list.tsx";
+import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
@@ -27,6 +27,208 @@ const idleUploads = (): AttachmentUploads => ({
   markClaimed: vi.fn(),
   reset: vi.fn(),
   dismissNotice: vi.fn(),
+});
+
+describe("MessageBubble chronological body", () => {
+  const intro = "First, a little context.\n\n";
+  const ask: ToolActivity = {
+    family: "ask",
+    callId: "ask-order",
+    name: "ask_user",
+    status: "complete",
+    textOffset: intro.length,
+    turnIndex: 0,
+    callIndex: 0,
+    questions: [{ question: "Where next?", options: [], multiSelect: false }],
+  };
+  const base: DisplayMessage = {
+    id: "ordered",
+    role: "assistant",
+    content: intro + "After the question.",
+    reasoning: "",
+    reasoningSeen: false,
+    toolActivities: [ask],
+    status: "complete",
+    questionActions: { onRespond: vi.fn() },
+  };
+
+  it("renders introductions before the question and same-round trailing prose after it", () => {
+    render(<MessageBubble message={base} />);
+    const before = screen.getByText("First, a little context.");
+    const question = screen.getByText("Where next?");
+    const after = screen.getByText("After the question.");
+    expect(
+      before.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(question.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+  });
+
+  it("does not reveal an activity until displayed text reaches its fixed anchor", () => {
+    const { rerender } = render(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: "First,",
+          rawTextLength: base.content.length,
+        }}
+      />,
+    );
+    expect(screen.queryByText("Where next?")).not.toBeInTheDocument();
+    rerender(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: intro,
+          rawTextLength: base.content.length,
+        }}
+      />,
+    );
+    expect(screen.getByText("Where next?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip and continue" })).toBeDisabled();
+  });
+
+  it("keeps the same card and draft when the first source arrives", () => {
+    const { rerender } = render(
+      <DetailPanelProvider>
+        <MessageBubble message={base} />
+      </DetailPanelProvider>,
+    );
+    const draft = screen.getByRole("textbox", { name: "Your answer" });
+    fireEvent.change(draft, { target: { value: "Keep this draft" } });
+    rerender(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            ...base,
+            toolActivities: [
+              ask,
+              {
+                family: "web",
+                name: "web_search",
+                callId: "late-source",
+                turnIndex: 0,
+                callIndex: 1,
+                textOffset: base.content.length,
+                status: "complete",
+                targets: ["topic"],
+                sources: [
+                  {
+                    index: 1,
+                    url: "https://example.com",
+                    title: "One source",
+                    snippet: "",
+                    read: false,
+                  },
+                ],
+              },
+            ],
+          }}
+        />
+      </DetailPanelProvider>,
+    );
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toBe(draft);
+    expect(draft).toHaveValue("Keep this draft");
+    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+  });
+
+  it("renders partial markdown safely at tool boundaries and shares citations/actions across prose segments", () => {
+    const first = "- First finding[^1]\n\n```text\nunfinished fence\n";
+    const last = "Second finding[^1].";
+    const source = {
+      index: 1,
+      url: "https://example.com",
+      title: "One source",
+      snippet: "",
+      read: false,
+    };
+    const { container } = render(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            ...base,
+            content: first + last,
+            toolActivities: [
+              {
+                family: "web",
+                callId: "source",
+                name: "web_search",
+                status: "complete",
+                turnIndex: 0,
+                callIndex: 0,
+                textOffset: first.length,
+                targets: ["topic"],
+                sources: [source],
+              },
+            ],
+          }}
+        />
+      </DetailPanelProvider>,
+    );
+    expect(container.querySelectorAll("pre")).toHaveLength(1);
+    expect(screen.getByText("unfinished fence")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Source 1: One source" })).toHaveLength(2);
+    expect(container.querySelector("[data-footnotes]")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+  });
+});
+
+describe("MessageBubble ask activity", () => {
+  it("keeps questions at their actual position between memory activity", () => {
+    render(
+      <MessageBubble
+        message={{
+          id: "assistant",
+          role: "assistant",
+          status: "complete",
+          content: "",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [
+            {
+              family: "memory",
+              callId: "after",
+              name: "save_memory",
+              turnIndex: 1,
+              callIndex: 2,
+              status: "complete",
+              outcome: "unchanged",
+            },
+            {
+              family: "ask",
+              callId: "ask",
+              name: "ask_user",
+              turnIndex: 1,
+              callIndex: 1,
+              status: "complete",
+              questions: [{ question: "Which direction?", multiSelect: false, options: [] }],
+            },
+            {
+              family: "memory",
+              callId: "before",
+              name: "save_memory",
+              turnIndex: 1,
+              callIndex: 0,
+              status: "complete",
+              outcome: "created",
+            },
+          ],
+          questionActions: { onRespond: vi.fn() },
+        }}
+      />,
+    );
+    const before = screen.getByText("Saved to memory");
+    const question = screen.getByText("Which direction?");
+    const after = screen.getByText("Memory already saved");
+    expect(
+      before.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(question.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skip and continue" })).toBeEnabled();
+  });
 });
 
 describe("MessageBubble", () => {

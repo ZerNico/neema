@@ -278,6 +278,8 @@ export const selectCompactionBoundary = (input: {
   tailBudgetTokens: number;
   /** Boundary of the checkpoint already in use; -1 when there is none. */
   minBoundaryIndex: number;
+  /** Latest permitted user-led start, protecting an immediate question/answer pair. */
+  maxStartIndex?: number | undefined;
 }): number | null => {
   const count = input.messages.length;
   let lastUser = -1;
@@ -298,12 +300,13 @@ export const selectCompactionBoundary = (input: {
   }
   // The newest user turn is non-negotiable. The soft minimum tail is naturally
   // retained when it fits; it must never move this boundary back across budget.
-  start = Math.min(start, lastUser);
+  const latestStart = Math.min(lastUser, input.maxStartIndex ?? lastUser);
+  start = Math.min(start, latestStart);
 
   // Snap forward, never backward: `start <= lastUser` guarantees a user
   // message exists at or after it, and moving forward keeps the tail inside
   // the budget the loop above just measured.
-  while (start < lastUser && input.messages[start]?.role !== "user") start += 1;
+  while (start < latestStart && input.messages[start]?.role !== "user") start += 1;
 
   const boundary = start - 1;
   return boundary > input.minBoundaryIndex ? boundary : null;
@@ -322,6 +325,7 @@ export const hardTruncateHistory = (input: {
   /** Prefix + summary + truncation notice. */
   fixedTokens: number;
   targetTokens: number;
+  maxStartIndex?: number | undefined;
 }): { startIndex: number; estimatedInputTokens: number } | null => {
   const count = input.messages.length;
   // Suffix sums so each candidate start is a lookup rather than a rescan.
@@ -333,6 +337,7 @@ export const hardTruncateHistory = (input: {
     if (input.messages[i]?.role === "user") candidates.push(i);
   }
   for (const start of candidates) {
+    if (start > (input.maxStartIndex ?? count)) continue;
     const total = input.fixedTokens + (suffix[start] ?? 0);
     if (total <= input.targetTokens) return { startIndex: start, estimatedInputTokens: total };
   }
@@ -533,6 +538,7 @@ export type CompactionEvent =
       readonly eventId: string;
       readonly beforeTurnIndex: number;
       readonly passIndex: number;
+      readonly textOffset?: number;
       readonly scope: "history" | "active_rounds";
     }
   | {
@@ -540,6 +546,7 @@ export type CompactionEvent =
       readonly eventId: string;
       readonly beforeTurnIndex: number;
       readonly passIndex: number;
+      readonly textOffset?: number;
       readonly scope: "history" | "active_rounds";
       readonly ok: boolean;
       readonly outcome?: "summary" | "hard_truncation";
@@ -547,6 +554,8 @@ export type CompactionEvent =
     };
 
 export interface CompactionInput {
+  readonly textOffset?: number;
+  readonly maxStartIndex?: number | undefined;
   readonly userId: string;
   readonly conversationId: string;
   /** Assistant response whose generation performs this work. */
@@ -583,7 +592,12 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
   input: CompactionInput,
 ) {
   const notify = (event: CompactionEvent) => input.onCompaction?.(event) ?? Effect.void;
-  const eventPosition = { beforeTurnIndex: 0, passIndex: 0, scope: "history" as const };
+  const eventPosition = {
+    beforeTurnIndex: 0,
+    passIndex: 0,
+    textOffset: input.textOffset ?? 0,
+    scope: "history" as const,
+  };
   const startEvent = (eventId: string) =>
     Effect.gen(function* () {
       yield* deps.repo.createCompactionEvent({
@@ -664,6 +678,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     fixedTokens: baseFixed,
     tailBudgetTokens: budget.tail,
     minBoundaryIndex: -1,
+    maxStartIndex: input.maxStartIndex,
   });
 
   let eventId: string | null = null;
@@ -739,6 +754,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
 
   const injected = [...baseInjected, truncationNoticeMessage()];
   const truncationInput = {
+    maxStartIndex: input.maxStartIndex,
     messages: input.messages,
     tokens,
     startIndex: baseStart,
@@ -834,6 +850,7 @@ export interface ActiveRound {
 }
 
 export interface ActiveRoundCompactionInput {
+  readonly textOffset?: number;
   readonly userId: string;
   readonly conversationId: string;
   readonly messageId: string;
@@ -941,6 +958,7 @@ export const prepareCompactedActiveRounds = Effect.fn("chat.prepareCompactedActi
     const position = {
       beforeTurnIndex: input.beforeTurnIndex,
       passIndex: input.passIndex,
+      ...(input.textOffset === undefined ? {} : { textOffset: input.textOffset }),
       scope: "active_rounds" as const,
     };
     const notify = (event: CompactionEvent) => input.onCompaction?.(event) ?? Effect.void;
@@ -1023,6 +1041,7 @@ export const prepareCompactedActiveRounds = Effect.fn("chat.prepareCompactedActi
  * Null when there is nothing left to drop — one overflow is all we retry.
  */
 export const shrinkForOverflow = (input: {
+  maxStartIndex?: number | undefined;
   decision: CompactionDecision;
   messages: ReadonlyArray<HistoryMessage>;
   renderedMessages: ReadonlyArray<Prompt.MessageEncoded>;
@@ -1039,6 +1058,7 @@ export const shrinkForOverflow = (input: {
 
   const scale = (value: number) => Math.ceil(value * input.calibrationFactor);
   const truncationInput = {
+    maxStartIndex: input.maxStartIndex,
     messages: input.messages,
     tokens: input.renderedMessages.map((message) => scale(estimateMessageTokens(message))),
     startIndex: input.decision.startIndex,

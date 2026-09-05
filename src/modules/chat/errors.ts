@@ -9,6 +9,13 @@ export class MessageNotFound extends Schema.TaggedError<MessageNotFound>()("Mess
   messageId: Schema.String,
 }) {}
 
+export class QuestionUnavailable extends Schema.TaggedError<QuestionUnavailable>()(
+  "QuestionUnavailable",
+  {
+    callId: Schema.String,
+  },
+) {}
+
 export class ModelNotFound extends Schema.TaggedError<ModelNotFound>()("ModelNotFound", {
   modelId: Schema.String,
 }) {}

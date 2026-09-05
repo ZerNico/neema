@@ -8,6 +8,7 @@ import {
   MessageNotFound,
   ModelNotFound,
   RetryNotAllowed,
+  QuestionUnavailable,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
@@ -19,27 +20,24 @@ import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
-import { ChatRepo } from "./repo.ts";
+import { ChatRepo, type CreateTurnInput, type EditContent, type HistorySnapshot } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
+
+type SendTurnInput = CreateTurnInput & { searchEnabled: boolean; timeZone?: string | undefined };
 
 // Orchestrates the chat use-cases on top of repo + stream engine + sync bus.
 export class ChatService extends Context.Service<
   ChatService,
   {
-    sendMessage(input: {
-      userId: string;
-      conversationId: string | null;
-      modelId: string;
-      content: string;
-      searchEnabled: boolean;
-      timeZone?: string | undefined;
-      attachmentIds: ReadonlyArray<string>;
-    }): Effect.Effect<
+    sendMessage(
+      input: SendTurnInput,
+    ): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
       | ModelNotFound
       | ConversationNotFound
       | ConversationBusy
+      | QuestionUnavailable
       | ToolUnavailable
       | InvalidMessage
       | AttachmentNotAvailable
@@ -60,6 +58,7 @@ export class ChatService extends Context.Service<
       | MessageNotFound
       | ModelNotFound
       | RetryNotAllowed
+      | InvalidMessage
       | AttachmentNotAvailable
       | AttachmentUnsupported
     >;
@@ -73,16 +72,17 @@ export class ChatService extends Context.Service<
       { conversationId: string },
       ConversationNotFound | MessageNotFound | BranchNotAllowed
     >;
-    editMessage(input: {
-      userId: string;
-      conversationId: string;
-      messageId: string;
-      content: string;
-      modelId: string;
-      searchEnabled: boolean;
-      timeZone?: string | undefined;
-      attachmentIds: ReadonlyArray<string>;
-    }): Effect.Effect<
+    editMessage(
+      input: EditContent & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        modelId: string;
+        searchEnabled: boolean;
+        timeZone?: string | undefined;
+        attachmentIds: ReadonlyArray<string>;
+      },
+    ): Effect.Effect<
       { assistantMessageId: string },
       | ConversationNotFound
       | MessageNotFound
@@ -136,13 +136,8 @@ function makeChatService() {
         userId: string;
         modelId: string;
         searchEnabled: boolean;
-        content: string;
         attachmentIds: ReadonlyArray<string>;
       }) {
-        // A turn with neither text nor files has nothing for the model to read.
-        if (input.content.trim() === "" && input.attachmentIds.length === 0) {
-          return yield* new InvalidMessage({ reason: "message is empty" });
-        }
         if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
           return yield* new InvalidMessage({
             reason: `at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`,
@@ -229,27 +224,20 @@ function makeChatService() {
 
     // Sends a user message; creates the conversation on first message.
     // Returns ids the client needs to subscribe to the assistant stream.
-    const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: {
-      userId: string;
-      conversationId: string | null;
-      modelId: string;
-      content: string;
-      searchEnabled: boolean;
-      timeZone?: string | undefined;
-      attachmentIds: ReadonlyArray<string>;
-    }) {
+    const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
+      if (
+        !input.questionResponse &&
+        input.content.trim() === "" &&
+        input.attachmentIds.length === 0
+      ) {
+        return yield* new InvalidMessage({ reason: "message is empty" });
+      }
       // The server stays authoritative even when the composer hides the toggle.
       const { attachmentFileNames } = yield* validateGenerationOptions(input);
 
       // One transaction: a lost attachment claim must not leave behind an
       // empty conversation or a user message nobody will answer.
-      const turn = yield* repo.createTurn({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        modelId: input.modelId,
-        content: input.content,
-        attachmentIds: input.attachmentIds,
-      });
+      const turn = yield* repo.createTurn(input);
 
       if (turn.conversationCreated) {
         yield* sync.publish(input.userId, {
@@ -282,7 +270,7 @@ function makeChatService() {
             userId: input.userId,
             conversationId: turn.conversation.id,
             modelId: input.modelId,
-            content: input.content,
+            content: turn.userMessage.content,
             attachmentFileNames,
           }),
         );
@@ -292,6 +280,7 @@ function makeChatService() {
     });
 
     const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (input: {
+      expectedMessages: HistorySnapshot;
       userId: string;
       conversationId: string;
       assistantMessageId: string;
@@ -300,13 +289,13 @@ function makeChatService() {
       timeZone?: string | undefined;
       deleteMessageIds: ReadonlyArray<string>;
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-      edit?: {
+      edit?: EditContent & {
         messageId: string;
-        content: string;
         attachmentIds: ReadonlyArray<string>;
       };
     }) {
       const { claimed, orphanedKeys } = yield* repo.resetMessageForRetry({
+        expectedMessages: input.expectedMessages,
         userId: input.userId,
         messageId: input.assistantMessageId,
         modelId: input.modelId,
@@ -435,6 +424,7 @@ function makeChatService() {
       const searchEnabled = usedSearch && model.capabilities.tools && (yield* searchToolEnabled);
 
       const restarted = yield* restartAssistant({
+        expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
         assistantMessageId: message.id,
@@ -532,16 +522,17 @@ function makeChatService() {
       return { conversationId: branch.id };
     });
 
-    const editMessage = Effect.fn("ChatService.editMessage")(function* (input: {
-      userId: string;
-      conversationId: string;
-      messageId: string;
-      content: string;
-      modelId: string;
-      searchEnabled: boolean;
-      timeZone?: string | undefined;
-      attachmentIds: ReadonlyArray<string>;
-    }) {
+    const editMessage = Effect.fn("ChatService.editMessage")(function* (
+      input: EditContent & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        modelId: string;
+        searchEnabled: boolean;
+        timeZone?: string | undefined;
+        attachmentIds: ReadonlyArray<string>;
+      },
+    ) {
       yield* repo.getConversation(input.userId, input.conversationId);
       const message = yield* repo.getMessage(input.messageId);
       if (!message || message.conversationId !== input.conversationId) {
@@ -565,11 +556,22 @@ function makeChatService() {
       }
 
       const assistant = after.find((candidate) => candidate.role === "assistant");
+      if (
+        !input.questionResponse &&
+        input.content.trim() === "" &&
+        input.attachmentIds.length === 0
+      ) {
+        return yield* new InvalidMessage({ reason: "message is empty" });
+      }
       yield* validateGenerationOptions(input);
+      const edit: EditContent = input.questionResponse
+        ? { questionResponse: input.questionResponse }
+        : { content: input.content };
 
       if (assistant) {
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
+          expectedMessages: all,
           userId: input.userId,
           conversationId: input.conversationId,
           assistantMessageId: assistant.id,
@@ -582,7 +584,7 @@ function makeChatService() {
           invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
           edit: {
             messageId: message.id,
-            content: input.content,
+            ...edit,
             attachmentIds: input.attachmentIds,
           },
         });
@@ -596,11 +598,12 @@ function makeChatService() {
       }
 
       const created = yield* repo.createAssistantForEdit({
+        expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
         userMessageId: message.id,
         expectedEditedAt: message.editedAt,
-        content: input.content,
+        ...edit,
         attachmentIds: input.attachmentIds,
         modelId: input.modelId,
         deleteMessageIds: after.map((candidate) => candidate.id),

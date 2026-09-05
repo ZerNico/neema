@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
 import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
+import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -25,6 +26,8 @@ interface ToolActivityBase {
   name: string;
   turnIndex?: number;
   callIndex?: number;
+  /** UTF-16 offset in the original assistant content, captured at start. */
+  textOffset?: number;
   status: "running" | "complete" | "error";
   error?: string;
 }
@@ -46,7 +49,13 @@ export interface MemoryToolActivity extends ToolActivityBase {
   outcome?: MemoryActivityOutcome;
 }
 
-export type ToolActivity = WebToolActivity | MemoryToolActivity;
+export interface AskToolActivity extends ToolActivityBase {
+  family: "ask";
+  /** Only a validated, successful durable presentation can supply questions. */
+  questions?: ReadonlyArray<AskUserQuestion>;
+}
+
+export type ToolActivity = WebToolActivity | MemoryToolActivity | AskToolActivity;
 
 export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
   activity.family === "web";
@@ -59,6 +68,7 @@ export const isMemoryToolActivity = (activity: ToolActivity): activity is Memory
 // may have produced.
 export interface CompactionActivity {
   eventId: string;
+  textOffset?: number;
   beforeTurnIndex: number;
   passIndex: number;
   scope: "history" | "active_rounds";
@@ -122,16 +132,25 @@ export const toMemoryActivityOutcome = (value: unknown): MemoryActivityOutcome |
   return undefined;
 };
 
+export const readTextOffset = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
 // Parses a tool chunk envelope defensively: malformed rows must not crash the
 // stream; the chunk still advances lastSeq so resume cursors stay correct.
-export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivity[] {
+export function applyToolChunk(
+  tools: ToolActivity[],
+  delta: string,
+  onlyFamily?: ToolActivity["family"],
+): ToolActivity[] {
   let envelope: unknown;
   try {
     envelope = JSON.parse(delta);
   } catch {
     return tools;
   }
+  if (typeof envelope !== "object" || envelope === null) return tools;
   const e = envelope as {
+    result?: unknown;
     v?: number;
     family?: string;
     phase?: string;
@@ -139,6 +158,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
     name?: string;
     turnIndex?: number;
     callIndex?: number;
+    textOffset?: unknown;
     args?: { targets?: string[] };
     ok?: boolean;
     outcome?: unknown;
@@ -153,13 +173,46 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
     error?: string;
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
-  if (e.family !== undefined && e.family !== "web" && e.family !== "memory") return tools;
+  if (e.family !== undefined && e.family !== "web" && e.family !== "memory" && e.family !== "ask")
+    return tools;
 
   // Historical envelopes predate the discriminator and are all web activity.
-  const family = e.family === "memory" ? "memory" : "web";
+  const family = e.family === "memory" || e.family === "ask" ? e.family : "web";
+  if (onlyFamily !== undefined && family !== onlyFamily) return tools;
   const index = tools.findIndex((activity) => activity.callId === e.callId);
   const existing = index === -1 ? undefined : tools[index];
   if (existing && existing.family !== family) return tools;
+  const textOffset =
+    existing?.textOffset ??
+    (e.phase === "start" && !existing ? readTextOffset(e.textOffset) : undefined);
+  const position = textOffset === undefined ? {} : { textOffset };
+  // Bootstrap can replay older progress after a terminal durable row was read.
+  if (existing && existing.status !== "running") return tools;
+
+  if (family === "ask") {
+    if (
+      typeof e.callId !== "string" ||
+      e.name !== "ask_user" ||
+      (e.phase !== "start" && e.phase !== "result")
+    )
+      return tools;
+    // The durable result is immutable. Late/replayed chunks cannot replace it.
+    if (existing && (e.phase === "start" || existing.status !== "running")) return tools;
+    const questions = e.phase === "result" ? readPresentedQuestions(e.result) : null;
+    const next: AskToolActivity = {
+      family: "ask",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : questions ? "complete" : "error",
+      ...(questions ? { questions } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
 
   if (family === "memory") {
     if (e.phase === "start") {
@@ -168,6 +221,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
         ...tools,
         {
           family: "memory",
+          ...position,
           callId: e.callId,
           name: e.name,
           turnIndex: e.turnIndex ?? 0,
@@ -181,6 +235,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
     const outcome = toMemoryActivityOutcome(e.summary?.outcome ?? e.outcome);
     const next: MemoryToolActivity = {
       family: "memory",
+      ...position,
       callId: e.callId,
       name: e.name,
       turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
@@ -197,6 +252,7 @@ export function applyToolChunk(tools: ToolActivity[], delta: string): ToolActivi
   const upsertWeb = (next: Partial<WebToolActivity>): ToolActivity[] => {
     const activity: WebToolActivity = {
       family: "web",
+      ...position,
       callId: e.callId!,
       name: e.name!,
       turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
@@ -251,7 +307,9 @@ export function applyCompactionChunk(
   } catch {
     return current;
   }
+  if (typeof envelope !== "object" || envelope === null) return current;
   const e = envelope as {
+    textOffset?: unknown;
     v?: number;
     phase?: string;
     eventId?: string;
@@ -274,12 +332,14 @@ export function applyCompactionChunk(
 
   const index = current.findIndex((activity) => activity.eventId === e.eventId);
   const existing = index === -1 ? undefined : current[index];
-  if (e.phase === "start" && existing && existing.status !== "running") return current;
+  if (existing && existing.status !== "running") return current;
+  const textOffset = existing ? existing.textOffset : readTextOffset(e.textOffset);
   const next: CompactionActivity = {
     eventId: e.eventId,
-    beforeTurnIndex: e.beforeTurnIndex,
-    passIndex: e.passIndex,
-    scope: e.scope,
+    ...(textOffset === undefined ? {} : { textOffset }),
+    beforeTurnIndex: existing?.beforeTurnIndex ?? e.beforeTurnIndex,
+    passIndex: existing?.passIndex ?? e.passIndex,
+    scope: existing?.scope ?? e.scope,
     status: e.phase === "result" ? (e.ok ? "complete" : "failed") : (existing?.status ?? "running"),
     ...(e.outcome
       ? { outcome: e.outcome }
@@ -455,6 +515,7 @@ export function useMessageStream(
 
   return {
     ...state,
+    rawTextLength: state.text.length,
     text,
     reasoning,
     // Completion is only reported once the words are all on screen; the

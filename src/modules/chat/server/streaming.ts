@@ -1,4 +1,11 @@
-import { Context, Deferred, Duration, Effect, Layer, PubSub, Stream } from "effect";
+import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
+import {
+  AskUserParams,
+  AskUserResult,
+  formatQuestionContext,
+  readPresentedQuestions,
+} from "~/modules/tools/ask-user-schema.ts";
+import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -367,8 +374,13 @@ export class StreamEngine extends Context.Service<
                   ordinals: renderedMemory?.ordinals ?? new Map(),
                 })
               : undefined;
-          const webToolkit = webTools ? yield* mergeToolGroups([webTools.group]) : undefined;
+          const askTools = model?.capabilities.tools ? prepareAskUserTool() : undefined;
+          const nonMemoryToolkit = yield* mergeToolGroups([
+            ...(webTools ? [webTools.group] : []),
+            ...(askTools ? [askTools] : []),
+          ]);
           const toolkit = yield* mergeToolGroups([
+            ...(askTools ? [askTools] : []),
             ...(webTools ? [webTools.group] : []),
             ...(memoryTools ? [memoryTools.group] : []),
           ]);
@@ -376,11 +388,45 @@ export class StreamEngine extends Context.Service<
           // Select once, before resolving attachments: the checkpoint replaces
           // its covered prefix entirely, including blobs that may no longer exist.
           // Keep `completed` intact for source authority, usage and memory provenance.
+          const questionContexts = new Map<string, string>();
+          for (const call of priorToolCalls) {
+            if (call.toolName !== "ask_user" || call.status !== "complete") continue;
+            const questions = readPresentedQuestions(call.result);
+            if (questions) questionContexts.set(call.messageId, formatQuestionContext(questions));
+          }
+          // Keep an immediate clarification with its answer, including on retry.
+          // The bound is a user-led turn start, so no orphan assistant is retained.
+          let protectedStart: number | undefined;
+          if (
+            completed.at(-1)?.role === "user" &&
+            questionContexts.has(completed.at(-2)?.id ?? "")
+          ) {
+            protectedStart = completed.length - 2;
+            while (protectedStart > 0 && completed[protectedStart]?.role !== "user")
+              protectedStart--;
+          }
+          const checkpoints = yield* repo.listCompactionCheckpoints(input.conversationId);
           const selected = latestValidCheckpoint(
             completed,
-            yield* repo.listCompactionCheckpoints(input.conversationId),
+            protectedStart === undefined
+              ? checkpoints
+              : checkpoints.filter(
+                  (checkpoint) =>
+                    completed.findIndex((message) => message.id === checkpoint.throughMessageId) <
+                    protectedStart,
+                ),
           );
-          const historySuffix = selected ? completed.slice(selected.index + 1) : completed;
+          const suffixStart = selected ? selected.index + 1 : 0;
+          const maxStartIndex =
+            protectedStart === undefined ? undefined : protectedStart - suffixStart;
+          const historySuffix = completed.slice(suffixStart).map((message) => {
+            const questionContext = questionContexts.get(message.id);
+            return questionContext
+              ? Object.assign({}, message, {
+                  content: [message.content, questionContext].filter(Boolean).join("\n\n"),
+                })
+              : message;
+          });
           // Keyed off web tools, not any toolkit: memory must not preserve
           // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
@@ -418,6 +464,15 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
+            ...(askTools
+              ? [
+                  {
+                    role: "system" as const,
+                    content:
+                      "Use ask_user only for consequential ambiguity that context or a sensible default cannot resolve. Include the question text and call it alone: presenting questions ends this response, and answers arrive in a new user message. Never request secrets, routine permission to continue, or treat answers or skips as authorization for actions.",
+                  },
+                ]
+              : []),
             ...(webTools
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
               : []),
@@ -453,6 +508,8 @@ export class StreamEngine extends Context.Service<
               modelId: input.modelId,
               contextLength: model?.contextLength,
               existingCheckpoint: selected?.checkpoint ?? null,
+              textOffset: assembled.length,
+              maxStartIndex,
               messages: historySuffix,
               renderedMessages: historyMessages,
               fixedPrefix,
@@ -508,6 +565,7 @@ export class StreamEngine extends Context.Service<
               const position = {
                 beforeTurnIndex,
                 passIndex: nextPassIndex(beforeTurnIndex),
+                textOffset: assembled.length,
                 scope: "history" as const,
               };
               yield* repo.createCompactionEvent({
@@ -531,6 +589,7 @@ export class StreamEngine extends Context.Service<
               });
             });
 
+          let questionPresented = false;
           let webAttempted = false;
           for (let turn = 0; turn <= MAX_TOOL_ROUNDS; turn++) {
             const toolRoundsLeft = turn < MAX_TOOL_ROUNDS;
@@ -552,7 +611,8 @@ export class StreamEngine extends Context.Service<
               // Once memory or either web tool has run, remove save_memory from
               // subsequent model turns. This bounds memory to one attempt and
               // prevents web/tool output from becoming durable memory.
-              const activeToolkit = memoryTools?.attempted() || webAttempted ? webToolkit : toolkit;
+              const activeToolkit =
+                memoryTools?.attempted() || webAttempted ? nonMemoryToolkit : toolkit;
               return gateway
                 .streamChat({
                   modelId: input.modelId,
@@ -603,21 +663,39 @@ export class StreamEngine extends Context.Service<
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
                           const args = part.params as Record<string, unknown>;
-                          const family = part.name === "save_memory" ? "memory" : "web";
+                          const family =
+                            part.name === "save_memory"
+                              ? "memory"
+                              : part.name === "ask_user"
+                                ? "ask"
+                                : "web";
+                          const askArgs =
+                            family === "ask"
+                              ? Schema.decodeUnknownOption(AskUserParams)(args)
+                              : null;
                           if (family === "web") webAttempted = true;
+                          const textOffset = assembled.length;
                           yield* repo.insertToolCall({
                             id: rowId,
                             messageId: input.messageId,
                             turnIndex: turn,
                             callIndex: callIndex++,
+                            textOffset,
                             providerCallId: part.id,
                             toolName: part.name,
                             // The canonical memory row is the sole persisted copy
                             // of proposed content. Chat activity stores only that
                             // the tool ran, so deleting memory actually removes it.
-                            arguments: family === "memory" ? {} : (args as JsonValue),
+                            arguments:
+                              family === "memory"
+                                ? {}
+                                : family === "ask"
+                                  ? askArgs && Option.isSome(askArgs)
+                                    ? (askArgs.value as unknown as JsonValue)
+                                    : {}
+                                  : (args as JsonValue),
                           });
-                          if (family === "memory") {
+                          if (family === "memory" || family === "ask") {
                             yield* pushToolChunk({
                               v: 1,
                               family,
@@ -626,6 +704,7 @@ export class StreamEngine extends Context.Service<
                               name: part.name,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
+                              textOffset,
                             });
                             return;
                           }
@@ -643,12 +722,44 @@ export class StreamEngine extends Context.Service<
                             name: part.name,
                             turnIndex: turn,
                             callIndex: callIndex - 1,
+                            textOffset,
                             args: { targets },
                           });
                           return;
                         }
                         case "tool-result": {
                           const rowId = callRowIds.get(part.id) ?? uuidv7();
+                          if (part.name === "ask_user") {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(AskUserResult)(part.result);
+                            const result: AskUserResult =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : {
+                                    v: 1,
+                                    outcome: "rejected",
+                                    message: "Questions could not be presented.",
+                                  };
+                            const ok = result.outcome === "presented";
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: result as unknown as JsonValue,
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : { error: { code: "QuestionRejected", message: result.message } }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "ask",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              result,
+                            });
+                            if (ok) questionPresented = true;
+                            return;
+                          }
                           if (part.name === "save_memory") {
                             // Memory handlers have no preliminary progress. Ignore
                             // any malformed preliminary part rather than persisting
@@ -849,6 +960,7 @@ export class StreamEngine extends Context.Service<
                             summary: activeSummary,
                             rounds: activeRounds,
                             beforeTurnIndex: turn,
+                            textOffset: assembled.length,
                             passIndex: nextPassIndex(turn),
                             calibrationFactor: factor,
                             sourceManifest: sourceManifest(),
@@ -878,6 +990,7 @@ export class StreamEngine extends Context.Service<
                     });
                     const shrunk = shrinkForOverflow({
                       decision: compaction,
+                      maxStartIndex,
                       messages: historySuffix,
                       renderedMessages: historyMessages,
                       fixedPrefix: [
@@ -907,7 +1020,7 @@ export class StreamEngine extends Context.Service<
 
             yield* runProviderCall(0);
 
-            if (finishReason !== "tool-calls") break;
+            if (questionPresented || finishReason !== "tool-calls") break;
             // A completed response/tool batch is one atomic unit. It becomes
             // eligible for compaction only now, after every tool result is
             // terminal; no call can ever be separated from its result.
@@ -939,6 +1052,7 @@ export class StreamEngine extends Context.Service<
                   summary: activeSummary,
                   rounds: activeRounds,
                   beforeTurnIndex: turn + 1,
+                  textOffset: assembled.length,
                   passIndex: nextPassIndex(turn + 1),
                   calibrationFactor: factor,
                   sourceManifest: sourceManifest(),

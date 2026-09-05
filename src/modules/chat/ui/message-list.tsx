@@ -1,16 +1,16 @@
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import {
-  isMemoryToolActivity,
   type CompactionActivity,
   type ToolActivity,
   type ToolSource,
-  type WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
+import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
+import { projectAssistantBody } from "./assistant-body.ts";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
@@ -74,24 +74,21 @@ function citationComponents(
   };
 }
 
-// Citation rendering needs the detail panel, so it lives in its own component
-// that is only mounted when the message actually has sources — an ordinary
-// answer renders through AssistantMarkdown with no panel dependency at all.
+// Every segment shares its message's source set and panel callback.
 const CitedAnswer = memo(function CitedAnswer({
-  messageId,
+  onOpenSources,
   content: rawContent,
   sources,
   streaming,
 }: {
-  messageId: string;
+  onOpenSources: (focus?: number) => void;
   content: string;
   sources: ToolSource[];
   streaming: boolean;
 }) {
-  const openSources = useSourcesPanel(messageId, sources);
   const components = useMemo(
-    () => citationComponents(sources, openSources),
-    [sources, openSources],
+    () => citationComponents(sources, onOpenSources),
+    [sources, onOpenSources],
   );
   const content = useMemo(() => prepareCitedMarkdown(rawContent, sources), [rawContent, sources]);
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
@@ -133,11 +130,14 @@ export interface DisplayMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** Receipt length before smoothing; activity anchors remain in this coordinate space. */
+  rawTextLength?: number;
   reasoning: string;
   /** A reasoning phase happened/is happening (even if its content is hidden). */
   reasoningSeen: boolean;
   toolActivities: ToolActivity[];
   status: string;
+  questionActions?: QuestionActions | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /**
@@ -332,7 +332,6 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* Hover-revealed on pointer devices; always visible on touch, where
               there is no hover. focus-within keeps them keyboard-reachable. */}
           <MessageActions
-            messageId={message.id}
             content={message.content}
             sources={[]}
             time={message.time}
@@ -351,94 +350,88 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
-const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
-  tools,
-  compactions,
-  onViewSources,
+const AssistantBody = memo(function AssistantBody({
+  message,
+  sources,
+  onOpenSources,
 }: {
-  tools: ToolActivity[];
-  compactions: CompactionActivity[];
-  onViewSources?: () => void;
+  message: DisplayMessage;
+  sources: ToolSource[];
+  onOpenSources?: (focus?: number) => void;
 }) {
-  // oxlint-disable-next-line no-array-sort -- fresh array
-  const orderedTools = [...tools].sort(
-    (a, b) => (a.turnIndex ?? 0) - (b.turnIndex ?? 0) || (a.callIndex ?? 0) - (b.callIndex ?? 0),
-  );
-  // oxlint-disable-next-line no-array-sort -- fresh array
-  const orderedCompactions = [...compactions].sort(
-    (a, b) => a.beforeTurnIndex - b.beforeTurnIndex || a.passIndex - b.passIndex,
-  );
-  const maxTurn = Math.max(
-    -1,
-    ...orderedTools.map((activity) => activity.turnIndex ?? 0),
-    ...orderedCompactions.map((activity) => activity.beforeTurnIndex),
-  );
-  const nodes: React.ReactNode[] = [];
-  let pendingWeb: WebToolActivity[] = [];
-
-  const flushWeb = () => {
-    if (pendingWeb.length === 0) return;
-    nodes.push(
-      <ToolActivityBlock
-        key={`tools-${pendingWeb[0]!.callId}`}
-        activities={pendingWeb}
-        {...(onViewSources ? { onViewSources } : {})}
-      />,
-    );
-    pendingWeb = [];
-  };
-
-  for (let turn = 0; turn <= maxTurn; turn++) {
-    const turnCompactions = orderedCompactions.filter(
-      (candidate) => candidate.beforeTurnIndex === turn,
-    );
-    if (turnCompactions.length > 0) flushWeb();
-    for (const activity of turnCompactions) {
-      nodes.push(
-        <CompactionBlock
-          key={activity.eventId}
-          status={activity.status}
-          outcome={activity.outcome}
-          summary={activity.summary}
-          className="mb-2"
-        />,
+  const streaming = message.status === "streaming";
+  const { parts } = projectAssistantBody({
+    content: message.content,
+    rawTextLength: message.rawTextLength ?? message.content.length,
+    streaming,
+    tools: message.toolActivities,
+    compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
+  });
+  return parts.map((part) => {
+    if (part.kind === "text") {
+      return (
+        <div key={part.key} className="mb-3 last:mb-0">
+          {onOpenSources ? (
+            <CitedAnswer
+              content={part.content}
+              sources={sources}
+              streaming={part.streaming}
+              onOpenSources={onOpenSources}
+            />
+          ) : (
+            <AssistantMarkdown content={part.content} streaming={part.streaming} />
+          )}
+        </div>
       );
     }
-
-    const turnTools = orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn);
-    for (const activity of turnTools) {
-      if (isMemoryToolActivity(activity)) {
-        flushWeb();
-        nodes.push(<MemoryActivityBlock key={activity.callId} activity={activity} />);
-      } else {
-        pendingWeb.push(activity);
-      }
+    if (part.kind === "web") {
+      return (
+        <ToolActivityBlock
+          key={part.key}
+          activities={part.activities}
+          {...(!streaming && onOpenSources ? { onViewSources: onOpenSources } : {})}
+        />
+      );
     }
-  }
-  flushWeb();
-
-  return nodes;
+    if (part.kind === "compaction") {
+      return (
+        <CompactionBlock
+          key={part.key}
+          status={part.activity.status}
+          outcome={part.activity.outcome}
+          summary={part.activity.summary}
+          className="mb-2"
+        />
+      );
+    }
+    if (part.activity.family === "memory") {
+      return <MemoryActivityBlock key={part.key} activity={part.activity} />;
+    }
+    return (
+      <AskUserBlock
+        key={part.key}
+        activity={part.activity}
+        messageStatus={message.status}
+        {...message.questionActions}
+      />
+    );
+  });
 });
 
-function CompletedAssistantActivityTimeline({
+// Mount the panel binding beside, not around, the body: receiving the first
+// source must not remount the timeline and erase open disclosures or drafts.
+function AssistantSourcePanel({
   messageId,
   sources,
-  tools,
-  compactions,
+  bind,
 }: {
   messageId: string;
   sources: ToolSource[];
-  tools: ToolActivity[];
-  compactions: CompactionActivity[];
+  bind: (open: (focus?: number) => void) => () => void;
 }) {
-  const openSources = useSourcesPanel(messageId, sources);
-  return (
-    <AssistantActivityTimeline
-      tools={tools}
-      compactions={compactions}
-      onViewSources={openSources}
-    />
-  );
+  const open = useSourcesPanel(messageId, sources);
+  useLayoutEffect(() => bind(open), [bind, open]);
+  return null;
 }
 
 const EMPTY_COMPACTION_ACTIVITIES: CompactionActivity[] = [];
@@ -575,6 +568,14 @@ function GenerationFailure({
 }
 
 function AssistantBubble({ message }: { message: DisplayMessage }) {
+  const sourcePanel = useRef<((focus?: number) => void) | null>(null);
+  const bindSourcePanel = useCallback((open: (focus?: number) => void) => {
+    sourcePanel.current = open;
+    return () => {
+      sourcePanel.current = null;
+    };
+  }, []);
+  const openSources = useCallback((focus?: number) => sourcePanel.current?.(focus), []);
   const streaming = message.status === "streaming";
   const toolRunning = message.toolActivities.some((a) => a.status === "running");
   // "Thinking" is the phase before any visible answer text arrives — but not
@@ -608,33 +609,21 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}
-        {!streaming && sources.length > 0 ? (
-          <CompletedAssistantActivityTimeline
-            messageId={message.id}
-            sources={sources}
-            tools={message.toolActivities}
-            compactions={compactionActivities}
-          />
-        ) : (
-          <AssistantActivityTimeline
-            tools={message.toolActivities}
-            compactions={compactionActivities}
-          />
-        )}
-        {streaming && message.content.length === 0 ? (
-          showReasoning || toolRunning || compacting ? null : (
-            <span className="text-muted-foreground animate-pulse">Thinking…</span>
-          )
-        ) : sources.length > 0 ? (
-          <CitedAnswer
-            messageId={message.id}
-            content={message.content}
-            sources={sources}
-            streaming={streaming}
-          />
-        ) : (
-          <AssistantMarkdown content={message.content} streaming={streaming} />
-        )}
+        {sources.length > 0 && (!streaming || message.content.length > 0) ? (
+          <AssistantSourcePanel messageId={message.id} sources={sources} bind={bindSourcePanel} />
+        ) : null}
+        <AssistantBody
+          message={message}
+          sources={sources}
+          {...(sources.length > 0 ? { onOpenSources: openSources } : {})}
+        />
+        {streaming &&
+        message.content.length === 0 &&
+        !showReasoning &&
+        !toolRunning &&
+        !compacting ? (
+          <span className="text-muted-foreground animate-pulse">Thinking…</span>
+        ) : null}
         {message.status === "error" ? (
           <GenerationFailure
             error={message.error}
@@ -646,7 +635,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         ) : null}
         {streaming ? null : (
           <MessageActions
-            messageId={message.id}
+            onOpenSources={openSources}
             content={message.content}
             sources={sources}
             time={message.time}

@@ -4,6 +4,21 @@ import { EditMessageInput, RetryMessageInput, SendMessageInput } from "./schema.
 
 const generation = { modelId: "m1", content: "hello", searchEnabled: false, attachmentIds: [] };
 
+it("accepts a structured edit without prose and rejects mixed edit payloads", () => {
+  const decode = Schema.decodeUnknownSync(EditMessageInput);
+  const input = {
+    conversationId: "c1",
+    messageId: "u1",
+    modelId: "m1",
+    searchEnabled: false,
+    attachmentIds: [],
+    questionResponse: { kind: "skip" },
+  };
+  expect(decode(input)).toEqual(input);
+  expect(() => decode({ ...input, content: "arbitrary prose" })).toThrow();
+  expect(() => decode({ ...input, questionResponse: { kind: "answers", answers: [] } })).toThrow();
+});
+
 for (const [name, schema, input] of [
   ["send", SendMessageInput, { conversationId: null, ...generation }],
   ["retry", RetryMessageInput, { conversationId: "c1", messageId: "m1" }],

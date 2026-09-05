@@ -5,6 +5,7 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
+  AnswerQuestionInput,
   BranchConversationInput,
   ConversationIdInput,
   EditMessageInput,
@@ -98,6 +99,44 @@ export const sendMessage = createServerFn({ method: "POST" })
     ),
   );
 
+export const answerQuestion = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(AnswerQuestionInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.sendMessage({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          modelId: data.modelId,
+          searchEnabled: data.searchEnabled,
+          timeZone: data.timeZone,
+          attachmentIds: [],
+          questionResponse: { callId: data.callId, response: data.response },
+        }),
+      ).pipe(
+        Effect.catchTags({
+          QuestionUnavailable: () =>
+            Effect.die(
+              new Response("These questions are no longer available. Refresh the conversation.", {
+                status: 409,
+              }),
+            ),
+          ConversationBusy: () =>
+            Effect.die(new Response("A response is still generating", { status: 409 })),
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+          ToolUnavailable: (e) =>
+            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("Attachment unavailable", { status: 409 })),
+          AttachmentUnsupported: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+        }),
+      ),
+    ),
+  );
+
 export const retryMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(RetryMessageInput))
@@ -117,6 +156,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           AttachmentNotAvailable: () =>
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
           AttachmentUnsupported: (e) =>
@@ -174,14 +214,8 @@ export const editMessage = createServerFn({ method: "POST" })
     runtime.runPromise(
       ChatService.use((chat) =>
         chat.editMessage({
+          ...data,
           userId: context.session.user.id,
-          conversationId: data.conversationId,
-          messageId: data.messageId,
-          content: data.content,
-          modelId: data.modelId,
-          searchEnabled: data.searchEnabled,
-          timeZone: data.timeZone,
-          attachmentIds: data.attachmentIds,
         }),
       ).pipe(
         Effect.catchTags({

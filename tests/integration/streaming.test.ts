@@ -5,7 +5,14 @@ import { PgClient } from "@effect/sql-pg";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Prompt } from "effect/unstable/ai";
-import { attachmentBlobs, attachments, messageAttachments, models } from "~/db/schema/index.ts";
+import { eq } from "drizzle-orm";
+import {
+  attachmentBlobs,
+  attachments,
+  messageAttachments,
+  messages,
+  models,
+} from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -173,6 +180,471 @@ const setupConversation = Effect.gen(function* () {
     status: "streaming",
   });
   return { userId, conversation, userMessage, assistant };
+});
+
+const questionParams = {
+  questions: [
+    {
+      question: "Choose the response style",
+      options: [{ label: "Concise" }, { label: "Detailed", description: "With examples" }],
+      multiSelect: false,
+    },
+  ],
+};
+const setupQuestion = Effect.gen(function* () {
+  const repo = yield* ChatRepo;
+  const seed = yield* setupConversation;
+  yield* repo.finalizeMessage({ messageId: seed.assistant.id, status: "complete", content: "" });
+  const callId = uuidv7();
+  yield* repo.insertToolCall({
+    id: callId,
+    messageId: seed.assistant.id,
+    turnIndex: 0,
+    callIndex: 0,
+    textOffset: 0,
+    providerCallId: "ask-1",
+    toolName: "ask_user",
+    arguments: questionParams,
+  });
+  yield* repo.completeToolCall({
+    id: callId,
+    status: "complete",
+    result: { v: 1, outcome: "presented", ...questionParams },
+  });
+  return { ...seed, callId, expectedMessages: yield* repo.listMessages(seed.conversation.id) };
+});
+const answerInput = (seed: Effect.Success<typeof setupQuestion>) => ({
+  userId: seed.userId,
+  conversationId: seed.conversation.id,
+  modelId: textModelId,
+  attachmentIds: [],
+  questionResponse: {
+    callId: seed.callId,
+    response: { kind: "answers" as const, answers: [{ selected: [1], custom: "" }] },
+  },
+});
+const retryInput = (seed: Effect.Success<typeof setupQuestion>) => ({
+  userId: seed.userId,
+  messageId: seed.assistant.id,
+  modelId: textModelId,
+  expectedMessages: seed.expectedMessages,
+  deleteMessageIds: [],
+  invalidateCheckpointThroughMessageIds: [],
+});
+
+describe("structured answer persistence and edits", () => {
+  it.each(["existing assistant", "missing assistant"])(
+    "edits answers through the %s path",
+    async (path) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const service = yield* ChatService;
+          const engine = yield* StreamEngine;
+          const seed = yield* setupQuestion;
+          const turn = yield* repo.createTurn(answerInput(seed));
+          yield* repo.finalizeMessage({
+            messageId: turn.assistant.id,
+            status: "complete",
+            content: "Old answer",
+          });
+          if (path === "missing assistant") yield* repo.deleteMessages([turn.assistant.id]);
+          const originalCalls = yield* repo.listToolCalls([seed.assistant.id]);
+          const input = {
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: turn.userMessage.id,
+            modelId: textModelId,
+            searchEnabled: false,
+            attachmentIds: [],
+          };
+          const ordinary = yield* service
+            .editMessage({ ...input, content: "unrelated text" })
+            .pipe(Effect.flip);
+          const invalid = yield* service
+            .editMessage({
+              ...input,
+              questionResponse: { kind: "answers", answers: [{ selected: [3], custom: "" }] },
+            })
+            .pipe(Effect.flip);
+          const response = {
+            kind: "answers" as const,
+            answers: [{ selected: [], custom: "My own style" }],
+          };
+          const edited = yield* service.editMessage({ ...input, questionResponse: response });
+          yield* engine.subscribe(edited.assistantMessageId, 0).pipe(Stream.runCollect);
+          const answer = yield* repo.getMessage(turn.userMessage.id);
+          const branch = yield* repo.cloneConversationPrefix({
+            userId: seed.userId,
+            sourceConversationId: seed.conversation.id,
+            throughMessageId: edited.assistantMessageId,
+          });
+          const branchMessages = yield* repo.listMessages(branch.id);
+          const calls = yield* repo.listToolCalls(branchMessages.map((message) => message.id));
+          return {
+            ordinary,
+            invalid,
+            response,
+            answer,
+            originalCalls,
+            afterCalls: yield* repo.listToolCalls([seed.assistant.id]),
+            branchMessages,
+            calls,
+            chunks: yield* repo.chunksAfter(branchMessages.at(-1)!.id, 0),
+          };
+        }),
+      );
+      expect(result.ordinary).toMatchObject({ _tag: "InvalidMessage" });
+      expect(result.invalid).toMatchObject({ _tag: "InvalidMessage" });
+      expect(result.answer).toMatchObject({
+        content: "Q1: My own style",
+        questionResponse: { v: 1, response: result.response },
+      });
+      expect(result.afterCalls).toEqual(result.originalCalls);
+      expect(result.branchMessages[2]).toMatchObject({
+        content: result.answer!.content,
+        questionResponse: result.answer!.questionResponse,
+      });
+      expect(result.calls[0]).toMatchObject({ textOffset: 0 });
+      expect(result.calls[0]!.id).not.toBe(result.originalCalls[0]!.id);
+      expect(result.chunks).toEqual([]);
+    },
+  );
+
+  it("rejects a stale history snapshot even when changed answer metadata has identical text", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupQuestion;
+        const turn = yield* repo.createTurn(answerInput(seed));
+        yield* repo.finalizeMessage({
+          messageId: turn.assistant.id,
+          status: "complete",
+          content: "Answer",
+        });
+        const expectedMessages = yield* repo.listMessages(seed.conversation.id);
+        yield* db
+          .update(messages)
+          .set({
+            questionResponse: {
+              v: 1,
+              response: { kind: "answers", answers: [{ selected: [], custom: "Detailed" }] },
+            },
+          })
+          .where(eq(messages.id, turn.userMessage.id));
+        return yield* repo.resetMessageForRetry({
+          userId: seed.userId,
+          messageId: turn.assistant.id,
+          modelId: textModelId,
+          expectedMessages,
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+      }),
+    );
+    expect(result.claimed).toBe(false);
+  });
+
+  it("clears unsupported metadata when a fallback message is edited normally", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupQuestion;
+        const turn = yield* repo.createTurn(answerInput(seed));
+        yield* repo.finalizeMessage({
+          messageId: turn.assistant.id,
+          status: "complete",
+          content: "Answer",
+        });
+        yield* db
+          .update(messages)
+          .set({ questionResponse: { v: 99 } })
+          .where(eq(messages.id, turn.userMessage.id));
+        yield* repo.resetMessageForRetry({
+          userId: seed.userId,
+          messageId: turn.assistant.id,
+          modelId: textModelId,
+          expectedMessages: yield* repo.listMessages(seed.conversation.id),
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+          edit: {
+            messageId: turn.userMessage.id,
+            conversationId: seed.conversation.id,
+            content: "Ordinary answer",
+            attachmentIds: [],
+          },
+        });
+        return yield* repo.getMessage(turn.userMessage.id);
+      }),
+    );
+    expect(result).toMatchObject({ content: "Ordinary answer", questionResponse: null });
+  });
+});
+
+describe("atomic question answers", () => {
+  it("accepts one of two concurrent answers and leaves the original result immutable", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupQuestion;
+        const before = yield* repo.listToolCalls([seed.assistant.id]);
+        const outcomes = yield* Effect.all(
+          [0, 1].map(() =>
+            repo.createTurn(answerInput(seed)).pipe(
+              Effect.map(() => "accepted"),
+              Effect.catchTag("ConversationBusy", () => Effect.succeed("ConversationBusy")),
+            ),
+          ),
+          { concurrency: "unbounded" },
+        );
+        return {
+          outcomes,
+          before,
+          after: yield* repo.listToolCalls([seed.assistant.id]),
+          messages: yield* repo.listMessages(seed.conversation.id),
+        };
+      }),
+    );
+    expect(result.outcomes.filter((outcome) => outcome === "accepted")).toHaveLength(1);
+    expect(result.outcomes).toContain("ConversationBusy");
+    expect(result.messages).toHaveLength(4);
+    expect(result.messages[2]).toMatchObject({
+      content: "Q1: Detailed",
+      questionResponse: {
+        v: 1,
+        response: { kind: "answers", answers: [{ selected: [1], custom: "" }] },
+      },
+    });
+    expect(result.after).toEqual(result.before);
+  });
+
+  it.each(["normal send", "retry", "edit"])(
+    "serializes an answer racing with %s",
+    async (action) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const seed = yield* setupQuestion;
+          const competing =
+            action === "normal send"
+              ? repo
+                  .createTurn({
+                    userId: seed.userId,
+                    conversationId: seed.conversation.id,
+                    modelId: textModelId,
+                    content: "ordinary reply",
+                    attachmentIds: [],
+                  })
+                  .pipe(
+                    Effect.map(() => true),
+                    Effect.catch(() => Effect.succeed(false)),
+                  )
+              : repo
+                  .resetMessageForRetry({
+                    ...retryInput(seed),
+                    ...(action === "edit"
+                      ? {
+                          edit: {
+                            messageId: seed.userMessage.id,
+                            conversationId: seed.conversation.id,
+                            content: "edited",
+                            attachmentIds: [],
+                          },
+                        }
+                      : {}),
+                  })
+                  .pipe(Effect.map((value) => value.claimed));
+          const outcomes = yield* Effect.all(
+            [
+              repo.createTurn(answerInput(seed)).pipe(
+                Effect.map(() => true),
+                Effect.catch(() => Effect.succeed(false)),
+              ),
+              competing,
+            ],
+            { concurrency: "unbounded" },
+          );
+          return { outcomes, messages: yield* repo.listMessages(seed.conversation.id) };
+        }),
+      );
+      expect(result.outcomes.filter(Boolean)).toHaveLength(1);
+      expect(result.messages.filter((message) => message.status === "streaming")).toHaveLength(1);
+    },
+  );
+
+  it("rejects a stale rewind snapshot even after a new answer has finished", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupQuestion;
+        const turn = yield* repo.createTurn(answerInput(seed));
+        yield* repo.finalizeMessage({
+          messageId: turn.assistant.id,
+          status: "complete",
+          content: "new answer",
+        });
+        const rewind = yield* repo.resetMessageForRetry(retryInput(seed));
+        const edit = yield* repo.createAssistantForEdit({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          userMessageId: seed.userMessage.id,
+          expectedEditedAt: null,
+          expectedMessages: seed.expectedMessages,
+          content: "stale edit",
+          attachmentIds: [],
+          modelId: textModelId,
+          deleteMessageIds: [seed.assistant.id],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+        return { rewind, edit, messages: yield* repo.listMessages(seed.conversation.id) };
+      }),
+    );
+    expect(result.rewind.claimed).toBe(false);
+    expect(result.edit).toBeNull();
+    expect(result.messages.map((message) => message.content)).toEqual([
+      "hi",
+      "",
+      "Q1: Detailed",
+      "new answer",
+    ]);
+  });
+
+  it.each([
+    "invalid selection",
+    "foreign call",
+    "foreign user",
+    "stale tail",
+    "retried",
+    "error",
+    "aborted",
+    "streaming",
+  ])("refuses %s without writing a turn", async (scenario) => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupQuestion;
+        const input = answerInput(seed);
+        if (scenario === "invalid selection")
+          input.questionResponse.response.answers[0]!.selected = [3];
+        if (scenario === "foreign call")
+          input.questionResponse.callId = (yield* setupQuestion).callId;
+        if (scenario === "foreign user") input.userId = (yield* setupQuestion).userId;
+        if (scenario === "stale tail")
+          yield* repo.insertMessage({
+            conversationId: seed.conversation.id,
+            role: "user",
+            content: "replied elsewhere",
+          });
+        if (scenario === "retried") {
+          yield* repo.resetMessageForRetry(retryInput(seed));
+          yield* repo.finalizeMessage({
+            messageId: seed.assistant.id,
+            status: "complete",
+            content: "replacement",
+          });
+        }
+        if (scenario === "error" || scenario === "aborted")
+          yield* repo.finalizeMessage({
+            messageId: seed.assistant.id,
+            status: scenario,
+            content: "",
+          });
+        if (scenario === "streaming")
+          yield* repo.insertMessage({
+            conversationId: seed.conversation.id,
+            role: "assistant",
+            status: "streaming",
+          });
+        const before = yield* repo.listMessages(seed.conversation.id);
+        const error = yield* repo.createTurn(input).pipe(Effect.flip);
+        return { before, after: yield* repo.listMessages(seed.conversation.id), error };
+      }),
+    );
+    expect(result.after).toEqual(result.before);
+    expect(result.error).toMatchObject({
+      _tag:
+        scenario === "invalid selection"
+          ? "InvalidMessage"
+          : scenario === "foreign user"
+            ? "ConversationNotFound"
+            : scenario === "streaming"
+              ? "ConversationBusy"
+              : "QuestionUnavailable",
+    });
+  });
+
+  it("branches with fresh card identity and answers each branch independently", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupQuestion;
+        const branch = yield* repo.cloneConversationPrefix({
+          userId: seed.userId,
+          sourceConversationId: seed.conversation.id,
+          throughMessageId: seed.assistant.id,
+        });
+        const branchMessages = yield* repo.listMessages(branch.id);
+        const calls = yield* repo.listToolCalls(branchMessages.map((message) => message.id));
+        const sourceTurn = yield* repo.createTurn(answerInput(seed));
+        const branchTurn = yield* repo.createTurn({
+          ...answerInput(seed),
+          conversationId: branch.id,
+          questionResponse: { callId: calls[0]!.id, response: { kind: "skip" } },
+        });
+        return { originalId: seed.callId, calls, sourceTurn, branchTurn };
+      }),
+    );
+    expect(result.calls[0]?.id).not.toBe(result.originalId);
+    expect(result.sourceTurn.userMessage.content).toBe("Q1: Detailed");
+    expect(result.branchTurn.userMessage.content).toContain("skipping is not approval");
+    expect(result.branchTurn.userMessage.questionResponse).toEqual({
+      v: 1,
+      response: { kind: "skip" },
+    });
+    expect(result.sourceTurn.conversation.id).not.toBe(result.branchTurn.conversation.id);
+  });
+
+  it("validates the selected model before answering and starts the ordinary next generation", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const service = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const seed = yield* setupQuestion;
+        const unknown = yield* service
+          .sendMessage({ ...answerInput(seed), modelId: uuidv7(), searchEnabled: false })
+          .pipe(Effect.flip);
+        const before = yield* repo.listMessages(seed.conversation.id);
+        const reply = yield* service.sendMessage({
+          ...answerInput(seed),
+          modelId: visionModelId,
+          searchEnabled: false,
+          timeZone: "Europe/Berlin",
+        });
+        yield* engine.subscribe(reply.assistantMessageId, 0).pipe(Stream.runCollect);
+        const old = yield* repo.createTurn(answerInput(seed)).pipe(Effect.flip);
+        return {
+          unknown,
+          before,
+          reply,
+          old,
+          messages: yield* repo.listMessages(seed.conversation.id),
+        };
+      }),
+    );
+    expect(result.unknown).toMatchObject({ _tag: "ModelNotFound" });
+    expect(result.before).toHaveLength(2);
+    expect(result.messages).toHaveLength(4);
+    expect(result.messages[3]).toMatchObject({
+      id: result.reply.assistantMessageId,
+      modelId: visionModelId,
+      status: "complete",
+    });
+    expect(result.old).toMatchObject({ _tag: "QuestionUnavailable" });
+    expect(JSON.stringify(streamPrompts.at(-1))).toContain("Choose the response style");
+  });
 });
 
 describe("resumable streaming pipeline", () => {
@@ -346,6 +818,7 @@ describe("resumable streaming pipeline", () => {
         });
 
         const restart = {
+          expectedMessages: yield* repo.listMessages(conversation.id),
           userId,
           messageId: assistant.id,
           modelId: null as never,
@@ -394,6 +867,7 @@ describe("resumable streaming pipeline", () => {
         });
 
         const edit = {
+          expectedMessages: yield* repo.listMessages(conversation.id),
           userId,
           conversationId: conversation.id,
           userMessageId: userMessage.id,

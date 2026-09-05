@@ -15,7 +15,6 @@ import { ModelPicker } from "./model-picker.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import type { MessageTime } from "./timestamps.ts";
 import { stripCitationMarkers } from "../citation-markers.ts";
-import { useSourcesPanel } from "./sources-panel.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -179,10 +178,13 @@ function RetryControl({
   );
 }
 
-// Own component so useSourcesPanel (which needs a DetailPanelProvider) only
-// runs for messages that actually have sources.
-function SourcesMenu({ messageId, sources }: { messageId: string; sources: ToolSource[] }) {
-  const openSources = useSourcesPanel(messageId, sources);
+function SourcesMenu({
+  sources,
+  onOpenSources,
+}: {
+  sources: ToolSource[];
+  onOpenSources: () => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -198,7 +200,7 @@ function SourcesMenu({ messageId, sources }: { messageId: string; sources: ToolS
         <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        <DropdownMenuItem onClick={() => openSources()}>
+        <DropdownMenuItem onClick={onOpenSources}>
           <HugeiconsIcon icon={BookOpen01Icon} className="size-4" />
           View sources ({sources.length})
         </DropdownMenuItem>
@@ -211,7 +213,7 @@ function SourcesMenu({ messageId, sources }: { messageId: string; sources: ToolS
 // model chevron) always, plus a 3-dot menu (currently just "View sources")
 // when there are sources.
 export function MessageActions({
-  messageId,
+  onOpenSources,
   content,
   sources,
   time,
@@ -226,7 +228,7 @@ export function MessageActions({
   timeFirst = false,
   className,
 }: {
-  messageId: string;
+  onOpenSources?: (() => void) | undefined;
   content: string;
   sources: ToolSource[];
   /** Local send time. Absent until hydration — the server has no timezone. */
@@ -310,7 +312,9 @@ export function MessageActions({
           disabled={retryDisabled ?? false}
         />
       ) : null}
-      {sources.length > 0 ? <SourcesMenu messageId={messageId} sources={sources} /> : null}
+      {sources.length > 0 && onOpenSources ? (
+        <SourcesMenu sources={sources} onOpenSources={onOpenSources} />
+      ) : null}
       {timeFirst ? null : stamp}
     </div>
   );

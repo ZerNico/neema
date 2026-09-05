@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AskUserResult } from "./ask-user-schema.ts";
 
 // Non-secret configuration for the web_search tool row (tools.config jsonb).
 export const WebSearchConfig = Schema.Struct({
@@ -119,12 +120,31 @@ export type MemoryActivityOutcome = typeof MemoryActivityOutcome.Type;
 export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),
+    family: Schema.Literals(["ask"]),
+    phase: Schema.Literals(["start"]),
+    callId: Schema.String,
+    name: Schema.String,
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    family: Schema.Literals(["ask"]),
+    phase: Schema.Literals(["result"]),
+    callId: Schema.String,
+    name: Schema.String,
+    result: AskUserResult,
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
     family: Schema.Literals(["web"]),
     phase: Schema.Literals(["start"]),
     callId: Schema.String,
     name: Schema.String,
     turnIndex: Schema.Int,
     callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     args: Schema.Struct({ targets: Schema.Array(Schema.String) }),
   }),
   Schema.Struct({
@@ -157,6 +177,7 @@ export const ToolChunkEnvelope = Schema.Union([
     name: Schema.String,
     turnIndex: Schema.Int,
     callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   }),
   Schema.Struct({
     v: Schema.Literals([1]),

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { AttachmentIds } from "~/modules/attachments/schema.ts";
 
 // Blank content is allowed when the turn carries attachments; the service
@@ -19,6 +20,15 @@ const generationFields = {
 export const SendMessageInput = Schema.Struct({
   conversationId: Schema.NullOr(Schema.String),
   ...generationFields,
+});
+
+export const AnswerQuestionInput = Schema.Struct({
+  conversationId: Schema.String,
+  callId: Schema.String,
+  response: QuestionResponse,
+  modelId: Schema.String,
+  searchEnabled: Schema.Boolean,
+  timeZone: TimeZone,
 });
 
 export const ConversationIdInput = Schema.Struct({
@@ -59,11 +69,24 @@ export const BranchConversationInput = Schema.Struct({
   messageId: Schema.String,
 });
 
-export const EditMessageInput = Schema.Struct({
-  conversationId: Schema.String,
-  messageId: Schema.String,
-  ...generationFields,
-});
+export const EditMessageInput = Schema.Union([
+  Schema.Struct({
+    conversationId: Schema.String,
+    messageId: Schema.String,
+    ...generationFields,
+    questionResponse: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    conversationId: Schema.String,
+    messageId: Schema.String,
+    modelId: Schema.String,
+    searchEnabled: Schema.Boolean,
+    timeZone: TimeZone,
+    attachmentIds: AttachmentIds,
+    questionResponse: QuestionResponse,
+    content: Schema.optionalKey(Schema.Never),
+  }),
+]);
 
 export const RenameConversationInput = Schema.Struct({
   conversationId: Schema.String,
@@ -79,6 +102,7 @@ const compactionPositionFields = {
   eventId: Schema.String,
   beforeTurnIndex: Schema.Int,
   passIndex: Schema.Int,
+  textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   scope: Schema.Literals(["history", "active_rounds"]),
 };
 

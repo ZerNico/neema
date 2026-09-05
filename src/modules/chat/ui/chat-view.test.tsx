@@ -1,17 +1,32 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import { AskUserBlock } from "./ask-user-block.tsx";
+import type { DisplayMessage } from "./message-list.tsx";
+import { useSync } from "~/modules/sync/client/use-sync.ts";
+import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
 import { ChatView, toActivity } from "./chat-view.tsx";
 import {
+  answerQuestion,
   branchConversation,
   getConversationWithMessages,
+  editMessage,
   retryMessage,
   sendMessage,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
-const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
+const { navigate, markClaimed, resetUploads, streamProbe } = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  markClaimed: vi.fn(),
+  resetUploads: vi.fn(),
+  streamProbe: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("../server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -19,6 +34,7 @@ vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
   branchConversation: vi.fn(),
   sendMessage: vi.fn(),
+  answerQuestion: vi.fn(),
   retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stopGeneration: vi.fn(),
@@ -51,8 +67,18 @@ vi.mock("./virtual-message-list.tsx", () => ({
   VirtualMessageList: ({ messages }: { messages: ReadonlyArray<Record<string, unknown>> }) => (
     <div>
       {messages.map((message) => (
-        <div key={String(message.id)}>
+        <div key={String(message.id)} data-message-id={String(message.id)}>
           <span>{String(message.content)}</span>
+          {(message.toolActivities as DisplayMessage["toolActivities"]).map((activity) =>
+            activity.family === "ask" ? (
+              <AskUserBlock
+                key={activity.callId}
+                activity={activity}
+                messageStatus={String(message.status)}
+                {...(message.questionActions as DisplayMessage["questionActions"])}
+              />
+            ) : null,
+          )}
           {(message.compactionActivities as ReadonlyArray<{ summary?: string }> | undefined)?.map(
             (activity, index) => (
               <output key={index} data-testid="compaction-activity">
@@ -60,6 +86,17 @@ vi.mock("./virtual-message-list.tsx", () => ({
               </output>
             ),
           )}
+          {message.editState ? <output>Editing {String(message.id)}</output> : null}
+          {message.onEdit ? (
+            <button
+              type="button"
+              aria-label={`Edit ${String(message.id)}`}
+              disabled={Boolean(message.editDisabled)}
+              onClick={message.onEdit as () => void}
+            >
+              Edit message
+            </button>
+          ) : null}
           {message.onRetry ? (
             <button
               type="button"
@@ -103,7 +140,13 @@ vi.mock("./composer.tsx", () => ({
     onModelChange,
     searchEnabled,
     onSearchEnabledChange,
+    disabled,
+    controlsDisabled,
+    textareaDisabled,
   }: {
+    disabled: boolean;
+    controlsDisabled?: boolean;
+    textareaDisabled?: boolean;
     onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
     modelId: string | null;
     onModelChange: (modelId: string) => void;
@@ -111,15 +154,20 @@ vi.mock("./composer.tsx", () => ({
     onSearchEnabledChange: (enabled: boolean) => void;
   }) => (
     <div>
+      <textarea aria-label="Unrelated composer draft" defaultValue="" disabled={textareaDisabled} />
       <output data-testid="composer-model">{modelId}</output>
-      <button type="button" onClick={() => onModelChange("m2")}>
+      <button type="button" disabled={controlsDisabled} onClick={() => onModelChange("m2")}>
         Select Model Two
       </button>
       <output data-testid="search-mode">{searchEnabled ? "on" : "off"}</output>
-      <button type="button" onClick={() => onSearchEnabledChange(false)}>
+      <button
+        type="button"
+        disabled={controlsDisabled}
+        onClick={() => onSearchEnabledChange(false)}
+      >
         Disable search
       </button>
-      <button type="button" onClick={() => void onSend("hello", [])}>
+      <button type="button" disabled={disabled} onClick={() => void onSend("hello", [])}>
         Send test message
       </button>
     </div>
@@ -128,15 +176,18 @@ vi.mock("./composer.tsx", () => ({
 
 vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../client/use-message-stream.ts")>()),
-  useMessageStream: () => ({
-    text: "",
-    reasoning: "",
-    reasoningSeen: false,
-    tools: [],
-    compactions: [],
-    lastSeq: 0,
-    status: "complete",
-  }),
+  useMessageStream: (...args: unknown[]) => {
+    streamProbe(...args);
+    return {
+      text: "",
+      reasoning: "",
+      reasoningSeen: false,
+      tools: [],
+      compactions: [],
+      lastSeq: 0,
+      status: "complete",
+    };
+  },
 }));
 
 vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
@@ -153,8 +204,8 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
     seed: vi.fn(),
     submit: (send: (ids: ReadonlyArray<string>) => unknown) => send([]),
     cancelQueue: vi.fn(),
-    markClaimed: vi.fn(),
-    reset: vi.fn(),
+    markClaimed,
+    reset: resetUploads,
     dismissNotice: vi.fn(),
   }),
 }));
@@ -179,6 +230,7 @@ const message = (id: string, role: "user" | "assistant" | "system", content: str
   createdAt: BASE,
   completedAt: BASE,
   editedAt: null,
+  questionResponse: null as unknown,
 });
 
 type Payload = ReturnType<typeof basePayload>;
@@ -195,8 +247,12 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     lastMessageAt: BASE,
   },
   messages: [message("m-user", "user", "u1"), message("m-answer", "assistant", "a1")],
-  pendingChunks: [],
-  toolCalls: [],
+  pendingChunks: [] as Array<{
+    seq: number;
+    kind: "text" | "reasoning" | "tool" | "compaction";
+    delta: string;
+  }>,
+  toolCalls: [] as Array<Parameters<typeof toActivity>[0] & { messageId: string }>,
   attachments: [],
   branchedFrom,
   compactionEvents: [] as Array<{
@@ -219,6 +275,11 @@ const payload = (
   branchedFrom: Parameters<typeof basePayload>[0],
   overrides: Partial<Payload> = {},
 ) => ({ ...basePayload(branchedFrom), ...overrides });
+
+function SyncProbe() {
+  useSync();
+  return null;
+}
 
 const renderView = (
   branchedFrom: Parameters<typeof basePayload>[0] = null,
@@ -262,6 +323,7 @@ const renderView = (
   });
   return render(
     <QueryClientProvider client={client}>
+      <SyncProbe />
       <ConfirmProvider>
         <Suspense fallback={null}>
           <ChatView conversationId="c1" />
@@ -273,7 +335,11 @@ const renderView = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("toActivity", () => {
   const row = {
@@ -327,6 +393,462 @@ describe("toActivity", () => {
       status: "complete",
       resultCount: 2,
     });
+  });
+});
+
+const askQuestions = [
+  {
+    question: "Which direction?",
+    options: [{ label: "Simple" }, { label: "Detailed" }],
+    multiSelect: false,
+  },
+];
+const askRow = {
+  id: "ask-1",
+  messageId: "m-answer",
+  toolName: "ask_user",
+  arguments: { questions: askQuestions },
+  result: { v: 1, outcome: "presented", questions: askQuestions },
+  status: "complete" as const,
+  turnIndex: 1,
+  callIndex: 2,
+  error: null,
+};
+
+const answerMock = vi.mocked(answerQuestion);
+const editMock = vi.mocked(editMessage);
+const structuredReply = (
+  response: QuestionResponse = { kind: "answers", answers: [{ selected: [0], custom: "" }] },
+) => ({
+  ...message("structured-user", "user", formatQuestionResponse(askQuestions, response)!),
+  questionResponse: { v: 1, response },
+});
+
+const resolvedPayload = (response?: QuestionResponse) =>
+  payload(null, {
+    toolCalls: [askRow],
+    messages: [
+      ...basePayload(null).messages,
+      structuredReply(response),
+      message("next-answer", "assistant", "Continuing"),
+    ],
+  });
+
+describe("ChatView inline question answers", () => {
+  it("folds only explicitly tagged replies into resolved cards without a blank message row", () => {
+    const { container } = renderView(null, resolvedPayload());
+    expect(screen.getByLabelText("Your answers")).toBeInTheDocument();
+    expect(screen.getByText("Simple")).toBeInTheDocument();
+    expect(screen.queryByText("Q1: Simple")).not.toBeInTheDocument();
+    expect(container.querySelector('[data-message-id="structured-user"]')).toBeNull();
+    expect(container.querySelector('[data-answer-message-id="structured-user"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Edit answers" })).toBeEnabled();
+  });
+
+  it("resolves a skipped card from cross-tab sync even if the next generation failed", async () => {
+    renderView(null, { toolCalls: [askRow] });
+    const next = resolvedPayload({ kind: "skip" });
+    next.messages[next.messages.length - 1] = {
+      ...next.messages.at(-1)!,
+      status: "error" as never,
+    };
+    conversationMock.mockResolvedValueOnce(next as never);
+    await act(async () =>
+      FakeEventSource.instances.at(-1)!.emit("sync", {
+        type: "message.created",
+        conversationId: "c1",
+        messageId: "structured-user",
+      }),
+    );
+    await screen.findByText("Skipped");
+    expect(screen.queryByText(structuredReply({ kind: "skip" }).content)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip and continue" })).not.toBeInTheDocument();
+  });
+
+  it("edits indexed answers through the existing mutation with no content or attachments", async () => {
+    const revised: QuestionResponse = { kind: "answers", answers: [{ selected: [1], custom: "" }] };
+    conversationMock.mockResolvedValueOnce(resolvedPayload(revised) as never);
+    editMock.mockResolvedValueOnce({
+      conversationId: "c1",
+      assistantMessageId: "next-answer",
+    } as never);
+    renderView(null, resolvedPayload());
+    const composer = screen.getByRole("textbox", { name: "Unrelated composer draft" });
+    fireEvent.change(composer, { target: { value: "Do not send this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Disable search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    expect(screen.getByRole("button", { name: "Simple" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Detailed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+    await waitFor(() =>
+      expect(editMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "c1",
+          messageId: "structured-user",
+          modelId: "m1",
+          searchEnabled: false,
+          timeZone: "Europe/Berlin",
+          attachmentIds: [],
+          questionResponse: revised,
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Detailed")).toBeInTheDocument();
+    expect(composer).toHaveValue("Do not send this");
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+    expect(markClaimed).not.toHaveBeenCalled();
+    expect(resetUploads).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(answerMock).not.toHaveBeenCalled();
+    expect(streamProbe.mock.calls.at(-1)?.[3]).toBe(1);
+  });
+
+  it("keeps answer edits local while typing and changing composer settings", () => {
+    renderView(null, resolvedPayload());
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    const draft = screen.getByRole("textbox", { name: "Or write your own answer" });
+    fireEvent.change(draft, { target: { value: "Unsaved revision" } });
+    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toBeEnabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Unrelated composer draft" }), {
+      target: { value: "A separate draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Select Model Two" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disable search" }));
+    expect(draft).toHaveValue("Unsaved revision");
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m2");
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+    for (const name of ["Send test message", "Retry next-answer", "Edit m-user"]) {
+      expect(screen.getByRole("button", { name })).toBeEnabled();
+    }
+    expect(editMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["send", "retry"])(
+    "discards the local answer edit on %s, without saving it",
+    async (action) => {
+      conversationMock.mockResolvedValueOnce(resolvedPayload() as never);
+      if (action === "send") sendMock.mockResolvedValueOnce({} as never);
+      else retryMock.mockResolvedValueOnce({} as never);
+      renderView(null, resolvedPayload());
+      fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Or write your own answer" }), {
+        target: { value: "Discard this revision" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: action === "send" ? "Send test message" : "Retry next-answer",
+        }),
+      );
+      await waitFor(() => expect(action === "send" ? sendMock : retryMock).toHaveBeenCalledOnce());
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Edit answers" })).toBeEnabled(),
+      );
+      expect(screen.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument();
+      expect(editMock).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+      expect(screen.getByRole("textbox", { name: "Or write your own answer" })).toHaveValue("");
+      expect(screen.getByRole("button", { name: "Simple" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    },
+  );
+
+  it("switches from an answer edit to another message editor", () => {
+    renderView(null, resolvedPayload());
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    expect(screen.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument();
+    expect(screen.getByText("Editing m-user")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toBeDisabled();
+    expect(editMock).not.toHaveBeenCalled();
+  });
+
+  it("locks other actions only while the answer save is submitting", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof editMessage>>) => void;
+    editMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    conversationMock.mockResolvedValueOnce(resolvedPayload() as never);
+    renderView(null, resolvedPayload());
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+    await waitFor(() => expect(editMock).toHaveBeenCalledOnce());
+    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toBeDisabled();
+    for (const name of [
+      "Save answers",
+      "Cancel",
+      "Send test message",
+      "Select Model Two",
+      "Retry next-answer",
+      "Edit m-user",
+    ]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    await act(async () => finish({} as never));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send test message" })).toBeEnabled(),
+    );
+  });
+
+  it("uses downstream edit confirmation and preserves the revised draft when cancelled", async () => {
+    const current = resolvedPayload();
+    renderView(null, {
+      ...current,
+      messages: [
+        ...current.messages,
+        message("later-user", "user", "Later"),
+        message("later-answer", "assistant", "Later reply"),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    const draft = screen.getByRole("textbox", { name: "Or write your own answer" });
+    fireEvent.change(draft, { target: { value: "Revised answer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(editMock).not.toHaveBeenCalled();
+    expect(draft).toHaveValue("Revised answer");
+    const revised: QuestionResponse = {
+      kind: "answers",
+      answers: [{ selected: [], custom: "Revised answer" }],
+    };
+    editMock.mockResolvedValueOnce({} as never);
+    conversationMock.mockResolvedValueOnce(resolvedPayload(revised) as never);
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save and regenerate" }));
+    await waitFor(() => expect(editMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("Later reply")).not.toBeInTheDocument());
+  });
+
+  it("refetches structural edit failures and retains draft before allowing retry", async () => {
+    editMock.mockRejectedValueOnce(new Error("Offline"));
+    conversationMock.mockResolvedValueOnce(resolvedPayload() as never);
+    renderView(null, resolvedPayload());
+    fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+    const draft = screen.getByRole("textbox", { name: "Or write your own answer" });
+    fireEvent.change(draft, { target: { value: "Keep my revision" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+    await waitFor(() => expect(conversationMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save answers" })).toBeEnabled());
+    expect(draft).toHaveValue("Keep my revision");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Could not save your answers. Your draft has been kept.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Simple")).toBeInTheDocument();
+    expect(resetUploads).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatView question handoff", () => {
+  it("hydrates validated questions with live-result parity and rejects unknown versions", () => {
+    expect(toActivity(askRow)).toEqual({
+      family: "ask",
+      callId: "ask-1",
+      name: "ask_user",
+      status: "complete",
+      turnIndex: 1,
+      callIndex: 2,
+      questions: askQuestions,
+    });
+    expect(toActivity({ ...askRow, result: { ...askRow.result, v: 2 } })).toMatchObject({
+      family: "ask",
+      status: "error",
+    });
+    expect(toActivity({ ...askRow, result: null })).not.toHaveProperty("questions");
+  });
+
+  it("seeds replayed question results after the durable snapshot", () => {
+    renderView(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        { ...message("m-answer", "assistant", ""), status: "streaming" as never },
+      ],
+      toolCalls: [{ ...askRow, status: "running", result: null }],
+      pendingChunks: [
+        {
+          seq: 3,
+          kind: "tool",
+          delta: JSON.stringify({
+            v: 1,
+            family: "ask",
+            phase: "result",
+            callId: "ask-1",
+            name: "ask_user",
+            result: askRow.result,
+          }),
+        },
+      ],
+    });
+    expect(streamProbe).toHaveBeenLastCalledWith(
+      "m-answer",
+      expect.objectContaining({
+        lastSeq: 3,
+        tools: [
+          {
+            family: "ask",
+            callId: "ask-1",
+            name: "ask_user",
+            status: "complete",
+            turnIndex: 1,
+            callIndex: 2,
+            questions: askQuestions,
+          },
+        ],
+      }),
+      "c1",
+      0,
+    );
+  });
+
+  it("sends current settings without attachments and preserves unrelated composer draft", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof answerQuestion>>) => void;
+    answerMock.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const next = payload(null, {
+      toolCalls: [askRow],
+      messages: [
+        ...basePayload(null).messages,
+        message("reply", "user", "Q1: Simple"),
+        { ...message("next", "assistant", ""), status: "streaming" as never },
+      ],
+    });
+    conversationMock.mockResolvedValue(next as never);
+    renderView(null, { toolCalls: [askRow] });
+    fireEvent.change(screen.getByRole("textbox", { name: "Unrelated composer draft" }), {
+      target: { value: "Keep my separate draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Select Model Two" }));
+    fireEvent.click(screen.getByRole("button", { name: "Simple" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() =>
+      expect(answerMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "c1",
+          callId: "ask-1",
+          response: { kind: "answers", answers: [{ selected: [0], custom: "" }] },
+          modelId: "m2",
+          searchEnabled: false,
+          timeZone: "Europe/Berlin",
+        },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeDisabled();
+    await act(async () => resolve({ conversationId: "c1", assistantMessageId: "next" }));
+    await waitFor(() =>
+      expect(streamProbe).toHaveBeenLastCalledWith("next", expect.any(Object), "c1", 0),
+    );
+    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toHaveValue(
+      "Keep my separate draft",
+    );
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(markClaimed).not.toHaveBeenCalled();
+    expect(resetUploads).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument();
+  });
+
+  it("refetches ambiguous failures before restoring controls and keeps the answer draft", async () => {
+    answerMock.mockRejectedValueOnce(new Error("Connection lost"));
+    let resolve!: (value: Awaited<ReturnType<typeof getConversationWithMessages>>) => void;
+    conversationMock.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    renderView(null, { toolCalls: [askRow] });
+    fireEvent.change(screen.getByRole("textbox", { name: "Or write your own answer" }), {
+      target: { value: "Keep this answer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() => expect(conversationMock).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
+    await act(async () => resolve(payload(null, { toolCalls: [askRow] }) as never));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send answers" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Or write your own answer" })).toHaveValue(
+      "Keep this answer",
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Could not send your answers. Your draft has been kept.",
+    );
+  });
+
+  it("keeps answers locked after failed recovery until an explicit refresh succeeds", async () => {
+    answerMock.mockRejectedValueOnce(new Error("Connection lost"));
+    conversationMock.mockRejectedValueOnce(new Error("Still offline"));
+    renderView(null, { toolCalls: [askRow] });
+    fireEvent.click(screen.getByRole("button", { name: "Simple" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
+    const refresh = await screen.findByRole("button", { name: "Refresh chat" });
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
+    conversationMock.mockResolvedValueOnce(payload(null, { toolCalls: [askRow] }) as never);
+    fireEvent.click(refresh);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send answers" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Simple" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each(["user", "system", "assistant"] as const)(
+    "a later %s message makes the old question read-only",
+    (role) => {
+      renderView(null, {
+        toolCalls: [askRow],
+        messages: [...basePayload(null).messages, message("later", role, "later")],
+      });
+      expect(screen.getByText("Which direction?")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Skip and continue" })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["message.created", "message.status"] as const)(
+    "closes stale question controls after cross-tab %s invalidation",
+    async (type) => {
+      renderView(null, { toolCalls: [askRow] });
+      expect(screen.getByRole("button", { name: "Skip and continue" })).toBeEnabled();
+      conversationMock.mockResolvedValueOnce(
+        payload(null, {
+          toolCalls: [askRow],
+          messages: [...basePayload(null).messages, message("reply", "user", "An ordinary reply")],
+        }) as never,
+      );
+      await act(async () =>
+        FakeEventSource.instances
+          .at(-1)!
+          .emit("sync", { type, conversationId: "c1", messageId: "reply", status: "complete" }),
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Skip and continue" })).not.toBeInTheDocument(),
+      );
+      expect(screen.getByText("An ordinary reply")).toBeInTheDocument();
+    },
+  );
+
+  it("normal composer sends also close the old question", async () => {
+    sendMock.mockResolvedValueOnce({} as never);
+    conversationMock.mockResolvedValueOnce(
+      payload(null, {
+        toolCalls: [askRow],
+        messages: [...basePayload(null).messages, message("reply", "user", "hello")],
+      }) as never,
+    );
+    renderView(null, { toolCalls: [askRow] });
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Skip and continue" })).not.toBeInTheDocument(),
+    );
+    expect(answerMock).not.toHaveBeenCalled();
   });
 });
 

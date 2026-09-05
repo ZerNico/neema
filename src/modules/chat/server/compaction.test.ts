@@ -31,6 +31,67 @@ const textOf = (message: Prompt.MessageEncoded): string => {
   return (content as ReadonlyArray<{ text?: string }>).map((part) => part.text ?? "").join("\n");
 };
 
+describe("clarification retention", () => {
+  const messages = ["user", "assistant", "user", "assistant", "user"].map((role, index) => ({
+    id: String(index),
+    role: role as "user" | "assistant",
+    content: "x".repeat(400),
+  }));
+
+  it("keeps the asking user-led turn out of summaries and hard truncation", () => {
+    expect(
+      selectCompactionBoundary({
+        messages,
+        tokens: [100, 100, 100, 100, 100],
+        fixedTokens: 0,
+        tailBudgetTokens: 100,
+        minBoundaryIndex: -1,
+        maxStartIndex: 2,
+      }),
+    ).toBe(1);
+    expect(
+      hardTruncateHistory({
+        messages,
+        tokens: [100, 100, 100, 100, 100],
+        startIndex: 0,
+        fixedTokens: 0,
+        targetTokens: 300,
+        maxStartIndex: 2,
+      }),
+    ).toEqual({ startIndex: 2, estimatedInputTokens: 300 });
+    expect(
+      hardTruncateHistory({
+        messages,
+        tokens: [100, 100, 100, 100, 100],
+        startIndex: 0,
+        fixedTokens: 0,
+        targetTokens: 299,
+        maxStartIndex: 2,
+      }),
+    ).toBeNull();
+  });
+
+  it("cannot drop the protected pair during provider overflow recovery", () => {
+    const budget = computeBudget({ contextLength: 10000, webToolsEnabled: false });
+    const input = {
+      messages,
+      renderedMessages: messages,
+      fixedPrefix: [],
+      calibrationFactor: 1,
+      decision: {
+        mode: "full" as const,
+        checkpoint: null,
+        startIndex: 2,
+        injectedMessages: [],
+        estimatedInputTokens: 350,
+        budget,
+      },
+    };
+    expect(shrinkForOverflow(input)?.startIndex).toBe(4);
+    expect(shrinkForOverflow({ ...input, maxStartIndex: 2 })).toBeNull();
+  });
+});
+
 describe("estimateMessageTokens", () => {
   it("charges per-message overhead on top of the text", () => {
     const tokens = estimateMessageTokens({ role: "user", content: "x".repeat(400) });
@@ -911,6 +972,7 @@ describe("prepareCompactedActiveRounds", () => {
           rounds,
           beforeTurnIndex: 3,
           passIndex: 0,
+          textOffset: 27,
           calibrationFactor: 1,
           sourceManifest: "[7] Evidence — https://example.com/evidence",
           onCompaction: (event) => Effect.sync(() => void events.push(event)),
@@ -924,6 +986,7 @@ describe("prepareCompactedActiveRounds", () => {
             messageId: "assistant-1",
             beforeTurnIndex: 3,
             passIndex: 0,
+            textOffset: 27,
             scope: "active_rounds",
           }),
         );
@@ -935,6 +998,7 @@ describe("prepareCompactedActiveRounds", () => {
           eventId: events[0]!.eventId,
           outcome: "summary",
         });
+        expect(events.map((event) => event.textOffset)).toEqual([27, 27]);
         const summaryPrompt = JSON.stringify(h.generateText.mock.calls[0]?.[0].prompt);
         expect(summaryPrompt).toContain("https://example.com/evidence");
       }),

@@ -17,6 +17,155 @@ const start = env({
   args: { targets: ["effect ts", "effect schema"] },
 });
 
+describe("activity text offsets", () => {
+  it.each(["web", "memory", "ask"] as const)(
+    "preserves the %s start offset across progress, results and replay",
+    (family) => {
+      const name =
+        family === "web" ? "web_search" : family === "memory" ? "save_memory" : "ask_user";
+      const begin = env({
+        phase: "start",
+        family,
+        name,
+        callId: "offset",
+        turnIndex: 1,
+        callIndex: 2,
+        textOffset: 8,
+      });
+      const finish = env({
+        phase: "result",
+        family,
+        name,
+        callId: "offset",
+        textOffset: 99,
+        ok: true,
+        outcome: "created",
+        summary: { targets: [] },
+        result: {
+          v: 1,
+          outcome: "presented",
+          questions: [{ question: "Why?", multiSelect: false, options: [] }],
+        },
+      });
+      let activities = applyToolChunk([], begin);
+      activities = applyToolChunk(
+        activities,
+        env({
+          phase: "progress",
+          family,
+          name,
+          callId: "offset",
+          textOffset: 55,
+          summary: { targets: [] },
+        }),
+      );
+      expect(activities[0]?.textOffset).toBe(8);
+      const complete = applyToolChunk(activities, finish);
+      expect(complete[0]).toMatchObject({ textOffset: 8, status: "complete" });
+      expect(applyToolChunk(complete, begin)).toBe(complete);
+      expect(
+        applyToolChunk(complete, env({ phase: "progress", family, name, callId: "offset" })),
+      ).toBe(complete);
+      expect(applyToolChunk([], finish)[0]).not.toHaveProperty("textOffset");
+    },
+  );
+
+  it.each([-1, 0.5, "8", null])("does not accept malformed start offsets %j", (textOffset) => {
+    const activity = applyToolChunk(
+      [],
+      env({ family: "web", phase: "start", name: "web_search", callId: "invalid", textOffset }),
+    )[0];
+    expect(activity).not.toHaveProperty("textOffset");
+  });
+
+  it("retains the original compaction anchor, including explicit result-only anchors", () => {
+    const position = {
+      eventId: "compact",
+      beforeTurnIndex: 1,
+      passIndex: 0,
+      scope: "active_rounds",
+    };
+    const started = applyCompactionChunk([], env({ ...position, phase: "start", textOffset: 12 }));
+    const complete = applyCompactionChunk(
+      started,
+      env({ ...position, phase: "result", textOffset: 99, ok: true }),
+    );
+    expect(complete[0]?.textOffset).toBe(12);
+    expect(
+      applyCompactionChunk([], env({ ...position, phase: "result", textOffset: 12, ok: true }))[0]
+        ?.textOffset,
+    ).toBe(12);
+    expect(
+      applyCompactionChunk([], env({ ...position, phase: "result", ok: true }))[0],
+    ).not.toHaveProperty("textOffset");
+    expect(
+      applyCompactionChunk(complete, env({ ...position, phase: "start", textOffset: 99 })),
+    ).toBe(complete);
+  });
+});
+
+describe("ask_user replay", () => {
+  const questions = [
+    { question: "Which approach?", multiSelect: false, options: [{ label: "A" }, { label: "B" }] },
+  ];
+  const askStart = env({
+    family: "ask",
+    phase: "start",
+    callId: "ask-1",
+    name: "ask_user",
+    turnIndex: 2,
+    callIndex: 1,
+  });
+  const result = (value: unknown) =>
+    env({ family: "ask", phase: "result", callId: "ask-1", name: "ask_user", result: value });
+
+  it("preserves position through result replay and ignores late starts", () => {
+    const running = applyToolChunk([], askStart);
+    expect(running[0]).toMatchObject({
+      family: "ask",
+      status: "running",
+      turnIndex: 2,
+      callIndex: 1,
+    });
+    const complete = applyToolChunk(running, result({ v: 1, outcome: "presented", questions }));
+    expect(complete).toEqual([
+      {
+        family: "ask",
+        callId: "ask-1",
+        name: "ask_user",
+        status: "complete",
+        turnIndex: 2,
+        callIndex: 1,
+        questions,
+      },
+    ]);
+    expect(applyToolChunk(complete, result({ v: 1, outcome: "presented", questions }))).toEqual(
+      complete,
+    );
+    expect(applyToolChunk(complete, askStart)).toBe(complete);
+    expect(applyToolChunk(complete, result(null))).toBe(complete);
+  });
+
+  it.each([
+    { v: 1, outcome: "rejected", message: "Already presented" },
+    { v: 2, outcome: "presented", questions },
+    { v: 1, outcome: "presented", questions: [] },
+    null,
+  ])("does not turn rejected or malformed results into actionable questions: %j", (value) => {
+    expect(applyToolChunk([], result(value))[0]).toMatchObject({ family: "ask", status: "error" });
+    expect(applyToolChunk([], result(value))[0]).not.toHaveProperty("questions");
+  });
+
+  it("ignores primitive envelopes and unrelated family collisions", () => {
+    expect(applyToolChunk([], "null")).toEqual([]);
+    const web = applyToolChunk([], start);
+    expect(applyToolChunk([], start, "ask")).toEqual([]);
+    expect(
+      applyToolChunk(web, env({ family: "ask", phase: "start", callId: "c1", name: "ask_user" })),
+    ).toBe(web);
+  });
+});
+
 describe("applyToolChunk", () => {
   it("creates a running activity from a start envelope", () => {
     expect(applyToolChunk([], start)).toEqual([

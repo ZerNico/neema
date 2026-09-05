@@ -67,6 +67,8 @@ export const messages = pgTable(
       .default("complete"),
     // final assembled text; for streaming messages this is written on completion
     content: text().notNull().default(""),
+    // Structured answer; content is its server-generated model/provenance projection.
+    questionResponse: jsonb("question_response").$type<JsonValue>(),
     // final assembled reasoning/thinking text; empty for non-reasoning models
     reasoning: text().notNull().default(""),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
@@ -130,6 +132,8 @@ export const messageToolCalls = pgTable(
     // one displayed assistant message can span several model turns
     turnIndex: integer("turn_index").notNull(),
     callIndex: integer("call_index").notNull(),
+    // UTF-16 offset in the original message content at invocation; null for legacy rows.
+    textOffset: integer("text_offset"),
     // id the provider assigned; must be echoed back in the tool-result message
     providerCallId: text("provider_call_id").notNull(),
     toolName: text("tool_name").notNull(),
@@ -206,6 +210,7 @@ export const messageCompactionEvents = pgTable(
     beforeTurnIndex: integer("before_turn_index").notNull(),
     // Several reductions may be needed before the same model turn.
     passIndex: integer("pass_index").notNull(),
+    textOffset: integer("text_offset"),
     scope: text({ enum: ["history", "active_rounds"] }).notNull(),
     status: text({ enum: ["running", "complete", "error"] }).notNull(),
     outcome: text({ enum: ["summary", "hard_truncation"] }),

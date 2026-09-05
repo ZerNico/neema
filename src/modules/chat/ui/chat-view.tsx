@@ -3,11 +3,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { conversationQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import {
   applyCompactionChunk,
+  applyToolChunk,
   toMemoryActivityOutcome,
+  readTextOffset,
   useMessageStream,
   type CompactionActivity,
   type ToolActivity,
@@ -15,6 +18,7 @@ import {
   type ToolSource,
 } from "../client/use-message-stream.ts";
 import {
+  answerQuestion,
   branchConversation,
   editMessage,
   retryMessage,
@@ -23,12 +27,16 @@ import {
 } from "../server/functions.ts";
 import { Composer } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
+import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
+import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+import { Button } from "~/ui/primitives/button.tsx";
+import { Spinner } from "~/ui/primitives/spinner.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { useHydrated } from "~/ui/use-hydrated.ts";
@@ -45,13 +53,31 @@ export function toActivity(row: {
   status: "running" | "complete" | "error";
   turnIndex: number;
   callIndex: number;
+  textOffset?: number | null;
   error: { code: string; message: string } | null;
 }): ToolActivity {
+  const textOffset = readTextOffset(row.textOffset);
+  const position = textOffset === undefined ? {} : { textOffset };
+  if (row.toolName === "ask_user") {
+    const questions = readPresentedQuestions(row.result);
+    return {
+      family: "ask",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "complete" && !questions ? "error" : row.status,
+      ...(questions ? { questions } : {}),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
   if (row.toolName === "save_memory") {
     const result = (row.result ?? {}) as { outcome?: unknown };
     const outcome = toMemoryActivityOutcome(result.outcome);
     return {
       family: "memory",
+      ...position,
       callId: row.id,
       name: row.toolName,
       turnIndex: row.turnIndex,
@@ -72,6 +98,7 @@ export function toActivity(row: {
   };
   return {
     family: "web",
+    ...position,
     callId: row.id,
     name: row.toolName,
     turnIndex: row.turnIndex,
@@ -94,9 +121,12 @@ function toCompactionActivity(row: {
   status: "running" | "complete" | "error";
   outcome: "summary" | "hard_truncation" | null;
   summary: string | null;
+  textOffset?: number | null;
 }): CompactionActivity {
+  const textOffset = readTextOffset(row.textOffset);
   return {
     eventId: row.id,
+    ...(textOffset === undefined ? {} : { textOffset }),
     beforeTurnIndex: row.beforeTurnIndex,
     passIndex: row.passIndex,
     scope: row.scope,
@@ -152,7 +182,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     const reasoning = reasoningChunks.map((c) => c.delta).join("");
     const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
     // Seed tool activity from durable rows; live envelopes upsert on top.
-    const tools = data.toolCalls.filter((t) => t.messageId === streamingMessage.id).map(toActivity);
+    const durableTools = data.toolCalls
+      .filter((t) => t.messageId === streamingMessage.id)
+      .map(toActivity);
+    // Starts can land between snapshots. Replay explicit anchors for every
+    // family; terminal durable activities ignore older progress in the reducer.
+    const tools = data.pendingChunks
+      .filter((chunk) => chunk.kind === "tool")
+      .reduce<ToolActivity[]>(
+        (current, chunk) => applyToolChunk(current, chunk.delta),
+        durableTools,
+      );
     // Seed durable activity first; replayed chunks then idempotently overlay
     // any terminal marker that landed after the query snapshot.
     const durableCompactions = data.compactionEvents
@@ -182,6 +222,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryEpoch,
   );
 
+  const questionResponses = useMemo(
+    () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
+    [data.messages, data.toolCalls, data.attachments],
+  );
+  const editingAnswers =
+    activeEditingMessage !== null &&
+    questionResponses.hiddenMessageIds.has(activeEditingMessage.id);
   const effectiveModelId = modelId ?? data.conversation.modelId;
   const {
     enabled: searchEnabled,
@@ -190,6 +237,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   } = useSearchMode(effectiveModelId);
 
   const sendMutation = useMutation({
+    onMutate: () => setEditingMessageId(null),
     mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
       sendMessage({
         data: {
@@ -207,7 +255,50 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
   });
 
+  // A transport failure may still have committed the next turn. Keep all
+  // controls locked until a fresh authoritative tail makes retrying safe.
+  const [questionNeedsRefresh, setQuestionNeedsRefresh] = useState(false);
+  const refreshQuestionMutation = useMutation({
+    mutationFn: () =>
+      queryClient.invalidateQueries(
+        { queryKey: ["conversation", conversationId] },
+        { throwOnError: true },
+      ),
+    onSuccess: () => setQuestionNeedsRefresh(false),
+    onError: () => toast.error("Could not refresh the chat. Refresh before answering again."),
+  });
+  const refreshQuestionState = async () => {
+    try {
+      // Await authoritative state even on transport errors before reopening a card.
+      await queryClient.invalidateQueries(
+        { queryKey: ["conversation", conversationId] },
+        { throwOnError: true },
+      );
+    } catch {
+      setQuestionNeedsRefresh(true);
+      toast.error("Could not refresh the chat. Refresh before answering again.");
+    }
+  };
+  const answerMutation = useMutation({
+    onMutate: () => setEditingMessageId(null),
+    mutationFn: (input: { callId: string; response: QuestionResponse }) =>
+      answerQuestion({
+        data: {
+          conversationId,
+          ...input,
+          modelId: effectiveModelId!,
+          searchEnabled,
+          timeZone: browserTimeZone(),
+        },
+      }),
+    onError: () => toast.error("Could not send your answers. Your draft has been kept."),
+    onSettled: refreshQuestionState,
+  });
+  const mutateAnswer = answerMutation.mutateAsync;
+  const answerInFlight = useRef(false);
+
   const retryMutation = useMutation({
+    onMutate: () => setEditingMessageId(null),
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -226,6 +317,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Branching leaves this conversation untouched and opens the copy, so the
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
+    onMutate: () => setEditingMessageId(null),
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -243,44 +335,81 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const editMutation = useMutation({
-    mutationFn: (input: {
-      messageId: string;
-      content: string;
-      modelId: string;
-      searchEnabled: boolean;
-      attachmentIds: ReadonlyArray<string>;
-    }) => editMessage({ data: { conversationId, ...input, timeZone: browserTimeZone() } }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-      // Claimed by the edited message now — dropping the chips must not delete
-      // the very attachments the message just took ownership of.
-      editUploads.markClaimed();
+    mutationFn: (
+      input: {
+        messageId: string;
+        modelId: string;
+        searchEnabled: boolean;
+        attachmentIds: ReadonlyArray<string>;
+      } & (
+        | { content: string; questionResponse?: never }
+        | { questionResponse: QuestionResponse; content?: never }
+      ),
+    ) => editMessage({ data: { conversationId, ...input, timeZone: browserTimeZone() } }),
+    onSuccess: async (_result, input) => {
+      if (input.questionResponse) {
+        await refreshQuestionState();
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        // Only ordinary edits claim uploads and consume the composer's search mode.
+        editUploads.markClaimed();
+        resetSearchEnabled();
+      }
       setEditingMessageId(null);
-      resetSearchEnabled();
       setRetryEpoch((epoch) => epoch + 1);
+    },
+    onError: async (_error, input) => {
+      if (!input.questionResponse) return;
+      toast.error("Could not save your answers. Your draft has been kept.");
+      await refreshQuestionState();
     },
   });
 
   const mutateRetry = retryMutation.mutate;
   const mutateBranch = branchMutation.mutate;
   const mutateEdit = editMutation.mutate;
+  const mutateQuestionEdit = editMutation.mutateAsync;
   const editPending = editMutation.isPending;
 
   // Retry rewinds the conversation to that response: retrying anything but
   // the last one deletes the messages after it, so it asks first.
   const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
-  const generating = sendMutation.isPending || stream.status === "streaming";
+  const generating =
+    sendMutation.isPending || answerMutation.isPending || stream.status === "streaming";
   const mutationPending =
+    answerMutation.isPending ||
+    questionNeedsRefresh ||
     sendMutation.isPending ||
     retryMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
+  // An answer draft is local to its card; only submitting it locks the chat.
   const actionsDisabled =
+    questionNeedsRefresh ||
     generating ||
     retryMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending ||
-    activeEditingMessage !== null;
+    (activeEditingMessage !== null && !editingAnswers);
+  // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
+  // oxlint-disable react-hooks/exhaustive-deps
+  const respondToQuestion = useCallback(
+    async (callId: string, response: QuestionResponse) => {
+      if (actionsDisabled || !effectiveModelId || answerInFlight.current) {
+        throw new Error("Question response unavailable");
+      }
+      answerInFlight.current = true;
+      try {
+        return await mutateAnswer({ callId, response });
+      } finally {
+        answerInFlight.current = false;
+      }
+    },
+    [actionsDisabled, effectiveModelId],
+  );
+  // oxlint-enable react-hooks/exhaustive-deps
+  const tailMessageId = data.messages.at(-1)?.id;
+
   const retry = useCallback(
     async (messageId: string, pickedModelId?: string) => {
       if (
@@ -304,24 +433,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Only offered for a generation this client can actually see running.
   const stoppableId = stream.status === "streaming" ? streamingMessage?.id : undefined;
 
-  // System messages never render, so the day headings have to be computed over
-  // the list as shown — otherwise a day opened by a hidden message would lose
-  // its heading.
-  const visibleMessages = useMemo(
-    () => data.messages.filter((m) => m.role !== "system"),
-    [data.messages],
-  );
-
-  // Day boundaries and clock times are timezone-dependent, so they can only be
-  // built once the browser has taken rendering over; formatting them during
-  // SSR would hydrate into a mismatch. Recomputed per query result, which also
-  // refreshes "Today"/"Yesterday" on every bit of activity.
-  const hydrated = useHydrated();
-  const stamps = useMemo(
-    () => (hydrated ? buildMessageStamps(visibleMessages) : null),
-    [hydrated, visibleMessages],
-  );
-
   const attachmentsByMessage = useMemo(() => {
     const grouped = new Map<string, MessageAttachment[]>();
     for (const attachment of data.attachments) {
@@ -344,6 +455,31 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return grouped;
   }, [data.toolCalls]);
+
+  // Associate in raw order, then filter display rows before computing day headings.
+  // Raw messages remain authoritative for retry, edit, branching and history.
+  const visibleMessages = useMemo(
+    () =>
+      data.messages.filter(
+        (message) =>
+          message.role !== "system" && !questionResponses.hiddenMessageIds.has(message.id),
+      ),
+    [data.messages, questionResponses],
+  );
+  const hydrated = useHydrated();
+  const stamps = useMemo(
+    () => (hydrated ? buildMessageStamps(visibleMessages) : null),
+    [hydrated, visibleMessages],
+  );
+  const answerStamps = useMemo(
+    () =>
+      hydrated
+        ? buildMessageStamps(
+            data.messages.filter((message) => questionResponses.hiddenMessageIds.has(message.id)),
+          )
+        : null,
+    [hydrated, data.messages, questionResponses],
+  );
 
   const compactionsByMessage = useMemo(() => {
     const grouped = new Map<string, CompactionActivity[]>();
@@ -374,22 +510,78 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       setEditingMessageId(messageId);
       // Seeded as existing/claimed: removing one only drops it from the
       // replacement set, it is released by the save itself.
-      seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
+      if (!questionResponses.hiddenMessageIds.has(messageId)) {
+        seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
+      }
     },
-    [attachmentsByMessage, seedEditUploads],
+    [attachmentsByMessage, seedEditUploads, questionResponses],
   );
 
   const closeEdit = useCallback(() => {
     setEditingMessageId(null);
-    // Anything uploaded for this edit and never sent is deleted here.
-    resetEditUploads();
-  }, [resetEditUploads]);
+    // Structured edits have no upload lifecycle of their own.
+    if (!editingMessageId || !questionResponses.hiddenMessageIds.has(editingMessageId))
+      resetEditUploads();
+  }, [resetEditUploads, editingMessageId, questionResponses]);
 
   // Which model wrote each answer — null once its row is gone. The retry menu
   // marks it, and a retry that omits a model reuses it server-side.
   const modelByMessage = useMemo(
     () => new Map(data.messages.map((m) => [m.id, m.modelId])),
     [data.messages],
+  );
+
+  const confirmEdit = useCallback(
+    async (messageId: string) => {
+      const messageIndex = data.messages.findIndex((message) => message.id === messageId);
+      const after = data.messages.slice(messageIndex + 1);
+      const responseIndex = after.findIndex((message) => message.role === "assistant");
+      const removesLaterTurns =
+        responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
+      return (
+        !removesLaterTurns ||
+        (await confirm({
+          title: "Edit this message?",
+          description: "All messages after its response will be removed.",
+          confirmLabel: "Save and regenerate",
+        }))
+      );
+    },
+    [data.messages, confirm],
+  );
+
+  const saveQuestionEdit = useCallback(
+    async (questionResponse: QuestionResponse) => {
+      if (
+        !activeEditingMessage ||
+        !questionResponses.hiddenMessageIds.has(activeEditingMessage.id) ||
+        !effectiveModelId ||
+        editPending ||
+        questionNeedsRefresh ||
+        generating
+      )
+        return false;
+      if (!(await confirmEdit(activeEditingMessage.id))) return false;
+      await mutateQuestionEdit({
+        messageId: activeEditingMessage.id,
+        questionResponse,
+        modelId: effectiveModelId,
+        searchEnabled,
+        attachmentIds: [],
+      });
+      return true;
+    },
+    [
+      activeEditingMessage,
+      questionResponses,
+      effectiveModelId,
+      editPending,
+      questionNeedsRefresh,
+      generating,
+      confirmEdit,
+      mutateQuestionEdit,
+      searchEnabled,
+    ],
   );
 
   const saveEdit = useCallback(
@@ -399,23 +591,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (!effectiveModelId || editPending) return;
       if (!content && editUploadCount === 0) return;
 
-      const messageIndex = data.messages.findIndex(
-        (message) => message.id === activeEditingMessage.id,
-      );
-      const after = data.messages.slice(messageIndex + 1);
-      const responseIndex = after.findIndex((message) => message.role === "assistant");
-      const removesLaterTurns =
-        responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
-      if (
-        removesLaterTurns &&
-        !(await confirm({
-          title: "Edit this message?",
-          description: "All messages after its response will be removed.",
-          confirmLabel: "Save and regenerate",
-        }))
-      ) {
-        return;
-      }
+      if (!(await confirmEdit(activeEditingMessage.id))) return;
 
       // Queues behind any upload still in flight, then sends the full ordered
       // replacement set — omitted ids are released server-side.
@@ -432,8 +608,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     [
       activeEditingMessage,
-      confirm,
-      data.messages,
+      confirmEdit,
       editPending,
       editUploadCount,
       effectiveModelId,
@@ -465,6 +640,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         }
       }
       const stamp = stamps?.get(message.id);
+      const resolution = questionResponses.byAssistant.get(message.id);
+      const answerTime = resolution ? answerStamps?.get(resolution.messageId) : undefined;
+      const canRespond =
+        message.role === "assistant" &&
+        message.status === "complete" &&
+        message.id === tailMessageId;
 
       return {
         ...message,
@@ -480,6 +661,24 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         toolActivities,
         inheritedSources,
         compactionActivities,
+        ...(canRespond || resolution
+          ? {
+              questionActions: {
+                ...(canRespond ? { onRespond: respondToQuestion } : {}),
+                disabled: actionsDisabled || !effectiveModelId,
+                ...(resolution
+                  ? {
+                      resolved: {
+                        ...resolution,
+                        ...(answerTime ? { time: answerTime } : {}),
+                        onEdit: () => openEdit(resolution.messageId),
+                        editDisabled: actionsDisabled,
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
@@ -509,9 +708,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     });
   }, [
     actionsDisabled,
+    answerStamps,
+    questionResponses,
     attachmentsByMessage,
     branchAt,
     compactionsByMessage,
+    effectiveModelId,
+    respondToQuestion,
+    tailMessageId,
     modelByMessage,
     nextAssistantAfter,
     openEdit,
@@ -526,6 +730,23 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     () =>
       baseDisplay.map((base): DisplayMessage => {
         let projected = base;
+        const resolved = base.questionActions?.resolved;
+        if (resolved && activeEditingMessage?.id === resolved.messageId) {
+          projected = {
+            ...projected,
+            questionActions: {
+              ...base.questionActions,
+              resolved: {
+                ...resolved,
+                editState: {
+                  onSave: saveQuestionEdit,
+                  onCancel: closeEdit,
+                  disabled: mutationPending || generating || !effectiveModelId,
+                },
+              },
+            },
+          };
+        }
 
         if (activeEditingMessage?.id === base.id) {
           projected = {
@@ -550,6 +771,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         // Overlay live stream state onto only the active assistant row.
         const live = {
           ...projected,
+          rawTextLength: stream.rawTextLength,
           reasoning: stream.reasoning,
           reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
           toolActivities: stream.tools.length > 0 ? stream.tools : base.toolActivities,
@@ -573,10 +795,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       editUploads,
       effectiveModelId,
       liveId,
+      mutationPending,
+      generating,
+      saveQuestionEdit,
       saveEdit,
       searchEnabled,
       setSearchEnabled,
       stream.compactions,
+      stream.rawTextLength,
       stream.reasoning,
       stream.reasoningSeen,
       stream.status,
@@ -613,13 +839,30 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           padding: the scroller's fade mask handles the visual transition. */}
       <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
+          {questionNeedsRefresh ? (
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
+              <span>Refresh the chat to check whether your answers were sent.</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={refreshQuestionMutation.isPending}
+                aria-busy={refreshQuestionMutation.isPending}
+                onClick={() => refreshQuestionMutation.mutate()}
+              >
+                {refreshQuestionMutation.isPending ? (
+                  <Spinner data-icon="inline-start" aria-hidden />
+                ) : null}
+                Refresh chat
+              </Button>
+            </div>
+          ) : null}
           <Composer
             onSend={(content, attachmentIds) =>
               sendMutation.mutateAsync({ content, attachmentIds })
             }
             {...(stoppableId ? { onStop: () => stopMutation.mutate(stoppableId) } : {})}
             disabled={actionsDisabled}
-            textareaDisabled={activeEditingMessage !== null}
+            textareaDisabled={activeEditingMessage !== null && (!editingAnswers || editPending)}
             controlsDisabled={mutationPending}
             modelId={effectiveModelId}
             onModelChange={setModelId}

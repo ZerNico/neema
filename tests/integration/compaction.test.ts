@@ -603,6 +603,7 @@ describe("context compaction", () => {
             : history.messages[index + 1]!;
         const targetIndex = history.messages.indexOf(target);
         yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(conversationId),
           userId,
           messageId: target.id,
           modelId,
@@ -633,6 +634,7 @@ describe("context compaction", () => {
         const before = yield* repo.listCompactionEvents([messageId]);
 
         yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(conversationId),
           userId,
           messageId,
           modelId,
@@ -746,6 +748,7 @@ describe("context compaction", () => {
       outcome: result.sourceEvent.outcome,
       beforeTurnIndex: result.sourceEvent.beforeTurnIndex,
       passIndex: result.sourceEvent.passIndex,
+      textOffset: result.sourceEvent.textOffset,
     });
     expect(result.branchEvent.id).not.toBe(result.sourceEvent.id);
     expect(result.branchEvent.messageId).not.toBe(result.sourceEvent.messageId);
@@ -852,6 +855,94 @@ const generate = Effect.fn("test.generate")(function* (input: {
   const { searchEnabled = false, ...generation } = input;
   yield* engine.startGeneration({ ...generation, searchEnabled });
   yield* engine.subscribe(input.messageId, 0).pipe(Stream.runDrain);
+});
+
+describe("question history compaction", () => {
+  beforeEach(() => gateway.reset());
+
+  it.each(["summary", "summary failure", "provider overflow"] as const)(
+    "retains tool-only questions with the immediate answer through %s",
+    async (mode) => {
+      gateway.summaryFails = mode === "summary failure";
+      gateway.overflowsLeft = mode === "provider overflow" ? 1 : 0;
+      gateway.reportedInputTokens = 1000;
+      const result = await run(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const userId = yield* makeUser();
+          const conversationId = yield* seedConversation(userId, 8);
+          const asking = yield* repo.createTurn({
+            userId,
+            conversationId,
+            modelId: smallModelId,
+            content: "Help me choose an approach.",
+            attachmentIds: [],
+          });
+          yield* repo.finalizeMessage({
+            messageId: asking.assistant.id,
+            status: "complete",
+            content: "",
+          });
+          const params = {
+            questions: [
+              {
+                question: "Which unique clarification should be preserved?",
+                options: [{ label: "First approach" }, { label: "Second approach" }],
+                multiSelect: false,
+              },
+            ],
+          };
+          const callId = uuidv7();
+          yield* repo.insertToolCall({
+            id: callId,
+            messageId: asking.assistant.id,
+            turnIndex: 0,
+            callIndex: 0,
+            providerCallId: "ask",
+            toolName: "ask_user",
+            arguments: params,
+          });
+          yield* repo.completeToolCall({
+            id: callId,
+            status: "complete",
+            result: { v: 1, outcome: "presented", ...params },
+          });
+          const reply = yield* repo.createTurn({
+            userId,
+            conversationId,
+            modelId: smallModelId,
+            attachmentIds: [],
+            questionResponse: {
+              callId,
+              response: { kind: "answers", answers: [{ selected: [1], custom: "" }] },
+            },
+          });
+          yield* generate({
+            userId,
+            conversationId,
+            messageId: reply.assistant.id,
+            modelId: smallModelId,
+          });
+          return {
+            final: yield* repo.getMessage(reply.assistant.id),
+            original: yield* repo.getMessage(asking.assistant.id),
+          };
+        }),
+      );
+      expect(result.final?.status).toBe("complete");
+      expect(result.original?.content).toBe("");
+      expect(gateway.summaryPrompts.length).toBeGreaterThan(0);
+      expect(gateway.summaryPrompts.join("\n")).not.toContain("Which unique clarification");
+      expect(gateway.streamPrompts.length).toBe(mode === "provider overflow" ? 2 : 1);
+      for (const prompt of gateway.streamPrompts) {
+        expect(prompt).toContain("Which unique clarification should be preserved?");
+        expect(prompt).toContain("Q1: Second approach");
+        expect(prompt.indexOf("Which unique clarification")).toBeLessThan(
+          prompt.indexOf("Q1: Second approach"),
+        );
+      }
+    },
+  );
 });
 
 /** A fresh turn on an already-long conversation, ready to be generated into. */
@@ -1188,6 +1279,7 @@ describe("compaction inside a generation", () => {
       phase: "start",
       beforeTurnIndex: 0,
       passIndex: 0,
+      textOffset: 0,
       scope: "history",
     });
     expect(markers[1]).toMatchObject({
@@ -1196,6 +1288,7 @@ describe("compaction inside a generation", () => {
       eventId: markers[0]?.eventId,
       beforeTurnIndex: 0,
       passIndex: 0,
+      textOffset: 0,
       scope: "history",
       ok: true,
       outcome: "summary",
@@ -1204,6 +1297,7 @@ describe("compaction inside a generation", () => {
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({
       id: markers[0]?.eventId,
+      textOffset: 0,
       status: "complete",
       outcome: "summary",
       checkpointId: result.checkpoints[0]?.id,
@@ -1274,6 +1368,7 @@ describe("compaction inside a generation", () => {
     expect(result.events[0]).toMatchObject({
       beforeTurnIndex: 1,
       passIndex: 0,
+      textOffset: 0,
       scope: "active_rounds",
       status: "complete",
       outcome: "summary",
