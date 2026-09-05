@@ -5,6 +5,8 @@ import { Suspense } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AnalyticsPage } from "./analytics-page.tsx";
 import { getUsageAnalytics } from "~/modules/analytics/server/functions.ts";
+import { adminUsageQuery } from "~/modules/analytics/client/queries.ts";
+import { DEFAULT_USAGE_RANGE } from "~/modules/analytics/schema.ts";
 
 vi.mock("~/modules/analytics/server/functions.ts", () => ({
   getUsageAnalytics: vi.fn(),
@@ -106,7 +108,7 @@ const rangeTrigger = () => screen.getByRole("button", { name: /Last \d+ days|–
 
 const renderPage = (override?: Partial<typeof data>) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(["admin", "analytics", 30], { ...data, ...override });
+  client.setQueryData(adminUsageQuery(DEFAULT_USAGE_RANGE).queryKey, { ...data, ...override });
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={<div>Loading analytics</div>}>

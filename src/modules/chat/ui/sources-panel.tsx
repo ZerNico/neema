@@ -53,8 +53,8 @@ function SourceRow({ source, focused }: { source: ToolSource; focused: boolean }
 /**
  * Opens this message's sources in the detail panel, optionally focusing one row.
  *
- * `sources` is snapshotted into the panel body, so only call this for a message
- * whose sources are final (see the body-props contract in detail-panel).
+ * `sources` is snapshotted into the panel body on each open; it doesn't
+ * subscribe to changes while the panel stays open.
  */
 export function useSourcesPanel(messageId: string, sources: ToolSource[]) {
   const panel = useDetailPanel();

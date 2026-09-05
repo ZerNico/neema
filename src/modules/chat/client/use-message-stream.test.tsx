@@ -4,27 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { useMessageStream } from "./use-message-stream.ts";
 
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
-  private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
-  readonly close = vi.fn();
-
-  constructor(readonly url: string) {
-    FakeEventSource.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: (event: MessageEvent) => void) {
-    const set = this.listeners.get(type) ?? new Set();
-    set.add(listener);
-    this.listeners.set(type, set);
-  }
-
-  emit(type: string, data: unknown) {
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener({ data: JSON.stringify(data) } as MessageEvent);
-    }
-  }
-}
+import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
 
 const renderStream = () => {
   const client = new QueryClient();

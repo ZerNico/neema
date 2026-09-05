@@ -25,6 +25,7 @@ import {
   calibrationFactor,
   compileActivePrompt,
   estimatePromptTokens,
+  latestValidCheckpoint,
   prepareCompactedActiveRounds,
   prepareCompactedHistory,
   shrinkForOverflow,
@@ -372,11 +373,19 @@ export class StreamEngine extends Context.Service<
             ...(memoryTools ? [memoryTools.group] : []),
           ]);
 
+          // Select once, before resolving attachments: the checkpoint replaces
+          // its covered prefix entirely, including blobs that may no longer exist.
+          // Keep `completed` intact for source authority, usage and memory provenance.
+          const selected = latestValidCheckpoint(
+            completed,
+            yield* repo.listCompactionCheckpoints(input.conversationId),
+          );
+          const historySuffix = selected ? completed.slice(selected.index + 1) : completed;
           // Keyed off web tools, not any toolkit: memory must not preserve
           // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
             webToolsEnabled: webTools !== undefined,
-            messages: completed,
+            messages: historySuffix,
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
           const sourcesByIndex = new Map(priorSources.map((source) => [source.index, source]));
@@ -443,7 +452,8 @@ export class StreamEngine extends Context.Service<
               messageId: input.messageId,
               modelId: input.modelId,
               contextLength: model?.contextLength,
-              messages: completed,
+              existingCheckpoint: selected?.checkpoint ?? null,
+              messages: historySuffix,
               renderedMessages: historyMessages,
               fixedPrefix,
               trailingMessages: historyBudgetTail(false),
@@ -868,7 +878,7 @@ export class StreamEngine extends Context.Service<
                     });
                     const shrunk = shrinkForOverflow({
                       decision: compaction,
-                      messages: completed,
+                      messages: historySuffix,
                       renderedMessages: historyMessages,
                       fixedPrefix: [
                         ...fixedPrefix,

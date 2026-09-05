@@ -1,5 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { vi } from "vitest";
+import * as unpdf from "unpdf";
+
+vi.mock("unpdf", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("unpdf")>();
+  return { ...actual, getDocumentProxy: vi.fn(actual.getDocumentProxy) };
+});
 import { buildEmptyPdf, buildPdf } from "../../../../tests/fixtures/pdf.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { DocumentParser, LOCAL_PARSER_KIND } from "./document-parser.ts";
@@ -55,12 +62,12 @@ describe("DocumentParser availability", () => {
 
 describe("DocumentParser.parsePdf (local backend)", () => {
   it("extracts page-labelled text", async () => {
+    const bytes = buildPdf(["First page body", "Second page body"]);
+    const original = new Uint8Array(bytes);
     const parsed = await withParser(enabled(), (parser) =>
-      parser.parsePdf({
-        bytes: buildPdf(["First page body", "Second page body"]),
-        fileName: "a.pdf",
-      }),
+      parser.parsePdf({ bytes, fileName: "a.pdf" }),
     );
+    expect(bytes).toEqual(original);
     expect(parsed).toEqual({
       text: "[page 1]\nFirst page body\n\n[page 2]\nSecond page body",
       parsedWith: LOCAL_PARSER_KIND,
@@ -82,6 +89,49 @@ describe("DocumentParser.parsePdf (local backend)", () => {
     );
     expect(parsed.truncated).toBe(true);
     expect(parsed.text).toBe("[page 1]\nKept page\n\n[document truncated]");
+  });
+
+  it("never requests excluded pages and releases the document after extracting text", async () => {
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    const getTextContent = vi.fn().mockResolvedValue({
+      items: [
+        { str: "First", hasEOL: true },
+        { type: "beginMarkedContent" },
+        { str: "Second", hasEOL: false },
+      ],
+    });
+    const getPage = vi.fn(async (page: number) => {
+      if (page > 1) throw new Error("excluded page must not be extracted");
+      return { getTextContent };
+    });
+    vi.mocked(unpdf.getDocumentProxy).mockResolvedValueOnce({
+      numPages: 3,
+      getPage,
+      loadingTask: { destroy },
+    } as never);
+
+    const parsed = await withParser(enabled({ maxPages: 1 }), (parser) =>
+      parser.parsePdf({ bytes: new Uint8Array(), fileName: "limited.pdf" }),
+    );
+    expect(parsed.text).toBe("[page 1]\nFirst\nSecond\n\n[document truncated]");
+    expect(parsed.truncated).toBe(true);
+    expect(getPage).toHaveBeenCalledExactlyOnceWith(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the document when a retained page fails extraction", async () => {
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(unpdf.getDocumentProxy).mockResolvedValueOnce({
+      numPages: 1,
+      getPage: vi.fn().mockResolvedValue({
+        getTextContent: vi.fn().mockRejectedValue(new Error("broken page")),
+      }),
+      loadingTask: { destroy },
+    } as never);
+
+    const error = await parseError(enabled(), new Uint8Array(), "broken.pdf");
+    expect(error).toMatchObject({ reason: "broken page", fileName: "broken.pdf" });
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a PDF with no extractable text", async () => {

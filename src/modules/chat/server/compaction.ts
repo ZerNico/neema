@@ -69,10 +69,7 @@ export interface CompactionDeps {
   readonly gateway: Pick<AiGateway["Service"], "generateText">;
   readonly repo: Pick<
     ChatRepo["Service"],
-    | "listCompactionCheckpoints"
-    | "insertCompactionCheckpoint"
-    | "createCompactionEvent"
-    | "completeCompactionEvent"
+    "insertCompactionCheckpoint" | "createCompactionEvent" | "completeCompactionEvent"
   >;
   readonly providers: Pick<ProviderRepo["Service"], "getModel">;
   readonly analytics: Pick<AnalyticsRepo["Service"], "record">;
@@ -556,7 +553,9 @@ export interface CompactionInput {
   readonly messageId: string;
   readonly modelId: string;
   readonly contextLength: number | null | undefined;
-  /** The completed history, in total `(createdAt, id)` order. */
+  /** Selected against the full completed history before attachment rendering. */
+  readonly existingCheckpoint: CompactionCheckpointRow | null;
+  /** Uncovered completed suffix, in total `(createdAt, id)` order. All indexes are local to it. */
   readonly messages: ReadonlyArray<HistoryMessage>;
   /** The same messages rendered for the model, aligned one-to-one. */
   readonly renderedMessages: ReadonlyArray<Prompt.MessageEncoded>;
@@ -628,11 +627,9 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
   );
   const suffixFrom = (start: number) => tokens.slice(start).reduce((sum, value) => sum + value, 0);
 
-  const existing = latestValidCheckpoint(input.messages, [
-    ...(yield* deps.repo.listCompactionCheckpoints(input.conversationId)),
-  ]);
-  const baseStart = existing ? existing.index + 1 : 0;
-  const baseInjected = existing ? [compactionSummaryMessage(existing.checkpoint.summary)] : [];
+  const existing = input.existingCheckpoint;
+  const baseStart = 0;
+  const baseInjected = existing ? [compactionSummaryMessage(existing.summary)] : [];
   const baseFixed = prefixTokens + scale(estimatePromptTokens(baseInjected));
   const baseTotal = baseFixed + suffixFrom(baseStart);
 
@@ -657,7 +654,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
       baseStart,
       baseInjected,
       baseTotal,
-      existing?.checkpoint ?? null,
+      existing,
     );
   }
 
@@ -666,7 +663,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     tokens,
     fixedTokens: baseFixed,
     tailBudgetTokens: budget.tail,
-    minBoundaryIndex: existing ? existing.index : -1,
+    minBoundaryIndex: -1,
   });
 
   let eventId: string | null = null;
@@ -678,11 +675,11 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     const summaryEventId = eventId;
     const summary = yield* summarizeRange(deps, input, {
       aged: input.renderedMessages.slice(baseStart, boundary + 1),
-      previousSummary: existing?.checkpoint.summary ?? null,
+      previousSummary: existing?.summary ?? null,
       // Previous summaries and framing share this request's input window too.
       maxTranscriptChars: summaryTranscriptChars({
         budget,
-        previousSummary: existing?.checkpoint.summary ?? null,
+        previousSummary: existing?.summary ?? null,
       }),
     });
 
@@ -736,7 +733,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
       baseStart,
       baseInjected,
       baseTotal,
-      existing?.checkpoint ?? null,
+      existing,
     );
   }
 
@@ -783,7 +780,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     truncated.startIndex,
     injected,
     truncated.estimatedInputTokens,
-    existing?.checkpoint ?? null,
+    existing,
   );
 });
 

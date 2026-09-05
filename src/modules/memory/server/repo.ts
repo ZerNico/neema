@@ -119,18 +119,25 @@ export class MemoryRepo extends Context.Service<
       const db = yield* Db;
 
       const getSettings = Effect.fn("MemoryRepo.getSettings")(function* (userId: string) {
-        yield* db
+        const select = () =>
+          db
+            .select()
+            .from(memorySettings)
+            .where(eq(memorySettings.userId, userId))
+            .limit(1)
+            .pipe(Effect.orDie);
+        const current = yield* select();
+        if (current[0]) return toSettings(current[0]);
+
+        const inserted = yield* db
           .insert(memorySettings)
           .values({ userId })
           .onConflictDoNothing()
+          .returning()
           .pipe(Effect.orDie);
-        const rows = yield* db
-          .select()
-          .from(memorySettings)
-          .where(eq(memorySettings.userId, userId))
-          .limit(1)
-          .pipe(Effect.orDie);
-        return toSettings(rows[0]!);
+        // Another initializer may have won while our first read saw no row.
+        const row = inserted[0] ?? (yield* select())[0]!;
+        return toSettings(row);
       });
 
       const updateSettings = Effect.fn("MemoryRepo.updateSettings")(function* (

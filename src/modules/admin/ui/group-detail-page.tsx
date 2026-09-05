@@ -23,7 +23,7 @@ import {
   renameGroup,
 } from "../server/functions.ts";
 import { groupsQuery, isConflict } from "./groups-page.tsx";
-import { authClient } from "~/modules/auth/client.ts";
+import { usersQuery } from "./users-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
@@ -75,17 +75,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
   const confirm = useConfirm();
   const { data: groups } = useSuspenseQuery(groupsQuery);
   const members = useQuery(membersQuery(groupId));
-  // Same key as the users page, so the list is warm when coming from there.
-  const users = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: async () => {
-      const { data, error } = await authClient.admin.listUsers({
-        query: { limit: 100, sortBy: "createdAt", sortDirection: "asc" },
-      });
-      if (error) throw new Error(error.message);
-      return data.users;
-    },
-  });
+  const users = useQuery(usersQuery);
   const [renaming, setRenaming] = useState(false);
 
   const group = groups.find((g) => g.id === groupId);

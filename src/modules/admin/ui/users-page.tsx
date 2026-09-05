@@ -1,6 +1,6 @@
 import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { authClient } from "~/modules/auth/client.ts";
 import { membershipsQuery } from "./groups-page.tsx";
@@ -20,6 +20,17 @@ import { Skeleton } from "~/ui/primitives/skeleton";
 // Group badges shown per row before collapsing into a "+N more" badge.
 const MAX_GROUP_BADGES = 2;
 
+export const usersQuery = queryOptions({
+  queryKey: ["admin", "users"],
+  queryFn: async () => {
+    const { data, error } = await authClient.admin.listUsers({
+      query: { limit: 100, sortBy: "createdAt", sortDirection: "asc" },
+    });
+    if (error) throw new Error(error.message);
+    return data.users;
+  },
+});
+
 export function UsersPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -27,16 +38,7 @@ export function UsersPage() {
   // Read-only here; membership is edited on the group detail pages.
   const memberships = useQuery(membershipsQuery);
 
-  const users = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: async () => {
-      const { data, error } = await authClient.admin.listUsers({
-        query: { limit: 100, sortBy: "createdAt", sortDirection: "asc" },
-      });
-      if (error) throw new Error(error.message);
-      return data.users;
-    },
-  });
+  const users = useQuery(usersQuery);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
 

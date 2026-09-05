@@ -17,8 +17,6 @@ import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
-import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
@@ -26,8 +24,12 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { WebSearchExecutor, ToolUnavailable } from "~/modules/tools/server/web-search.ts";
+import {
+  FakeBlobStore,
+  FakeDocumentParser,
+  FakeWebSearch,
+  FakeUrlReader,
+} from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 
@@ -62,34 +64,6 @@ const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   generateText: () => fakeGeneratedText(GENERATED_TITLE),
   streamChat: () => Stream.fromEffect(Effect.die("no generation in these tests")),
-});
-
-// Blobs are rows here: branching never reads bytes, it only shares them.
-const FakeBlobStore = Layer.succeed(BlobStore, {
-  put: () => Effect.die("no blobs in these tests"),
-  get: () => Effect.die("no blobs in these tests"),
-  delete: () => Effect.void,
-  exists: () => Effect.succeed(false),
-  deletePrefix: () => Effect.void,
-});
-
-const FakeDocumentParser = Layer.succeed(DocumentParser, {
-  parsePdf: () => Effect.die("no documents in these tests"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
-});
-
-// Neither web tool is exercised in these tests. They report themselves
-// unavailable the way a disabled tool really does — a typed ToolUnavailable,
-// not a defect — so a tools-capable model here degrades instead of dying.
-const unavailable = (tool: "web_search" | "read_url") => () =>
-  Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
-const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
-  handler: unavailable("web_search"),
-  availability: () => Effect.succeed({ configured: false, enabled: false }),
-});
-const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
-  handler: unavailable("read_url"),
-  availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 
 beforeAll(async () => {

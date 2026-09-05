@@ -80,9 +80,40 @@ export function MemoryPage() {
   const settings = useQuery(memorySettingsQuery);
   const memories = useQuery(memoriesQuery);
   const [editing, setEditing] = useState<Memory | "new" | null>(null);
-  const [dialogPending, setDialogPending] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["memory"] });
+  const form = useAppForm({
+    defaultValues: { content: editing !== null && editing !== "new" ? editing.content : "" },
+    validators: { onSubmit: Schema.toStandardSchemaV1(MemoryFormSchema) },
+    onSubmit: async ({ value }) => {
+      if (editing === null) return;
+      const content = value.content.trim();
+      try {
+        const outcome =
+          editing === "new"
+            ? await createMemory({ data: { content } })
+            : await updateMemory({ data: { memoryId: editing.id, content } });
+        if (
+          outcome.outcome === "created" ||
+          outcome.outcome === "updated" ||
+          outcome.outcome === "duplicate"
+        ) {
+          if (outcome.outcome === "duplicate") toast.info("That memory is already saved.");
+          await invalidate();
+          setEditing(null);
+          return;
+        }
+        toast.error(rejectionMessage(outcome));
+      } catch {
+        toast.error("Could not save the memory.");
+      }
+    },
+  });
+  const openEditor = (memory: Memory | "new") => {
+    if (form.state.isSubmitting) return;
+    form.reset({ content: memory === "new" ? "" : memory.content });
+    setEditing(memory);
+  };
   const settingsMutation = useMutation({
     mutationFn: (patch: { referenceEnabled?: boolean; autoSaveEnabled?: boolean }) =>
       updateMemorySettings({ data: patch }),
@@ -188,7 +219,7 @@ export function MemoryPage() {
             ) : null}
             <Button
               size="sm"
-              onClick={() => setEditing("new")}
+              onClick={() => openEditor("new")}
               disabled={rows.length >= MAX_MEMORIES_PER_USER}
             >
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
@@ -212,7 +243,7 @@ export function MemoryPage() {
             title="Nothing saved yet"
             description="Add a memory yourself, or enable automatic saving for useful facts and preferences."
             action={
-              <Button size="sm" onClick={() => setEditing("new")}>
+              <Button size="sm" onClick={() => openEditor("new")}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
                 Add memory
               </Button>
@@ -225,7 +256,7 @@ export function MemoryPage() {
                 key={memory.id}
                 memory={memory}
                 deleting={remove.isPending && remove.variables === memory.id}
-                onEdit={() => setEditing(memory)}
+                onEdit={() => openEditor(memory)}
                 onDelete={() => {
                   void confirm({
                     title: "Delete this memory?",
@@ -241,19 +272,56 @@ export function MemoryPage() {
         )}
       </Section>
 
-      <MemoryDialog
-        memory={editing}
+      <Dialog
         open={editing !== null}
-        pending={dialogPending}
-        onPendingChange={setDialogPending}
         onOpenChange={(open) => {
-          if (!open && !dialogPending) setEditing(null);
+          if (!open && !form.state.isSubmitting) setEditing(null);
         }}
-        onSaved={async () => {
-          await invalidate();
-          setEditing(null);
-        }}
-      />
+      >
+        <DialogContent showCloseButton={false}>
+          {editing !== null ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{editing === "new" ? "Add memory" : "Edit memory"}</DialogTitle>
+                <DialogDescription>
+                  Keep it short and durable. Do not store passwords, API keys, or other secrets.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                className="flex flex-col gap-6"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!form.state.isSubmitting) void form.handleSubmit();
+                }}
+              >
+                <form.AppField name="content">
+                  {(field) => (
+                    <field.TextareaField
+                      label="Memory"
+                      description={`Up to ${MAX_MEMORY_CONTENT_LENGTH} characters.`}
+                      placeholder="For example: I prefer concise answers with code examples."
+                    />
+                  )}
+                </form.AppField>
+                <form.AppForm>
+                  <DialogFooter>
+                    <form.Subscribe selector={(state) => state.isSubmitting}>
+                      {(isSubmitting) => (
+                        <DialogClose render={<Button variant="outline" disabled={isSubmitting} />}>
+                          Cancel
+                        </DialogClose>
+                      )}
+                    </form.Subscribe>
+                    <form.SubmitButton>
+                      {editing === "new" ? "Add memory" : "Save changes"}
+                    </form.SubmitButton>
+                  </DialogFooter>
+                </form.AppForm>
+              </form>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </Page>
   );
 }
@@ -319,124 +387,5 @@ function MemoryRow({
         </Button>
       </div>
     </ListRow>
-  );
-}
-
-function MemoryDialog({
-  memory,
-  open,
-  pending,
-  onPendingChange,
-  onOpenChange,
-  onSaved,
-}: {
-  memory: Memory | "new" | null;
-  open: boolean;
-  pending: boolean;
-  onPendingChange: (pending: boolean) => void;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && pending) return;
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent showCloseButton={false}>
-        {memory ? (
-          <MemoryForm
-            key={memory === "new" ? "new" : memory.id}
-            memory={memory}
-            onPendingChange={onPendingChange}
-            onSaved={onSaved}
-          />
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function MemoryForm({
-  memory,
-  onPendingChange,
-  onSaved,
-}: {
-  memory: Memory | "new";
-  onPendingChange: (pending: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  const editing = memory !== "new";
-  const [pending, setPending] = useState(false);
-  const updatePending = (next: boolean) => {
-    setPending(next);
-    onPendingChange(next);
-  };
-  const form = useAppForm({
-    defaultValues: { content: editing ? memory.content : "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(MemoryFormSchema) },
-    onSubmit: async ({ value }) => {
-      const content = value.content.trim();
-      updatePending(true);
-      try {
-        const outcome = editing
-          ? await updateMemory({ data: { memoryId: memory.id, content } })
-          : await createMemory({ data: { content } });
-        if (
-          outcome.outcome === "created" ||
-          outcome.outcome === "updated" ||
-          outcome.outcome === "duplicate"
-        ) {
-          if (outcome.outcome === "duplicate") toast.info("That memory is already saved.");
-          await onSaved();
-          return;
-        }
-        toast.error(rejectionMessage(outcome));
-      } catch {
-        toast.error("Could not save the memory.");
-      } finally {
-        updatePending(false);
-      }
-    },
-  });
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{editing ? "Edit memory" : "Add memory"}</DialogTitle>
-        <DialogDescription>
-          Keep it short and durable. Do not store passwords, API keys, or other secrets.
-        </DialogDescription>
-      </DialogHeader>
-      <form
-        className="flex flex-col gap-6"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
-        }}
-      >
-        <form.AppField name="content">
-          {(field) => (
-            <field.TextareaField
-              label="Memory"
-              description={`Up to ${MAX_MEMORY_CONTENT_LENGTH} characters.`}
-              placeholder="For example: I prefer concise answers with code examples."
-            />
-          )}
-        </form.AppField>
-        <form.AppForm>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={pending} />}>
-              Cancel
-            </DialogClose>
-            <form.SubmitButton disabled={pending}>
-              {editing ? "Save changes" : "Add memory"}
-            </form.SubmitButton>
-          </DialogFooter>
-        </form.AppForm>
-      </form>
-    </>
   );
 }

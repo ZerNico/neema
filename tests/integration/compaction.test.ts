@@ -8,16 +8,21 @@ import { Prompt, Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import {
   conversationCompactionCheckpoints,
+  attachmentBlobs,
+  attachments,
+  messageAttachments,
   messages as messagesTable,
   models,
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { BlobStoreError, DocumentParseError } from "~/modules/attachments/errors.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import {
   estimatePromptTokens,
+  latestValidCheckpoint,
   prepareCompactedHistory,
   type CompactionDeps,
 } from "~/modules/chat/server/compaction.ts";
@@ -175,18 +180,25 @@ const FakeGateway = Layer.succeed(AiGateway, {
     }),
 });
 
-// Nothing here carries an attachment or arms a web tool; these stubs only
-// exist to close the layer graph.
+const getBlob = vi.fn<BlobStore["Service"]["get"]>((key) =>
+  Effect.fail(new BlobStoreError({ operation: "get", key, message: "missing blob" })),
+);
+const parsePdf = vi.fn<DocumentParser["Service"]["parsePdf"]>(() =>
+  Effect.die("covered documents must not be parsed"),
+);
+const parserAvailability = vi.fn<DocumentParser["Service"]["availability"]>(() =>
+  Effect.succeed({ configured: true, enabled: true, kind: "test-parser" }),
+);
 const FakeBlobStore = Layer.succeed(BlobStore, {
-  put: () => Effect.die("no blobs in these tests"),
-  get: () => Effect.die("no blobs in these tests"),
+  put: () => Effect.die("no blob writes in these tests"),
+  get: getBlob,
   delete: () => Effect.void,
   exists: () => Effect.succeed(false),
   deletePrefix: () => Effect.void,
 });
 const FakeDocumentParser = Layer.succeed(DocumentParser, {
-  parsePdf: () => Effect.die("no documents in these tests"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+  parsePdf,
+  availability: parserAvailability,
 });
 const unavailable = (tool: "web_search" | "read_url") => () =>
   Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
@@ -205,8 +217,9 @@ const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
     ),
   availability: () => Effect.succeed({ configured: true, enabled: true }),
 });
+const readerHandler = vi.fn<UrlReaderExecutor["Service"]["handler"]>(unavailable("read_url"));
 const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
-  handler: unavailable("read_url"),
+  handler: readerHandler,
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 
@@ -380,13 +393,24 @@ const prepare = Effect.fn("test.prepare")(function* (input: {
     analytics,
     input.summary ?? "Earlier: they set up the database and picked Postgres 17.",
   );
-  const history = yield* historyOf(input.conversationId);
+  const fullHistory = yield* historyOf(input.conversationId);
+  const selected = latestValidCheckpoint(
+    fullHistory.messages,
+    yield* repo.listCompactionCheckpoints(input.conversationId),
+  );
+  const start = selected ? selected.index + 1 : 0;
+  const history = {
+    ...fullHistory,
+    messages: fullHistory.messages.slice(start),
+    renderedMessages: fullHistory.renderedMessages.slice(start),
+  };
   const decision = yield* prepareCompactedHistory(deps, {
     userId: input.userId,
     conversationId: input.conversationId,
     messageId: history.messageId,
     modelId,
     contextLength: TINY_CONTEXT,
+    existingCheckpoint: selected?.checkpoint ?? null,
     messages: history.messages,
     renderedMessages: history.renderedMessages,
     fixedPrefix: [],
@@ -463,6 +487,10 @@ describe("context compaction", () => {
         }
 
         const second = yield* prepare({ userId, conversationId, summary: "SECOND SUMMARY" });
+        expect(second.decision.checkpoint!.throughMessageId).toBe(
+          second.history.messages[second.decision.startIndex - 1]!.id,
+        );
+        expect(first.decision.startIndex).toBeGreaterThan(0);
         const rows = yield* checkpointsOf(conversationId);
         const history = yield* historyOf(conversationId);
         const position = (id: string) => history.messages.findIndex((m) => m.id === id);
@@ -529,6 +557,7 @@ describe("context compaction", () => {
           messageId: history.messageId,
           modelId,
           contextLength: TINY_CONTEXT,
+          existingCheckpoint: null,
           messages: history.messages,
           renderedMessages: history.renderedMessages,
           fixedPrefix: [],
@@ -781,6 +810,7 @@ describe("context compaction", () => {
           modelId,
           // The model's real window, not the artificial one.
           contextLength: 128_000,
+          existingCheckpoint: null,
           messages: history.messages,
           renderedMessages: history.renderedMessages,
           fixedPrefix: [],
@@ -837,6 +867,33 @@ const askAgain = Effect.fn("test.askAgain")(function* (userId: string, conversat
   return turn.assistant.id;
 });
 
+const attachDocument = Effect.fn("test.attachDocument")(function* (
+  userId: string,
+  messageId: string,
+  mediaType: "text/plain" | "application/pdf",
+) {
+  const db = yield* Db;
+  const blobId = uuidv7();
+  const attachmentId = uuidv7();
+  const storageKey = `test/${blobId}`;
+  yield* db.insert(attachmentBlobs).values({
+    id: blobId,
+    userId,
+    sha256: blobId,
+    storageKey,
+    size: 4,
+    mediaType,
+  });
+  yield* db.insert(attachments).values({
+    id: attachmentId,
+    userId,
+    blobId,
+    fileName: mediaType === "application/pdf" ? "document.pdf" : "document.txt",
+  });
+  yield* db.insert(messageAttachments).values({ messageId, attachmentId, position: 0 });
+  return storageKey;
+});
+
 const runtimeBlock = (serialized: string) => {
   const { content } = JSON.parse(serialized) as {
     content: Array<{ role: string; content: unknown }>;
@@ -856,6 +913,223 @@ const runtimeBlock = (serialized: string) => {
 describe("compaction inside a generation", () => {
   beforeEach(() => {
     gateway.reset();
+    getBlob.mockReset();
+    parsePdf.mockReset();
+    parserAvailability.mockClear();
+    readerHandler.mockClear();
+  });
+
+  it.each(["missing", "throwing"] as const)(
+    "never reads a covered %s PDF blob or consults its parser",
+    async (failure) => {
+      if (failure === "throwing")
+        getBlob.mockImplementation(() => Effect.die("blob read exploded"));
+      const result = await run(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const userId = yield* makeUser();
+          const conversationId = yield* seedConversation(userId, 2);
+          const history = yield* historyOf(conversationId);
+          yield* attachDocument(userId, history.messages[0]!.id, "application/pdf");
+          yield* repo.insertCompactionCheckpoint({
+            conversationId,
+            throughMessageId: history.messages[1]!.id,
+            modelId,
+            summary: "COVERED DOCUMENT SUMMARY",
+          });
+          const messageId = yield* askAgain(userId, conversationId);
+          yield* generate({ userId, conversationId, messageId, modelId });
+          return yield* repo.getMessage(messageId);
+        }),
+      );
+      expect(result?.status).toBe("complete");
+      expect(getBlob).not.toHaveBeenCalled();
+      expect(parserAvailability).not.toHaveBeenCalled();
+      expect(parsePdf).not.toHaveBeenCalled();
+      expect(gateway.summaryPrompts).toEqual([]);
+      expect(gateway.streamPrompts[0]).toContain("COVERED DOCUMENT SUMMARY");
+      expect(gateway.streamPrompts[0]).not.toContain("question 0 ");
+      expect(gateway.streamPrompts[0]).toContain("question 1 ");
+      expect(gateway.streamPrompts[0]).toContain("question latest");
+    },
+  );
+
+  it.each([
+    { checkpoint: false, failure: false },
+    { checkpoint: true, failure: false },
+    { checkpoint: false, failure: true },
+    { checkpoint: true, failure: true },
+  ])(
+    "still resolves uncovered attachments ($checkpoint checkpoint, $failure failure)",
+    async ({ checkpoint, failure }) => {
+      if (!failure)
+        getBlob.mockImplementation(() =>
+          Effect.succeed(new TextEncoder().encode("UNCOVERED DOCUMENT")),
+        );
+      const result = await run(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const userId = yield* makeUser();
+          const conversationId = yield* seedConversation(userId, 2);
+          const history = yield* historyOf(conversationId);
+          if (checkpoint)
+            yield* repo.insertCompactionCheckpoint({
+              conversationId,
+              throughMessageId: history.messages[1]!.id,
+              modelId,
+              summary: "COVERED PREFIX",
+            });
+          const storageKey = yield* attachDocument(userId, history.messages[2]!.id, "text/plain");
+          const messageId = yield* askAgain(userId, conversationId);
+          yield* generate({ userId, conversationId, messageId, modelId });
+          return { message: yield* repo.getMessage(messageId), storageKey };
+        }),
+      );
+      expect(getBlob).toHaveBeenCalledExactlyOnceWith(result.storageKey);
+      expect(result.message?.status).toBe(failure ? "error" : "complete");
+      if (failure) {
+        expect(result.message?.error).toMatchObject({ tag: "GenerationFailed" });
+        expect(gateway.streamPrompts).toEqual([]);
+      } else {
+        expect(gateway.streamPrompts[0]).toContain("UNCOVERED DOCUMENT");
+        expect(gateway.streamPrompts[0]).toContain("question 1 ");
+      }
+    },
+  );
+
+  it("retains uncovered PDF parse failures inside generation error handling", async () => {
+    getBlob.mockImplementation(() => Effect.succeed(new Uint8Array([1, 2, 3, 4])));
+    parsePdf.mockImplementation(({ fileName }) =>
+      Effect.fail(
+        new DocumentParseError({
+          fileName,
+          reason: "cannot parse uncovered PDF",
+        }),
+      ),
+    );
+    const message = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 2);
+        const history = yield* historyOf(conversationId);
+        yield* repo.insertCompactionCheckpoint({
+          conversationId,
+          throughMessageId: history.messages[1]!.id,
+          modelId,
+          summary: "COVERED PREFIX",
+        });
+        yield* attachDocument(userId, history.messages[2]!.id, "application/pdf");
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId });
+        return yield* repo.getMessage(messageId);
+      }),
+    );
+    expect(getBlob).toHaveBeenCalledOnce();
+    expect(parserAvailability).toHaveBeenCalledOnce();
+    expect(parsePdf).toHaveBeenCalledOnce();
+    expect(message?.status).toBe("error");
+    expect(message?.error).toMatchObject({ tag: "GenerationFailed" });
+    expect(gateway.streamPrompts).toEqual([]);
+  });
+
+  it("keeps covered user URLs and persisted sources in reader authority and citation numbering", async () => {
+    const userUrl = "https://example.com/user-document";
+    const sourceUrl = "https://example.com/prior-source";
+    const inventedUrl = "https://example.com/assistant-only";
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const turn = yield* repo.createTurn({
+          userId,
+          conversationId: null,
+          modelId: smallModelId,
+          content: `Read ${userUrl}`,
+          attachmentIds: [],
+        });
+        yield* repo.finalizeMessage({
+          messageId: turn.assistant.id,
+          status: "complete",
+          content: `See ${inventedUrl}`,
+        });
+        const callId = uuidv7();
+        yield* repo.insertToolCall({
+          id: callId,
+          messageId: turn.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "old-search",
+          toolName: "web_search",
+          arguments: { queries: ["old query"] },
+        });
+        yield* repo.completeToolCall({
+          id: callId,
+          status: "complete",
+          result: {
+            ok: true,
+            targets: ["old query"],
+            resultCount: 1,
+            pagesFetched: 0,
+            failures: [],
+            sources: [{ index: 7, url: sourceUrl, title: "Prior source", read: false }],
+          },
+        });
+        const conversationId = turn.conversation.id;
+        yield* repo.insertCompactionCheckpoint({
+          conversationId,
+          throughMessageId: turn.assistant.id,
+          modelId: smallModelId,
+          summary: "Earlier documents discussed, without their URLs",
+        });
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId: smallModelId });
+        expect((yield* repo.getMessage(messageId))?.status).toBe("complete");
+      }),
+    );
+    // Search is off and the verbatim suffix has no URLs. The covered metadata
+    // must still arm the reader and seed the shared application-owned state.
+    expect(readerHandler).toHaveBeenCalledOnce();
+    const [indexer, authority] = readerHandler.mock.calls[0]!;
+    expect(authority.resolve(userUrl)).toBe(userUrl);
+    expect(authority.resolve(sourceUrl)).toBe(sourceUrl);
+    expect(authority.resolve(inventedUrl)).toBeNull();
+    expect(indexer.indexFor(sourceUrl)).toBe(7);
+    expect(indexer.indexFor("https://example.com/new-source")).toBe(8);
+    expect(gateway.streamPrompts[0]).not.toContain(userUrl);
+    expect(gateway.streamPrompts[0]).not.toContain(inventedUrl);
+  });
+
+  it("recovers overflow using suffix-local metadata after a nonzero checkpoint", async () => {
+    gateway.overflowsLeft = 1;
+    const message = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const conversationId = yield* seedConversation(userId, 4);
+        const history = yield* historyOf(conversationId);
+        yield* repo.insertCompactionCheckpoint({
+          conversationId,
+          throughMessageId: history.messages[3]!.id,
+          modelId,
+          summary: "EARLIER CHECKPOINT",
+        });
+        const messageId = yield* askAgain(userId, conversationId);
+        yield* generate({ userId, conversationId, messageId, modelId });
+        return yield* repo.getMessage(messageId);
+      }),
+    );
+    expect(message?.status).toBe("complete");
+    expect(gateway.summaryPrompts).toEqual([]);
+    expect(gateway.streamPrompts).toHaveLength(2);
+    expect(gateway.streamPrompts[0]).toContain("EARLIER CHECKPOINT");
+    expect(gateway.streamPrompts[0]).toContain("question 2 ");
+    expect(gateway.streamPrompts[1]).not.toContain("question 2 ");
+    expect(gateway.streamPrompts[1]).toContain("question latest");
+    expect(gateway.streamPrompts[1]).toContain("<context-truncation-notice>");
+    expect(runtimeBlock(gateway.streamPrompts[0]!).message).toEqual(
+      runtimeBlock(gateway.streamPrompts[1]!).message,
+    );
   });
 
   it("summarizes before the answer streams and sends summary + tail, not the whole log", async () => {

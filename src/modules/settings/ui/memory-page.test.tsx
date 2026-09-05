@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -241,28 +241,115 @@ describe("MemoryPage", () => {
     );
   });
 
-  it("keeps the memory dialog open and labelled while saving", async () => {
+  it("blocks dismissal and repeat submission through both the write and refresh", async () => {
     const user = userEvent.setup();
     const pending = deferred<Awaited<ReturnType<typeof createMemory>>>();
-    createMock.mockReturnValue(pending.promise);
+    const refresh = deferred<Awaited<ReturnType<typeof listMemories>>>();
+    createMock.mockReturnValueOnce(pending.promise);
+    listMock.mockResolvedValue([memory()] as never);
     renderPage();
+    await screen.findByText("Prefers concise answers");
 
-    await user.click(await screen.findByRole("button", { name: "Add memory" }));
-    await user.type(screen.getByLabelText("Memory"), "Remember this preference");
     await user.click(screen.getByRole("button", { name: "Add memory" }));
-
-    const submit = screen.getByRole("button", { name: "Add memory" });
-    const cancel = screen.getByRole("button", { name: "Cancel" });
+    await user.type(screen.getByLabelText("Memory"), "Remember this preference");
+    listMock.mockReturnValueOnce(refresh.promise);
+    await user.click(screen.getByRole("button", { name: "Add memory" }));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
-    expect(submit).toHaveTextContent("Add memory");
-    expect(submit).toHaveAttribute("aria-busy", "true");
-    expect(cancel).toBeDisabled();
 
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const attemptDismissal = async () => {
+      const submit = screen.getByRole("button", { name: "Add memory" });
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      expect(submit).toHaveTextContent("Add memory");
+      expect(submit).toHaveAttribute("aria-busy", "true");
+      expect(submit).toBeDisabled();
+      expect(cancel).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+      await user.click(cancel);
+      await user.keyboard("{Escape}");
+      await user.click(document.querySelector('[data-slot="dialog-overlay"]')!);
+      fireEvent.submit(screen.getByLabelText("Memory").closest("form")!);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByLabelText("Memory")).toHaveValue("Remember this preference");
+      expect(createMock).toHaveBeenCalledTimes(1);
+    };
+    await attemptDismissal();
+    await act(async () =>
+      pending.resolve({ outcome: "created", memory: memory({ origin: "manual" }) } as never),
+    );
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+    await attemptDismissal();
 
-    pending.resolve({ outcome: "created", memory: memory({ origin: "manual" }) } as never);
+    await act(async () => refresh.resolve([memory()] as never));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Add memory" }));
+    expect(screen.getByLabelText("Memory")).toHaveValue("");
+  });
+
+  it.each(["Add memory", "Edit memory"])(
+    "resets %s drafts only on opening, not on query updates",
+    async (action) => {
+      const user = userEvent.setup();
+      listMock.mockResolvedValue([memory()] as never);
+      const client = renderPage();
+      await screen.findByText("Prefers concise answers");
+      await user.click(screen.getByRole("button", { name: action }));
+      await user.clear(screen.getByLabelText("Memory"));
+      await user.type(screen.getByLabelText("Memory"), "Unsaved draft");
+
+      act(() =>
+        client.setQueryData(["memory", "list"], [memory({ content: "Updated elsewhere" })]),
+      );
+      expect(screen.getByLabelText("Memory")).toHaveValue("Unsaved draft");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await screen.findByText("Updated elsewhere");
+      await user.click(screen.getByRole("button", { name: action }));
+      expect(screen.getByLabelText("Memory")).toHaveValue(
+        action === "Add memory" ? "" : "Updated elsewhere",
+      );
+    },
+  );
+
+  it("uses the selected memory's defaults and ID when switching editors", async () => {
+    const user = userEvent.setup();
+    listMock.mockResolvedValue([
+      memory(),
+      memory({ id: "memory-2", content: "Uses TypeScript" }),
+    ] as never);
+    renderPage();
+    await screen.findByText("Uses TypeScript");
+    await user.click(screen.getAllByRole("button", { name: "Edit memory" })[0]!);
+    await user.clear(screen.getByLabelText("Memory"));
+    await user.type(screen.getByLabelText("Memory"), "Discard this draft");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "Edit memory" })[1]!);
+    expect(screen.getByLabelText("Memory")).toHaveValue("Uses TypeScript");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({
+        data: { memoryId: "memory-2", content: "Uses TypeScript" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps the draft and re-enables submission after a thrown save error", async () => {
+    const user = userEvent.setup();
+    createMock.mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Add memory" }));
+    await user.type(screen.getByLabelText("Memory"), "Keep this draft");
+    await user.click(screen.getByRole("button", { name: "Add memory" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not save the memory."));
+    expect(screen.getByLabelText("Memory")).toHaveValue("Keep this draft");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    const submit = screen.getByRole("button", { name: "Add memory" });
+    expect(submit).toBeEnabled();
+    expect(submit).not.toHaveAttribute("aria-busy", "true");
+    await user.click(submit);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(createMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps failed writes open and explains rejected sensitive content", async () => {

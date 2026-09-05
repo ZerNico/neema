@@ -16,6 +16,7 @@ import {
   prepareCompactedHistory,
   sanitizeSummary,
   selectCompactionBoundary,
+  shrinkForOverflow,
   buildSummaryPrompt,
   type CompactionDeps,
   type CompactionEvent,
@@ -480,7 +481,6 @@ const history = (count: number): HistoryMessage[] =>
 
 const harness = (
   options: {
-    checkpoints?: ReadonlyArray<{ throughMessageId: string; summary: string; createdAt: Date }>;
     summary?: Effect.Effect<string, string>;
   } = {},
 ) => {
@@ -489,7 +489,9 @@ const harness = (
       Effect.map((text) => ({ text, usage, finishMetadata: undefined })),
     ),
   );
-  const listCompactionCheckpoints = vi.fn(() => Effect.succeed(options.checkpoints ?? []));
+  const listCompactionCheckpoints = vi.fn(() =>
+    Effect.die("checkpoint must be selected before rendering"),
+  );
   const insertCompactionCheckpoint = vi.fn((row: Record<string, unknown>) =>
     Effect.succeed({ id: "cp-new", createdAt: new Date(), ...row }),
   );
@@ -528,6 +530,7 @@ const request = (
     messageId: "assistant-1",
     modelId: "model-a",
     contextLength: 8_000,
+    existingCheckpoint: null,
     messages,
     renderedMessages: messages.map((message) => ({ role: message.role, content: message.content })),
     fixedPrefix: [],
@@ -535,6 +538,15 @@ const request = (
     priorUsage: null,
     ...overrides,
   }) satisfies CompactionInput;
+
+const earlierCheckpoint = {
+  id: "cp-earlier",
+  conversationId: "conv-1",
+  modelId: "model-a",
+  throughMessageId: "m3",
+  summary: "earlier work",
+  createdAt: new Date("2026-09-01T00:00:00Z"),
+};
 
 describe("prepareCompactedHistory", () => {
   it("leaves a short conversation entirely alone", () =>
@@ -581,12 +593,17 @@ describe("prepareCompactedHistory", () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const messages = history(10);
-        const h = harness({
-          checkpoints: [{ throughMessageId: "m5", summary: "earlier work", createdAt: new Date() }],
-        });
-        const decision = yield* prepareCompactedHistory(h.deps, request(messages));
+        const h = harness();
+        const selected = latestValidCheckpoint(messages, [
+          { ...earlierCheckpoint, throughMessageId: "m5" },
+        ])!;
+        const decision = yield* prepareCompactedHistory(
+          h.deps,
+          request(messages.slice(selected.index + 1), { existingCheckpoint: selected.checkpoint }),
+        );
         expect(decision.mode).toBe("checkpoint");
-        expect(decision.startIndex).toBe(6);
+        expect(decision.startIndex).toBe(0);
+        expect(h.listCompactionCheckpoints).not.toHaveBeenCalled();
         expect(textOf(decision.injectedMessages[0]!)).toContain("earlier work");
         expect(h.generateText).not.toHaveBeenCalled();
       }),
@@ -596,15 +613,87 @@ describe("prepareCompactedHistory", () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const messages = history(30);
-        const h = harness({
-          checkpoints: [{ throughMessageId: "m3", summary: "earlier work", createdAt: new Date() }],
-        });
-        const decision = yield* prepareCompactedHistory(h.deps, request(messages));
+        const h = harness();
+        const selected = latestValidCheckpoint(messages, [earlierCheckpoint])!;
+        const suffix = messages.slice(selected.index + 1);
+        const decision = yield* prepareCompactedHistory(
+          h.deps,
+          request(suffix, { existingCheckpoint: selected.checkpoint }),
+        );
+        expect(h.insertCompactionCheckpoint).toHaveBeenCalledWith(
+          expect.objectContaining({ throughMessageId: suffix[decision.startIndex - 1]!.id }),
+        );
+        expect(suffix[decision.startIndex - 1]!.id).not.toBe(messages[decision.startIndex - 1]!.id);
+        expect(h.listCompactionCheckpoints).not.toHaveBeenCalled();
         const { prompt } = h.generateText.mock.calls[0]![0];
         expect(textOf(prompt.content[1] as Prompt.MessageEncoded)).toContain("earlier work");
         // Only the range that aged since the last checkpoint is re-read.
         expect(textOf(prompt.content[1] as Prompt.MessageEncoded)).not.toContain("question 0");
         expect(decision.startIndex).toBeGreaterThan(4);
+      }),
+    ));
+
+  it("keeps the checkpoint and whole suffix when a failed summary still fits", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const h = harness({ summary: Effect.fail("provider down") });
+        const suffix = history(26).slice(4);
+        const decision = yield* prepareCompactedHistory(
+          h.deps,
+          request(suffix, { existingCheckpoint: earlierCheckpoint }),
+        );
+        expect(h.generateText).toHaveBeenCalledOnce();
+        expect(decision.mode).toBe("checkpoint");
+        expect(decision.startIndex).toBe(0);
+        expect(decision.checkpoint).toEqual(earlierCheckpoint);
+        expect(decision.estimatedInputTokens).toBeLessThanOrEqual(decision.budget.input);
+        expect(h.insertCompactionCheckpoint).not.toHaveBeenCalled();
+      }),
+    ));
+
+  it("truncates suffix-local turns after summary failure, preserving the newest user", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const h = harness({ summary: Effect.fail("provider down") });
+        const suffix = history(60).slice(4);
+        const decision = yield* prepareCompactedHistory(
+          h.deps,
+          request(suffix, { existingCheckpoint: earlierCheckpoint }),
+        );
+        expect(decision.mode).toBe("truncated");
+        expect(decision.startIndex).toBeGreaterThan(0);
+        expect(suffix[decision.startIndex]?.role).toBe("user");
+        expect(suffix.slice(decision.startIndex).map((message) => message.id)).toContain("m58");
+        expect(decision.checkpoint).toEqual(earlierCheckpoint);
+        expect(textOf(decision.injectedMessages[0]!)).toContain("earlier work");
+        expect(textOf(decision.injectedMessages[1]!)).toContain("<context-truncation-notice>");
+        expect(decision.estimatedInputTokens).toBeLessThanOrEqual(decision.budget.input);
+      }),
+    ));
+
+  it("shrinks an existing checkpoint's suffix on overflow and budgets trailing context", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const suffix = history(10).slice(4);
+        const input = request(suffix, {
+          existingCheckpoint: earlierCheckpoint,
+          trailingMessages: [{ role: "user", content: "runtime context" }],
+        });
+        const decision = yield* prepareCompactedHistory(harness().deps, input);
+        const shrunk = shrinkForOverflow({ ...input, decision, calibrationFactor: 1 });
+        expect(shrunk).not.toBeNull();
+        expect(shrunk!.startIndex).toBeGreaterThan(0);
+        expect(suffix[shrunk!.startIndex]?.role).toBe("user");
+        const retained = input.renderedMessages.slice(shrunk!.startIndex);
+        expect(suffix.slice(shrunk!.startIndex).map((message) => message.id)).toContain("m8");
+        expect(shrunk!.estimatedInputTokens).toBeLessThan(decision.estimatedInputTokens);
+        expect(shrunk!.estimatedInputTokens).toBe(
+          estimatePromptTokens([
+            ...shrunk!.injectedMessages,
+            ...retained,
+            ...input.trailingMessages!,
+          ]),
+        );
       }),
     ));
 

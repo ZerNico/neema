@@ -79,15 +79,28 @@ const parseLocalPdf = Effect.fn("DocumentParser.parseLocalPdf")(function* (
   input: { bytes: Uint8Array; fileName: string },
   config: { maxChars: number; maxPages: number },
 ) {
-  const pages = yield* Effect.tryPromise({
+  const { pages, totalPages } = yield* Effect.tryPromise({
     try: async () => {
       // pdf.js is heavy and only needed when a non-native model meets a PDF.
-      const { extractText, getDocumentProxy } = await import("unpdf");
+      const { getDocumentProxy } = await import("unpdf");
       // pdf.js transfers (and detaches) the buffer it is given; copy so the
       // caller's bytes stay usable — the same blob may be sent natively too.
       const document = await getDocumentProxy(new Uint8Array(input.bytes));
-      const { text } = await extractText(document);
-      return text;
+      try {
+        const extractedPages = await Promise.all(
+          Array.from({ length: Math.min(document.numPages, config.maxPages) }, async (_, index) => {
+            const page = await document.getPage(index + 1);
+            const content = await page.getTextContent();
+            // Match unpdf's text joining, but don't extract pages we'll discard.
+            return content.items
+              .map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : "") : ""))
+              .join("");
+          }),
+        );
+        return { pages: extractedPages, totalPages: document.numPages };
+      } finally {
+        await document.loadingTask.destroy();
+      }
     },
     catch: (error) =>
       new DocumentParseError({
@@ -96,8 +109,7 @@ const parseLocalPdf = Effect.fn("DocumentParser.parseLocalPdf")(function* (
       }),
   });
 
-  const used = pages.slice(0, config.maxPages);
-  const joined = used
+  const joined = pages
     .map((page, index) => `[page ${index + 1}]\n${page.trim()}`)
     .join("\n\n")
     .trim();
@@ -109,7 +121,7 @@ const parseLocalPdf = Effect.fn("DocumentParser.parseLocalPdf")(function* (
     });
   }
 
-  const truncated = joined.length > config.maxChars || pages.length > used.length;
+  const truncated = joined.length > config.maxChars || totalPages > pages.length;
   const text = joined.length > config.maxChars ? joined.slice(0, config.maxChars) : joined;
   return {
     text: truncated ? `${text}\n\n[document truncated]` : text,

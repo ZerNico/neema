@@ -3,7 +3,7 @@ import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { execSync } from "node:child_process";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { uuidv7 } from "uuidv7";
 import {
   conversations,
@@ -550,6 +550,75 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(MemoryService.use((service) => service.listReferenceable(userId))),
     ).resolves.toHaveLength(1);
+  });
+
+  it("reads initialized preferences without attempting another insert", async () => {
+    const userId = await createUser();
+    const repo = await runtime.runPromise(MemoryRepo);
+    const db = await runtime.runPromise(Db);
+    const initial = await runtime.runPromise(repo.getSettings(userId));
+    const insert = vi.spyOn(db, "insert");
+    try {
+      await expect(runtime.runPromise(repo.getSettings(userId))).resolves.toEqual(initial);
+      expect(insert).not.toHaveBeenCalled();
+    } finally {
+      insert.mockRestore();
+    }
+  });
+
+  it("initializes one settings row for concurrent first reads", async () => {
+    const userId = await createUser();
+    const repo = await runtime.runPromise(MemoryRepo);
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => runtime.runPromise(repo.getSettings(userId))),
+    );
+    for (const result of results) expect(result).toEqual(results[0]);
+    const rows = await runtime.runPromise(
+      Db.pipe(
+        Effect.flatMap((db) =>
+          db.select().from(memorySettings).where(eq(memorySettings.userId, userId)),
+        ),
+      ),
+    );
+    expect(rows).toHaveLength(1);
+    expect(results[0]).toMatchObject({ referenceEnabled: true, autoSaveEnabled: true });
+  });
+
+  it("rereads the winning preferences when initialization commits after the first select", async () => {
+    const userId = await createUser();
+    const repo = await runtime.runPromise(MemoryRepo);
+    const db = await runtime.runPromise(Db);
+    const inserted = deferred();
+    const release = deferred();
+    const writer = runtime.runPromise(
+      db.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx
+            .insert(memorySettings)
+            .values({ userId, referenceEnabled: false, autoSaveEnabled: false });
+          inserted.resolve();
+          yield* Effect.promise(() => release.promise);
+        }),
+      ),
+    );
+    await inserted.promise;
+    const insert = vi.spyOn(db, "insert");
+    const reader = runtime.runPromise(repo.getSettings(userId));
+    try {
+      // The uncommitted row is invisible to SELECT; its unique key blocks INSERT
+      // until the writer commits. The fallback read must use that writer's flags.
+      await vi.waitFor(() => expect(insert).toHaveBeenCalledWith(memorySettings));
+      release.resolve();
+      await writer;
+      await expect(reader).resolves.toMatchObject({
+        referenceEnabled: false,
+        autoSaveEnabled: false,
+      });
+    } finally {
+      release.resolve();
+      await Promise.allSettled([writer, reader]);
+      insert.mockRestore();
+    }
   });
 
   it("applies concurrent preference patches without overwriting another switch", async () => {

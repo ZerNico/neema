@@ -17,10 +17,9 @@ export interface DetailPanelRequest {
   /**
    * The panel body.
    *
-   * Contract: pass only stable *identifiers* as props (a message id, a
-   * conversation id), or data that is already final — this element is held in
-   * state, so its props are frozen at open time. A body that must track live
-   * data should take an id and subscribe with its own hooks.
+   * Props are snapshotted at open time and refreshed on re-open. A body that
+   * must track live data between opens should take an id and subscribe with
+   * its own hooks.
    */
   body: ReactNode;
   /** Free-form hint for the body (e.g. which row to scroll to). Updates on re-open. */
@@ -51,13 +50,7 @@ const DetailPanelStateContext = createContext<DetailPanelRequest | null>(null);
 export function DetailPanelProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DetailPanelRequest | null>(null);
 
-  const open = useCallback((request: DetailPanelRequest) => {
-    setState((current) =>
-      // Same content re-opened (e.g. a second citation chip): keep the mounted
-      // body element and only move the focus hint.
-      current?.id === request.id ? { ...request, body: current.body } : request,
-    );
-  }, []);
+  const open = useCallback((request: DetailPanelRequest) => setState(request), []);
   const close = useCallback(() => setState(null), []);
 
   // Otherwise navigating away leaves the panel showing the previous page's
@@ -107,7 +100,9 @@ export function DetailPanelRail({ className }: { className?: string }) {
               <p className="text-muted-foreground text-xs">{state.subtitle}</p>
             ) : null}
           </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{state.body}</div>
+          <div key={state.id} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+            {state.body}
+          </div>
         </SheetContent>
       </Sheet>
     );
@@ -140,7 +135,9 @@ export function DetailPanelRail({ className }: { className?: string }) {
           <TooltipContent>Close panel</TooltipContent>
         </Tooltip>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">{state.body}</div>
+      <div key={state.id} className="min-h-0 flex-1 overflow-y-auto p-4">
+        {state.body}
+      </div>
     </aside>
   );
 }
