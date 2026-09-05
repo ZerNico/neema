@@ -5,7 +5,7 @@ import { MessageBubble } from "./message-list.tsx";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
-import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 
 // The panel closes on navigation; the citation tests render outside a router.
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
@@ -732,7 +732,7 @@ describe("MessageBubble actions", () => {
     expect(screen.queryByRole("button", { name: /memory/i })).toBeNull();
   });
 
-  it("keeps a completed search collapsed when a later turn starts reading", () => {
+  it("groups a completed search with a later-turn page read", () => {
     renderPlain({
       status: "streaming",
       content: "",
@@ -775,14 +775,9 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getByRole("button", { name: /Searched the web/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.getByRole("button", { name: /Reading pages/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    const research = screen.getByRole("button", { name: "Reading sources…" });
+    expect(research).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByRole("button", { name: /sources|web/i })).toHaveLength(1);
     expect(screen.queryByText("Search-only result")).not.toBeInTheDocument();
     expect(screen.getByText("Reading this page")).toBeInTheDocument();
   });
@@ -813,8 +808,99 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getAllByRole("button", { name: /Searching the web/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Opening sources…" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Searched the web/ })).toBeNull();
+  });
+
+  it("keeps memory activity between separate research groups", () => {
+    renderPlain({
+      toolActivities: [
+        {
+          family: "web",
+          callId: "search-1",
+          name: "web_search",
+          turnIndex: 0,
+          callIndex: 0,
+          targets: ["effect"],
+          status: "complete",
+        },
+        {
+          family: "memory",
+          callId: "memory-1",
+          name: "save_memory",
+          turnIndex: 1,
+          callIndex: 0,
+          status: "complete",
+          outcome: "created",
+        },
+        {
+          family: "web",
+          callId: "read-1",
+          name: "read_url",
+          turnIndex: 1,
+          callIndex: 1,
+          targets: ["https://effect.website"],
+          status: "complete",
+        },
+      ],
+    });
+
+    const search = screen.getByRole("button", { name: /Searched the web/ });
+    const memory = screen.getByText("Saved to memory");
+    const read = screen.getByRole("button", { name: /Read a page/ });
+    expect(search.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(memory.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("opens the final source list from completed research activity", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    render(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            id: "research-complete",
+            role: "assistant",
+            content: "A researched answer.",
+            reasoning: "",
+            reasoningSeen: false,
+            status: "complete",
+            toolActivities: [
+              {
+                family: "web",
+                callId: "search-1",
+                name: "web_search",
+                targets: ["effect"],
+                status: "complete",
+                sources: [
+                  {
+                    index: 1,
+                    url: "https://effect.website/docs",
+                    title: "Effect source",
+                    snippet: "Documentation excerpt",
+                    read: false,
+                  },
+                ],
+              },
+            ],
+          }}
+        />
+        <DetailPanelRail />
+      </DetailPanelProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Searched the web · 1 source" }));
+    fireEvent.click(screen.getByRole("button", { name: "View all sources" }));
+
+    const panel = screen.getByRole("complementary", { name: "Sources" });
+    expect(within(panel).getByText("Effect source")).toBeInTheDocument();
+    expect(within(panel).getByText("Documentation excerpt")).toBeInTheDocument();
   });
 
   it("orders tool, compaction, then later tool by model turn", () => {
@@ -854,7 +940,7 @@ describe("MessageBubble actions", () => {
 
     const search = screen.getByRole("button", { name: /Searched the web/ });
     const compact = screen.getByRole("button", { name: "Earlier context summarized" });
-    const read = screen.getByRole("button", { name: /Read pages/ });
+    const read = screen.getByRole("button", { name: /Read a page/ });
     expect(search.compareDocumentPosition(compact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(compact.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

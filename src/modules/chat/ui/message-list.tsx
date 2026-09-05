@@ -5,10 +5,10 @@ import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import {
   isMemoryToolActivity,
-  isWebToolActivity,
   type CompactionActivity,
   type ToolActivity,
   type ToolSource,
+  type WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { CitationChip } from "./citation-chip.tsx";
@@ -346,9 +346,11 @@ function UserBubble({ message }: { message: DisplayMessage }) {
 const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
   tools,
   compactions,
+  onViewSources,
 }: {
   tools: ToolActivity[];
   compactions: CompactionActivity[];
+  onViewSources?: () => void;
 }) {
   // oxlint-disable-next-line no-array-sort -- fresh array
   const orderedTools = [...tools].sort(
@@ -364,11 +366,26 @@ const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
     ...orderedCompactions.map((activity) => activity.beforeTurnIndex),
   );
   const nodes: React.ReactNode[] = [];
+  let pendingWeb: WebToolActivity[] = [];
+
+  const flushWeb = () => {
+    if (pendingWeb.length === 0) return;
+    nodes.push(
+      <ToolActivityBlock
+        key={`tools-${pendingWeb[0]!.callId}`}
+        activities={pendingWeb}
+        {...(onViewSources ? { onViewSources } : {})}
+      />,
+    );
+    pendingWeb = [];
+  };
 
   for (let turn = 0; turn <= maxTurn; turn++) {
-    for (const activity of orderedCompactions.filter(
+    const turnCompactions = orderedCompactions.filter(
       (candidate) => candidate.beforeTurnIndex === turn,
-    )) {
+    );
+    if (turnCompactions.length > 0) flushWeb();
+    for (const activity of turnCompactions) {
       nodes.push(
         <CompactionBlock
           key={activity.eventId}
@@ -381,20 +398,40 @@ const AssistantActivityTimeline = memo(function AssistantActivityTimeline({
     }
 
     const turnTools = orderedTools.filter((activity) => (activity.turnIndex ?? 0) === turn);
-    const webTools = turnTools.filter(isWebToolActivity);
-    let webBlockAdded = false;
     for (const activity of turnTools) {
       if (isMemoryToolActivity(activity)) {
+        flushWeb();
         nodes.push(<MemoryActivityBlock key={activity.callId} activity={activity} />);
-      } else if (!webBlockAdded) {
-        nodes.push(<ToolActivityBlock key={`tools-${turn}`} activities={webTools} />);
-        webBlockAdded = true;
+      } else {
+        pendingWeb.push(activity);
       }
     }
   }
+  flushWeb();
 
   return nodes;
 });
+
+function CompletedAssistantActivityTimeline({
+  messageId,
+  sources,
+  tools,
+  compactions,
+}: {
+  messageId: string;
+  sources: ToolSource[];
+  tools: ToolActivity[];
+  compactions: CompactionActivity[];
+}) {
+  const openSources = useSourcesPanel(messageId, sources);
+  return (
+    <AssistantActivityTimeline
+      tools={tools}
+      compactions={compactions}
+      onViewSources={openSources}
+    />
+  );
+}
 
 const EMPTY_COMPACTION_ACTIVITIES: CompactionActivity[] = [];
 
@@ -557,10 +594,19 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}
-        <AssistantActivityTimeline
-          tools={message.toolActivities}
-          compactions={compactionActivities}
-        />
+        {!streaming && sources.length > 0 ? (
+          <CompletedAssistantActivityTimeline
+            messageId={message.id}
+            sources={sources}
+            tools={message.toolActivities}
+            compactions={compactionActivities}
+          />
+        ) : (
+          <AssistantActivityTimeline
+            tools={message.toolActivities}
+            compactions={compactionActivities}
+          />
+        )}
         {streaming && message.content.length === 0 ? (
           showReasoning || toolRunning || compacting ? null : (
             <span className="text-muted-foreground animate-pulse">Thinking…</span>
