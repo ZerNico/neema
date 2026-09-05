@@ -8,7 +8,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import type { ToolPageStatus, WebToolActivity } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
+import {
+  Disclosure,
+  DisclosureContent,
+  DisclosureTrigger,
+  disclosureBodyRailClassName,
+  disclosureChevronMotionClassName,
+  disclosureTriggerClassName,
+} from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 
 const QUERY_LIMIT = 2;
@@ -96,7 +103,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
       </span>
       <span className="ml-auto shrink-0">
         {page.status === "done" ? (
-          <HugeiconsIcon icon={Tick02Icon} className="size-3.5 text-emerald-500" />
+          <HugeiconsIcon icon={Tick02Icon} className="size-3.5 text-success" />
         ) : page.status === "error" ? (
           <HugeiconsIcon
             icon={Alert02Icon}
@@ -209,12 +216,12 @@ export function ToolActivityBlock({
     (onViewSources !== undefined && sourceCount > 0);
 
   return (
-    <Collapsible
+    <Disclosure
       open={expanded}
       onOpenChange={(next) => setOverride({ during: anyRunning, value: next })}
       className="mb-2"
     >
-      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors">
+      <DisclosureTrigger className={disclosureTriggerClassName}>
         <HugeiconsIcon
           icon={GlobalSearchIcon}
           className={cn("size-4", anyRunning && "animate-pulse")}
@@ -223,16 +230,13 @@ export function ToolActivityBlock({
         {hasDetails ? (
           <HugeiconsIcon
             icon={ArrowDown01Icon}
-            className={cn(
-              "size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none",
-              expanded && "rotate-180",
-            )}
+            className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
           />
         ) : null}
-      </CollapsibleTrigger>
+      </DisclosureTrigger>
       {hasDetails ? (
-        <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
-          <div className="border-border text-muted-foreground mt-2 flex flex-col gap-2 border-l-2 pl-3 text-sm">
+        <DisclosureContent>
+          <div className={cn(disclosureBodyRailClassName, "flex flex-col gap-2")}>
             {queries.length > 0 ? (
               <p>
                 Searched <span className="text-foreground/70">{quotedTargets(queries)}</span>
@@ -269,8 +273,8 @@ export function ToolActivityBlock({
               </button>
             ) : null}
           </div>
-        </CollapsibleContent>
+        </DisclosureContent>
       ) : null}
-    </Collapsible>
+    </Disclosure>
   );
 }

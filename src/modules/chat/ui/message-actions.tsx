@@ -270,7 +270,7 @@ export function MessageActions({
           <time
             dateTime={time.iso}
             className={cn(
-              "text-muted-foreground shrink-0 text-[0.6875rem] tabular-nums",
+              "text-muted-foreground shrink-0 text-2xs leading-[inherit] tabular-nums",
               timeFirst ? "mr-0.5" : "ml-0.5",
             )}
           />
@@ -289,7 +289,7 @@ export function MessageActions({
       <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
         <HugeiconsIcon
           icon={copied ? Tick02Icon : Copy01Icon}
-          className={copied ? "size-4 text-emerald-500" : "size-4"}
+          className={copied ? "size-4 text-success" : "size-4"}
         />
       </ActionButton>
       {onEdit ? (

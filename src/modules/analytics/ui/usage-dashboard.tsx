@@ -23,7 +23,6 @@ import {
 } from "./format.ts";
 import { Button } from "~/ui/primitives/button";
 import { Calendar } from "~/ui/primitives/calendar";
-import { Card, CardContent, CardHeader } from "~/ui/primitives/card";
 import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
 import { Separator } from "~/ui/primitives/separator";
 import {
@@ -34,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/ui/primitives/table";
+import { Card, CardContent, CardHeader } from "~/ui/card.tsx";
 import { cn } from "~/ui/utils";
 
 export const USAGE_RANGES: Array<{ value: UsageRangeDays; label: string }> = [

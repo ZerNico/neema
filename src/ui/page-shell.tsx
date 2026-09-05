@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useMatches } from "@tanstack/react-router";
 import type { IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import { cardSurfaceClassName } from "~/ui/card.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
   Empty,
@@ -181,12 +182,7 @@ export function Section({
 // same. Radius sits on the app's 2xl/3xl/4xl scale like every other surface.
 export function ListCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        "border-border divide-border bg-background divide-y overflow-hidden rounded-3xl border",
-        className,
-      )}
-    >
+    <div className={cn(cardSurfaceClassName, "divide-border divide-y overflow-hidden", className)}>
       {children}
     </div>
   );

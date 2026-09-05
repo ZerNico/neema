@@ -130,6 +130,18 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 
+  it("composes KPI tiles and chart panels from shared cards", async () => {
+    renderPage();
+
+    const messagesLabel = (await screen.findAllByText("Messages"))[0]!;
+    const chartTitle = await screen.findByRole("heading", { name: "Token composition" });
+    expect(messagesLabel.closest('[data-slot="card-content"]')).toHaveTextContent("42");
+    expect(chartTitle.closest('[data-slot="card-header"]')).not.toBeNull();
+    for (const content of [messagesLabel, chartTitle]) {
+      expect(content.closest('[data-slot="card"]')).toHaveAttribute("data-size", "sm");
+    }
+  });
+
   it("keeps the current dashboard visible while another range loads", async () => {
     // Never resolve the uncached 7-day query: if the range update is not a
     // transition, the route's Suspense fallback replaces the whole page.

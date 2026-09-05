@@ -27,7 +27,13 @@ import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/ui/primitives/collapsible";
+import {
+  Disclosure,
+  DisclosureContent,
+  DisclosureTrigger,
+  disclosureChevronMotionClassName,
+  disclosureTriggerClassName,
+} from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 
 type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
@@ -189,7 +195,7 @@ function DayDivider({ label }: { label: string }) {
   return (
     <div className="mb-3 mt-1 flex items-center gap-3" role="separator" aria-label={label}>
       <span className="bg-border h-px flex-1" />
-      <span className="text-muted-foreground text-[0.6875rem] font-medium uppercase tracking-wider">
+      <span className="text-muted-foreground text-2xs leading-[inherit] font-medium uppercase tracking-wider">
         {label}
       </span>
       <span className="bg-border h-px flex-1" />
@@ -319,7 +325,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             </div>
           ) : null}
           {message.editedAt ? (
-            <span className="text-muted-foreground mr-1 mt-1 text-[0.6875rem]">edited</span>
+            <span className="text-muted-foreground mr-1 mt-1 text-2xs leading-[inherit]">
+              edited
+            </span>
           ) : null}
           {/* Hover-revealed on pointer devices; always visible on touch, where
               there is no hover. focus-within keeps them keyboard-reachable. */}
@@ -521,25 +529,31 @@ function GenerationFailure({
               {copy.description}
             </p>
             {details ? (
-              <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="mt-2">
-                <CollapsibleTrigger className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 flex w-fit items-center gap-1 rounded-lg text-xs font-medium outline-none transition-colors focus-visible:ring-3">
+              <Disclosure open={detailsOpen} onOpenChange={setDetailsOpen} className="mt-2">
+                <DisclosureTrigger
+                  className={cn(
+                    disclosureTriggerClassName,
+                    "focus-visible:ring-ring/30 w-fit gap-1 rounded-lg text-xs font-medium outline-none focus-visible:ring-3",
+                  )}
+                >
                   <HugeiconsIcon
                     icon={ArrowDown01Icon}
                     strokeWidth={2}
                     className={cn(
-                      "size-3 transition-transform duration-200 ease-out motion-reduce:transition-none",
+                      disclosureChevronMotionClassName,
+                      "size-3",
                       detailsOpen && "rotate-180",
                     )}
                     aria-hidden
                   />
                   Technical details
-                </CollapsibleTrigger>
-                <CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
+                </DisclosureTrigger>
+                <DisclosureContent>
                   <p className="text-muted-foreground mt-1.5 [overflow-wrap:anywhere] font-mono text-2xs leading-relaxed">
                     {details}
                   </p>
-                </CollapsibleContent>
-              </Collapsible>
+                </DisclosureContent>
+              </Disclosure>
             ) : null}
           </div>
         </div>

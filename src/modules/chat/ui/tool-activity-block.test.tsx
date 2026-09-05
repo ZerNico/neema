@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { WebToolActivity } from "../client/use-message-stream.ts";
@@ -161,22 +161,39 @@ describe("ToolActivityBlock", () => {
     );
   });
 
-  it("stays open across a completed-search gap before reading begins", () => {
+  it("cancels collapse across a 500ms research gap and waits 800ms after the final read", () => {
+    vi.useFakeTimers();
     const runningSearch: WebToolActivity = {
       ...completeSearch,
       status: "running",
       sources: [],
     };
-    const { rerender } = render(<ToolActivityBlock activities={[runningSearch]} />);
+    const { rerender, unmount } = render(<ToolActivityBlock activities={[runningSearch]} />);
 
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    try {
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
 
-    rerender(<ToolActivityBlock activities={[completeSearch]} />);
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+      rerender(<ToolActivityBlock activities={[completeSearch]} />);
+      act(() => vi.advanceTimersByTime(500));
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
 
-    rerender(<ToolActivityBlock activities={[completeSearch, runningRead]} />);
-    expect(toggle()).toHaveAccessibleName("Reading sources…");
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+      rerender(<ToolActivityBlock activities={[completeSearch, runningRead]} />);
+      expect(toggle()).toHaveAccessibleName("Reading sources…");
+      // Pass the original search-completion deadline while a read is running.
+      // A stale timeout would clear graceOpen and collapse immediately on finish.
+      act(() => vi.advanceTimersByTime(300));
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
+
+      rerender(<ToolActivityBlock activities={[completeSearch, completeRead]} />);
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
+      act(() => vi.advanceTimersByTime(799));
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
+      act(() => vi.advanceTimersByTime(1));
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("only offers the source-panel action after completion", async () => {

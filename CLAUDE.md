@@ -168,6 +168,15 @@ nativeButton={false}>` for navigation — Base UI forces `role="button"`; use
   chats index all use it. Confirmations go through `useConfirm()` (AlertDialog);
   non-inline mutation failures go through `toast` from `sonner` (Toaster mounted in
   `__root.tsx`).
-- Radius scale is 2xl/3xl/4xl (rows/cards/buttons). Semantic colour tokens only —
-  `success` and `warning` exist alongside `destructive`; `text-2xs` is the one size
-  below `text-xs`.
+- In-page cards import from `~/ui/card.tsx`, not the generated primitive. Its
+  `cardSurfaceClassName` also styles `ListCard`: flat outlined `rounded-3xl`, with
+  background/foreground tokens and no shadow or ring in either theme. Keep layout
+  local; lists retain their unpadded divided rows. Floating overlays (dialogs,
+  popovers, menus, sheets) retain their generated elevation.
+- Chat disclosures use `~/ui/disclosure.tsx` for measured-height/opacity animation,
+  reduced-motion and hidden-until-found handling, plus shared trigger/chevron/rail
+  recipes. Keep each consumer's open state, timers and scroll behavior local.
+- Radius scale is 2xl/3xl/4xl for app-authored chrome (rows/cards/buttons), not a
+  mandate to change generated primitive density or tiny chart/favicon geometry.
+  Semantic colour tokens only — `success` and `warning` exist alongside
+  `destructive`; `text-2xs` is the one size below `text-xs`.

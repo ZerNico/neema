@@ -111,6 +111,9 @@ describe("MessageBubble", () => {
     expect(within(alert).getByText(/Try again in 2 seconds/)).toBeInTheDocument();
 
     const detailsTrigger = within(alert).getByRole("button", { name: "Technical details" });
+    expect(detailsTrigger).toHaveClass("gap-1", "text-xs", "rounded-lg", "focus-visible:ring-3");
+    expect(detailsTrigger).not.toHaveClass("gap-1.5", "text-sm");
+    expect(detailsTrigger.querySelector("svg")).toHaveClass("size-3", "transition-transform");
     expect(detailsTrigger).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(detailsTrigger);
     expect(detailsTrigger).toHaveAttribute("aria-expanded", "true");

@@ -11,7 +11,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "~/ui/primitives/card";
+} from "~/ui/card.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 
