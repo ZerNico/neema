@@ -1,22 +1,27 @@
 import { BubbleChatCancelIcon } from "@hugeicons/core-free-icons";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { chatModelsQuery, conversationQuery } from "~/modules/chat/client/queries.ts";
+import {
+  chatModelsQuery,
+  conversationQuery,
+  webSearchAvailabilityQuery,
+} from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
 import { EmptyState } from "~/ui/page-shell.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 
 export const Route = createFileRoute("/_app/chat/$conversationId")({
-  // Both blocking queries start together. The model list is a suspense read
-  // inside the view (the composer's search toggle), so leaving it out here
-  // would queue a second cold round trip after the conversation lands.
-  // Nothing is returned: the view reads both from the query cache, and the
+  // Start the conversation and composer queries together so the model label
+  // and search toggle are ready when the view renders, not a round trip later.
+  // Nothing is returned: the view reads from the query cache, and the
   // SSR query integration already dehydrates them — returning the payload
   // would serialize the whole conversation into the document a second time.
   loader: async ({ context, params }) => {
     const [detail] = await Promise.all([
       context.queryClient.ensureQueryData(conversationQuery(params.conversationId)),
       context.queryClient.ensureQueryData(chatModelsQuery),
+      // Prefetch keeps optional search-config failures out of the route error boundary.
+      context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
     ]);
     // The server function normally throws `notFound()`. Keep this runtime guard
     // too: a stale or malformed cached result must never reach ChatView, whose

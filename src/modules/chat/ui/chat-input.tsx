@@ -9,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { chatModelsQuery, webSearchAvailabilityQuery } from "../client/queries.ts";
+import { resolveChatModel } from "../client/selected-model.ts";
 import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
 import { ModelPicker } from "./model-picker.tsx";
 import { ATTACHMENT_ACCEPT } from "~/modules/attachments/constants.ts";
@@ -92,11 +93,11 @@ export const ChatInput = forwardRef<
   const dragDepth = useRef(0);
   const [dragging, setDragging] = useState(false);
   const noModels = models.length === 0;
-  const selectedModel = models.find((model) => model.id === modelId);
+  const selectedModel = resolveChatModel(models, modelId);
 
   useEffect(() => {
-    if ((!modelId || !selectedModel) && models[0]) onModelChange(models[0].id);
-  }, [modelId, models, onModelChange, selectedModel]);
+    if (selectedModel && selectedModel.id !== modelId) onModelChange(selectedModel.id);
+  }, [modelId, onModelChange, selectedModel]);
   const searchAvailable =
     (searchAvailability?.enabled ?? false) && (selectedModel?.capabilities.tools ?? false);
 
@@ -144,6 +145,7 @@ export const ChatInput = forwardRef<
   const canSubmit =
     !disabled &&
     !!selectedModel &&
+    selectedModel.id === modelId &&
     !blocked &&
     !attachments?.queued &&
     (value.trim() !== "" || usable > 0);
@@ -300,7 +302,7 @@ export const ChatInput = forwardRef<
         ) : null}
         <ModelPicker
           models={models}
-          value={modelId}
+          value={selectedModel?.id ?? null}
           onChange={onModelChange}
           disabled={noModels || controlsDisabled}
           trigger={

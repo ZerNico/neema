@@ -1,9 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { isNotFound, notFound } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "./_app.chat.$conversationId.tsx";
+import { Route as NewChatRoute } from "./_app.index.tsx";
 import { getConversationWithMessages, listChatModels } from "~/modules/chat/server/functions.ts";
+import { getWebSearchAvailability } from "~/modules/tools/server/functions.ts";
 
 vi.mock("~/modules/chat/server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -13,11 +15,16 @@ vi.mock("~/modules/chat/server/functions.ts", () => ({
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: vi.fn(),
 }));
-// The view is covered by chat-view.test; the route only has to hand it data.
-vi.mock("~/modules/chat/ui/chat-view.tsx", () => ({ ChatView: () => <div /> }));
+// The views are covered by chat-view.test; the routes only have to hand them data.
+vi.mock("~/modules/chat/ui/chat-view.tsx", () => ({
+  ChatView: () => <div />,
+  NewChatView: () => <div />,
+}));
 
 const conversationMock = vi.mocked(getConversationWithMessages);
 const modelsMock = vi.mocked(listChatModels);
+const availabilityMock = vi.mocked(getWebSearchAvailability);
+const availability = { configured: true, enabled: true };
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -27,10 +34,10 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
-const runLoader = (queryClient: QueryClient) =>
-  // Only the two fields the loader reads; the router supplies the rest.
+const runLoader = (queryClient: QueryClient, route: typeof Route | typeof NewChatRoute = Route) =>
+  // Only the two fields the loaders read; the router supplies the rest.
   (
-    Route.options.loader as (args: {
+    route.options.loader as (args: {
       context: { queryClient: QueryClient };
       params: { conversationId: string };
     }) => Promise<undefined>
@@ -42,66 +49,92 @@ const runLoader = (queryClient: QueryClient) =>
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  conversationMock.mockResolvedValue({ conversation: { id: "c1" }, messages: [] } as never);
+  modelsMock.mockResolvedValue([]);
+  availabilityMock.mockResolvedValue(availability);
 });
 
-describe("chat route loader", () => {
-  it("starts the conversation and model requests together", async () => {
+describe.each([
+  { name: "existing chat", route: Route },
+  { name: "new chat", route: NewChatRoute },
+])("$name route composer loading", ({ route }) => {
+  it("starts requests together and waits for composer data before rendering", async () => {
     const conversation = deferred<unknown>();
     const models = deferred<unknown>();
+    const search = deferred<typeof availability>();
     conversationMock.mockReturnValue(conversation.promise as never);
     modelsMock.mockReturnValue(models.promise as never);
+    availabilityMock.mockReturnValue(search.promise);
     const queryClient = newClient();
 
-    const pending = runLoader(queryClient);
-    // Neither request has answered yet, so a serial loader would still be
-    // waiting on the first one.
-    await Promise.resolve();
-    expect(conversationMock).toHaveBeenCalledWith({ data: { conversationId: "c1" } });
+    const pending = runLoader(queryClient, route);
+    // None has answered yet: a serial loader would only have started one.
     expect(modelsMock).toHaveBeenCalledTimes(1);
+    expect(availabilityMock).toHaveBeenCalledTimes(1);
+    if (route === Route) {
+      expect(conversationMock).toHaveBeenCalledWith({ data: { conversationId: "c1" } });
+    } else {
+      expect(conversationMock).not.toHaveBeenCalled();
+    }
 
     let settled = false;
     void pending.then(() => {
       settled = true;
     });
     conversation.resolve({ conversation: { id: "c1" }, messages: [] });
-    await Promise.resolve();
+    models.resolve([]);
+    await waitFor(() => expect(queryClient.getQueryData(["chat-models"])).toEqual([]));
     expect(settled).toBe(false);
 
-    models.resolve([]);
-    // Resolves to nothing: the view reads the cache, and returning the payload
-    // would serialize the whole conversation into the SSR document twice.
+    search.resolve(availability);
+    // The SSR query integration serializes the cache; don't duplicate the payload.
     await expect(pending).resolves.toBeUndefined();
-    expect(queryClient.getQueryData(["conversation", "c1"])).toEqual({
-      conversation: { id: "c1" },
-      messages: [],
-    });
-    expect(queryClient.getQueryData(["chat-models"])).toEqual([]);
+    expect(queryClient.getQueryData(["tools", "web-search", "availability"])).toEqual(availability);
+    if (route === Route) {
+      expect(queryClient.getQueryData(["conversation", "c1"])).toEqual({
+        conversation: { id: "c1" },
+        messages: [],
+      });
+    }
   });
 
   it("reuses fresh cached data instead of refetching", async () => {
-    conversationMock.mockResolvedValue({ conversation: { id: "c1" }, messages: [] } as never);
-    modelsMock.mockResolvedValue([] as never);
     const queryClient = newClient();
+    await runLoader(queryClient, route);
+    await runLoader(queryClient, route);
 
-    await runLoader(queryClient);
-    await runLoader(queryClient);
-
-    expect(conversationMock).toHaveBeenCalledTimes(1);
     expect(modelsMock).toHaveBeenCalledTimes(1);
+    expect(availabilityMock).toHaveBeenCalledTimes(1);
+    expect(conversationMock).toHaveBeenCalledTimes(route === Route ? 1 : 0);
   });
 
+  it("does not prevent opening a chat if optional search config fails", async () => {
+    availabilityMock.mockRejectedValue(new Error("Search config unavailable"));
+    const queryClient = newClient();
+
+    await expect(runLoader(queryClient, route)).resolves.toBeUndefined();
+    expect(availabilityMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(["chat-models"])).toEqual([]);
+    expect(queryClient.getQueryState(["tools", "web-search", "availability"])?.status).toBe(
+      "error",
+    );
+  });
+
+  it("still rejects a failed required model lookup", async () => {
+    modelsMock.mockRejectedValue(new Error("Models unavailable"));
+    await expect(runLoader(newClient(), route)).rejects.toThrow("Models unavailable");
+  });
+});
+
+describe("chat route loader", () => {
   it("preserves a missing server conversation as route not-found", async () => {
     conversationMock.mockRejectedValue(notFound());
-    modelsMock.mockResolvedValue([] as never);
-
     await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
   });
 
   it("rejects malformed missing-conversation data before rendering the view", async () => {
     conversationMock.mockResolvedValue({ conversation: undefined, messages: [] } as never);
-    modelsMock.mockResolvedValue([] as never);
-
     await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
   });
 });

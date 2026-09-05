@@ -5,6 +5,7 @@ import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import {
   CreateGroupInput,
   CreateModelInput,
@@ -14,6 +15,7 @@ import {
   ModelIdInput,
   ProviderIdInput,
   RenameGroupInput,
+  UpdateDefaultModelOrderInput,
   UpdateModelInput,
   UpdateProviderInput,
 } from "../schema.ts";
@@ -63,6 +65,30 @@ export const fetchProviderCatalog = createServerFn({ method: "GET" })
 export const listModels = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ProviderRepo.use((repo) => repo.listModels())));
+
+export const updateDefaultModelOrder = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateDefaultModelOrderInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ProviderRepo;
+        const sync = yield* SyncBus;
+        yield* repo.setDefaultModelOrder(data.modelIds);
+        yield* sync
+          .publishGlobal({ type: "models.defaults.changed" })
+          .pipe(
+            Effect.catchCause(() =>
+              Effect.logWarning("model defaults changed but sync publication failed"),
+            ),
+          );
+      }).pipe(
+        Effect.catchTag("InvalidDefaultModelOrder", (error) =>
+          Effect.die(new Response(error.reason, { status: 400 })),
+        ),
+      ),
+    ),
+  );
 
 export const createModel = createServerFn({ method: "POST" })
   .middleware([requireAdmin])

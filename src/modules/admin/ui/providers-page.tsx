@@ -4,6 +4,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@ta
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
+import { DefaultModelOrder } from "./default-model-order.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -113,6 +114,7 @@ export function ProvidersPage() {
           })}
         </ListCard>
       )}
+      <DefaultModelOrder models={models} providers={providers} />
       <AddProviderDialog open={adding} onOpenChange={setAdding} />
     </Page>
   );

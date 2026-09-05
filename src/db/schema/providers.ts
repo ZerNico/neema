@@ -41,6 +41,8 @@ export const models = pgTable(
     type: text({ enum: ["chat", "embedding"] })
       .$type<ModelType>()
       .notNull(),
+    // Selection priority only; null leaves this model in the alphabetical fallback.
+    defaultPriority: integer("default_priority"),
     contextLength: integer("context_length"),
     embeddingDimensions: integer("embedding_dimensions"),
     // Auto-detected from the provider catalog where possible, admin-overridable.

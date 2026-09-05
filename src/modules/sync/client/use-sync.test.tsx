@@ -77,6 +77,18 @@ describe("useSync", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
   });
 
+  it("refetches authorized models and admin order after a policy change or reconnect", () => {
+    const { invalidate, source } = renderSync();
+    source.emit("sync", { type: "models.defaults.changed" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "models"] });
+    invalidate.mockClear();
+    source.emit("open");
+    source.emit("open");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "models"] });
+  });
+
   it("still applies ordinary events after reconnecting", () => {
     const { invalidate, source } = renderSync();
     source.emit("open");

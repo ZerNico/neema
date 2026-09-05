@@ -1,5 +1,6 @@
-import { and, asc, eq, exists, or, sql } from "drizzle-orm";
-import { Context, Effect, Layer, type Redacted } from "effect";
+import { and, asc, eq, exists, inArray, or, sql } from "drizzle-orm";
+import { Context, Effect, Layer, Schema, type Redacted } from "effect";
+import { DefaultModelIds, InvalidDefaultModelOrder, markDefaultModel } from "../default-models.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
@@ -16,6 +17,7 @@ export type ChatModelRow = Pick<
   "id" | "displayName" | "contextLength" | "capabilities"
 > & {
   providerName: string;
+  isDefault: boolean;
 };
 type ProviderRow = typeof providers.$inferSelect;
 // Provider rows with the ciphertext stripped — safe to send to admin clients.
@@ -48,6 +50,9 @@ export class ProviderRepo extends Context.Service<
      * see everything (but never models of a disabled provider).
      */
     listChatModelsFor(userId: string): Effect.Effect<ChatModelRow[]>;
+    setDefaultModelOrder(
+      modelIds: ReadonlyArray<string>,
+    ): Effect.Effect<void, InvalidDefaultModelOrder>;
     /**
      * May this user use this model right now: the listChatModelsFor access
      * predicate plus an enabled provider. The model's own enabled/type flags
@@ -168,9 +173,10 @@ export class ProviderRepo extends Context.Service<
         listChatModelsFor: Effect.fn("ProviderRepo.listChatModelsFor")(function* (userId) {
           // Selects only what the picker renders: the full row would leak
           // provider-internal details (modelKey, metadata) to every user.
-          return yield* db
+          const rows = yield* db
             .select({
               id: models.id,
+              defaultPriority: models.defaultPriority,
               displayName: models.displayName,
               contextLength: models.contextLength,
               capabilities: models.capabilities,
@@ -186,8 +192,60 @@ export class ProviderRepo extends Context.Service<
                 accessibleBy(userId),
               ),
             )
-            .orderBy(asc(models.displayName))
+            .orderBy(asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
+          return markDefaultModel(rows);
+        }),
+
+        setDefaultModelOrder: Effect.fn("ProviderRepo.setDefaultModelOrder")(function* (input) {
+          const modelIds = yield* Schema.decodeUnknownEffect(DefaultModelIds)(input).pipe(
+            Effect.mapError(
+              () =>
+                new InvalidDefaultModelOrder({ reason: "Choose up to 100 distinct model IDs." }),
+            ),
+          );
+          yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                // Also serializes replacements of an empty order. Row locks on
+                // ranked models alone would not protect that case.
+                yield* tx.execute(
+                  sql`select pg_advisory_xact_lock(hashtextextended('chat.model-default-order', 0))`,
+                );
+                if (modelIds.length > 0) {
+                  const selected = yield* tx
+                    .select({ id: models.id, type: models.type })
+                    .from(models)
+                    .where(inArray(models.id, modelIds))
+                    .orderBy(asc(models.id))
+                    .for("update");
+                  if (
+                    selected.length !== modelIds.length ||
+                    selected.some((model) => model.type !== "chat")
+                  ) {
+                    return yield* new InvalidDefaultModelOrder({
+                      reason:
+                        "Some models are no longer available for chat. Refresh the list and try again.",
+                    });
+                  }
+                }
+                const rank =
+                  modelIds.length === 0
+                    ? sql`null`
+                    : sql`case ${sql.join(
+                        modelIds.map(
+                          (id, index) => sql`when ${models.id} = ${id} then ${index}::integer`,
+                        ),
+                        sql` `,
+                      )} else null end`;
+                yield* tx.update(models).set({ defaultPriority: rank, updatedAt: new Date() });
+              }),
+            )
+            .pipe(
+              Effect.catch((error) =>
+                error instanceof InvalidDefaultModelOrder ? Effect.fail(error) : Effect.die(error),
+              ),
+            );
         }),
 
         isModelAccessible: Effect.fn("ProviderRepo.isModelAccessible")(function* (userId, modelId) {
@@ -268,7 +326,11 @@ export class ProviderRepo extends Context.Service<
               Effect.gen(function* () {
                 yield* tx
                   .update(models)
-                  .set({ ...settings, updatedAt: new Date() })
+                  .set({
+                    ...settings,
+                    ...(settings.type === "embedding" ? { defaultPriority: null } : {}),
+                    updatedAt: new Date(),
+                  })
                   .where(eq(models.id, modelId));
                 // Replace wholesale: the editor submits the complete set, and
                 // the lists are small enough that diffing buys nothing.

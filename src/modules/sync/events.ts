@@ -34,6 +34,9 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("memory.policy.changed"),
   }),
+  Schema.Struct({
+    type: Schema.Literal("models.defaults.changed"),
+  }),
 ]);
 
 export type SyncEvent = typeof SyncEvent.Type;

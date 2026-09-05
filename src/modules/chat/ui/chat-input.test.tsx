@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense, useImperativeHandle, useState, type Ref } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInput } from "./chat-input.tsx";
+import { renderToString } from "react-dom/server";
+import { useSearchMode } from "./use-search-mode.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import {
   useAttachmentUploads,
@@ -194,6 +196,180 @@ beforeEach(() => {
   // jsdom has no object-URL implementation.
   URL.createObjectURL = vi.fn(() => "blob:preview");
   URL.revokeObjectURL = vi.fn();
+});
+
+function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
+  const [modelId, setModelId] = useState(initialModelId);
+  const [searchEnabled, setSearchEnabled] = useState(true);
+  return (
+    <>
+      <output data-testid="selected-default">{modelId ?? "none"}</output>
+      <output data-testid="default-search">{searchEnabled ? "on" : "off"}</output>
+      <button onClick={() => setModelId("text-only")}>Choose Alpha</button>
+      <ChatInput
+        value=""
+        onValueChange={() => {}}
+        onSubmit={() => {}}
+        disabled={false}
+        modelId={modelId}
+        onModelChange={setModelId}
+        searchEnabled={searchEnabled}
+        onSearchEnabledChange={setSearchEnabled}
+      />
+    </>
+  );
+}
+const renderDefaultProbe = (
+  initialModelId: string | null,
+  rows = MODELS.map((entry) => ({ ...entry, isDefault: entry.id === "vision" })),
+) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  });
+  client.setQueryData(["chat-models"], rows);
+  client.setQueryData(["tools", "web-search", "availability"], { configured: true, enabled: true });
+  render(
+    <QueryClientProvider client={client}>
+      <DefaultProbe initialModelId={initialModelId} />
+    </QueryClientProvider>,
+  );
+  return client;
+};
+
+describe("ChatInput default model", () => {
+  it.each([null, "removed"])(
+    "selects the marked default for %s rather than the first row",
+    (initialModelId) => {
+      renderDefaultProbe(initialModelId);
+      expect(screen.getByTestId("selected-default")).toHaveTextContent("vision");
+      expect(screen.getByTestId("default-search")).toHaveTextContent("off");
+    },
+  );
+
+  it("preserves valid conversation and manual selections through policy refreshes", () => {
+    const client = renderDefaultProbe("text-only");
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("text-only");
+    act(() =>
+      client.setQueryData(
+        ["chat-models"],
+        MODELS.map((entry) => ({ ...entry, isDefault: true })),
+      ),
+    );
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("text-only");
+  });
+
+  it("does not enforce changed defaults on an already selected new chat", async () => {
+    const client = renderDefaultProbe(null);
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("vision");
+    act(() =>
+      client.setQueryData(
+        ["chat-models"],
+        MODELS.map((entry) => ({ ...entry, isDefault: entry.id === "text-only" })),
+      ),
+    );
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("vision");
+    fireEvent.click(screen.getByRole("button", { name: "Choose Alpha" }));
+    act(() => client.setQueryData(["chat-models"], [{ ...MODELS[1]!, isDefault: true }]));
+    await waitFor(() => expect(screen.getByTestId("selected-default")).toHaveTextContent("vision"));
+  });
+
+  it("falls back defensively when an older response has no default marker", () => {
+    renderDefaultProbe(
+      null,
+      MODELS.map((entry) => ({ ...entry, isDefault: false })),
+    );
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("text-only");
+  });
+
+  it("leaves an empty list unselected", () => {
+    renderDefaultProbe(null, []);
+    expect(screen.getByTestId("selected-default")).toHaveTextContent("none");
+  });
+});
+
+function InitialControls({
+  modelId,
+  onModelChange,
+  onSubmit,
+}: {
+  modelId: string | null;
+  onModelChange: (id: string) => void;
+  onSubmit: () => void;
+}) {
+  const search = useSearchMode(modelId);
+  return (
+    <ChatInput
+      value="Hello"
+      onValueChange={() => {}}
+      onSubmit={onSubmit}
+      disabled={false}
+      modelId={modelId}
+      onModelChange={onModelChange}
+      searchEnabled={search.enabled}
+      onSearchEnabledChange={search.setEnabled}
+    />
+  );
+}
+
+describe("ChatInput first render", () => {
+  it.each([
+    { id: null, label: "Vision Model", search: true, configured: true, empty: false },
+    { id: "removed", label: "Vision Model", search: true, configured: true, empty: false },
+    { id: "vision", label: "Vision Model", search: true, configured: true, empty: false },
+    { id: "text-only", label: "Text Only", search: false, configured: true, empty: false },
+    { id: null, label: "Vision Model", search: false, configured: false, empty: false },
+    { id: null, label: "Select model", search: false, configured: true, empty: true },
+  ])(
+    "renders the resolved controls before effects: %#",
+    ({ id, label, search, configured, empty }) => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(
+        ["chat-models"],
+        empty
+          ? []
+          : MODELS.map((entry) => ({
+              ...entry,
+              isDefault: entry.id === "vision",
+              capabilities: { ...entry.capabilities, tools: entry.id === "vision" },
+            })),
+      );
+      client.setQueryData(["tools", "web-search", "availability"], {
+        configured,
+        enabled: configured,
+      });
+      const onModelChange = vi.fn();
+      const onSubmit = vi.fn();
+      const input = (modelId: string | null) => (
+        <QueryClientProvider client={client}>
+          <InitialControls modelId={modelId} onModelChange={onModelChange} onSubmit={onSubmit} />
+        </QueryClientProvider>
+      );
+      // Server rendering never runs effects: this catches a placeholder flash
+      // that a normal Testing Library render (which flushes effects) would miss.
+      const container = document.createElement("div");
+      container.innerHTML = renderToString(input(id));
+      const initial = within(container);
+      expect(initial.getByRole("combobox")).toHaveTextContent(label);
+      const toggle = initial.queryByRole("button", { name: "Search the web" });
+      if (search) expect(toggle).toHaveAttribute("aria-pressed", "true");
+      else expect(toggle).toBeNull();
+      expect(onModelChange).not.toHaveBeenCalled();
+
+      if (!empty && (id === null || id === "removed")) {
+        expect(initial.getByRole("button", { name: "Send" })).toBeDisabled();
+        const { rerender } = render(input(id));
+        expect(onModelChange).toHaveBeenCalledWith("vision");
+        // The owner has not applied the callback yet: neither click nor Enter
+        // may send with a different model from the one shown in the trigger.
+        fireEvent.click(sendButton());
+        fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+        expect(onSubmit).not.toHaveBeenCalled();
+        rerender(input("vision"));
+        fireEvent.click(sendButton());
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
 });
 
 describe("ChatInput search toggle", () => {

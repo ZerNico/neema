@@ -1,4 +1,7 @@
 import { Schema } from "effect";
+import { DefaultModelIds } from "~/modules/providers/default-models.ts";
+
+export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
 
 export const CreateProviderInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),

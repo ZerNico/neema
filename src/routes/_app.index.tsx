@@ -1,7 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { NewChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { chatModelsQuery, webSearchAvailabilityQuery } from "~/modules/chat/client/queries.ts";
 
 export const Route = createFileRoute("/_app/")({
+  loader: async ({ context }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData(chatModelsQuery),
+      // Optional: a search-config failure must not prevent opening a chat.
+      context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
+    ]);
+  },
   component: NewChatPage,
 });
 

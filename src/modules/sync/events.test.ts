@@ -49,6 +49,16 @@ describe("sync events", () => {
     }),
   );
 
+  it.effect("roundtrips model default invalidations without model data", () =>
+    Effect.gen(function* () {
+      const envelope = {
+        scope: "global" as const,
+        event: { type: "models.defaults.changed" as const },
+      };
+      expect(yield* decodeEnvelope(yield* encodeEnvelope(envelope))).toEqual(envelope);
+    }),
+  );
+
   it.effect("rejects unknown event types", () =>
     Effect.gen(function* () {
       const result = yield* decodeEnvelope(

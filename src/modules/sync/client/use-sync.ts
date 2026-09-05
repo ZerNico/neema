@@ -20,6 +20,8 @@ export function useSync() {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
+        void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
       }
       opened = true;
     });
@@ -51,6 +53,10 @@ export function useSync() {
           // Edits are announced as message events; provenance derives whether
           // the saved source content still matches the current message.
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
+          break;
+        case "models.defaults.changed":
+          void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
           break;
         case "memory.changed":
         case "memory.policy.changed":

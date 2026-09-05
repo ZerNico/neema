@@ -13,6 +13,7 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
 
 const model = (id: string, tools: boolean) => ({
   id,
+  isDefault: id === "tool-model",
   providerId: "provider-1",
   providerName: "Provider One",
   modelKey: id,
@@ -50,7 +51,8 @@ describe("useSearchMode", () => {
     expect(setup().result.current.enabled).toBe(true);
     expect(setup({ searchEnabled: false }).result.current.enabled).toBe(false);
     expect(setup({ modelId: "plain-model" }).result.current.enabled).toBe(false);
-    expect(setup({ modelId: null }).result.current.enabled).toBe(false);
+    expect(setup({ modelId: null }).result.current.enabled).toBe(true);
+    expect(setup({ modelId: "removed" }).result.current.enabled).toBe(true);
   });
 
   it("allows a per-message opt-out and resets to the enabled default", () => {
