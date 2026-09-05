@@ -76,6 +76,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           modelId: data.modelId,
           content: data.content,
           searchEnabled: data.searchEnabled,
+          timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
         }),
       ).pipe(
@@ -108,6 +109,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           messageId: data.messageId,
           modelId: data.modelId,
+          timeZone: data.timeZone,
         }),
       ).pipe(
         Effect.catchTags({
@@ -178,6 +180,7 @@ export const editMessage = createServerFn({ method: "POST" })
           content: data.content,
           modelId: data.modelId,
           searchEnabled: data.searchEnabled,
+          timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
         }),
       ).pipe(

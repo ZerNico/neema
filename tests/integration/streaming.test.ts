@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
+import type { Prompt } from "effect/unstable/ai";
 import { attachmentBlobs, attachments, messageAttachments, models } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -43,13 +44,16 @@ let hold: {
   release: Deferred.Deferred<void>;
 } | null = null;
 
+const streamPrompts: Array<Prompt.Prompt> = [];
+
 // Deterministic fake AI provider: streams 5 words with a small delay.
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   // Titles are not exercised here; the stream engine never calls this.
   generateText: () => Effect.die("no title generation in these tests"),
-  streamChat: () =>
+  streamChat: (input) =>
     Stream.suspend(() => {
+      streamPrompts.push(input.prompt);
       let emitted = 0;
       return Stream.fromIterable(["alpha ", "beta ", "gamma ", "delta ", "epsilon"]).pipe(
         Stream.map((delta): ChatStreamPart => ({ type: "text-delta", id: "t", delta }) as never),
@@ -520,6 +524,78 @@ describe("retry with a different model", () => {
         .values({ id: attachmentId, userId, blobId, fileName: "shot.png" });
       yield* db.insert(messageAttachments).values({ messageId, attachmentId, position: 0 });
     });
+
+  it("refreshes late runtime context on send, retry and edit without rewriting history", async () => {
+    streamPrompts.length = 0;
+    const stored = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const { userId, conversation } = yield* seedAnswered(textModelId);
+        const sent = yield* chat.sendMessage({
+          userId,
+          conversationId: conversation.id,
+          modelId: textModelId,
+          content: "What day is it?",
+          searchEnabled: false,
+          attachmentIds: [],
+          timeZone: "Europe/Berlin",
+        });
+        yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+        yield* chat.retryMessage({
+          userId,
+          conversationId: conversation.id,
+          messageId: sent.assistantMessageId,
+          timeZone: "America/Los_Angeles",
+        });
+        yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+        const history = yield* repo.listMessages(conversation.id);
+        const question = history.find((message) => message.content === "What day is it?")!;
+        const edited = yield* chat.editMessage({
+          userId,
+          conversationId: conversation.id,
+          messageId: question.id,
+          modelId: textModelId,
+          content: "What time is it?",
+          searchEnabled: false,
+          attachmentIds: [],
+          timeZone: "Asia/Tokyo",
+        });
+        yield* engine.subscribe(edited.assistantMessageId, 0).pipe(Stream.runDrain);
+        return yield* repo.listMessages(conversation.id);
+      }),
+    );
+
+    expect(streamPrompts).toHaveLength(3);
+    const snapshots = streamPrompts.map((prompt, index) => {
+      const clocks = prompt.content.filter((message) =>
+        JSON.stringify(message).includes("<runtime-context>"),
+      );
+      expect(clocks).toHaveLength(1);
+      const clock = clocks[0]!;
+      expect(clock.role).toBe("user");
+      expect(prompt.content.at(-1)).toBe(clock);
+      const text = JSON.stringify(clock);
+      expect(text).toContain(
+        `Time zone: ${["Europe/Berlin", "America/Los_Angeles", "Asia/Tokyo"][index]}`,
+      );
+      return text.match(/UTC instant: ([0-9T:.Z-]+)/)?.[1];
+    });
+    expect(snapshots.every((snapshot) => snapshot !== undefined)).toBe(true);
+    expect(new Set(snapshots).size).toBe(3);
+    // Retrying in a different zone changes only the final runtime block.
+    expect(streamPrompts[1]!.content.slice(0, -1)).toEqual(streamPrompts[0]!.content.slice(0, -1));
+    // Editing changes the latest user turn, not the earlier UTC-annotated history.
+    expect(streamPrompts[2]!.content.slice(0, -2)).toEqual(streamPrompts[0]!.content.slice(0, -2));
+    expect(JSON.stringify(streamPrompts[2]!.content.at(-2))).toContain("; edited:");
+    expect(stored.map((message) => message.content)).toEqual([
+      "hi",
+      "first answer",
+      "What time is it?",
+      "alpha beta gamma delta epsilon",
+    ]);
+  }, 60_000);
 
   it("regenerates the answer with the model the retry picked", async () => {
     const result = await runtime.runPromise(

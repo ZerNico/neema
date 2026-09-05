@@ -69,6 +69,17 @@ See README.md for architecture; this file records the sharp edges.
   whether any tool is armed (`webToolsEnabled`), and retry re-arms search only when
   the original generation called `web_search`.
 
+## Temporal prompt context
+
+- `streaming.ts` samples server time once per generation; `runtime-context.ts` formats it in
+  the browser's submitted timezone (Intl-validated; UTC fallback). Keep this user-role block **after
+  retained history, before tool rounds**, never in the leading system prompt; its content
+  and position stay fixed through the tool loop to preserve cacheable prefixes. Budget it
+  in history/overflow compaction; active-round compaction already counts the base transcript.
+- History timestamps are prompt-only UTC metadata, independent of the current browser zone.
+  Assistant timestamps use `completedAt` when available: retry reuses the row and its original
+  `createdAt`. Neither timestamp annotations nor the runtime block are persisted as message text.
+
 ## Citations / streamdown
 
 - Citations ride on GFM footnotes (`[^N]`), not markdown links: a half-streamed

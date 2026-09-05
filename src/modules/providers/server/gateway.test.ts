@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { Prompt } from "effect/unstable/ai";
 import { vi } from "vitest";
+import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
 import { ProviderRepo } from "./repo.ts";
 import { AiGateway, catalogPricing, inferType } from "./gateway.ts";
 
@@ -79,6 +80,43 @@ const repoStub = Layer.succeed(ProviderRepo)(
 const generate = Effect.flatMap(AiGateway, (gateway) =>
   gateway.generateText({ modelId: "m1", prompt: Prompt.make("Summarize this") }),
 ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+
+describe("provider prompt ordering", () => {
+  it.effect(
+    "serializes runtime context after history instead of moving it into system instructions",
+    () =>
+      Effect.gen(function* () {
+        const recorded = stubProvider(
+          sse([
+            chunk({ content: "Saturday" }),
+            usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+          ]),
+        );
+        const clock = runtimeContextMessage(new Date("2026-09-05T12:00:00Z"), "Europe/Berlin");
+        yield* Effect.flatMap(AiGateway, (gateway) =>
+          gateway.generateText({
+            modelId: "m1",
+            prompt: Prompt.make([
+              { role: "system", content: "Stable policy" },
+              { role: "user", content: "Earlier question" },
+              { role: "assistant", content: "Earlier answer" },
+              { role: "user", content: "What day is it?" },
+              clock,
+            ]),
+          }),
+        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        expect(recorded[0]?.body).toMatchObject({
+          messages: [
+            { role: "system", content: [{ type: "text", text: "Stable policy" }] },
+            { role: "user", content: "Earlier question" },
+            { role: "assistant", content: "Earlier answer" },
+            { role: "user", content: "What day is it?" },
+            { role: "user", content: clock.content },
+          ],
+        });
+      }),
+  );
+});
 
 describe("side generations", () => {
   it.effect("completes against a provider that omits system_fingerprint", () =>

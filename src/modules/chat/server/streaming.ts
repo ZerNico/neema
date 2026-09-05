@@ -33,6 +33,7 @@ import {
   type CompactionDecision,
 } from "./compaction.ts";
 import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
+import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
   MAX_PRIOR_SOURCES,
@@ -84,6 +85,7 @@ export class StreamEngine extends Context.Service<
       messageId: string;
       modelId: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
     }): Effect.Effect<void>;
     // Winds a running generation down early, keeping whatever it has already
     // produced. False when this instance is not the one running it — the same
@@ -130,8 +132,10 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        timeZone?: string | undefined;
         abort: Deferred.Deferred<void>;
       }) {
+        const runtimeContext = runtimeContextMessage(new Date(), input.timeZone);
         // Snapshot the model row up front: the ledger wants its display name
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
@@ -394,6 +398,12 @@ export class StreamEngine extends Context.Service<
                   ),
                 ])
               : null;
+          // History planning excludes the runtime block; reserve its cost here.
+          // Active-round planning already counts it in buildBaseTranscript().
+          const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
+            runtimeContext,
+            ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
+          ];
 
           // Tool policies + memory data + history are the stable prefix.
           // Actual memory records sit in a lower-authority assistant/data message;
@@ -436,12 +446,7 @@ export class StreamEngine extends Context.Service<
               messages: completed,
               renderedMessages: historyMessages,
               fixedPrefix,
-              ...(reminderPrompt(false)
-                ? {
-                    trailingMessages: reminderPrompt(false)!
-                      .content as unknown as ReadonlyArray<Prompt.MessageEncoded>,
-                  }
-                : {}),
+              trailingMessages: historyBudgetTail(false),
               webToolsEnabled: webTools !== undefined,
               priorUsage,
               onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
@@ -453,6 +458,9 @@ export class StreamEngine extends Context.Service<
               ...fixedPrefix,
               ...compaction.injectedMessages,
               ...historyMessages.slice(compaction.startIndex),
+              // A fixed snapshot after history preserves its cacheable prefix.
+              // Tool rounds append after it; no clock updates inside the loop.
+              runtimeContext,
             ]);
           let activeSummary: string | null = null;
           let activeRounds: ReadonlyArray<ActiveRound> = [];
@@ -858,7 +866,6 @@ export class StreamEngine extends Context.Service<
                       summary: activeSummary,
                       rounds: activeRounds,
                     });
-                    const trailing = currentReminderPrompt();
                     const shrunk = shrinkForOverflow({
                       decision: compaction,
                       messages: completed,
@@ -867,12 +874,7 @@ export class StreamEngine extends Context.Service<
                         ...fixedPrefix,
                         ...(activeOnly.content as unknown as ReadonlyArray<Prompt.MessageEncoded>),
                       ],
-                      ...(trailing
-                        ? {
-                            trailingMessages:
-                              trailing.content as unknown as ReadonlyArray<Prompt.MessageEncoded>,
-                          }
-                        : {}),
+                      trailingMessages: historyBudgetTail(!toolRoundsLeft),
                       calibrationFactor: factor,
                     });
                     if (!shrunk) return yield* Effect.fail(error);
@@ -964,6 +966,7 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        timeZone?: string | undefined;
       }) {
         const abort = yield* Deferred.make<void>();
         inFlight.set(input.messageId, abort);

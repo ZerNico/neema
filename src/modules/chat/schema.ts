@@ -5,7 +5,10 @@ import { AttachmentIds } from "~/modules/attachments/schema.ts";
 // rejects the turn that has neither.
 const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 
+const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
+
 const generationFields = {
+  timeZone: TimeZone,
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
@@ -47,6 +50,7 @@ export const RetryMessageInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
+  timeZone: TimeZone,
 });
 
 // Forks the conversation at this assistant message into a new one.

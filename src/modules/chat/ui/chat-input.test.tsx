@@ -196,6 +196,64 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
+describe("ChatInput search toggle", () => {
+  it("keeps enabled search distinct from the disabled hover style", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
+    });
+    client.setQueryData(
+      ["chat-models"],
+      [{ ...MODELS[0]!, capabilities: { ...MODELS[0]!.capabilities, tools: true } }],
+    );
+    client.setQueryData(["tools", "web-search", "availability"], {
+      configured: true,
+      enabled: true,
+    });
+    const onSearchEnabledChange = vi.fn();
+    const input = (searchEnabled: boolean) => (
+      <QueryClientProvider client={client}>
+        <Suspense fallback={null}>
+          <ChatInput
+            value=""
+            onValueChange={() => {}}
+            onSubmit={() => {}}
+            disabled={false}
+            modelId="text-only"
+            onModelChange={() => {}}
+            searchEnabled={searchEnabled}
+            onSearchEnabledChange={onSearchEnabledChange}
+          />
+        </Suspense>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(input(false));
+    const toggle = screen.getByRole("button", { name: "Search the web" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveClass("text-muted-foreground", "hover:bg-muted");
+    fireEvent.click(toggle);
+    expect(onSearchEnabledChange).toHaveBeenLastCalledWith(true);
+
+    rerender(input(true));
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveClass("bg-primary", "text-primary-foreground", "hover:bg-primary/80");
+    for (const className of [
+      "hover:bg-muted",
+      "hover:text-foreground",
+      "dark:hover:bg-muted/50",
+      "text-muted-foreground",
+    ]) {
+      expect(toggle).not.toHaveClass(className);
+    }
+    fireEvent.click(toggle);
+    expect(onSearchEnabledChange).toHaveBeenLastCalledWith(false);
+
+    rerender(input(false));
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveClass("text-muted-foreground", "hover:bg-muted");
+    expect(toggle).not.toHaveClass("bg-primary");
+  });
+});
+
 describe("ChatInput attachment picking", () => {
   it("opens the hidden file input from the plus menu", async () => {
     const harness = setup();

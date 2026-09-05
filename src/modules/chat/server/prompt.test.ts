@@ -110,6 +110,64 @@ describe("buildHistoryMessages without attachments", () => {
   });
 });
 
+describe("buildHistoryMessages timestamps", () => {
+  const createdAt = new Date("2026-09-04T12:00:00Z");
+  const editedAt = new Date("2026-09-05T01:00:00Z");
+  const completedAt = new Date("2026-09-05T01:00:30Z");
+
+  it("adds stable UTC metadata without changing stored text or system instructions", async () => {
+    const { deps } = harness({ rows: [] });
+    const history = [
+      { ...user("m1", "hello"), createdAt },
+      { id: "m2", role: "assistant" as const, content: "answer[^1]", createdAt, completedAt },
+      { id: "s1", role: "system" as const, content: "policy", createdAt },
+    ];
+    const first = await build(deps, history);
+    expect(first).toEqual(await build(deps, history));
+    expect(first).toEqual([
+      { role: "user", content: `[Sent: ${createdAt.toISOString()}]\nhello` },
+      { role: "assistant", content: `[Completed: ${completedAt.toISOString()}]\nanswer` },
+      { role: "system", content: "policy" },
+    ]);
+    expect(history[0]?.content).toBe("hello");
+    expect(history[1]?.content).toBe("answer[^1]");
+  });
+
+  it("distinguishes edits from original sends and retries from original row creation", async () => {
+    const { deps } = harness({ rows: [] });
+    const rendered = await build(deps, [
+      { ...user("m1", "edited question"), createdAt, editedAt },
+      { id: "m2", role: "assistant", content: "retried answer", createdAt, completedAt },
+    ]);
+    expect(rendered[0]?.content).toContain(
+      `Sent: ${createdAt.toISOString()}; edited: ${editedAt.toISOString()}`,
+    );
+    expect(rendered[1]?.content).toContain(`Completed: ${completedAt.toISOString()}`);
+    expect(rendered[1]?.content).not.toContain(createdAt.toISOString());
+  });
+
+  it("adds metadata to attachment-only messages without disturbing file order", async () => {
+    const { deps } = harness({
+      rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "a.png" })],
+    });
+    const [rendered] = await build(deps, [{ ...user("m1", ""), createdAt }]);
+    expect(rendered?.content).toEqual([
+      expect.objectContaining({ type: "file", fileName: "a.png" }),
+      { type: "text", text: `[Sent: ${createdAt.toISOString()}]\n` },
+    ]);
+  });
+
+  it("labels a legacy assistant creation time and omits invalid dates", async () => {
+    const { deps } = harness({ rows: [] });
+    const rendered = await build(deps, [
+      { id: "m1", role: "assistant", content: "old answer", createdAt, completedAt: null },
+      { ...user("m2", "hello"), createdAt: new Date("invalid") },
+    ]);
+    expect(rendered[0]?.content).toBe(`[Created: ${createdAt.toISOString()}]\nold answer`);
+    expect(rendered[1]?.content).toBe("hello");
+  });
+});
+
 describe("buildHistoryMessages with attachments", () => {
   it("puts attachments before the user's words, in position order", async () => {
     const { deps } = harness({

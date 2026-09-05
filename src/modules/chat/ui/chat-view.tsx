@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { conversationQuery } from "../client/queries.ts";
+import { browserTimeZone } from "../client/time-zone.ts";
 import {
   applyCompactionChunk,
   toMemoryActivityOutcome,
@@ -196,6 +197,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           modelId: effectiveModelId!,
           content: input.content,
           searchEnabled,
+          timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
         },
       }),
@@ -206,12 +208,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const retryMutation = useMutation({
-    // `modelId` omitted regenerates with the model that answered before; a
-    // value switches models for this attempt only (the conversation default
-    // and every earlier message keep theirs).
+    // `modelId` omitted regenerates with the model that answered before; an
+    // explicit choice also selects the composer model once the retry succeeds.
+    // The persisted conversation default and earlier messages keep theirs.
     mutationFn: (input: { messageId: string; modelId?: string }) =>
-      retryMessage({ data: { conversationId, ...input } }),
-    onSuccess: async () => {
+      retryMessage({ data: { conversationId, ...input, timeZone: browserTimeZone() } }),
+    onSuccess: async (_result, input) => {
+      if (input.modelId !== undefined) setModelId(input.modelId);
       // Refetch BEFORE bumping the epoch: the retried generation restarts at
       // seq 1, so the new subscription must be seeded from the wiped message
       // (after=0), not from the previous generation's chunk cursor.
@@ -246,7 +249,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       modelId: string;
       searchEnabled: boolean;
       attachmentIds: ReadonlyArray<string>;
-    }) => editMessage({ data: { conversationId, ...input } }),
+    }) => editMessage({ data: { conversationId, ...input, timeZone: browserTimeZone() } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
       // Claimed by the edited message now — dropping the chips must not delete
@@ -659,6 +662,7 @@ export function NewChatView({ user }: { user: { name: string } }) {
           modelId: modelId!,
           content: input.content,
           searchEnabled,
+          timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
         },
       }),

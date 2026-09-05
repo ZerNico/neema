@@ -11,6 +11,9 @@ export interface HistoryMessage {
   readonly id: string;
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
+  readonly createdAt?: Date;
+  readonly editedAt?: Date | null;
+  readonly completedAt?: Date | null;
 }
 
 // Only the three methods the builder needs, so unit tests can hand it plain
@@ -27,6 +30,19 @@ export interface PromptDeps {
 const PDF_TEXT_LABEL = "Text extracted from attached PDF";
 
 const decoder = new TextDecoder();
+
+const messageTimestamp = (message: HistoryMessage): string => {
+  if (message.role === "system") return "";
+  const timestamp =
+    message.role === "assistant" ? (message.completedAt ?? message.createdAt) : message.createdAt;
+  if (!timestamp || !Number.isFinite(timestamp.getTime())) return "";
+  const label = message.role === "user" ? "Sent" : message.completedAt ? "Completed" : "Created";
+  const edited =
+    message.editedAt && Number.isFinite(message.editedAt.getTime())
+      ? `; edited: ${message.editedAt.toISOString()}`
+      : "";
+  return `[${label}: ${timestamp.toISOString()}${edited}]\n`;
+};
 
 /**
  * Rebuilds the prompt history from stored messages, resolving each attachment
@@ -49,11 +65,12 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   const plain = (message: HistoryMessage): Prompt.MessageEncoded => ({
     role: message.role,
     content:
+      messageTimestamp(message) +
       // Without web tools there is no recap block, so history markers would
       // teach the model to emit unresolvable citations — strip them.
-      message.role === "assistant" && !input.webToolsEnabled
+      (message.role === "assistant" && !input.webToolsEnabled
         ? stripCitationMarkers(message.content)
-        : message.content,
+        : message.content),
   });
 
   const rows = yield* deps.attachments.listWithBlobsForMessages(
@@ -129,7 +146,8 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       });
     }
     // The user's own words come last: attachments read as context for them.
-    if (message.content.trim() !== "") parts.push({ type: "text", text: message.content });
+    const text = messageTimestamp(message) + message.content;
+    if (text.trim() !== "") parts.push({ type: "text", text });
 
     messages.push({ role: "user", content: parts });
   }

@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatView, toActivity } from "./chat-view.tsx";
 import {
   branchConversation,
   getConversationWithMessages,
+  retryMessage,
   sendMessage,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -22,6 +23,8 @@ vi.mock("../server/functions.ts", () => ({
   editMessage: vi.fn(),
   stopGeneration: vi.fn(),
 }));
+vi.mock("../client/time-zone.ts", () => ({ browserTimeZone: () => "Europe/Berlin" }));
+
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: vi.fn(),
 }));
@@ -57,6 +60,26 @@ vi.mock("./virtual-message-list.tsx", () => ({
               </output>
             ),
           )}
+          {message.onRetry ? (
+            <button
+              type="button"
+              aria-label={`Retry ${String(message.id)}`}
+              disabled={Boolean(message.retryDisabled)}
+              onClick={message.onRetry as () => void}
+            >
+              Retry same
+            </button>
+          ) : null}
+          {message.onRetryWith ? (
+            <button
+              type="button"
+              aria-label={`Retry ${String(message.id)} with m2`}
+              disabled={Boolean(message.retryDisabled)}
+              onClick={() => (message.onRetryWith as (modelId: string) => void)("m2")}
+            >
+              Retry with Model Two
+            </button>
+          ) : null}
           {message.onBranch ? (
             <button
               type="button"
@@ -76,14 +99,22 @@ vi.mock("./virtual-message-list.tsx", () => ({
 vi.mock("./composer.tsx", () => ({
   Composer: ({
     onSend,
+    modelId,
+    onModelChange,
     searchEnabled,
     onSearchEnabledChange,
   }: {
     onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
+    modelId: string | null;
+    onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
   }) => (
     <div>
+      <output data-testid="composer-model">{modelId}</output>
+      <button type="button" onClick={() => onModelChange("m2")}>
+        Select Model Two
+      </button>
       <output data-testid="search-mode">{searchEnabled ? "on" : "off"}</output>
       <button type="button" onClick={() => onSearchEnabledChange(false)}>
         Disable search
@@ -131,6 +162,7 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
 const branchMock = vi.mocked(branchConversation);
 const conversationMock = vi.mocked(getConversationWithMessages);
 const sendMock = vi.mocked(sendMessage);
+const retryMock = vi.mocked(retryMessage);
 
 const BASE = new Date("2026-03-01T12:00:00Z");
 
@@ -210,6 +242,17 @@ const renderView = (
         enabled: true,
         contextLength: 128_000,
         capabilities: { reasoning: false, tools: true, vision: false, files: false },
+      },
+      {
+        id: "m2",
+        providerId: "provider-1",
+        providerName: "Provider One",
+        modelKey: "m2",
+        displayName: "Model Two",
+        type: "chat",
+        enabled: true,
+        contextLength: 128_000,
+        capabilities: { reasoning: false, tools: false, vision: false, files: false },
       },
     ],
   );
@@ -309,11 +352,105 @@ describe("ChatView search mode", () => {
           modelId: "m1",
           content: "hello",
           searchEnabled: false,
+          timeZone: "Europe/Berlin",
           attachmentIds: [],
         },
       }),
     );
     await waitFor(() => expect(screen.getByTestId("search-mode")).toHaveTextContent("on"));
+  });
+});
+
+describe("ChatView retry", () => {
+  it("selects the explicit retry model for subsequent sends only after success", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof retryMessage>>) => void;
+    retryMock.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    conversationMock.mockResolvedValue(payload(null) as never);
+    sendMock.mockResolvedValueOnce({} as never);
+    renderView();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry m-answer with m2" }));
+    await waitFor(() =>
+      expect(retryMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "c1",
+          messageId: "m-answer",
+          modelId: "m2",
+          timeZone: "Europe/Berlin",
+        },
+      }),
+    );
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
+
+    await act(async () => resolve({} as never));
+    await waitFor(() => expect(screen.getByTestId("composer-model")).toHaveTextContent("m2"));
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "c1",
+          modelId: "m2",
+          content: "hello",
+          searchEnabled: false,
+          timeZone: "Europe/Berlin",
+          attachmentIds: [],
+        },
+      }),
+    );
+  });
+
+  it("keeps the composer selection when retrying the original model", async () => {
+    retryMock.mockResolvedValueOnce({} as never);
+    conversationMock.mockResolvedValue(payload(null) as never);
+    renderView();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Model Two" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+    });
+    await waitFor(() => expect(conversationMock).toHaveBeenCalled());
+
+    expect(retryMock).toHaveBeenCalledWith({
+      data: { conversationId: "c1", messageId: "m-answer", timeZone: "Europe/Berlin" },
+    });
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m2");
+  });
+
+  it("keeps the composer selection when the explicit retry is rejected", async () => {
+    retryMock.mockRejectedValueOnce(new Error("Model unavailable"));
+    renderView();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry m-answer with m2" }));
+    });
+
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    expect(conversationMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
+  });
+
+  it("keeps the composer selection when an earlier-response retry is cancelled", async () => {
+    renderView(null, {
+      messages: [
+        ...basePayload(null).messages,
+        message("m-user-2", "user", "u2"),
+        message("m-answer-2", "assistant", "a2"),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry m-answer with m2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(retryMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
   });
 });
 

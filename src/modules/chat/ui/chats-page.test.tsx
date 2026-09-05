@@ -63,6 +63,21 @@ beforeEach(() => {
 });
 
 describe("ChatsPage", () => {
+  it("owns a full-height scroll container for the chat list", async () => {
+    listMock.mockResolvedValue({
+      conversations: [conversation("a", "A chat", 5)],
+      nextCursor: null,
+    } as never);
+    const { container } = renderPage();
+
+    const chat = await screen.findByRole("link", { name: /A chat/ });
+    const scroller = container.firstElementChild;
+    expect(scroller).toHaveClass("h-full", "overflow-y-auto");
+    expect(scroller).toContainElement(screen.getByRole("heading", { name: "Chats" }));
+    expect(scroller).toContainElement(screen.getByRole("searchbox", { name: "Search chats" }));
+    expect(scroller).toContainElement(chat);
+  });
+
   it("renders conversations grouped by recency", async () => {
     listMock.mockResolvedValue({
       // Four days back lands in the same bucket regardless of the runner's

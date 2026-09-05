@@ -287,16 +287,12 @@ export const ChatInput = forwardRef<
         {searchAvailable ? (
           <Button
             size="sm"
-            variant="ghost"
+            variant={searchEnabled ? "default" : "ghost"}
             aria-label="Search the web"
             aria-pressed={searchEnabled}
             onClick={() => onSearchEnabledChange(!searchEnabled)}
             disabled={controlsDisabled}
-            className={cn(
-              searchEnabled
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className={cn(!searchEnabled && "text-muted-foreground")}
           >
             <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
             <span className="max-[420px]:sr-only">Search</span>

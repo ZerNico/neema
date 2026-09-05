@@ -33,6 +33,7 @@ export class ChatService extends Context.Service<
       modelId: string;
       content: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
       attachmentIds: ReadonlyArray<string>;
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
@@ -52,6 +53,7 @@ export class ChatService extends Context.Service<
       messageId: string;
       /** Regenerate with this model instead of the one that answered before. */
       modelId?: string | undefined;
+      timeZone?: string | undefined;
     }): Effect.Effect<
       { assistantMessageId: string },
       | ConversationNotFound
@@ -78,6 +80,7 @@ export class ChatService extends Context.Service<
       content: string;
       modelId: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
       attachmentIds: ReadonlyArray<string>;
     }): Effect.Effect<
       { assistantMessageId: string },
@@ -232,6 +235,7 @@ function makeChatService() {
       modelId: string;
       content: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
       attachmentIds: ReadonlyArray<string>;
     }) {
       // The server stays authoritative even when the composer hides the toggle.
@@ -266,6 +270,7 @@ function makeChatService() {
         messageId: turn.assistant.id,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
+        timeZone: input.timeZone,
       });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -292,6 +297,7 @@ function makeChatService() {
       assistantMessageId: string;
       modelId: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
       deleteMessageIds: ReadonlyArray<string>;
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: {
@@ -332,6 +338,7 @@ function makeChatService() {
         messageId: input.assistantMessageId,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
+        timeZone: input.timeZone,
       });
 
       return { assistantMessageId: input.assistantMessageId };
@@ -345,6 +352,7 @@ function makeChatService() {
       conversationId: string;
       messageId: string;
       modelId?: string | undefined;
+      timeZone?: string | undefined;
     }) {
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -432,6 +440,7 @@ function makeChatService() {
         assistantMessageId: message.id,
         modelId,
         searchEnabled,
+        timeZone: input.timeZone,
         deleteMessageIds: after.map((m) => m.id),
         // From the retried answer onward: a summary that ends at this message
         // describes the response about to be thrown away. Rows after it are
@@ -530,6 +539,7 @@ function makeChatService() {
       content: string;
       modelId: string;
       searchEnabled: boolean;
+      timeZone?: string | undefined;
       attachmentIds: ReadonlyArray<string>;
     }) {
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -565,6 +575,7 @@ function makeChatService() {
           assistantMessageId: assistant.id,
           modelId: input.modelId,
           searchEnabled: input.searchEnabled,
+          timeZone: input.timeZone,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
           // From the edited user message onward — its text changes while the
           // row survives, so any summary covering it is stale.
@@ -613,6 +624,7 @@ function makeChatService() {
         messageId: created.message.id,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
+        timeZone: input.timeZone,
       });
 
       return { assistantMessageId: created.message.id };

@@ -103,6 +103,15 @@ describe("VirtualMessageList", () => {
     expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "auto" });
   });
 
+  it("keeps the floating jump button opaque on hover in both themes", () => {
+    render(<VirtualMessageList messages={messages} followKey={0} />);
+
+    const button = screen.getByRole("button", { name: "Jump to bottom" });
+    expect(button).toHaveClass("bg-popover", "text-popover-foreground", "hover:bg-muted");
+    expect(button).not.toHaveClass("dark:bg-transparent");
+    expect(button).not.toHaveClass("dark:hover:bg-input/30");
+  });
+
   it("detaches on user scroll and reattaches from the jump button", () => {
     const { rerender } = render(<VirtualMessageList messages={messages} followKey={0} />);
     const scroller = options.getScrollElement()!;

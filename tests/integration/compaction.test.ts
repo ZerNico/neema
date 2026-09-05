@@ -16,7 +16,11 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { prepareCompactedHistory, type CompactionDeps } from "~/modules/chat/server/compaction.ts";
+import {
+  estimatePromptTokens,
+  prepareCompactedHistory,
+  type CompactionDeps,
+} from "~/modules/chat/server/compaction.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -812,6 +816,7 @@ const generate = Effect.fn("test.generate")(function* (input: {
   messageId: string;
   modelId: string;
   searchEnabled?: boolean;
+  timeZone?: string;
 }) {
   const engine = yield* StreamEngine;
   const { searchEnabled = false, ...generation } = input;
@@ -831,6 +836,22 @@ const askAgain = Effect.fn("test.askAgain")(function* (userId: string, conversat
   });
   return turn.assistant.id;
 });
+
+const runtimeBlock = (serialized: string) => {
+  const { content } = JSON.parse(serialized) as {
+    content: Array<{ role: string; content: unknown }>;
+  };
+  const matches = content.filter((message) =>
+    JSON.stringify(message.content).includes("<runtime-context>"),
+  );
+  expect(matches).toHaveLength(1);
+  const message = matches[0]!;
+  expect(message.role).toBe("user");
+  expect(JSON.stringify(content.filter((entry) => entry.role === "system"))).not.toContain(
+    "<runtime-context>",
+  );
+  return { message, index: content.indexOf(message), content };
+};
 
 describe("compaction inside a generation", () => {
   beforeEach(() => {
@@ -865,6 +886,17 @@ describe("compaction inside a generation", () => {
     const prompt = gateway.streamPrompts[0]!;
     expect(prompt).toContain("SUMMARY OF EARLIER TURNS");
     expect(prompt).toContain("question latest");
+    const clock = runtimeBlock(prompt);
+    expect(clock.index).toBe(clock.content.length - 1);
+    expect(JSON.stringify(clock.content[clock.index - 1])).toContain("question latest");
+    expect(JSON.stringify(clock.message)).toContain("Time zone: UTC");
+    expect(gateway.summaryPrompts[0]).not.toContain("<runtime-context>");
+    expect(JSON.stringify(result.checkpoints)).not.toContain("<runtime-context>");
+    const messages = clock.content as ReadonlyArray<Prompt.MessageEncoded>;
+    expect(result.message?.usage?.estimatedFirstInputTokens).toBe(estimatePromptTokens(messages));
+    expect(estimatePromptTokens(messages)).toBeGreaterThan(
+      estimatePromptTokens(messages.slice(0, -1)),
+    );
     // The oldest turn is represented by the summary, not by its own text.
     expect(prompt).not.toContain("question 0 ");
     expect(result.message?.status).toBe("complete");
@@ -948,6 +980,17 @@ describe("compaction inside a generation", () => {
     const continuation = gateway.streamPrompts[1]!;
     expect(continuation).toContain("ACTIVE ROUND SUMMARY");
     expect(continuation).not.toContain("RAW_PAGE_BODY_SENTINEL_");
+    const initialClock = runtimeBlock(gateway.streamPrompts[0]!);
+    const continuedClock = runtimeBlock(continuation);
+    expect(continuedClock.message).toEqual(initialClock.message);
+    expect(continuedClock.index).toBe(initialClock.index);
+    expect(continuedClock.content.slice(0, continuedClock.index + 1)).toEqual(
+      initialClock.content.slice(0, initialClock.index + 1),
+    );
+    expect(JSON.stringify(continuedClock.content.slice(continuedClock.index + 1))).toContain(
+      "ACTIVE ROUND SUMMARY",
+    );
+    expect(gateway.summaryPrompts[0]).not.toContain("<runtime-context>");
     // Source authority and citation numbering come from application state, not
     // from the generated summary that replaced the raw tool transcript.
     expect(continuation).toContain(TOOL_SOURCE_URL);
