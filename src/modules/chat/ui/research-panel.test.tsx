@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResearchToolActivity, WebToolActivity } from "../client/use-message-stream.ts";
 import { MessageBubble } from "./message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import { AppMotionProvider } from "~/ui/motion.tsx";
 
 // The panel closes on navigation; these tests render outside a router.
 const environment = vi.hoisted(() => ({ pathname: "/chat/test" }));
@@ -91,16 +92,18 @@ const tree = (
   const display = { ...message, status, content, toolActivities, ...options };
   return (
     <StrictMode>
-      <DetailPanelProvider>
-        <main>
-          <ResearchPanelOwner messages={options.removed ? [] : [display]} />
-          {options.visible !== false && !options.removed ? (
-            <MessageBubble message={display} />
-          ) : null}
-        </main>
-        {/* The real rail is outside ChatView, not a child of the virtual list. */}
-        <DetailPanelRail />
-      </DetailPanelProvider>
+      <AppMotionProvider>
+        <DetailPanelProvider>
+          <main>
+            <ResearchPanelOwner messages={options.removed ? [] : [display]} />
+            {options.visible !== false && !options.removed ? (
+              <MessageBubble message={display} />
+            ) : null}
+          </main>
+          {/* The real rail is outside ChatView, not a child of the virtual list. */}
+          <DetailPanelRail />
+        </DetailPanelProvider>
+      </AppMotionProvider>
     </StrictMode>
   );
 };
@@ -132,7 +135,7 @@ describe("research panel", () => {
     expect(within(panel).queryByRole("tab")).not.toBeInTheDocument();
   });
 
-  it("follows progress after the opening bubble unmounts in StrictMode", () => {
+  it("follows progress after the opening bubble unmounts in StrictMode", async () => {
     const { rerender } = renderBubble();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
@@ -172,8 +175,12 @@ describe("research panel", () => {
       ),
     );
     expect(within(panel).getByText("“follow-up evidence”")).toBeInTheDocument();
-    expect(within(panel).queryByText("Queued")).not.toBeInTheDocument();
     expect(within(panel).getAllByText("Investigating")).toHaveLength(2);
+    expect(within(panel).getByText("Queued").closest("[inert]")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    await waitFor(() => expect(within(panel).queryByText("Queued")).not.toBeInTheDocument());
   });
 
   it("settles the header and shows terminal failures with the bubble unmounted", () => {

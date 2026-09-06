@@ -12,6 +12,7 @@ import {
 } from "~/ui/detail-panel";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
 import { cn } from "~/ui/utils";
+import { MotionSwap } from "~/ui/motion.tsx";
 
 // The transcript row stays one line; this is where the rest lives: what the
 // run did, in order, grouped by the task it was doing it for. The sources
@@ -53,19 +54,24 @@ function ActivityRow({ activity }: { activity: WebToolActivity }) {
       {/* h-lh: exactly one line of the text beside it, so the icon centres on
           the first line whatever the font metrics. */}
       <span className="flex h-lh shrink-0 items-center">
-        {activity.status === "running" ? (
-          <Spinner aria-hidden className="text-muted-foreground size-3.5" />
-        ) : failed ? (
-          <HugeiconsIcon icon={Alert02Icon} className="text-warning size-3.5" aria-hidden />
-        ) : activity.name === "read_url" ? (
-          <HugeiconsIcon icon={Tick02Icon} className="text-success size-3.5" aria-hidden />
-        ) : (
-          <HugeiconsIcon
-            icon={Search01Icon}
-            className="text-muted-foreground size-3.5"
-            aria-hidden
-          />
-        )}
+        <MotionSwap value={activity.status} kind="icon" className="size-3.5">
+          {activity.status === "running" ? (
+            <Spinner
+              aria-hidden
+              className="text-muted-foreground size-3.5 motion-reduce:animate-none"
+            />
+          ) : failed ? (
+            <HugeiconsIcon icon={Alert02Icon} className="text-warning size-3.5" aria-hidden />
+          ) : activity.name === "read_url" ? (
+            <HugeiconsIcon icon={Tick02Icon} className="text-success size-3.5" aria-hidden />
+          ) : (
+            <HugeiconsIcon
+              icon={Search01Icon}
+              className="text-muted-foreground size-3.5"
+              aria-hidden
+            />
+          )}
+        </MotionSwap>
       </span>
       <div className="min-w-0 flex-1">
         <span className="text-muted-foreground">{verb} </span>
@@ -120,7 +126,7 @@ function TaskGroup({
               task.status === "error" ? "text-warning" : "text-muted-foreground",
             )}
           >
-            {taskLabels[task.status]}
+            <MotionSwap value={task.status}>{taskLabels[task.status]}</MotionSwap>
           </span>
         </header>
       ) : null}

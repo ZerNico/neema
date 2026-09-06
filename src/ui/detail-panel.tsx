@@ -1,8 +1,19 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRouterState } from "@tanstack/react-router";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import * as m from "motion/react-m";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
+import { useAppReducedMotion } from "~/ui/motion";
 import { Button } from "~/ui/primitives/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "~/ui/primitives/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
@@ -34,6 +45,13 @@ const DetailPanelStateContext = createContext<DetailPanelRequest | null>(null);
 // Live owners subscribe to identity, not the request they refresh: updating a
 // body must not trigger another owner render and refresh feedback loop.
 const DetailPanelSelectedIdContext = createContext<string | null>(null);
+const DetailPanelRouteContext = createContext("");
+type PanelAction = { type: "open"; id: string } | { type: "close"; id?: string };
+// Desktop focus is handed off synchronously, before React makes outgoing content
+// inert. Mobile deliberately leaves focus management entirely to Base UI.
+const DetailPanelBeforeActionContext = createContext<
+  (handler: (action: PanelAction) => void) => () => void
+>(() => () => {});
 
 // A general-purpose detail region beside the main content — the sources list is
 // the first tenant, not the only intended one.
@@ -49,12 +67,26 @@ const DetailPanelSelectedIdContext = createContext<string | null>(null);
 export function DetailPanelProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DetailPanelRequest | null>(null);
 
-  const open = useCallback((request: DetailPanelRequest) => setState(request), []);
-  const close = useCallback(() => setState(null), []);
+  const beforeAction = useRef<((action: PanelAction) => void) | null>(null);
+  const registerBeforeAction = useCallback((handler: (action: PanelAction) => void) => {
+    beforeAction.current = handler;
+    return () => {
+      if (beforeAction.current === handler) beforeAction.current = null;
+    };
+  }, []);
+  const open = useCallback((request: DetailPanelRequest) => {
+    beforeAction.current?.({ type: "open", id: request.id });
+    setState(request);
+  }, []);
+  const close = useCallback(() => {
+    beforeAction.current?.({ type: "close" });
+    setState(null);
+  }, []);
   const refresh = useCallback((request: DetailPanelRequest) => {
     setState((current) => (current?.id === request.id ? request : current));
   }, []);
   const closeIfSelected = useCallback((id: string) => {
+    beforeAction.current?.({ type: "close", id });
     setState((current) => (current?.id === id ? null : current));
   }, []);
 
@@ -76,7 +108,11 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
     <DetailPanelContext.Provider value={api}>
       <DetailPanelSelectedIdContext.Provider value={state?.id ?? null}>
         <DetailPanelStateContext.Provider value={state}>
-          {children}
+          <DetailPanelBeforeActionContext.Provider value={registerBeforeAction}>
+            <DetailPanelRouteContext.Provider value={pathname}>
+              {children}
+            </DetailPanelRouteContext.Provider>
+          </DetailPanelBeforeActionContext.Provider>
         </DetailPanelStateContext.Provider>
       </DetailPanelSelectedIdContext.Provider>
     </DetailPanelContext.Provider>
@@ -84,73 +120,189 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
 }
 
 export function DetailPanelRail({ className }: { className?: string }) {
-  const state = useContext(DetailPanelStateContext);
-  const panel = useDetailPanel();
+  const pathname = useContext(DetailPanelRouteContext);
   const isMobile = useIsMobile();
-  const openOnDesktop = state !== null && !isMobile;
+  // Neither route changes nor breakpoint changes retain the old host/presence.
+  // In particular, navigation must not animate another conversation's body out.
+  return isMobile ? (
+    <MobilePanel key={pathname} />
+  ) : (
+    <DesktopPanel key={pathname} className={className} />
+  );
+}
 
-  // The rail isn't a dialog (it doesn't trap focus or block the page), so
-  // Escape-to-close is ours to wire. The mobile sheet handles its own.
+function usePanelPresentation() {
+  const selected = useContext(DetailPanelStateContext);
+  const [presentation, setPresentation] = useState({
+    selected,
+    request: selected,
+    generation: 0,
+  });
+  if (presentation.selected !== selected) {
+    setPresentation({
+      selected,
+      request: selected ?? presentation.request,
+      // Refreshes do not restart animation; close/reopen does, even for one ID.
+      generation: presentation.generation + (presentation.selected?.id === selected?.id ? 0 : 1),
+    });
+  }
+  const finishExit = useCallback((generation: number) => {
+    setPresentation((current) =>
+      current.selected === null && current.generation === generation && current.request !== null
+        ? { ...current, request: null }
+        : current,
+    );
+  }, []);
+  return { ...presentation, open: selected !== null, finishExit };
+}
+
+function MobilePanel() {
+  const panel = useDetailPanel();
+  const { request, open, generation, finishExit } = usePanelPresentation();
+  const reducedMotion = useAppReducedMotion();
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && panel.close()}
+      onOpenChangeComplete={(nextOpen) => !nextOpen && finishExit(generation)}
+    >
+      <SheetContent
+        side="bottom"
+        className={cn(
+          "max-h-[80svh]",
+          reducedMotion && "!transition-none !transform-none !translate-none",
+        )}
+        aria-hidden={!open || undefined}
+        inert={!open || undefined}
+      >
+        <SheetHeader className="pb-2">
+          <SheetTitle>{request?.title}</SheetTitle>
+          {request?.subtitle ? (
+            <p className="text-muted-foreground text-xs">{request.subtitle}</p>
+          ) : null}
+        </SheetHeader>
+        <div key={request?.id} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+          {request?.body}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function restorePanelFocus(root: HTMLElement, opener: HTMLElement | null) {
+  if (!root.contains(document.activeElement)) return;
+  if (opener?.isConnected && !root.contains(opener) && !opener.closest("[inert]")) {
+    opener.focus({ preventScroll: true });
+    if (!root.contains(document.activeElement)) return;
+  }
+  const fallback = document.querySelector<HTMLElement>("main, [role=main]") ?? document.body;
+  const tabIndex = fallback.getAttribute("tabindex");
+  if (tabIndex === null) fallback.setAttribute("tabindex", "-1");
+  fallback.focus({ preventScroll: true });
+  if (tabIndex === null) fallback.removeAttribute("tabindex");
+}
+
+function DesktopPanel({ className }: { className: string | undefined }) {
+  const panel = useDetailPanel();
+  const registerBeforeAction = useContext(DetailPanelBeforeActionContext);
+  const { selected, request, open, generation, finishExit } = usePanelPresentation();
+  const selectedId = selected?.id;
+  const reducedMotion = useAppReducedMotion();
+  const root = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const handleAction = (action: PanelAction) => {
+      if (action.type === "open") {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && !root.current?.contains(active)) {
+          opener.current = active;
+        }
+        if (selectedId !== action.id && root.current) {
+          restorePanelFocus(root.current, opener.current);
+        }
+      } else if (
+        selectedId !== undefined &&
+        (action.id === undefined || action.id === selectedId)
+      ) {
+        if (root.current) restorePanelFocus(root.current, opener.current);
+      }
+    };
+    return registerBeforeAction(handleAction);
+  }, [registerBeforeAction, selectedId]);
+
+  // A nonmodal rail owns Escape, but never steals focus from elsewhere on close.
   useEffect(() => {
-    if (!openOnDesktop) return;
+    if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") panel.close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openOnDesktop, panel]);
+  }, [open, panel]);
 
-  if (state === null) return null;
+  // A zero-duration exit must not depend on an animation frame/completion event.
+  useLayoutEffect(() => {
+    if (!open && (reducedMotion || typeof requestAnimationFrame !== "function")) {
+      finishExit(generation);
+    }
+  }, [open, reducedMotion, generation, finishExit]);
 
-  if (isMobile) {
-    return (
-      <Sheet open onOpenChange={(open) => !open && panel.close()}>
-        <SheetContent side="bottom" className="max-h-[80svh]">
-          <SheetHeader className="pb-2">
-            <SheetTitle>{state.title}</SheetTitle>
-            {state.subtitle ? (
-              <p className="text-muted-foreground text-xs">{state.subtitle}</p>
-            ) : null}
-          </SheetHeader>
-          <div key={state.id} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-            {state.body}
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
+  if (!request) return null;
+  const target = `${open ? "open" : "closed"}-${generation}-${reducedMotion ? "reduced" : "animated"}`;
+  const duration = reducedMotion ? 0 : 0.2;
   return (
-    <aside
-      aria-label={state.title}
-      className={cn("flex w-[22rem] shrink-0 flex-col overflow-hidden border-l", className)}
+    <m.aside
+      ref={root}
+      aria-label={request.title}
+      aria-hidden={!open || undefined}
+      inert={!open || undefined}
+      className={cn(
+        "flex shrink-0 flex-col overflow-hidden",
+        !open && "pointer-events-none",
+        className,
+      )}
+      initial={{ width: reducedMotion ? "22rem" : 0 }}
+      animate={target}
+      variants={{ [target]: { width: open ? "22rem" : 0 } }}
+      transition={{ duration, ease: "easeInOut" }}
+      onAnimationComplete={(definition) => {
+        if (!open && definition === target) finishExit(generation);
+      }}
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-        <p className="min-w-0 flex-1 truncate text-sm font-medium">{state.title}</p>
-        {state.subtitle ? (
-          <span className="text-muted-foreground shrink-0 text-xs">{state.subtitle}</span>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={panel.close}
-                aria-label="Close panel"
-                className="text-muted-foreground"
-              />
-            }
-          >
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-          </TooltipTrigger>
-          <TooltipContent>Close panel</TooltipContent>
-        </Tooltip>
-      </div>
-      <div key={state.id} className="min-h-0 flex-1 overflow-y-auto p-4">
-        {state.body}
-      </div>
-    </aside>
+      <m.div
+        key={request.id}
+        className="flex min-h-0 w-[22rem] flex-1 flex-col border-l"
+        initial={{ opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : 8 }}
+        animate={target}
+        variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
+        transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
+      >
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{request.title}</p>
+          {request.subtitle ? (
+            <span className="text-muted-foreground shrink-0 text-xs">{request.subtitle}</span>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={panel.close}
+                  aria-label="Close panel"
+                  className="text-muted-foreground"
+                />
+              }
+            >
+              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+            </TooltipTrigger>
+            <TooltipContent>Close panel</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{request.body}</div>
+      </m.div>
+    </m.aside>
   );
 }
 

@@ -38,6 +38,9 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import * as m from "motion/react-m";
+import { MotionSwap, useAppReducedMotion } from "~/ui/motion.tsx";
+import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 
 export const ChatInput = forwardRef<
   HTMLTextAreaElement,
@@ -97,6 +100,13 @@ export const ChatInput = forwardRef<
     enabled: onResearchEnabledChange !== undefined || researchEnabled,
   });
   const researchHintId = useId();
+  const reduced = useAppReducedMotion();
+  const action = onStop ? "stop" : attachments?.queued ? "upload" : "send";
+  const actionLabel = onStop
+    ? "Stop generating"
+    : attachments?.queued
+      ? "Sending after uploads finish"
+      : submitLabel;
   const menuLabel = onResearchEnabledChange ? "Add files or tools" : "Add attachment";
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
@@ -319,33 +329,36 @@ export const ChatInput = forwardRef<
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
-        {researchEnabled ? (
+        {researchEnabled || searchAvailable ? (
           <Button
             size="sm"
-            variant="default"
-            aria-label="Deep research"
-            aria-pressed
-            onClick={() => onResearchEnabledChange?.(false)}
-            disabled={controlsDisabled || attachments?.queued || !onResearchEnabledChange}
-            className="min-w-0 shrink-0"
+            variant={researchEnabled || searchEnabled ? "default" : "ghost"}
+            aria-label={researchEnabled ? "Deep research" : "Search the web"}
+            aria-pressed={researchEnabled || searchEnabled}
+            onClick={() =>
+              researchEnabled
+                ? onResearchEnabledChange?.(false)
+                : onSearchEnabledChange(!searchEnabled)
+            }
+            disabled={
+              controlsDisabled ||
+              (researchEnabled && (!!attachments?.queued || !onResearchEnabledChange))
+            }
+            className={cn(
+              "min-w-0 shrink-0",
+              !researchEnabled && !searchEnabled && "text-muted-foreground",
+            )}
           >
             <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span>
-              <span className="max-[420px]:sr-only">Deep </span>research
-            </span>
-          </Button>
-        ) : searchAvailable ? (
-          <Button
-            size="sm"
-            variant={searchEnabled ? "default" : "ghost"}
-            aria-label="Search the web"
-            aria-pressed={searchEnabled}
-            onClick={() => onSearchEnabledChange(!searchEnabled)}
-            disabled={controlsDisabled}
-            className={cn(!searchEnabled && "text-muted-foreground")}
-          >
-            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span className="max-[420px]:sr-only">Search</span>
+            <MotionSwap value={researchEnabled ? "research" : "search"}>
+              {researchEnabled ? (
+                <span>
+                  <span className="max-[420px]:sr-only">Deep </span>research
+                </span>
+              ) : (
+                <span className="max-[420px]:sr-only">Search</span>
+              )}
+            </MotionSwap>
           </Button>
         ) : null}
         <ModelPicker
@@ -369,60 +382,62 @@ export const ChatInput = forwardRef<
               Cancel
             </Button>
           ) : null}
-          {onStop ? (
-            // Deliberately outside the `canSubmit` gate: the composer is
-            // disabled precisely while there is something to stop.
-            <Tooltip>
-              <TooltipTrigger
-                render={<Button size="icon-sm" onClick={onStop} aria-label="Stop generating" />}
-              >
-                <HugeiconsIcon icon={StopIcon} strokeWidth={2} />
-              </TooltipTrigger>
-              <TooltipContent>Stop generating</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    onClick={submit}
-                    disabled={!canSubmit}
-                    aria-label={attachments?.queued ? "Sending after uploads finish" : submitLabel}
-                    aria-busy={attachments?.queued || undefined}
-                  />
-                }
-              >
-                {attachments?.queued ? (
-                  <Spinner aria-hidden />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  onClick={onStop ?? submit}
+                  // Stop is available precisely while sending is disabled.
+                  disabled={!onStop && !canSubmit}
+                  aria-label={actionLabel}
+                  aria-busy={(!onStop && attachments?.queued) || undefined}
+                />
+              }
+            >
+              <MotionSwap value={action} kind="icon" className="size-4">
+                {onStop ? (
+                  <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
+                ) : attachments?.queued ? (
+                  <Spinner aria-hidden className="size-4 motion-reduce:animate-none" />
                 ) : (
-                  <HugeiconsIcon icon={ArrowUp02Icon} strokeWidth={2} />
+                  <HugeiconsIcon
+                    icon={ArrowUp02Icon}
+                    strokeWidth={2}
+                    className="size-4"
+                    aria-hidden
+                  />
                 )}
-              </TooltipTrigger>
-              {/* Enter submits (chat-textarea.tsx); Shift+Enter breaks the line. */}
-              <TooltipContent>
-                {attachments?.queued ? "Sending after uploads finish" : submitLabel}
-                <Kbd>Enter</Kbd>
-              </TooltipContent>
-            </Tooltip>
-          )}
+              </MotionSwap>
+            </TooltipTrigger>
+            <TooltipContent>
+              {actionLabel}
+              {!onStop ? <Kbd>Enter</Kbd> : null}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
-      {researchEnabled && researchUnavailableReason ? (
-        <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
-          {researchUnavailableReason}
-        </p>
-      ) : null}
-      {dragging ? (
-        // pointer-events-none so dragleave/drop still reach the shell.
-        // Inset by 0.25rem, so the radius is the shell's minus that inset.
-        <div className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[calc(1.375rem-0.25rem)] border-2 border-dashed backdrop-blur-[2px]">
-          <span className="text-foreground flex items-center gap-2 text-sm font-medium">
-            <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
-            Drop files to attach
-          </span>
-        </div>
-      ) : null}
+      <Disclosure open={researchEnabled && !!researchUnavailableReason}>
+        <DisclosureContent>
+          <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
+            {researchUnavailableReason}
+          </p>
+        </DisclosureContent>
+      </Disclosure>
+      {/* Never intercept dragleave/drop; only opacity changes, not hit testing. */}
+      <m.div
+        aria-hidden={!dragging}
+        inert
+        initial={false}
+        animate={{ opacity: dragging ? 1 : 0 }}
+        transition={{ duration: reduced ? 0 : 0.12 }}
+        className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[calc(1.375rem-0.25rem)] border-2 border-dashed backdrop-blur-[2px]"
+      >
+        <span className="text-foreground flex items-center gap-2 text-sm font-medium">
+          <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
+          Drop files to attach
+        </span>
+      </m.div>
     </div>
   );
 });

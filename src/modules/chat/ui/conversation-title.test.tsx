@@ -31,7 +31,7 @@ const resize = () => {
 const reducedMotion = (matches: boolean) => {
   vi.stubGlobal(
     "matchMedia",
-    vi.fn(() => ({ matches })),
+    vi.fn(() => ({ matches, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   );
 };
 

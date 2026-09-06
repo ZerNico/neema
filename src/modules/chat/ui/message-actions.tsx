@@ -9,7 +9,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { MotionSwap } from "~/ui/motion.tsx";
 import { chatModelsQuery } from "../client/queries.ts";
 import { ModelPicker } from "./model-picker.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
@@ -254,11 +255,22 @@ export function MessageActions({
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      clearTimeout(copyTimer.current);
+    };
+  }, []);
 
   const copy = () => {
     void navigator.clipboard.writeText(stripCitationMarkers(content)).then(() => {
+      if (!mounted.current) return;
+      clearTimeout(copyTimer.current);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      copyTimer.current = setTimeout(() => setCopied(false), 1500);
     });
   };
 
@@ -289,10 +301,13 @@ export function MessageActions({
     <div className={cn("mt-2 flex items-center gap-1", className)}>
       {timeFirst ? stamp : null}
       <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
-        <HugeiconsIcon
-          icon={copied ? Tick02Icon : Copy01Icon}
-          className={copied ? "size-4 text-success" : "size-4"}
-        />
+        <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
+          <HugeiconsIcon
+            icon={copied ? Tick02Icon : Copy01Icon}
+            className={copied ? "size-4 text-success" : "size-4"}
+            aria-hidden
+          />
+        </MotionSwap>
       </ActionButton>
       {onEdit ? (
         <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>

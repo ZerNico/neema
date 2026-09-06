@@ -1,7 +1,6 @@
 import {
   BubbleChatIcon,
   Logout03Icon,
-  GitBranchIcon,
   MoreHorizontalIcon,
   PlusSignIcon,
   Settings02Icon,
@@ -16,7 +15,8 @@ import { toast } from "sonner";
 import { authClient } from "~/modules/auth/client.ts";
 import { conversationsInfiniteQuery } from "../client/queries.ts";
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
-import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
+import { createTitleRevealRegistry } from "./conversation-title.tsx";
+import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
@@ -28,7 +28,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Spinner } from "~/ui/primitives/spinner";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import {
@@ -206,7 +205,7 @@ function ConversationList() {
                 <SidebarMenuItem key={conversation.id}>
                   <SidebarMenuButton
                     isActive={conversation.id === activeId}
-                    className="[&>span:last-child]:!text-clip"
+                    className="gap-0 [&>span:last-child]:!text-clip"
                     render={
                       <Link
                         to="/chat/$conversationId"
@@ -214,19 +213,9 @@ function ConversationList() {
                       />
                     }
                   >
-                    {/* The spinner borrows the branch icon's slot: while an
-                        answer streams, "busy" is the state worth a glance. */}
-                    {conversation.generating ? (
-                      <Spinner aria-label="Generating" className="text-muted-foreground shrink-0" />
-                    ) : conversation.branchedFrom ? (
-                      <HugeiconsIcon
-                        icon={GitBranchIcon}
-                        strokeWidth={2}
-                        className="text-muted-foreground shrink-0"
-                        aria-label="Branched conversation"
-                      />
-                    ) : null}
-                    <ConversationTitle
+                    <ConversationStatusTitle
+                      generating={conversation.generating}
+                      branched={!!conversation.branchedFrom}
                       conversationId={conversation.id}
                       title={conversation.title}
                       registry={revealRegistry}

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
+import { AppMotionProvider } from "~/ui/motion.tsx";
 import { projectAssistantBody } from "./assistant-body.ts";
 import { collectSources } from "./citations.ts";
 import {
@@ -75,6 +76,46 @@ const envelope = (phase: string, progress: unknown) =>
   });
 
 describe("research activity", () => {
+  it("rolls changed targets inside a fixed line, keeps the action stable, and settles immediately", async () => {
+    const onOpen = vi.fn();
+    const tree = (target: string, synthesis = false) => (
+      <AppMotionProvider>
+        <ResearchActivityBlock
+          activity={{
+            ...root,
+            progress: { ...root.progress!, phase: synthesis ? "synthesizing" : "researching" },
+          }}
+          sourceCount={1}
+          webActivities={[{ ...web, targets: [target] }]}
+          onOpen={onOpen}
+        />
+      </AppMotionProvider>
+    );
+    const { rerender } = render(tree("First"));
+    const row = screen.getByRole("button", { name: /Researching/ });
+    const label = screen.getByText("Searching “First”");
+    const phase = screen.getByText("Researching");
+    const spinner = row.querySelector("svg");
+    expect(label.parentElement).toHaveClass("h-5", "overflow-hidden");
+    rerender(tree("First"));
+    expect(screen.getByText("Searching “First”")).toBe(label);
+    rerender(tree("Second"));
+    rerender(tree("Latest"));
+    expect(screen.getByRole("button", { name: "Researching Searching “Latest”" })).toBe(row);
+    expect(screen.queryByText("Searching “First”")).toBeNull();
+    expect(row.querySelectorAll("[inert]")).toHaveLength(1);
+    const latest = screen.getByText("Searching “Latest”");
+    expect(latest.style.transform).toContain("translateY(100%)");
+    expect(screen.getByText("Researching")).toBe(phase);
+    expect(row.querySelector("svg")).toBe(spinner);
+    await waitFor(() => expect(row.querySelector("[inert]")).toBeNull());
+    expect(latest.style.transform).toBe("none");
+    rerender(tree("Latest", true));
+    expect(screen.getByRole("button", { name: "Researched 1 source" })).toBe(row);
+    expect(row).not.toHaveAttribute("aria-busy");
+    fireEvent.click(row);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
   it("reports what it is doing now, then the sources it read, and nothing else", () => {
     const { rerender } = render(<ResearchActivityBlock activity={root} webActivities={[web]} />);
     expect(screen.getByText("Researching")).toBeTruthy();

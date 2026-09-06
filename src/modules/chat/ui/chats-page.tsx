@@ -1,23 +1,18 @@
-import {
-  BubbleChatIcon,
-  GitBranchIcon,
-  MoreHorizontalIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import { BubbleChatIcon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { conversationsInfiniteQuery } from "../client/queries.ts";
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
-import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
+import { createTitleRevealRegistry } from "./conversation-title.tsx";
+import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { activityStamp, describeActivity } from "./timestamps.ts";
 import { EmptyState, Page } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
 
@@ -117,23 +112,10 @@ export function ChatsPage() {
                         className="hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/30 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors outline-none focus-visible:ring-3"
                         {...(hydrated ? { title: describeActivity(conversation) } : {})}
                       >
-                        {/* Same slot precedence as the sidebar: generation is
-                          transient and outranks lineage for the moment. */}
-                        {conversation.generating ? (
-                          <Spinner
-                            aria-label="Generating"
-                            className="text-muted-foreground size-3.5 shrink-0"
-                          />
-                        ) : conversation.branchedFrom ? (
-                          <HugeiconsIcon
-                            icon={GitBranchIcon}
-                            strokeWidth={2}
-                            className="text-muted-foreground size-3.5 shrink-0"
-                            aria-label="Branched conversation"
-                          />
-                        ) : null}
-                        <span className="min-w-0 flex-1 truncate">
-                          <ConversationTitle
+                        <span className="flex min-w-0 flex-1 items-center">
+                          <ConversationStatusTitle
+                            generating={conversation.generating}
+                            branched={!!conversation.branchedFrom}
                             conversationId={conversation.id}
                             title={conversation.title}
                             registry={revealRegistry}

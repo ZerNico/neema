@@ -51,8 +51,8 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     if (!active) return null;
     return (
       <div className="text-muted-foreground mb-2 flex items-center gap-2 text-sm">
-        <HugeiconsIcon icon={AiBrain01Icon} className="size-4 animate-pulse" />
-        <span className="animate-pulse">Thinking…</span>
+        <HugeiconsIcon icon={AiBrain01Icon} className="size-4" aria-hidden />
+        <span className="text-shimmer">Thinking…</span>
       </div>
     );
   }
@@ -64,8 +64,8 @@ export const ReasoningBlock = memo(function ReasoningBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={AiBrain01Icon} className={cn("size-4", active && "animate-pulse")} />
-        <span className={cn(active && "animate-pulse")}>
+        <HugeiconsIcon icon={AiBrain01Icon} className="size-4" aria-hidden />
+        <span className={cn(active && "text-shimmer")}>
           {active ? "Thinking…" : "Thought process"}
         </span>
         <HugeiconsIcon

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { relativeAgeLabel } from "./timestamps.ts";
+import { useAppReducedMotion } from "~/ui/motion.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 
 /**
@@ -34,10 +35,6 @@ const BOTH_EDGE_FADE =
 // otherwise the full text flashes for a frame first.
 const useRevealEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-const prefersReducedMotion = (): boolean =>
-  typeof window !== "undefined" &&
-  (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
-
 /**
  * A conversation's title. Null means generation is still running, which shows
  * a placeholder; the title that resolves it types itself in once. Supplying a
@@ -49,12 +46,16 @@ export function ConversationTitle({
   title,
   registry,
   createdAt,
+  resizing = false,
 }: {
   conversationId: string;
   title: string | null;
   registry: TitleRevealRegistry;
   createdAt?: Date | string | number;
+  /** Defer overflow measurement while the sidebar status slot changes width. */
+  resizing?: boolean;
 }) {
+  const reduced = useAppReducedMotion();
   // Character count during a reveal; null means "show all of it".
   const [shown, setShown] = useState<number | null>(null);
   // Cached per title so React re-running effects on the same instance
@@ -78,7 +79,7 @@ export function ConversationTitle({
       registry.revealed.add(conversationId);
       decision.current = { title, reveal };
     }
-    if (!decision.current.reveal || prefersReducedMotion()) {
+    if (!decision.current.reveal || reduced) {
       setShown(null);
       return;
     }
@@ -94,10 +95,10 @@ export function ConversationTitle({
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [conversationId, title, registry]);
+  }, [conversationId, title, registry, reduced]);
 
   useLayoutEffect(() => {
-    if (createdAt === undefined || title === null || shown !== null) return;
+    if (resizing || createdAt === undefined || title === null || shown !== null) return;
 
     const viewport = viewportRef.current;
     const text = textRef.current;
@@ -115,7 +116,7 @@ export function ConversationTitle({
     observer.observe(viewport);
     observer.observe(text);
     return () => observer.disconnect();
-  }, [createdAt, shown, title]);
+  }, [createdAt, shown, title, resizing]);
 
   if (title === null) {
     return (
@@ -158,7 +159,7 @@ export function ConversationTitle({
   }
 
   const overflowing = !revealing && overflowDistance > 0;
-  const scrolling = overflowing && hovered && !prefersReducedMotion();
+  const scrolling = overflowing && hovered && !reduced;
   const scrollDistance = overflowDistance + TITLE_SCROLL_END_GAP_PX;
   const scrollDuration = Math.min(
     TITLE_SCROLL_MAX_MS,

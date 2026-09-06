@@ -5,6 +5,7 @@ import type { ResearchPhase } from "../research-schema.ts";
 import { hostOf } from "./favicon.tsx";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
 import { cn } from "~/ui/utils";
+import { MotionSwap } from "~/ui/motion.tsx";
 
 // Deliberately one line. What a reader wants inline is "is it still going, and
 // on what", then "what did it read". The plan, task list and per-task activity
@@ -77,42 +78,8 @@ export function ResearchActivityBlock({
 
   // Once synthesis starts the investigation is over: the row settles into its
   // finished form and the answer streams in below it like any other reply.
-  if (activity.status === "running" && phase !== "synthesizing") {
-    const detail = currentDetail(webActivities);
-    const body = (
-      <>
-        <Spinner aria-hidden className="text-muted-foreground size-4 shrink-0" />
-        <span className="text-shimmer shrink-0 font-medium">
-          {activeLabels[phase ?? "researching"]}
-        </span>
-        {detail ? (
-          <>
-            <span className="text-muted-foreground/40 shrink-0" aria-hidden>
-              ·
-            </span>
-            <span className="text-muted-foreground min-w-0 truncate">{detail}</span>
-          </>
-        ) : null}
-      </>
-    );
-    // The live row opens the same panel as the finished one: watching the
-    // investigation unfold is the point of having it.
-    return onOpen ? (
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-live="polite"
-        aria-busy="true"
-        className={cn(rowClassName, buttonClassName)}
-      >
-        {body}
-      </button>
-    ) : (
-      <div className={rowClassName} aria-live="polite" aria-busy="true">
-        {body}
-      </div>
-    );
-  }
+  const running = activity.status === "running" && phase !== "synthesizing";
+  const detail = running ? currentDetail(webActivities) : null;
 
   const sources = sourceCount ?? activity.sources?.length ?? 0;
   const early = phase ? endedEarly[phase] : undefined;
@@ -123,29 +90,55 @@ export function ResearchActivityBlock({
   // Only how the run ended is worth a qualifier. Individual failed reads are
   // the answer's job to route around, and the panel lists them for the curious.
   const note = sources > 0 && early ? early.note : null;
-  const openable = onOpen !== undefined;
-
+  const primary = running ? activeLabels[phase ?? "researching"] : label;
+  const secondary = running ? detail : note;
   const body = (
     <>
-      <HugeiconsIcon icon={GlobalSearchIcon} className="size-4 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">{label}</span>
-      {note ? (
+      <MotionSwap value={running ? "running" : "settled"} kind="icon" className="size-4 shrink-0">
+        {running ? (
+          <Spinner aria-hidden className="size-4 motion-reduce:animate-none" />
+        ) : (
+          <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" aria-hidden />
+        )}
+      </MotionSwap>
+      <MotionSwap
+        value={primary}
+        kind="rolling-text"
+        className={cn("min-w-0", running && "shrink-0")}
+      >
+        <span className={cn(running && "text-shimmer font-medium")}>{primary}</span>
+      </MotionSwap>
+      {secondary ? (
         <>
           <span className="text-muted-foreground/40 shrink-0" aria-hidden>
             ·
           </span>
-          <span className="min-w-0 truncate">{note}</span>
+          <MotionSwap
+            value={secondary}
+            kind="rolling-text"
+            className="text-muted-foreground min-w-0 truncate"
+          >
+            {secondary}
+          </MotionSwap>
         </>
       ) : null}
     </>
   );
-  const className = cn(rowClassName, "text-muted-foreground");
+  const className = cn(rowClassName, "text-muted-foreground h-5");
 
-  return openable ? (
-    <button type="button" onClick={onOpen} className={cn(className, buttonClassName)}>
+  return onOpen ? (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-live="polite"
+      aria-busy={running || undefined}
+      className={cn(className, buttonClassName)}
+    >
       {body}
     </button>
   ) : (
-    <div className={className}>{body}</div>
+    <div className={className} aria-live="polite" aria-busy={running || undefined}>
+      {body}
+    </div>
   );
 }

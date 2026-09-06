@@ -20,12 +20,8 @@ export function MemoryActivityBlock({ activity }: { activity: MemoryToolActivity
   const running = activity.status === "running";
   return (
     <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-sm">
-      <HugeiconsIcon
-        icon={Brain02Icon}
-        className={cn("size-4", running && "animate-pulse")}
-        aria-hidden
-      />
-      <span className={cn(running && "animate-pulse")}>{memoryActivityLabel(activity)}</span>
+      <HugeiconsIcon icon={Brain02Icon} className="size-4" aria-hidden />
+      <span className={cn(running && "text-shimmer")}>{memoryActivityLabel(activity)}</span>
     </div>
   );
 }

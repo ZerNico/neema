@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { Suspense, useImperativeHandle, useState, type Ref } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInput } from "./chat-input.tsx";
+import { AppMotionProvider } from "~/ui/motion.tsx";
 import { renderToString } from "react-dom/server";
 import { useSearchMode } from "./use-search-mode.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
@@ -372,6 +373,52 @@ describe("ChatInput first render", () => {
   );
 });
 
+it("keeps one focused action button while Send becomes Stop and back", () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(["chat-models"], MODELS);
+  client.setQueryData(["tools", "web-search", "availability"], {
+    configured: false,
+    enabled: false,
+  });
+  const send = vi.fn();
+  const stop = vi.fn();
+  const input = (running: boolean) => (
+    <AppMotionProvider>
+      <QueryClientProvider client={client}>
+        <ChatInput
+          value="Kept draft"
+          onValueChange={() => {}}
+          onSubmit={send}
+          {...(running ? { onStop: stop } : {})}
+          disabled={running}
+          modelId="text-only"
+          onModelChange={() => {}}
+          searchEnabled={false}
+          onSearchEnabledChange={() => {}}
+        />
+      </QueryClientProvider>
+    </AppMotionProvider>
+  );
+  const { rerender } = render(input(false));
+  const button = screen.getByRole("button", { name: "Send" });
+  button.focus();
+  rerender(input(true));
+  expect(screen.getByRole("button", { name: "Stop generating" })).toBe(button);
+  expect(button).toHaveFocus();
+  expect(button).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  fireEvent.click(button);
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(send).not.toHaveBeenCalled();
+  rerender(input(false));
+  expect(screen.getByRole("button", { name: "Send" })).toBe(button);
+  expect(screen.getByRole("textbox")).toHaveValue("Kept draft");
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
 describe("ChatInput search toggle", () => {
   it("keeps enabled search distinct from the disabled hover style", () => {
     const client = new QueryClient({
@@ -473,7 +520,10 @@ describe("ChatInput attachment picking", () => {
     expect(screen.getByText("Drop files to attach")).toBeInTheDocument();
 
     fireEvent.dragLeave(shell, { dataTransfer });
-    expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
+    expect(screen.getByText("Drop files to attach").closest("[inert]")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
   });
 
   it("ignores drags that carry no files", () => {

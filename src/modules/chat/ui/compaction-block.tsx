@@ -49,11 +49,8 @@ export function CompactionBlock({
   if (!summary) {
     return (
       <div className={cn("text-muted-foreground flex items-center gap-1.5 text-sm", className)}>
-        <HugeiconsIcon
-          icon={ArrowShrink02Icon}
-          className={cn("size-4", running && "animate-pulse")}
-        />
-        <span className={cn(running && "animate-pulse")}>{label}</span>
+        <HugeiconsIcon icon={ArrowShrink02Icon} className="size-4" aria-hidden />
+        <span className={cn(running && "text-shimmer")}>{label}</span>
       </div>
     );
   }

@@ -663,7 +663,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         !showReasoning &&
         !toolRunning &&
         !compacting ? (
-          <span className="text-muted-foreground animate-pulse">Thinking…</span>
+          <span className="text-shimmer">Thinking…</span>
         ) : null}
         {message.status === "error" ? (
           <GenerationFailure

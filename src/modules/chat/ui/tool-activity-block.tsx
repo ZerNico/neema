@@ -98,7 +98,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
         rel="noreferrer noopener"
         className={cn(
           "hover:text-foreground min-w-0 truncate transition-colors",
-          active && reading && "animate-pulse",
+          active && reading && "text-shimmer",
         )}
         title={page.error ?? page.url}
       >
@@ -231,11 +231,8 @@ export function ToolActivityBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon
-          icon={GlobalSearchIcon}
-          className={cn("size-4", anyRunning && "animate-pulse")}
-        />
-        <span className={cn(anyRunning && "animate-pulse")}>{headerLabel}</span>
+        <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" aria-hidden />
+        <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>
         {hasDetails ? (
           <HugeiconsIcon
             icon={ArrowDown01Icon}
