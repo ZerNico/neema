@@ -12,3 +12,49 @@ search:
   formats:
     - html
     - json
+  # Let rate-limited engines rest rather than retrying every three minutes.
+  # Keep the default CAPTCHA backoffs (including the longer CF/reCAPTCHA ones).
+  suspended_times:
+    SearxEngineTooManyRequests: 900
+
+outgoing:
+  # Stay below the chat backend's ten-second HTTP timeout.
+  request_timeout: 7.0
+  max_request_timeout: 8.0
+  retries: 0
+
+# Every query fans out to every enabled engine in the general category at once.
+# From a home connection Bing and Yandex are the two that answer; DuckDuckGo,
+# Brave, Google CSE, Qwant and Startpage get rate-limited or CAPTCHA'd on the
+# first burst and only add suspensions and latency. Bing alone is not enough:
+# under bot suspicion it serves unrelated pages instead of an error, so a run
+# fed only Bing collects hundreds of off-topic "sources". Yandex was the one
+# engine that returned on-topic results for German-language queries.
+engines:
+  - name: bing
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: duckduckgo
+    disabled: true
+  - name: brave
+    disabled: true
+  - name: google cse
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: currency
+    disabled: true
+  - name: lingva
+    disabled: true
+  - name: dictzone
+    disabled: true
+  - name: mymemory translated
+    disabled: true
+  # Repeated CAPTCHA responses make this a poor default for local research.
+  - name: startpage
+    disabled: true
+  # The default Wikipedia engine returns infoboxes, not the results the app uses.
+  # Wikipedia pages can still appear in web results and be opened by read_url.
+  - name: wikipedia
+    disabled: true

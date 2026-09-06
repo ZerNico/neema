@@ -20,7 +20,7 @@ services:
   searxng:
     image: docker.io/searxng/searxng
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
