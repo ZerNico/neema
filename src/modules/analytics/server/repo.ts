@@ -18,6 +18,7 @@ export interface UsageEventInput {
   outputTokens: number;
   cachedInputTokens: number;
   reasoningTokens: number;
+  usageComplete?: boolean;
   cost: number | null;
   costSource: "provider" | "pricing" | null;
 }
@@ -139,7 +140,7 @@ export class AnalyticsRepo extends Context.Service<
               titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
               compactionGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'compaction')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
-              unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null)::int`,
+              unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null or not ${usageEvents.usageComplete})::int`,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
             })
             .from(usageEvents)

@@ -1,4 +1,12 @@
-import { doublePrecision, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  doublePrecision,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
@@ -29,6 +37,7 @@ export const usageEvents = pgTable(
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     reasoningTokens: integer("reasoning_tokens").notNull().default(0),
     // USD. Null = unknown (no provider-reported cost and no model pricing).
+    usageComplete: boolean("usage_complete").notNull().default(true),
     cost: doublePrecision(),
     costSource: text("cost_source", { enum: ["provider", "pricing"] }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

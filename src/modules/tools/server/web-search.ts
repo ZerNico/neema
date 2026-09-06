@@ -1,6 +1,8 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import type { WebExecutionPolicy } from "./execution-policy.ts";
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Schema, type Scope } from "effect";
 import { Tool } from "effect/unstable/ai";
 import {
+  RESEARCH_SEARCH_BUDGET,
   WebSearchParams,
   WebToolResult as WebToolResultSchema,
   type Source,
@@ -19,6 +21,9 @@ export class ToolUnavailable extends Schema.TaggedError<ToolUnavailable>()("Tool
 }) {}
 
 const MAX_MERGED_RESULTS = 20;
+
+const cacheKey = (query: string, params: WebSearchParams) =>
+  JSON.stringify([query, params.timeRange ?? null, params.language ?? null]);
 
 export { WebToolResult } from "../schema.ts";
 
@@ -39,6 +44,17 @@ interface SearchOutcome {
   readonly hits: ReadonlyArray<SearchHit>;
   readonly error: string | null;
 }
+
+interface PendingSearch {
+  readonly state: "pending";
+  readonly result: Deferred.Deferred<SearchOutcome>;
+  producer?: Fiber.Fiber<SearchOutcome>;
+  waiters: number;
+}
+
+type CachedSearch =
+  | PendingSearch
+  | { readonly state: "success"; readonly hits: ReadonlyArray<SearchHit> };
 
 const uniqueQueries = (queries: ReadonlyArray<string>): string[] => {
   const seen = new Set<string>();
@@ -83,7 +99,10 @@ export class WebSearchExecutor extends Context.Service<
     handler(
       indexer: SourceIndexer,
       authority: UrlAuthority,
-    ): Effect.Effect<WebSearchHandler, ToolUnavailable>;
+      policy?: WebExecutionPolicy,
+    ): Effect.Effect<WebSearchHandler, ToolUnavailable, Scope.Scope>;
+    /** Read once at research start; an active run keeps its captured allowance. */
+    researchSearchLimit(): Effect.Effect<number>;
     // Cheap check used by ChatService validation + composer availability.
     availability(): Effect.Effect<{ configured: boolean; enabled: boolean }>;
   }
@@ -97,6 +116,7 @@ export class WebSearchExecutor extends Context.Service<
       const makeHandler = Effect.fn("WebSearchExecutor.handler")(function* (
         indexer: SourceIndexer,
         authority: UrlAuthority,
+        policy?: WebExecutionPolicy,
       ) {
         const tool = yield* repo.getWebSearch();
         if (!tool) {
@@ -107,6 +127,87 @@ export class WebSearchExecutor extends Context.Service<
         }
         const { config, secret } = tool;
         const connection = { baseUrl: config.baseUrl, secret };
+        // Capture the generation scope, not the service/runtime or a worker's
+        // scope: one cancelled waiter must not cancel another worker's search.
+        const scope = yield* Effect.scope;
+        const cache = new Map<string, CachedSearch>();
+
+        const search = (query: string, params: WebSearchParams): Effect.Effect<SearchOutcome> =>
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const key = cacheKey(query, params);
+              const cached = cache.get(key);
+              if (cached?.state === "success") return { query, hits: cached.hits, error: null };
+
+              const flight: PendingSearch = cached ?? {
+                state: "pending",
+                result: Deferred.makeUnsafe<SearchOutcome>(),
+                waiters: 0,
+              };
+              // Claim and attach synchronously, before forking or awaiting.
+              flight.waiters++;
+              if (!cached) {
+                cache.set(key, flight);
+                const request = Effect.gen(function* () {
+                  // Admission happens inside the shared permit, immediately
+                  // before each actual request, never for a cached/shared wait.
+                  if (policy && !policy.admit("search", 1))
+                    return {
+                      query,
+                      hits: [],
+                      error: "Research web budget or exploration deadline reached.",
+                    };
+                  return yield* backend
+                    .search(connection, {
+                      query,
+                      maxResults: config.maxResults,
+                      ...(params.timeRange !== undefined ? { timeRange: params.timeRange } : {}),
+                      ...(params.language !== undefined ? { language: params.language } : {}),
+                    })
+                    .pipe(
+                      Effect.match({
+                        onSuccess: (hits): SearchOutcome => {
+                          policy?.observeSearch?.(true);
+                          return { query, hits, error: null };
+                        },
+                        onFailure: (error): SearchOutcome => {
+                          policy?.observeSearch?.(false);
+                          return { query, hits: [], error: error.message };
+                        },
+                      }),
+                    );
+                });
+                flight.producer = yield* Effect.forkIn(
+                  policy ? policy.run(request) : request,
+                  scope,
+                );
+                // An observer also runs if scope closure interrupts the fiber
+                // before its first instruction. Complete with the computed Exit,
+                // never with backend work that Deferred would re-run per waiter.
+                flight.producer.addObserver((exit) => {
+                  if (cache.get(key) === flight) {
+                    if (Exit.isSuccess(exit) && exit.value.error === null)
+                      cache.set(key, { state: "success", hits: exit.value.hits });
+                    else cache.delete(key);
+                  }
+                  Deferred.doneUnsafe(flight.result, exit);
+                });
+              }
+
+              return yield* restore(Deferred.await(flight.result)).pipe(
+                Effect.ensuring(
+                  Effect.gen(function* () {
+                    flight.waiters--;
+                    if (flight.waiters === 0 && cache.get(key) === flight) {
+                      // Evict before interruption so a retry cannot join dying work.
+                      cache.delete(key);
+                      if (flight.producer) yield* Fiber.interrupt(flight.producer);
+                    }
+                  }),
+                ),
+              );
+            }),
+          );
 
         const handler = Effect.fnUntraced(function* (params: WebSearchParams) {
           const queries = uniqueQueries(params.queries);
@@ -122,24 +223,9 @@ export class WebSearchExecutor extends Context.Service<
             } satisfies Result;
           }
 
-          const outcomes = yield* Effect.forEach(
-            queries,
-            (query): Effect.Effect<SearchOutcome> =>
-              backend
-                .search(connection, {
-                  query,
-                  maxResults: config.maxResults,
-                  ...(params.timeRange !== undefined ? { timeRange: params.timeRange } : {}),
-                  ...(params.language !== undefined ? { language: params.language } : {}),
-                })
-                .pipe(
-                  Effect.map((hits) => ({ query, hits, error: null })),
-                  Effect.catchTag("SearchBackendError", (error) =>
-                    Effect.succeed({ query, hits: [], error: error.message }),
-                  ),
-                ),
-            { concurrency: 3 },
-          );
+          const outcomes = yield* Effect.forEach(queries, (query) => search(query, params), {
+            concurrency: 3,
+          });
 
           const hits = mergeRoundRobin(outcomes);
           const failures: WebToolFailure[] = outcomes.flatMap((outcome) =>
@@ -188,7 +274,12 @@ export class WebSearchExecutor extends Context.Service<
         return { configured: tool !== null, enabled: tool?.enabled ?? false };
       });
 
-      return WebSearchExecutor.of({ handler: makeHandler, availability });
+      const researchSearchLimit = Effect.fn("WebSearchExecutor.researchSearchLimit")(function* () {
+        const tool = yield* repo.getWebSearch();
+        return tool?.config.researchMaxSearchQueries ?? RESEARCH_SEARCH_BUDGET.default;
+      });
+
+      return WebSearchExecutor.of({ handler: makeHandler, availability, researchSearchLimit });
     }),
   );
 }

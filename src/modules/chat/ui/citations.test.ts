@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { collectSources, prepareCitedMarkdown } from "./citations.ts";
+import {
+  citedSourceIndexes,
+  collectSources,
+  prepareCitedMarkdown,
+  selectAnswerSources,
+} from "./citations.ts";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 
 const source = (index: number, url: string): ToolSource => ({
@@ -53,6 +58,39 @@ describe("prepareCitedMarkdown", () => {
   it("drops markers with no matching source", () => {
     const out = prepareCitedMarkdown("Claim[^9] and claim[^1].", [source(1, "https://a.dev")]);
     expect(out).toContain("Claim and claim[^1].");
+  });
+});
+
+describe("answer evidence selection", () => {
+  it("includes own cited or extracted evidence and only cited inherited evidence", () => {
+    const own = [
+      source(1, "https://a.dev"),
+      { ...source(2, "https://b.dev"), read: false },
+      { ...source(3, "https://c.dev"), read: false },
+    ];
+    const inherited = [source(4, "https://d.dev"), source(5, "https://e.dev")];
+    expect(
+      selectAnswerSources("Claim[^2] and prior finding[^4].", own, inherited).map((s) => s.index),
+    ).toEqual([1, 2, 4]);
+    expect(selectAnswerSources("No cited evidence.", [own[1]!], inherited)).toEqual([]);
+  });
+
+  it.each([
+    "`[^2]`",
+    "`` example ` [^2] ``",
+    "```md\n[^2]\n```",
+    "~~~md\n[^2]\n~~~",
+    "    [^2]",
+    "> ```md\n> [^2]\n> ```",
+    "[^2]: definition containing [^3]",
+    "\\[^2]",
+    "```md\nunterminated [^2]",
+  ])("does not count example code or definitions as citations: %s", (example) => {
+    expect([...citedSourceIndexes(`Claim[^1].\n\n${example}`)]).toEqual([1]);
+  });
+
+  it("counts prose in blockquotes/lists and ignores half-streamed markers", () => {
+    expect([...citedSourceIndexes("> Claim[^2]\n\n- Another[^3]\n\nHalf[^4")]).toEqual([2, 3]);
   });
 });
 

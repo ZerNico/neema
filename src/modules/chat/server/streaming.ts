@@ -1,4 +1,19 @@
-import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
+import { messageChunks } from "~/db/schema/chat.ts";
+import { runResearch } from "./research/runner.ts";
+import type { ResearchPhase } from "../research-schema.ts";
+import {
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  PubSub,
+  Schema,
+  Stream,
+  Semaphore,
+  Schedule,
+} from "effect";
 import {
   AskUserParams,
   AskUserResult,
@@ -26,7 +41,8 @@ import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
-import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
+import { mergeSource, mergeSources } from "~/modules/tools/sources.ts";
+import type { Source, ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
   calibrationFactor,
@@ -56,6 +72,7 @@ import type { JsonValue } from "~/db/schema/providers.ts";
 // only needs to carry chunks for in-flight generations.
 export interface ChunkEvent {
   readonly messageId: string;
+  readonly runId?: string;
   readonly seq: number;
   readonly chunkKind: ChunkKind;
   readonly delta: string;
@@ -63,6 +80,7 @@ export interface ChunkEvent {
 
 export interface DoneEvent {
   readonly messageId: string;
+  readonly runId?: string;
   readonly status: "complete" | "error" | "aborted";
 }
 
@@ -93,16 +111,21 @@ export class StreamEngine extends Context.Service<
       messageId: string;
       modelId: string;
       searchEnabled: boolean;
+      researchRunId?: string | undefined;
       timeZone?: string | undefined;
     }): Effect.Effect<void>;
     // Winds a running generation down early, keeping whatever it has already
     // produced. False when this instance is not the one running it — the same
     // single-instance constraint the live chunk tail has (replay is durable,
     // the in-flight fiber is not).
-    stopGeneration(messageId: string): Effect.Effect<boolean>;
+    stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
     // Chunks already persisted after `afterSeq`, then live chunks, then done.
     // Terminates when the message reaches a terminal status.
-    subscribe(messageId: string, afterSeq: number): Stream.Stream<StreamEvent>;
+    subscribe(
+      messageId: string,
+      afterSeq: number,
+      expectedRunId?: string,
+    ): Stream.Stream<StreamEvent>;
   }
 >()("chat/chat/StreamEngine") {
   static readonly layer = Layer.effect(
@@ -132,7 +155,19 @@ export class StreamEngine extends Context.Service<
       // is how "stop" works: the fiber winds itself down and still runs
       // finalize, so the partial answer is persisted and every subscriber
       // gets a `done`. Interrupting the fiber from outside would skip both.
-      const inFlight = new Map<string, Deferred.Deferred<void>>();
+      const inFlight = new Map<
+        string,
+        { abort: Deferred.Deferred<void>; runId?: string | undefined }
+      >();
+      const runtimeScope = yield* Effect.scope;
+      if (repo.research)
+        yield* Effect.forkScoped(
+          repo.research.reap().pipe(
+            Effect.catchCause((cause) => Effect.logError("research reconciliation failed", cause)),
+            Effect.delay(Duration.seconds(10)),
+            Effect.forever,
+          ),
+        );
 
       const runGeneration = Effect.fn("StreamEngine.runGeneration")(function* (input: {
         userId: string;
@@ -140,9 +175,19 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        researchRunId?: string | undefined;
         timeZone?: string | undefined;
         abort: Deferred.Deferred<void>;
       }) {
+        const currentMessage = yield* repo.getMessage(input.messageId);
+        if (input.researchRunId && currentMessage?.researchRunId !== input.researchRunId) return;
+        const claim =
+          currentMessage?.researchRunId && repo.research
+            ? yield* repo.research.claim(currentMessage.researchRunId)
+            : null;
+        if (currentMessage?.generationMode === "research" && !claim) return;
+        const research = claim && repo.research ? { ...claim, store: repo.research } : null;
+        let researchPhase: ResearchPhase = "error";
         const runtimeContext = runtimeContextMessage(new Date(), input.timeZone);
         // Snapshot the model row up front: the ledger wants its display name
         // and pricing even if the admin deletes or reprices it mid-generation.
@@ -159,23 +204,16 @@ export class StreamEngine extends Context.Service<
         // block that makes earlier indexes legitimately citable again. History
         // keeps its markers — with the recap present they resolve.
         const priorToolCalls = yield* repo.listToolCalls(
-          completed.filter((m) => m.role === "assistant").map((m) => m.id),
+          history
+            .filter((m) => m.id !== input.messageId && m.role === "assistant")
+            .map((m) => m.id),
         );
-        const priorByIndex = new Map<
-          number,
-          { index: number; url: string; title: string; snippet: string }
-        >();
-        for (const call of priorToolCalls) {
-          const result = call.result as {
-            sources?: ReadonlyArray<{ index: number; url: string; title: string; snippet: string }>;
-          } | null;
-          for (const s of result?.sources ?? []) {
-            if (!priorByIndex.has(s.index)) priorByIndex.set(s.index, s);
-          }
-        }
-        const priorSources = [...priorByIndex.values()]
-          // oxlint-disable-next-line no-array-sort -- fresh array from Map values
-          .sort((a, b) => a.index - b.index);
+        const priorSources = mergeSources(
+          priorToolCalls.flatMap((call) => {
+            const result = call.result as { sources?: ReadonlyArray<Source> } | null;
+            return result?.sources ?? [];
+          }),
+        );
 
         // Calibrates the token estimator: the newest answer that recorded what
         // the provider counted for its first model call, against what we had
@@ -196,28 +234,43 @@ export class StreamEngine extends Context.Service<
         // a race against the generation finishing, and an interrupt between
         // clearing the buffer and the insert would lose that seq range for
         // good (breaking chunk contiguity, which resume relies on).
-        const flush = Effect.uninterruptible(
-          Effect.suspend(() => {
-            if (buffer.length === 0) return Effect.void;
-            const batch = buffer;
-            buffer = [];
-            return repo.appendChunks(input.messageId, batch).pipe(
-              Effect.flatMap(() =>
-                Effect.forEach(
-                  batch,
-                  (chunk) =>
-                    PubSub.publish(pubsub, {
-                      kind: "chunk",
-                      messageId: input.messageId,
-                      seq: chunk.seq,
-                      chunkKind: chunk.kind,
-                      delta: chunk.delta,
-                    }),
-                  { discard: true },
+        const writer = yield* Semaphore.make(1);
+        const flush = writer.withPermits(1)(
+          Effect.uninterruptible(
+            Effect.suspend(() => {
+              if (buffer.length === 0) return Effect.void;
+              const batch = buffer;
+              buffer = [];
+              const persist = research
+                ? research.store.locked(
+                    research.fence,
+                    (tx) =>
+                      tx
+                        .insert(messageChunks)
+                        .values(batch.map((chunk) => ({ ...chunk, messageId: input.messageId })))
+                        .pipe(Effect.orDie, Effect.asVoid),
+                    true,
+                  )
+                : repo.appendChunks(input.messageId, batch);
+              return persist.pipe(
+                Effect.flatMap(() =>
+                  Effect.forEach(
+                    batch,
+                    (chunk) =>
+                      PubSub.publish(pubsub, {
+                        kind: "chunk",
+                        ...(research ? { runId: research.fence.runId } : {}),
+                        messageId: input.messageId,
+                        seq: chunk.seq,
+                        chunkKind: chunk.kind,
+                        delta: chunk.delta,
+                      }),
+                    { discard: true },
+                  ),
                 ),
-              ),
-            );
-          }),
+              );
+            }),
+          ),
         );
 
         const pushChunk = (kind: ChunkKind, delta: string) => {
@@ -241,6 +294,34 @@ export class StreamEngine extends Context.Service<
 
         const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
+            if (research) {
+              yield* flush.pipe(Effect.catchCause(() => Effect.void));
+              const phase =
+                status === "aborted" ? "aborted" : status === "error" ? "error" : researchPhase;
+              const finalized = yield* research.store.finalize(
+                research.fence.runId,
+                phase,
+                research.fence.owner,
+              );
+              if (finalized) {
+                const terminal = yield* repo.getMessage(input.messageId);
+                const doneStatus =
+                  terminal?.status === "streaming" ? "error" : (terminal?.status ?? "error");
+                yield* PubSub.publish(pubsub, {
+                  kind: "done",
+                  messageId: input.messageId,
+                  runId: research.fence.runId,
+                  status: doneStatus,
+                });
+                yield* sync.publish(input.userId, {
+                  type: "message.status",
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  status: doneStatus,
+                });
+              }
+              return;
+            }
             yield* flush;
             if (error) {
               yield* Effect.logError("generation failed", {
@@ -316,6 +397,49 @@ export class StreamEngine extends Context.Service<
         let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
+          if (research) {
+            const work = runResearch({
+              store: research.store,
+              fence: research.fence,
+              gateway,
+              repo,
+              providers,
+              webSearch,
+              urlReader,
+              promptDeps,
+              history: completed,
+              priorSources,
+              runtimeContext,
+              modelId: input.modelId,
+              userId: input.userId,
+              startedAt: research.run.createdAt.getTime(),
+              emit: pushToolChunk,
+              emitCompaction: pushCompactionChunk,
+              getTextOffset: () => assembled.length,
+              text: (delta) =>
+                Effect.suspend(() => {
+                  pushChunk("text", delta);
+                  return flush;
+                }),
+            });
+            const control = Effect.gen(function* () {
+              let ticks = 0;
+              while (true) {
+                yield* Effect.sleep(Duration.seconds(1));
+                if (!(yield* research.store.alive(research.fence))) {
+                  yield* Deferred.succeed(input.abort, undefined);
+                  return yield* Effect.never;
+                }
+                if (++ticks % 10 === 0) yield* research.store.heartbeat(research.fence);
+              }
+            });
+            researchPhase = yield* Effect.raceFirst(work, control).pipe(
+              Effect.timeout(
+                Duration.millis(Math.max(1, research.run.deadline.getTime() - Date.now())),
+              ),
+            );
+            return;
+          }
           // Attachments resolve here, inside the generation: a missing blob or
           // an unparseable PDF then finalizes the message as an error like any
           // other generation failure.
@@ -824,9 +948,10 @@ export class StreamEngine extends Context.Service<
 
                           if (!isPreliminary) {
                             for (const source of sources) {
-                              if (!sourcesByIndex.has(source.index)) {
-                                sourcesByIndex.set(source.index, source);
-                              }
+                              sourcesByIndex.set(
+                                source.index,
+                                mergeSource(sourcesByIndex.get(source.index), source),
+                              );
                             }
                           }
 
@@ -1076,11 +1201,12 @@ export class StreamEngine extends Context.Service<
         // outside: the model stream is interrupted but finalize still runs, so
         // the text produced so far is persisted and subscribers get a `done`.
         const stopped = Deferred.await(input.abort).pipe(Effect.as(true));
-        const ran = generate.pipe(Effect.as(false));
+        const ran = generate.pipe(Effect.scoped, Effect.as(false));
 
         yield* Effect.raceFirst(Effect.raceFirst(ran, stopped), flusher).pipe(
           Effect.flatMap((wasStopped) => finalize(wasStopped ? "aborted" : "complete")),
           Effect.catchCause((cause) => finalize("error", cause)),
+          Effect.onInterrupt(() => (research ? finalize("error") : Effect.void)),
         );
       });
 
@@ -1090,32 +1216,40 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        researchRunId?: string | undefined;
         timeZone?: string | undefined;
       }) {
         const abort = yield* Deferred.make<void>();
-        inFlight.set(input.messageId, abort);
+        const registration = { abort, runId: input.researchRunId };
+        inFlight.set(input.messageId, registration);
         // Detached from the request fiber: survives the HTTP response ending.
-        yield* Effect.forkDetach(
+        yield* Effect.forkIn(
           runGeneration({ ...input, abort }).pipe(
             Effect.ensuring(
               Effect.sync(() => {
                 // Identity-checked: a retry reuses the message id, so this run
                 // must not evict the registration a newer one just made.
-                if (inFlight.get(input.messageId) === abort) inFlight.delete(input.messageId);
+                if (inFlight.get(input.messageId) === registration)
+                  inFlight.delete(input.messageId);
               }),
             ),
           ),
+          runtimeScope,
         );
       });
 
-      const stopGeneration = (messageId: string): Effect.Effect<boolean> =>
+      const stopGeneration = (messageId: string, expectedRunId?: string): Effect.Effect<boolean> =>
         Effect.suspend(() => {
-          const abort = inFlight.get(messageId);
-          if (!abort) return Effect.succeed(false);
-          return Deferred.succeed(abort, undefined);
+          const registration = inFlight.get(messageId);
+          if (!registration || registration.runId !== expectedRunId) return Effect.succeed(false);
+          return Deferred.succeed(registration.abort, undefined);
         });
 
-      const subscribe = (messageId: string, afterSeq: number): Stream.Stream<StreamEvent> =>
+      const subscribe = (
+        messageId: string,
+        afterSeq: number,
+        expectedRunId?: string,
+      ): Stream.Stream<StreamEvent> =>
         Stream.unwrap(
           Effect.gen(function* () {
             // Subscribe to live events FIRST so nothing falls in the gap
@@ -1126,6 +1260,48 @@ export class StreamEngine extends Context.Service<
             if (!message) {
               const done: StreamEvent = { kind: "done", messageId, status: "error" };
               return Stream.make(done);
+            }
+
+            if (message.researchRunId) {
+              const runId = expectedRunId ?? message.researchRunId;
+              let cursor = afterSeq;
+              return Stream.fromEffectSchedule(
+                Effect.gen(function* () {
+                  yield* repo.research?.reap() ?? Effect.void;
+                  const snapshot = yield* repo.research!.tail(messageId, cursor);
+                  const current = snapshot?.message;
+                  if (!current || current.researchRunId !== runId)
+                    return [
+                      {
+                        kind: "done" as const,
+                        messageId,
+                        runId: current?.researchRunId ?? runId,
+                        status: "error" as const,
+                      },
+                    ];
+                  const rows = snapshot?.chunks ?? [];
+                  const events: StreamEvent[] = [];
+                  for (const chunk of rows) {
+                    if (chunk.seq !== cursor + 1) break;
+                    cursor = chunk.seq;
+                    events.push({
+                      kind: "chunk",
+                      messageId,
+                      runId,
+                      seq: chunk.seq,
+                      chunkKind: chunk.kind,
+                      delta: chunk.delta,
+                    });
+                  }
+                  if (current.status !== "streaming" && (rows.at(-1)?.seq ?? cursor) === cursor)
+                    events.push({ kind: "done", messageId, runId, status: current.status });
+                  return events;
+                }),
+                Schedule.spaced(Duration.seconds(1)),
+              ).pipe(
+                Stream.flatMap((events) => Stream.fromIterable(events)),
+                Stream.takeUntil((event) => event.kind === "done"),
+              );
             }
 
             const persisted = yield* repo.chunksAfter(messageId, afterSeq);

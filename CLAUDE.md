@@ -49,6 +49,8 @@ See README.md for architecture; this file records the sharp edges.
 - A handler's second arg is `Toolkit.HandlerContext`: `ctx.preliminary(result)` streams
   progress as `tool-result` parts with `preliminary: true`. Those are UI-only — the
   stream loop must keep them out of the continuation transcript.
+- No-argument tools use `Tool.EmptyParams`, not `Schema.Struct({})`: the latter emits
+  a root `anyOf` accepting objects or arrays, which is not a portable function-tool schema.
 - Tool page bodies are never persisted. `message_tool_calls.result` holds the summary
   plus the source list (url/title/status) only.
 - Every web tool (web_search, read_url) returns the SAME result shape
@@ -61,6 +63,18 @@ See README.md for architecture; this file records the sharp edges.
   and is the only path through `PageExtractor`, whose `url-safety.ts` guard is the
   SSRF boundary: http(s) only, no credentials, private/reserved addresses refused
   for the URL and every redirect hop. The SearXNG base URL is exempt by design.
+- `web_search` shares pending queries and caches successful results (including empty
+  results) per generation, keyed by query, time range and language. Only the producer
+  takes a permit and admits one query immediately before calling the backend. Cached
+  and shared hits survive a spent budget; mixed batches keep available results and
+  identify refused targets. Failures are evicted. Producers belong to the generation's
+  `Effect.scoped`, with waiter counts: cancelling one worker preserves other waiters;
+  the last waiter or generation shutdown interrupts abandoned work. Research shares `RESEARCH_LIMITS.externalOps` (3) permits across every
+  worker; SearXNG fans each query to every enabled engine at once, so that number
+  times the engine count is the burst the upstreams see. `infra/searxng/settings.yml`
+  enables only Bing and Yandex for general search on purpose: Bing under bot
+  suspicion returns unrelated pages rather than an error, so it must not be the
+  only engine, and the others suspend on the first burst.
 - Search follows the per-message composer toggle. The reader rides with an armed
   search so the model can open its hits, and is also armed when user-authored text
   or prior persisted sources seed URL authority. Search hits extend that authority
@@ -68,6 +82,104 @@ See README.md for architecture; this file records the sharp edges.
   `searchEnabled` gates search ONLY, history citation-marker stripping keys off
   whether any tool is armed (`webToolsEnabled`), and retry re-arms search only when
   the original generation called `web_search`.
+
+## Deep research
+
+- Research is a persisted **request mode**, not a conversation setting. Valid structured
+  answers inherit it server-side; ordinary text does not. Retry/edit use the target's saved
+  mode, and retry installs a fresh `researchRunId` even when the message ID is reused.
+- Research writes hold the conversation lock and validate current run/owner/lease. Stop
+  carries the expected run ID; local cancellation, SSE events and client hook identity must
+  carry it too. Research tails ordered DB chunks every second; ordinary chat keeps its
+  existing local live tail. Expired research is terminalized, never automatically resumed.
+  Keep the active SSE subscription through `done` even if a sync refresh sees the terminal
+  row first; otherwise the sticky overlay can strand undisplayed questions and stale status.
+- Clarification is internal: discard its prose and emit only validated `ask_user` activities.
+  Only synthesis writes outer research prose; a model ignoring the stage policy must not
+  leak an uncited answer before investigation.
+- The research row in the transcript is one line: live phase plus the current
+  search/read while exploring, then `Researched N sources`. It settles the moment
+  synthesis starts, not when the message completes: the answer streams below it
+  like any reply, with the ordinary "Thinking…" before the first token, so there
+  is no "writing" state for a research turn. It opens the run's activity panel (`research-panel.tsx`:
+  searches and reads grouped by task) under its own panel id. The detail panel
+  snapshots its body at open; `ResearchPanelOwner` beside ChatView's virtual list
+  refreshes body and subtitle in a commit effect from the final persisted/live display.
+  Selection is message + run ID, independent of bubble mounts. Identity-checked refresh
+  cannot reopen a closed panel or replace Sources; a retry closes the superseded run.
+  There is no module-level message cache or render-time publication. The sources list
+  stays a separate panel reached from the message menu. The plan and
+  worker reports never render, and a failed read is never a user-facing limitation:
+  the worker prompt tells the model to route around it. An `awaiting_answer` run
+  renders nothing, because its question card follows and the answered run continues
+  in the next message.
+- Synthesis citations: `validateResearchCitations` accepts plain `[N]` for a
+  registered source and normalises it to `[^N]`, because models write both and the
+  chip renderer keys off the footnote form. Unregistered footnote handles become
+  `[unverified source]`; ordinary bracketed numbers without a registered source stay text.
+- SearXNG returns HTTP 200 with `results: []` and `unresponsive_engines` when every
+  engine is rate-limited or captcha-suspended. The backend maps that to a
+  `SearchBackendError` so the run sees a failure, not an empty topic. The budget
+  counts consecutive failed backend queries across all workers (`observeSearch`),
+  once per actual backend completion, never per tool batch, waiter, cache hit,
+  cancellation or refusal; at
+  `searchOutageThreshold` it latches `searchUnavailable`, which ends exploration
+  and dispatch, adds one plain limitation, and tells synthesis to say so. One
+  failed search is the worker rephrasing; a run of them is the backend down.
+- Stage evidence stays assistant-role data, followed by an application-authored user-role
+  stage request. Never end coordinator, report or synthesis prompts on the evidence block:
+  models that disallow assistant prefill reject it. Include the request in protected trailing
+  context so history/active-round compaction and overflow repair cannot drop it.
+- Per-call provider timeouts key off stream inactivity (`providerStallMs`), not
+  elapsed time: a worker's searches and reads run inside its model stream and
+  report progress, so a wall-clock cap fails productive rounds. The run deadline
+  still bounds every call. A synthesis that already emitted validated lines ends
+  `partial`, never `error` — the reader can see it.
+- Every exploring turn ends on a user-role soft budget line (`prompts.budgetNotice`,
+  from `budget.remaining()`/`headroom`): workers get their fair share of the shared
+  web pool, the coordinator gets run-wide slots and rounds, and the wording tightens
+  well before a ceiling refuses anything. It stays last so the prompt prefix keeps
+  its cache, and rides the trailing/protected context so compaction budgets it.
+- The admin web-search config's optional `researchMaxSearchQueries` caps individual
+  queries across all workers (default 80, range 12–120), not tool calls or ordinary chat.
+  Resolve it once when research starts; admission and soft-budget headroom use that
+  same captured value. Admin edits apply to subsequent runs/retries, never active ones.
+  Stage prompts use evidence-based completion criteria and consequential gaps to decide
+  when to stop; the budget is a ceiling, not a target or a required source count.
+- Per-phase output caps come from the model's configured `contextLength`
+  (`researchOutputCaps`), with `RESEARCH_LIMITS.*Output` only as ceilings. The
+  resolved `ResearchCallSpec` drives admission, prompt preparation, compaction,
+  preflight and the gateway request. Task admission reserves an ordinary worker call,
+  all pending reports and synthesis at their own caps, not a shared synthesis reserve.
+  Retain full citation-validated task reports within that generation cap; never apply a
+  second character cutoff. Later stages fit reports through evidence compaction. A report
+  finish reason of `length` signals actual output-limit truncation and adds a limitation
+  while preserving the available report, independently of context abridgment.
+- A run retains its latest history projection (start index, injections and checkpoint),
+  including hard truncation and overflow repair; later stages never resurrect dropped
+  turns. Coordinator/synthesis evidence is an incremental briefing plus new task reports,
+  reduced through accounted compaction. Summarizer input budgets include prior briefings
+  and manifests. Failed consolidation falls back to bounded per-task evidence with
+  explicit omissions. Worker manifests are task-local; inherited sources remain registered
+  but do not become this run's collected evidence merely by being in history.
+- `projectResearchProgress` is the explicit durable display boundary for live, terminal
+  and branch snapshots. The plan stays run-local and reports stay in task columns, never
+  in root tool/SSE progress. Planning text deltas do not publish progress; unchanged
+  snapshots are suppressed. Tool envelopes require their current family discriminator,
+  with no missing-family inference.
+- `research/budget.ts` admits actual model calls and batched web targets before execution.
+  The first refused web admission latches `webRefused`: further rounds and
+  dispatches stop instead of spending model calls on tools that must refuse.
+  Reaching a ceiling is the design, not a limitation: it is reported to synthesis
+  as an execution bound so the answer discloses it, and stays out of the
+  user-facing limitation list, which is for coverage that actually failed.
+  All workers share one web semaphore, source indexer and URL authority. Worker prose
+  grants no URL authority and never becomes outer assistant text. Child tool/compaction
+  activity is nested under the run's root activity, not sorted independently into prose.
+- Research calls checkpoint observed usage; finalization appends one idempotent aggregate
+  chat ledger row keyed by run ID. Compaction uses its call ID for a separate ledger row;
+  it is excluded from the chat aggregate. Missing usage is incomplete/unknown cost, not zero.
+  Branch copies terminal display snapshots with fresh IDs, never calls or ledger entries.
 
 ## Temporal prompt context
 
@@ -92,9 +204,17 @@ See README.md for architecture; this file records the sharp edges.
   footnote ref, and the `data-footnotes` attribute on the appended section. hast gives that
   attribute the _empty string_, so suppress on `!== undefined` — a truthiness check silently
   renders the list. Both are pinned by `message-list.test.tsx`; re-probe on upgrade.
+- A citation chip is a link to its source showing favicon and truncated title; the
+  number is never rendered, in chips or in the sources panel. It stays the model's
+  handle: markers, source manifests and the panel's row keys all use it.
 - Citation numbers are conversation-scoped: `createSourceIndexer` is seeded from prior
   messages' persisted sources and shared by all web tools in a generation, so repeats
   keep their number and every tool continues one sequence.
+- `tools/sources.ts` merges observations everywhere: successful extraction is monotonic,
+  and a later search cannot replace it with snippet-only evidence. The Sources panel/counts
+  select own cited or extracted sources plus cited inherited sources, never all search hits.
+  `citedSourceIndexes` uses the renderer's GFM-footnote parser packages, excluding code
+  examples and definition bodies. `read` means page extraction, not reading a page in full.
 
 ## Markdown plugins (`src/ui/markdown-plugins.ts`)
 

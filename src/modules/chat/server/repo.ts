@@ -23,6 +23,9 @@ import {
   readStoredQuestionPresentation,
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
+import { projectResearchProgress } from "../research-schema.ts";
+import { createResearchStore, queueResearch, type ResearchStore } from "./research/repo.ts";
+import { researchRuns, researchTasks } from "~/db/schema/research.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
@@ -55,6 +58,7 @@ export type EditContent =
   | { content?: never; questionResponse: QuestionResponse };
 
 export type CreateTurnInput = {
+  generationMode?: "chat" | "research" | undefined;
   userId: string;
   conversationId: string | null;
   modelId: string;
@@ -71,7 +75,17 @@ export interface ConversationCursor {
 }
 export type MessageRow = typeof messages.$inferSelect;
 export type HistorySnapshot = ReadonlyArray<
-  Pick<MessageRow, "id" | "status" | "content" | "questionResponse" | "editedAt" | "completedAt">
+  Pick<
+    MessageRow,
+    | "id"
+    | "status"
+    | "content"
+    | "questionResponse"
+    | "editedAt"
+    | "completedAt"
+    | "generationMode"
+    | "researchRunId"
+  >
 >;
 
 const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boolean =>
@@ -81,6 +95,8 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
     return (
       message.id === previous.id &&
       message.status === previous.status &&
+      message.generationMode === previous.generationMode &&
+      message.researchRunId === previous.researchRunId &&
       message.content === previous.content &&
       JSON.stringify(message.questionResponse) === JSON.stringify(previous.questionResponse) &&
       message.editedAt?.getTime() === previous.editedAt?.getTime() &&
@@ -186,6 +202,7 @@ const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
+    research?: ResearchStore;
     /**
      * One page of a user's conversations, newest activity first. Ordered by
      * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the
@@ -386,8 +403,10 @@ export class ChatRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const attachments = yield* AttachmentRepo;
+      const research = createResearchStore(db);
 
       return ChatRepo.of({
+        research,
         listConversations: Effect.fn("ChatRepo.listConversations")(function* (input) {
           const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
           const title = input.query?.trim();
@@ -512,6 +531,7 @@ export class ChatRepo extends Context.Service<
                   conversationCreated = true;
                 }
 
+                let generationMode = input.generationMode ?? "chat";
                 let content = input.content;
                 let questionResponse: JsonValue | null = null;
                 if (input.questionResponse) {
@@ -528,6 +548,7 @@ export class ChatRepo extends Context.Service<
                   const batch = yield* questionForMessage(tx, tail);
                   if (!batch || batch.call.id !== callId)
                     return yield* new QuestionUnavailable({ callId });
+                  generationMode = tail?.generationMode ?? "chat";
                   const formatted = yield* questionContent(batch.questions, response);
                   content = formatted.content;
                   questionResponse = formatted.questionResponse;
@@ -542,6 +563,7 @@ export class ChatRepo extends Context.Service<
                     status: "complete",
                     content: content!,
                     questionResponse,
+                    generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
@@ -561,10 +583,19 @@ export class ChatRepo extends Context.Service<
                     role: "assistant",
                     status: "streaming",
                     modelId: input.modelId,
+                    generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
 
+                if (generationMode === "research") {
+                  assistantRows[0]!.researchRunId = yield* queueResearch(tx, {
+                    userId: input.userId,
+                    conversationId: conversation.id,
+                    messageId: assistantRows[0]!.id,
+                    modelId: input.modelId,
+                  });
+                }
                 yield* tx
                   .update(conversations)
                   .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })
@@ -617,8 +648,10 @@ export class ChatRepo extends Context.Service<
                     .from(conversations)
                     .where(
                       and(eq(conversations.id, conversationId), eq(conversations.userId, userId)),
-                    );
+                    )
+                    .for("update");
                   if (owned.length === 0) return [] as ReadonlyArray<string>;
+                  yield* research.finalizeBeforeDelete(tx, conversationId);
 
                   const rows = yield* tx
                     .select({ id: messages.id })
@@ -725,6 +758,61 @@ export class ChatRepo extends Context.Service<
                   )
                   .pipe(Effect.orDie);
 
+                const runIds = new Map<string, string>();
+                const taskIds = new Map<string, string>();
+                const clonedProgress = new Map<string, unknown>();
+                for (const message of prefix) {
+                  if (!message.researchRunId) continue;
+                  const run = (yield* tx
+                    .select()
+                    .from(researchRuns)
+                    .where(eq(researchRuns.id, message.researchRunId))
+                    .pipe(Effect.orDie))[0];
+                  if (!run || run.status !== "terminal") continue;
+                  const id = uuidv7();
+                  runIds.set(run.id, id);
+                  const tasks = yield* tx
+                    .select()
+                    .from(researchTasks)
+                    .where(eq(researchTasks.runId, run.id))
+                    .pipe(Effect.orDie);
+                  for (const task of tasks) taskIds.set(task.id, uuidv7());
+                  const progress = projectResearchProgress({
+                    ...run.progress,
+                    runId: id,
+                    tasks: run.progress.tasks.map((task) => ({
+                      ...task,
+                      id: taskIds.get(task.id)!,
+                    })),
+                  });
+                  clonedProgress.set(run.id, progress);
+                  yield* tx
+                    .insert(researchRuns)
+                    .values({
+                      ...run,
+                      id,
+                      conversationId: branch.id,
+                      messageId: clonedIds.get(message.id)!,
+                      owner: null,
+                      cancelRequested: false,
+                      snapshot: true,
+                      progress,
+                    })
+                    .pipe(Effect.orDie);
+                  if (tasks.length)
+                    yield* tx
+                      .insert(researchTasks)
+                      .values(
+                        tasks.map((task) => ({ ...task, id: taskIds.get(task.id)!, runId: id })),
+                      )
+                      .pipe(Effect.orDie);
+                  yield* tx
+                    .update(messages)
+                    .set({ researchRunId: id })
+                    .where(eq(messages.id, clonedIds.get(message.id)!))
+                    .pipe(Effect.orDie);
+                }
+
                 // Tool calls are part of the answer, not of its generation:
                 // the sources panel and the citation numbering both read them.
                 const toolCalls = yield* tx
@@ -738,7 +826,19 @@ export class ChatRepo extends Context.Service<
                     .values(
                       toolCalls.map((call) => ({
                         ...call,
-                        id: uuidv7(),
+                        id: runIds.get(call.id) ?? uuidv7(),
+                        researchRunId: call.researchRunId
+                          ? (runIds.get(call.researchRunId) ?? null)
+                          : null,
+                        researchTaskId: call.researchTaskId
+                          ? (taskIds.get(call.researchTaskId) ?? null)
+                          : null,
+                        result: clonedProgress.has(call.id)
+                          ? ({
+                              ...(call.result as object),
+                              progress: clonedProgress.get(call.id),
+                            } as JsonValue)
+                          : call.result,
                         messageId: clonedIds.get(call.messageId)!,
                       })),
                     )
@@ -800,6 +900,12 @@ export class ChatRepo extends Context.Service<
                         ...event,
                         id: uuidv7(),
                         messageId: clonedIds.get(event.messageId)!,
+                        researchRunId: event.researchRunId
+                          ? (runIds.get(event.researchRunId) ?? null)
+                          : null,
+                        researchTaskId: event.researchTaskId
+                          ? (taskIds.get(event.researchTaskId) ?? null)
+                          : null,
                         checkpointId: event.checkpointId
                           ? (checkpointIds.get(event.checkpointId) ?? null)
                           : null,
@@ -1073,6 +1179,14 @@ export class ChatRepo extends Context.Service<
                   return { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
                 }
 
+                if (current[index]!.generationMode === "research") {
+                  yield* queueResearch(tx, {
+                    userId: input.userId,
+                    conversationId: target.conversationId,
+                    messageId: input.messageId,
+                    modelId: input.modelId,
+                  });
+                }
                 const orphanedKeys: string[] = [];
 
                 if (input.edit) {
@@ -1227,9 +1341,17 @@ export class ChatRepo extends Context.Service<
                     role: "assistant",
                     status: "streaming",
                     modelId: input.modelId,
+                    generationMode: current[index]!.generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
+                if (current[index]!.generationMode === "research")
+                  created[0]!.researchRunId = yield* queueResearch(tx, {
+                    userId: input.userId,
+                    conversationId: input.conversationId,
+                    messageId: created[0]!.id,
+                    modelId: input.modelId,
+                  });
                 return {
                   message: created[0]!,
                   orphanedKeys: orphanedKeys as ReadonlyArray<string>,

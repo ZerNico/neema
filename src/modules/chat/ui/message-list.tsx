@@ -5,8 +5,10 @@ import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import {
   type CompactionActivity,
+  type ResearchToolActivity,
   type ToolActivity,
   type ToolSource,
+  type WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
@@ -14,7 +16,14 @@ import { projectAssistantBody } from "./assistant-body.ts";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
-import { FOOTNOTE_HREF, collectSources, prepareCitedMarkdown } from "./citations.ts";
+import {
+  FOOTNOTE_HREF,
+  collectSources,
+  prepareCitedMarkdown,
+  selectAnswerSources,
+} from "./citations.ts";
+import { ResearchActivityBlock } from "./research-activity-block.tsx";
+import { useResearchPanel } from "./research-panel.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
@@ -38,15 +47,13 @@ import { cn } from "~/ui/utils";
 
 type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
 
-// Renders GFM footnote references as citation chips and hides the footnote
-// list streamdown would otherwise append (the detail panel is our sources UI).
+// Renders GFM footnote references as citation chips linking to their source,
+// and hides the footnote list streamdown would otherwise append (the detail
+// panel is our sources UI).
 // Both hooks into streamdown's output — the `#user-content-fn-N` href shape and
 // the `data-footnotes` section — are verified against 2.5.0 by the render test;
 // re-check them on upgrade.
-function citationComponents(
-  sources: ToolSource[],
-  onOpen: (index: number) => void,
-): MarkdownComponents {
+function citationComponents(sources: ToolSource[]): MarkdownComponents {
   const byIndex = new Map(sources.map((s) => [s.index, s]));
   return {
     a: ({ node: _node, href, children, ...props }) => {
@@ -59,7 +66,7 @@ function citationComponents(
           </a>
         );
       }
-      return <CitationChip source={source} onOpen={() => onOpen(source.index)} />;
+      return <CitationChip source={source} />;
     },
     section: ({ node, children, ...props }) => {
       // hast gives a valueless attribute the empty string, so compare against
@@ -74,22 +81,17 @@ function citationComponents(
   };
 }
 
-// Every segment shares its message's source set and panel callback.
+// Every segment shares its message's source set.
 const CitedAnswer = memo(function CitedAnswer({
-  onOpenSources,
   content: rawContent,
   sources,
   streaming,
 }: {
-  onOpenSources: (focus?: number) => void;
   content: string;
   sources: ToolSource[];
   streaming: boolean;
 }) {
-  const components = useMemo(
-    () => citationComponents(sources, onOpenSources),
-    [sources, onOpenSources],
-  );
+  const components = useMemo(() => citationComponents(sources), [sources]);
   const content = useMemo(() => prepareCitedMarkdown(rawContent, sources), [rawContent, sources]);
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
 });
@@ -128,6 +130,8 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
 
 export interface DisplayMessage {
   id: string;
+  /** Durable attempt identity, used to fence live panel updates across retries. */
+  researchRunId?: string | null;
   role: "user" | "assistant" | "system";
   content: string;
   /** Receipt length before smoothing; activity anchors remain in this coordinate space. */
@@ -171,6 +175,7 @@ export interface DisplayMessage {
     modelId: string | null;
     onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
+    researchEnabled?: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
     /** The view-level upload state, seeded with the message's own files. */
     attachments: AttachmentUploads;
@@ -282,6 +287,7 @@ function InlineMessageEditor({
         modelId={editState.modelId}
         onModelChange={editState.onModelChange}
         searchEnabled={editState.searchEnabled}
+        researchEnabled={editState.researchEnabled ?? false}
         onSearchEnabledChange={editState.onSearchEnabledChange}
         attachments={editState.attachments}
         placeholder="Edit message…"
@@ -357,9 +363,10 @@ const AssistantBody = memo(function AssistantBody({
 }: {
   message: DisplayMessage;
   sources: ToolSource[];
-  onOpenSources?: (focus?: number) => void;
+  onOpenSources?: () => void;
 }) {
   const streaming = message.status === "streaming";
+  const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   const { parts } = projectAssistantBody({
     content: message.content,
     rawTextLength: message.rawTextLength ?? message.content.length,
@@ -371,13 +378,8 @@ const AssistantBody = memo(function AssistantBody({
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">
-          {onOpenSources ? (
-            <CitedAnswer
-              content={part.content}
-              sources={sources}
-              streaming={part.streaming}
-              onOpenSources={onOpenSources}
-            />
+          {sources.length > 0 ? (
+            <CitedAnswer content={part.content} sources={sources} streaming={part.streaming} />
           ) : (
             <AssistantMarkdown content={part.content} streaming={part.streaming} />
           )}
@@ -389,6 +391,7 @@ const AssistantBody = memo(function AssistantBody({
         <ToolActivityBlock
           key={part.key}
           activities={part.activities}
+          usedSources={usedIndexes}
           {...(!streaming && onOpenSources ? { onViewSources: onOpenSources } : {})}
         />
       );
@@ -401,6 +404,21 @@ const AssistantBody = memo(function AssistantBody({
           outcome={part.activity.outcome}
           summary={part.activity.summary}
           className="mb-2"
+        />
+      );
+    }
+    if (part.activity.family === "research") {
+      const runId = part.activity.progress?.runId;
+      return (
+        <ResearchActivityRow
+          key={part.key}
+          messageId={message.id}
+          activity={part.activity}
+          webActivities={message.toolActivities.filter(
+            (activity): activity is WebToolActivity =>
+              activity.family === "web" && !!runId && activity.runId === runId,
+          )}
+          sourceCount={sources.length}
         />
       );
     }
@@ -427,11 +445,34 @@ function AssistantSourcePanel({
 }: {
   messageId: string;
   sources: ToolSource[];
-  bind: (open: (focus?: number) => void) => () => void;
+  bind: (open: () => void) => () => void;
 }) {
   const open = useSourcesPanel(messageId, sources);
   useLayoutEffect(() => bind(open), [bind, open]);
   return null;
+}
+
+// An opening-only trigger. The conversation owns updates after this row unmounts.
+function ResearchActivityRow({
+  messageId,
+  activity,
+  webActivities,
+  sourceCount,
+}: {
+  messageId: string;
+  activity: ResearchToolActivity;
+  webActivities: WebToolActivity[];
+  sourceCount: number;
+}) {
+  const open = useResearchPanel(messageId, activity, webActivities);
+  return (
+    <ResearchActivityBlock
+      activity={activity}
+      webActivities={webActivities}
+      sourceCount={sourceCount}
+      onOpen={open}
+    />
+  );
 }
 
 const EMPTY_COMPACTION_ACTIVITIES: CompactionActivity[] = [];
@@ -568,16 +609,21 @@ function GenerationFailure({
 }
 
 function AssistantBubble({ message }: { message: DisplayMessage }) {
-  const sourcePanel = useRef<((focus?: number) => void) | null>(null);
-  const bindSourcePanel = useCallback((open: (focus?: number) => void) => {
+  const sourcePanel = useRef<(() => void) | null>(null);
+  const bindSourcePanel = useCallback((open: () => void) => {
     sourcePanel.current = open;
     return () => {
       sourcePanel.current = null;
     };
   }, []);
-  const openSources = useCallback((focus?: number) => sourcePanel.current?.(focus), []);
+  const openSources = useCallback(() => sourcePanel.current?.(), []);
   const streaming = message.status === "streaming";
-  const toolRunning = message.toolActivities.some((a) => a.status === "running");
+  // A research run writing its answer is no longer "a tool running": the reply
+  // is streaming like any other, so the ordinary pre-text signal applies.
+  const toolRunning = message.toolActivities.some(
+    (a) =>
+      a.status === "running" && !(a.family === "research" && a.progress?.phase === "synthesizing"),
+  );
   // "Thinking" is the phase before any visible answer text arrives — but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
@@ -587,21 +633,16 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const compacting = compactionActivities.some((activity) => activity.status === "running");
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
 
-  // The message's citable set: its own searched sources (always shown, even
-  // uncited — they were consulted) plus inherited sources it actually cites.
-  // Numbering is conversation-scoped, so indexes never collide across the two.
-  const sources = useMemo(() => {
-    const own = collectSources(message.toolActivities);
-    const ownIndexes = new Set(own.map((source) => source.index));
-    const cited = new Set(
-      [...message.content.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1])),
-    );
-    const inherited = (message.inheritedSources ?? []).filter(
-      (source) => cited.has(source.index) && !ownIndexes.has(source.index),
-    );
-    // oxlint-disable-next-line no-array-sort -- fresh array
-    return [...own, ...inherited].sort((a, b) => a.index - b.index);
-  }, [message.content, message.inheritedSources, message.toolActivities]);
+  // Search hits remain in activity; the answer lists cited or extracted evidence.
+  const sources = useMemo(
+    () =>
+      selectAnswerSources(
+        message.content,
+        collectSources(message.toolActivities),
+        message.inheritedSources ?? [],
+      ),
+    [message.content, message.inheritedSources, message.toolActivities],
+  );
 
   return (
     <div className="flex w-full justify-start">
@@ -633,7 +674,10 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         ) : message.status === "aborted" ? (
           <p className="text-muted-foreground mt-2 text-xs">Stopped.</p>
         ) : null}
-        {streaming ? null : (
+        {/* A turn that only asked a question or only ran research has nothing to
+            copy and no answer to branch from; the row would be chrome around
+            an empty message. Its actions return with the text. */}
+        {streaming || message.content.length === 0 ? null : (
           <MessageActions
             onOpenSources={openSources}
             content={message.content}

@@ -7,8 +7,12 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { forwardRef, useEffect, useRef, useState } from "react";
-import { chatModelsQuery, webSearchAvailabilityQuery } from "../client/queries.ts";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
+import {
+  chatModelsQuery,
+  researchAvailabilityQuery,
+  webSearchAvailabilityQuery,
+} from "../client/queries.ts";
 import { resolveChatModel } from "../client/selected-model.ts";
 import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
 import { ModelPicker } from "./model-picker.tsx";
@@ -26,6 +30,7 @@ import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
@@ -50,7 +55,9 @@ export const ChatInput = forwardRef<
     onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
-    /** Owner-held upload state; omitted renders the plus button disabled. */
+    researchEnabled?: boolean;
+    onResearchEnabledChange?: (enabled: boolean) => void;
+    /** Owner-held upload state; research remains available without uploads. */
     attachments?: AttachmentUploads | undefined;
     placeholder?: string;
     textareaLabel?: string;
@@ -72,6 +79,8 @@ export const ChatInput = forwardRef<
     onModelChange,
     searchEnabled,
     onSearchEnabledChange,
+    researchEnabled = false,
+    onResearchEnabledChange,
     attachments,
     placeholder = "Message…",
     textareaLabel,
@@ -83,6 +92,12 @@ export const ChatInput = forwardRef<
 ) {
   const { data: models } = useSuspenseQuery(chatModelsQuery);
   const { data: searchAvailability } = useQuery(webSearchAvailabilityQuery);
+  const { data: researchAvailability } = useQuery({
+    ...researchAvailabilityQuery,
+    enabled: onResearchEnabledChange !== undefined || researchEnabled,
+  });
+  const researchHintId = useId();
+  const menuLabel = onResearchEnabledChange ? "Add files or tools" : "Add attachment";
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
     enabled: attachments !== undefined,
@@ -101,11 +116,19 @@ export const ChatInput = forwardRef<
   const searchAvailable =
     (searchAvailability?.enabled ?? false) && (selectedModel?.capabilities.tools ?? false);
 
+  const researchUnavailableReason = !selectedModel?.capabilities.tools
+    ? "Choose a model that supports tools."
+    : !researchAvailability
+      ? "Checking research availability…"
+      : !researchAvailability.configured || !researchAvailability.enabled
+        ? "Web search and page reading must both be enabled."
+        : null;
+
   useEffect(() => {
-    if (searchEnabled && selectedModel && !selectedModel.capabilities.tools) {
+    if (!researchEnabled && searchEnabled && selectedModel && !selectedModel.capabilities.tools) {
       onSearchEnabledChange(false);
     }
-  }, [searchEnabled, selectedModel, onSearchEnabledChange]);
+  }, [researchEnabled, searchEnabled, selectedModel, onSearchEnabledChange]);
 
   // Parsing lets a PDF through on a model without native file input; while the
   // query is still loading we say nothing rather than flash a wrong warning.
@@ -147,6 +170,7 @@ export const ChatInput = forwardRef<
     !!selectedModel &&
     selectedModel.id === modelId &&
     !blocked &&
+    !(researchEnabled && researchUnavailableReason) &&
     !attachments?.queued &&
     (value.trim() !== "" || usable > 0);
 
@@ -233,60 +257,84 @@ export const ChatInput = forwardRef<
       />
       <div className="flex items-center gap-1 p-2 pt-0">
         {attachments ? (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ATTACHMENT_ACCEPT}
-              className="hidden"
-              // Selecting the same file twice in a row must re-fire `change`.
-              onChange={(event) => {
-                attachments.addFiles(event.target.files ?? []);
-                event.target.value = "";
-              }}
-            />
-            <DropdownMenu>
-              <Tooltip>
-                <DropdownMenuTrigger
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ATTACHMENT_ACCEPT}
+            className="hidden"
+            // Selecting the same file twice in a row must re-fire `change`.
+            onChange={(event) => {
+              attachments.addFiles(event.target.files ?? []);
+              event.target.value = "";
+            }}
+          />
+        ) : null}
+        <DropdownMenu>
+          <Tooltip>
+            <DropdownMenuTrigger
+              render={
+                <TooltipTrigger
                   render={
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          aria-label="Add attachment"
-                          disabled={controlsDisabled || attachments.isFull}
-                          className="text-muted-foreground"
-                        />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={menuLabel}
+                      disabled={
+                        controlsDisabled ||
+                        (!onResearchEnabledChange && (!attachments || attachments.isFull))
                       }
+                      className="text-muted-foreground"
                     />
                   }
+                />
+              }
+            >
+              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+            </DropdownMenuTrigger>
+            <TooltipContent>{menuLabel}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="start" className={cn(onResearchEnabledChange && "w-64")}>
+            <DropdownMenuItem onClick={pickFiles} disabled={!attachments || attachments.isFull}>
+              <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
+              Attach files
+            </DropdownMenuItem>
+            {onResearchEnabledChange ? (
+              <>
+                <DropdownMenuCheckboxItem
+                  checked={researchEnabled}
+                  onCheckedChange={onResearchEnabledChange}
+                  disabled={
+                    controlsDisabled ||
+                    attachments?.queued ||
+                    (!researchEnabled && researchUnavailableReason !== null)
+                  }
+                  aria-label="Deep research"
+                  aria-describedby={researchHintId}
                 >
-                  <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-                </DropdownMenuTrigger>
-                <TooltipContent>Add attachment</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={pickFiles}>
-                  <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-                  Attach files
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        ) : (
+                  <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
+                  Deep research
+                </DropdownMenuCheckboxItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {researchEnabled ? (
           <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Add attachment"
-            disabled
-            className="text-muted-foreground"
+            size="sm"
+            variant="default"
+            aria-label="Deep research"
+            aria-pressed
+            onClick={() => onResearchEnabledChange?.(false)}
+            disabled={controlsDisabled || attachments?.queued || !onResearchEnabledChange}
+            className="min-w-0 shrink-0"
           >
-            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
+            <span>
+              <span className="max-[420px]:sr-only">Deep </span>research
+            </span>
           </Button>
-        )}
-        {searchAvailable ? (
+        ) : searchAvailable ? (
           <Button
             size="sm"
             variant={searchEnabled ? "default" : "ghost"}
@@ -360,6 +408,11 @@ export const ChatInput = forwardRef<
           )}
         </div>
       </div>
+      {researchEnabled && researchUnavailableReason ? (
+        <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
+          {researchUnavailableReason}
+        </p>
+      ) : null}
       {dragging ? (
         // pointer-events-none so dragleave/drop still reach the shell.
         // Inset by 0.25rem, so the radius is the shell's minus that inset.

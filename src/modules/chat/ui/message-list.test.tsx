@@ -120,7 +120,7 @@ describe("MessageBubble chronological body", () => {
                     url: "https://example.com",
                     title: "One source",
                     snippet: "",
-                    read: false,
+                    read: true,
                   },
                 ],
               },
@@ -169,7 +169,7 @@ describe("MessageBubble chronological body", () => {
     );
     expect(container.querySelectorAll("pre")).toHaveLength(1);
     expect(screen.getByText("unfinished fence")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Source 1: One source" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Source: One source" })).toHaveLength(2);
     expect(container.querySelector("[data-footnotes]")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
@@ -465,12 +465,14 @@ describe("MessageBubble citations", () => {
       </DetailPanelProvider>,
     );
 
-  it("renders a footnote marker as a citation chip, not literal text", () => {
+  it("renders a footnote marker as a titled link to the source, not a number", () => {
     const { container } = renderCited("Effect 4.0 is out[^1].");
 
-    expect(
-      screen.getByRole("button", { name: "Source 1: Effect 4.0 released" }),
-    ).toBeInTheDocument();
+    const chip = screen.getByRole("link", { name: "Source: Effect 4.0 released" });
+    expect(chip).toHaveAttribute("href", "https://effect.website/blog");
+    expect(chip).toHaveAttribute("target", "_blank");
+    expect(chip).toHaveTextContent("Effect 4.0 released");
+    expect(chip).not.toHaveTextContent("1");
     expect(container.textContent).not.toContain("[^1]");
   });
 
@@ -570,8 +572,8 @@ describe("MessageBubble actions", () => {
         />
       </DetailPanelProvider>,
     );
-    expect(screen.getByRole("button", { name: "Source 2: Effect docs" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Source 3: Other" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Source: Effect docs" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Source: Other" })).toBeNull();
   });
 
   it("hides imitated citation markers on messages without sources", () => {
@@ -1072,7 +1074,7 @@ describe("MessageBubble actions", () => {
           message={{
             id: "research-complete",
             role: "assistant",
-            content: "A researched answer.",
+            content: "A researched answer.[^1]",
             reasoning: "",
             reasoningSeen: false,
             status: "complete",
@@ -1106,6 +1108,72 @@ describe("MessageBubble actions", () => {
     const panel = screen.getByRole("complementary", { name: "Sources" });
     expect(within(panel).getByText("Effect source")).toBeInTheDocument();
     expect(within(panel).getByText("Documentation excerpt")).toBeInTheDocument();
+  });
+
+  it("lists only the sources the answer cited or read, not every search hit", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+    const hit = (index: number, read = false) => ({
+      index,
+      url: `https://example.org/${index}`,
+      title: `Source ${index}`,
+      snippet: "",
+      read,
+    });
+    render(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            id: "many-hits",
+            role: "assistant",
+            content: "Supported[^2] and confirmed[^7].",
+            reasoning: "",
+            reasoningSeen: false,
+            status: "complete",
+            toolActivities: [
+              {
+                family: "web",
+                callId: "search-1",
+                name: "web_search",
+                targets: ["effect"],
+                status: "complete",
+                sources: [hit(1), hit(2), hit(3), hit(4)],
+              },
+              {
+                family: "web",
+                callId: "read-1",
+                name: "read_url",
+                targets: ["https://example.org/5"],
+                status: "complete",
+                sources: [hit(5, true)],
+              },
+            ],
+            inheritedSources: [hit(6), hit(7)],
+          }}
+        />
+        <DetailPanelRail />
+      </DetailPanelProvider>,
+    );
+    // Cited own, read own and cited inherited — not the two uncited hits. The
+    // tool row counts the same way: two of its five hits made the list.
+    fireEvent.click(screen.getByRole("button", { name: "Searched the web · 2 sources" }));
+    fireEvent.click(screen.getByRole("button", { name: "View all sources" }));
+    const panel = screen.getByRole("complementary", { name: "Sources" });
+    expect(
+      within(panel)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      expect.stringContaining("Source 2"),
+      expect.stringContaining("Source 5"),
+      expect.stringContaining("Source 7"),
+    ]);
+    expect(within(panel).queryByText("Source 1")).toBeNull();
+    // Rows carry no citation number; the title identifies the source.
+    expect(within(panel).queryByText(/^[257]$/)).toBeNull();
   });
 
   it("orders tool, compaction, then later tool by model turn", () => {

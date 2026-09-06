@@ -192,3 +192,38 @@
 .dark [data-shiki-token] {
   color: var(--shiki-dark) !important;
 }
+
+/* Live-progress label (deep research, and anything else that reports what it
+   is doing right now). A sweep across the text reads as "still working"
+   without the twitch of a pulsing opacity on a line of prose. */
+@utility text-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer-sweep 2.4s linear infinite;
+}
+
+@keyframes text-shimmer-sweep {
+  from {
+    background-position: 175% 0;
+  }
+  to {
+    background-position: -75% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer {
+    background-image: none;
+    color: var(--muted-foreground);
+    animation: none;
+  }
+}

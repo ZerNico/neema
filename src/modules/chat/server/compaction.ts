@@ -66,7 +66,13 @@ export const COMPACTION_CONFIG = {
 // Only what compaction touches, so unit tests can pass plain objects instead
 // of standing up the layer graph (same shape as PromptDeps / TitleDeps).
 export interface CompactionDeps {
-  readonly gateway: Pick<AiGateway["Service"], "generateText">;
+  readonly gateway: {
+    // Accounted research calls can also fail admission; every typed failure must
+    // reach the same compaction fallback, rather than being promoted to a defect.
+    generateText(
+      input: Parameters<AiGateway["Service"]["generateText"]>[0],
+    ): Effect.Effect<Effect.Success<ReturnType<AiGateway["Service"]["generateText"]>>, unknown>;
+  };
   readonly repo: Pick<
     ChatRepo["Service"],
     "insertCompactionCheckpoint" | "createCompactionEvent" | "completeCompactionEvent"
@@ -173,6 +179,12 @@ export const calibrationFactor = (
 export const computeBudget = (input: {
   contextLength: number | null | undefined;
   webToolsEnabled: boolean;
+  /**
+   * Overrides the output allowance this budget subtracts. Deep research asks
+   * for a larger final answer than ordinary chat, and the prompt it builds has
+   * to be sized against the same number it will later request.
+   */
+  outputReserve?: number | undefined;
 }): ContextBudget => {
   const context =
     input.contextLength && input.contextLength > 0
@@ -180,7 +192,12 @@ export const computeBudget = (input: {
       : COMPACTION_CONFIG.defaultContextLength;
 
   const reserve =
-    Math.min(context * COMPACTION_CONFIG.outputReserveRatio, COMPACTION_CONFIG.outputReserveMax) +
+    (input.outputReserve !== undefined && input.outputReserve > 0
+      ? Math.min(input.outputReserve, context)
+      : Math.min(
+          context * COMPACTION_CONFIG.outputReserveRatio,
+          COMPACTION_CONFIG.outputReserveMax,
+        )) +
     Math.min(context * COMPACTION_CONFIG.baseOverheadRatio, COMPACTION_CONFIG.baseOverheadMax) +
     (input.webToolsEnabled
       ? Math.min(
@@ -392,37 +409,38 @@ const transcriptLine = (message: Prompt.MessageEncoded): string => {
   return `[${roleTag(message.role)}]\n${body}`;
 };
 
-/**
- * The transcript to summarize, newest-first-priority: when the aged range is
- * itself larger than the budget, the turns nearest the boundary are the ones
- * the tail actually builds on, so the older end is what gets marked omitted.
- */
-const summaryTranscriptChars = (input: {
-  budget: ContextBudget;
-  previousSummary: string | null;
-  sourceManifest?: string;
-}) => {
-  const framingTokens =
-    textTokens(SUMMARY_SYSTEM) +
-    textTokens(input.previousSummary ?? "") +
-    textTokens(input.sourceManifest ?? "") +
-    128;
-  // The side call has no web toolkit and uses its own 2k output cap, so budget
-  // against the model window directly rather than subtracting chat/web reserves
-  // a second time.
-  return (
-    Math.max(1, input.budget.context - COMPACTION_CONFIG.summaryMaxOutputTokens - framingTokens) *
-    COMPACTION_CONFIG.charsPerToken
-  );
-};
+const clipSummaryContext = (text: string | null | undefined, limit: number) =>
+  text && text.length > limit
+    ? `${text.slice(0, Math.max(0, limit - 32))}\n[Remaining context omitted]`
+    : text;
 
 export const buildSummaryPrompt = (input: {
   aged: ReadonlyArray<Prompt.MessageEncoded>;
   previousSummary: string | null;
   maxTranscriptChars: number;
+  /** Includes framing, previous summary and source manifest, not just aged text. */
+  maxInputTokens?: number;
   /** Application-owned source list; summary prose never grants URL authority. */
   sourceManifest?: string;
 }): Prompt.Prompt => {
+  if (input.maxInputTokens !== undefined) {
+    const chars = Math.max(
+      0,
+      (input.maxInputTokens - textTokens(SUMMARY_SYSTEM) - 256) * COMPACTION_CONFIG.charsPerToken,
+    );
+    const previousSummary =
+      clipSummaryContext(input.previousSummary, Math.floor(chars / 4)) ?? null;
+    const sourceManifest = clipSummaryContext(input.sourceManifest, Math.floor(chars / 4));
+    input = {
+      ...input,
+      previousSummary,
+      ...(sourceManifest ? { sourceManifest } : {}),
+      maxTranscriptChars: Math.min(
+        input.maxTranscriptChars,
+        Math.max(0, chars - (previousSummary?.length ?? 0) - (sourceManifest?.length ?? 0)),
+      ),
+    };
+  }
   const lines = input.aged.map(transcriptLine);
   const kept: string[] = [];
   let used = 0;
@@ -562,6 +580,9 @@ export interface CompactionInput {
   readonly messageId: string;
   readonly modelId: string;
   readonly contextLength: number | null | undefined;
+  readonly outputReserve?: number | undefined;
+  /** Latest run-local projection, including hard truncation without a checkpoint. */
+  readonly projection?: Pick<CompactionDecision, "startIndex" | "injectedMessages" | "checkpoint">;
   /** Selected against the full completed history before attachment rendering. */
   readonly existingCheckpoint: CompactionCheckpointRow | null;
   /** Uncovered completed suffix, in total `(createdAt, id)` order. All indexes are local to it. */
@@ -629,6 +650,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
       });
     });
   const budget = computeBudget({
+    outputReserve: input.outputReserve,
     contextLength: input.contextLength,
     webToolsEnabled: input.webToolsEnabled,
   });
@@ -641,9 +663,14 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
   );
   const suffixFrom = (start: number) => tokens.slice(start).reduce((sum, value) => sum + value, 0);
 
-  const existing = input.existingCheckpoint;
-  const baseStart = 0;
-  const baseInjected = existing ? [compactionSummaryMessage(existing.summary)] : [];
+  const existing = input.projection ? input.projection.checkpoint : input.existingCheckpoint;
+  const baseStart = input.projection?.startIndex ?? 0;
+  const baseInjected =
+    input.projection?.injectedMessages ??
+    (existing ? [compactionSummaryMessage(existing.summary)] : []);
+  const previousSummary = input.projection
+    ? baseInjected.map(transcriptLine).join("\n\n") || null
+    : (existing?.summary ?? null);
   const baseFixed = prefixTokens + scale(estimatePromptTokens(baseInjected));
   const baseTotal = baseFixed + suffixFrom(baseStart);
 
@@ -677,7 +704,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     tokens,
     fixedTokens: baseFixed,
     tailBudgetTokens: budget.tail,
-    minBoundaryIndex: -1,
+    minBoundaryIndex: baseStart - 1,
     maxStartIndex: input.maxStartIndex,
   });
 
@@ -690,12 +717,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     const summaryEventId = eventId;
     const summary = yield* summarizeRange(deps, input, {
       aged: input.renderedMessages.slice(baseStart, boundary + 1),
-      previousSummary: existing?.summary ?? null,
-      // Previous summaries and framing share this request's input window too.
-      maxTranscriptChars: summaryTranscriptChars({
-        budget,
-        previousSummary: existing?.summary ?? null,
-      }),
+      previousSummary,
     });
 
     if (summary !== null) {
@@ -804,19 +826,33 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
 // error — the caller drops turns instead and the answer still streams.
 const summarizeRange = Effect.fn("chat.summarizeRange")(function* (
   deps: CompactionDeps,
-  input: Pick<CompactionInput, "userId" | "conversationId" | "messageId" | "modelId">,
+  input: Pick<
+    CompactionInput,
+    "userId" | "conversationId" | "messageId" | "modelId" | "contextLength"
+  >,
   range: {
     aged: ReadonlyArray<Prompt.MessageEncoded>;
     previousSummary: string | null;
-    maxTranscriptChars: number;
     sourceManifest?: string;
   },
 ) {
   if (range.aged.length === 0) return null;
+  const maxInputTokens = computeBudget({
+    contextLength: input.contextLength,
+    webToolsEnabled: false,
+    outputReserve: COMPACTION_CONFIG.summaryMaxOutputTokens,
+  }).input;
+  const prompt = buildSummaryPrompt({
+    ...range,
+    maxInputTokens,
+    maxTranscriptChars: maxInputTokens * COMPACTION_CONFIG.charsPerToken,
+  });
+  if (estimatePromptTokens(prompt.content as ReadonlyArray<Prompt.MessageEncoded>) > maxInputTokens)
+    return null;
   return yield* deps.gateway
     .generateText({
       modelId: input.modelId,
-      prompt: buildSummaryPrompt(range),
+      prompt,
       maxOutputTokens: COMPACTION_CONFIG.summaryMaxOutputTokens,
     })
     .pipe(
@@ -856,6 +892,7 @@ export interface ActiveRoundCompactionInput {
   readonly messageId: string;
   readonly modelId: string;
   readonly contextLength: number | null | undefined;
+  readonly outputReserve?: number | undefined;
   readonly webToolsEnabled: boolean;
   /** Historical prompt after checkpoint/truncation shaping. */
   readonly basePrompt: Prompt.Prompt;
@@ -902,6 +939,7 @@ export const compileActivePrompt = (input: {
 export const prepareCompactedActiveRounds = Effect.fn("chat.prepareCompactedActiveRounds")(
   function* (deps: CompactionDeps, input: ActiveRoundCompactionInput) {
     const budget = computeBudget({
+      outputReserve: input.outputReserve,
       contextLength: input.contextLength,
       webToolsEnabled: input.webToolsEnabled,
     });
@@ -972,11 +1010,6 @@ export const prepareCompactedActiveRounds = Effect.fn("chat.prepareCompactedActi
     const summary = yield* summarizeRange(deps, input, {
       aged: aged.flatMap((round) => [...promptMessages(round.prompt)]),
       previousSummary: input.summary,
-      maxTranscriptChars: summaryTranscriptChars({
-        budget,
-        previousSummary: input.summary,
-        ...(input.sourceManifest ? { sourceManifest: input.sourceManifest } : {}),
-      }),
       ...(input.sourceManifest ? { sourceManifest: input.sourceManifest } : {}),
     });
     const outcome = summary === null ? "hard_truncation" : "summary";

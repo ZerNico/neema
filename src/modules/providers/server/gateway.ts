@@ -1,6 +1,6 @@
 import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
-import { Context, Effect, Layer, Schema, Stream } from "effect";
-import { LanguageModel, type Prompt, Response, type Toolkit } from "effect/unstable/ai";
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
+import { AiError, LanguageModel, type Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import type { ModelCapabilities, ModelPricing, ModelType } from "../model-config.ts";
@@ -9,7 +9,39 @@ import { extractThinkTags } from "./think-extractor.ts";
 
 export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>()(
   "ProviderUnreachable",
-  { providerId: Schema.String, message: Schema.String },
+  {
+    providerId: Schema.String,
+    message: Schema.String,
+    diagnostic: Schema.optionalKey(
+      Schema.Struct({
+        kind: Schema.Literals([
+          "RateLimitError",
+          "QuotaExhaustedError",
+          "AuthenticationError",
+          "ContentPolicyError",
+          "InvalidRequestError",
+          "InternalProviderError",
+          "NetworkError",
+          "InvalidOutputError",
+          "StructuredOutputError",
+          "UnsupportedSchemaError",
+          "UnknownError",
+          "ToolNotFoundError",
+          "ToolParameterValidationError",
+          "InvalidToolResultError",
+          "ToolResultEncodingError",
+          "ToolConfigurationError",
+          "ToolkitRequiredError",
+          "InvalidUserInputError",
+          "ProviderStreamError",
+        ]),
+        code: Schema.optionalKey(Schema.Int),
+        status: Schema.optionalKey(
+          Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 599 })),
+        ),
+      }),
+    ),
+  },
 ) {}
 
 /**
@@ -57,6 +89,8 @@ export interface CatalogModel {
 // Streamed response parts from effect/unstable/ai: text/reasoning deltas,
 // tool-call + tool-result parts (handlers run by the library), finish, etc.
 export type ChatStreamPart = Response.AnyPart;
+
+const StreamedProviderError = Schema.Struct({ code: Schema.Int });
 
 const ModelsResponse = Schema.Struct({
   data: Schema.Array(
@@ -146,6 +180,7 @@ export class AiGateway extends Context.Service<
       prompt: Prompt.Prompt;
       toolkit?: Toolkit.WithHandler<any>;
       toolChoice?: "auto" | "none" | "required";
+      maxOutputTokens?: number;
     }): Stream.Stream<
       ChatStreamPart,
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
@@ -245,9 +280,24 @@ export class AiGateway extends Context.Service<
         if (cause instanceof ProviderContextOverflow || cause instanceof ProviderUnreachable) {
           return cause;
         }
-        return isContextOverflow(cause)
-          ? new ProviderContextOverflow({ providerId, message: String(cause) })
-          : new ProviderUnreachable({ providerId, message: String(cause) });
+        if (isContextOverflow(cause))
+          return new ProviderContextOverflow({ providerId, message: String(cause) });
+        // Preserve only the adapter's fixed reason tag and HTTP status for durable
+        // diagnostics. Descriptions, bodies and headers can contain private data.
+        const reason = AiError.isAiError(cause) ? cause.reason : undefined;
+        const status = reason && "http" in reason ? reason.http?.response?.status : undefined;
+        // SSE error values are plain objects, not AiErrors. Their code is a
+        // provider code, not the HTTP status of the already-open stream.
+        const streamedError = Schema.decodeUnknownOption(StreamedProviderError)(cause);
+        return new ProviderUnreachable({
+          providerId,
+          message: String(cause),
+          ...(reason
+            ? { diagnostic: { kind: reason._tag, ...(status === undefined ? {} : { status }) } }
+            : Option.isSome(streamedError)
+              ? { diagnostic: { kind: "ProviderStreamError", code: streamedError.value.code } }
+              : {}),
+        });
       };
 
       const streamChat = (input: {
@@ -255,13 +305,17 @@ export class AiGateway extends Context.Service<
         prompt: Prompt.Prompt;
         toolkit?: Toolkit.WithHandler<any>;
         toolChoice?: "auto" | "none" | "required";
+        maxOutputTokens?: number;
       }): Stream.Stream<
         ChatStreamPart,
         ProviderUnreachable | ProviderContextOverflow | ModelNotFound
       > =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const { providerId, layer: modelLayer } = yield* resolveModel(input.modelId);
+            const { providerId, layer: modelLayer } = yield* resolveModel(
+              input.modelId,
+              input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
+            );
 
             const parts = input.toolkit
               ? LanguageModel.streamText({

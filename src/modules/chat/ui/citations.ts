@@ -1,4 +1,8 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFootnoteFromMarkdown } from "mdast-util-gfm-footnote";
+import { gfmFootnote } from "micromark-extension-gfm-footnote";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
+import { mergeSources } from "~/modules/tools/sources.ts";
 
 /** Matches the href streamdown gives a GFM footnote reference. */
 export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
@@ -33,15 +37,47 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
   return `${body}${openFence}\n\n${definitions}`;
 }
 
+/** Citation references in prose, excluding code and model-authored definitions. */
+export function citedSourceIndexes(content: string): Set<number> {
+  const handles = new Set([...content.matchAll(/\[\^(\d+)\]/g)].map((match) => match[1]!));
+  if (!handles.size) return new Set();
+  // Resolve marker-only model output with the same GFM grammar as the renderer.
+  // Prefix definitions so an unfinished fence cannot swallow them; never visit
+  // definition bodies, inline code, or fenced examples as answer evidence.
+  const definitions = [...handles].map((handle) => `[^${handle}]: source`).join("\n");
+  const tree = fromMarkdown(`${definitions}\n\n${content}`, {
+    extensions: [gfmFootnote()],
+    mdastExtensions: [gfmFootnoteFromMarkdown()],
+  });
+  const cited = new Set<number>();
+  type Node = { type: string; identifier?: string; children?: ReadonlyArray<Node> };
+  const visit = (node: Node) => {
+    if (node.type === "footnoteDefinition") return;
+    if (node.type === "footnoteReference" && node.identifier && /^\d+$/.test(node.identifier))
+      cited.add(Number(node.identifier));
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+  return cited;
+}
+
+export function selectAnswerSources(
+  content: string,
+  own: ReadonlyArray<ToolSource>,
+  inherited: ReadonlyArray<ToolSource>,
+): ToolSource[] {
+  const cited = citedSourceIndexes(content);
+  return mergeSources([
+    ...own.filter((source) => source.read || cited.has(source.index)),
+    ...inherited.filter((source) => cited.has(source.index)),
+  ]);
+}
+
 /** Deduplicates sources by citation index, lowest first. */
 export function collectSources(activities: ReadonlyArray<ToolActivity>): ToolSource[] {
-  const byIndex = new Map<number, ToolSource>();
-  for (const activity of activities) {
-    if (activity.family !== "web") continue;
-    for (const source of activity.sources ?? []) {
-      if (!byIndex.has(source.index)) byIndex.set(source.index, source);
-    }
-  }
-  // oxlint-disable-next-line no-array-sort -- sorting a fresh copy, nothing shared to mutate
-  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+  return mergeSources(
+    activities.flatMap((activity) =>
+      activity.family === "web" || activity.family === "research" ? (activity.sources ?? []) : [],
+    ),
+  );
 }

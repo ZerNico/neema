@@ -52,6 +52,57 @@ describe("useMessageStream ask replay", () => {
   });
 });
 
+describe("research attempt identity", () => {
+  it("resets the reused message cursor across tabs and ignores callbacks from the old subscription", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      {
+        wrapper,
+        initialProps: { runId: "run-1" },
+      },
+    );
+    const old = FakeEventSource.instances.at(-1)!;
+    expect(old.url).toContain("runId=run-1");
+    act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Old text" }));
+    expect(result.current.lastSeq).toBe(1);
+    rerender({ runId: "run-2" });
+    const current = FakeEventSource.instances.at(-1)!;
+    expect(current.url).toContain("after=0&runId=run-2");
+    expect(result.current.lastSeq).toBe(0);
+    act(() => {
+      old.emit("chunk", { runId: "run-1", seq: 2, delta: "Late text" });
+      old.emit("done", { runId: "run-1", status: "error" });
+      current.emit("chunk", { runId: "run-2", seq: 1, delta: "New text" });
+    });
+    expect(result.current.lastSeq).toBe(1);
+    expect(result.current.status).toBe("streaming");
+    act(() => vi.advanceTimersByTime(500));
+    expect(result.current.text).toBe("New text");
+  });
+
+  it("refetches a changed server attempt without applying its done or subsequent chunks", () => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useMessageStream("m1", null, "c1", 0, "run-1"), {
+      wrapper,
+    });
+    const source = FakeEventSource.instances.at(-1)!;
+    act(() => source.emit("done", { runId: "run-2", status: "complete" }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
+    expect(source.close).toHaveBeenCalled();
+    expect(result.current.status).toBe("streaming");
+    act(() => source.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
+    expect(result.current.lastSeq).toBe(0);
+  });
+});
+
 describe("useMessageStream smoothing", () => {
   it("holds the reported completion until every word is on screen", () => {
     const { result, invalidate, source } = renderStream();

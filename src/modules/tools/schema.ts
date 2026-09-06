@@ -1,11 +1,22 @@
 import { Schema } from "effect";
+import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
+
+export const RESEARCH_SEARCH_BUDGET = { default: 80, min: 12, max: 120 } as const;
+const researchMaxSearchQueries = Schema.optionalKey(
+  Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(RESEARCH_SEARCH_BUDGET.min),
+    Schema.isLessThanOrEqualTo(RESEARCH_SEARCH_BUDGET.max),
+  ),
+);
 
 // Non-secret configuration for the web_search tool row (tools.config jsonb).
 export const WebSearchConfig = Schema.Struct({
   backend: Schema.Literals(["searxng"]),
   baseUrl: Schema.String.check(Schema.isMinLength(1)),
   maxResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(20)),
+  // Older rows omit this and use the shared default; no backfill is needed.
+  researchMaxSearchQueries,
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
 
@@ -114,10 +125,23 @@ export const MemoryActivityOutcome = Schema.Literals([
 ]);
 export type MemoryActivityOutcome = typeof MemoryActivityOutcome.Type;
 
-// Envelope persisted in message_chunks.delta for kind:"tool" markers. `family`
-// is required on newly written markers; the client still treats its absence on
-// historical web markers as family:"web".
+// Envelope persisted in message_chunks.delta for kind:"tool" markers.
+// Every event carries an explicit family discriminator.
+const researchEnvelopeFields = {
+  v: Schema.Literals([1]),
+  family: Schema.Literals(["research"]),
+  name: Schema.Literals(["deep_research"]),
+  callId: Schema.String,
+  runId: Schema.String,
+  turnIndex: Schema.Int,
+  callIndex: Schema.Int,
+  textOffset: Schema.optionalKey(Schema.Int),
+  progress: ResearchProgress,
+};
 export const ToolChunkEnvelope = Schema.Union([
+  Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["start"]) }),
+  Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["progress"]) }),
+  Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["result"]) }),
   Schema.Struct({
     v: Schema.Literals([1]),
     family: Schema.Literals(["ask"]),
@@ -139,6 +163,8 @@ export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),
     family: Schema.Literals(["web"]),
+    runId: Schema.optionalKey(Schema.String),
+    taskId: Schema.optionalKey(Schema.String),
     phase: Schema.Literals(["start"]),
     callId: Schema.String,
     name: Schema.String,
@@ -150,6 +176,8 @@ export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),
     family: Schema.Literals(["web"]),
+    runId: Schema.optionalKey(Schema.String),
+    taskId: Schema.optionalKey(Schema.String),
     phase: Schema.Literals(["progress"]),
     callId: Schema.String,
     name: Schema.String,
@@ -159,6 +187,8 @@ export const ToolChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),
     family: Schema.Literals(["web"]),
+    runId: Schema.optionalKey(Schema.String),
+    taskId: Schema.optionalKey(Schema.String),
     phase: Schema.Literals(["result"]),
     callId: Schema.String,
     name: Schema.String,
@@ -205,6 +235,7 @@ export const UpdateWebSearchToolInput = Schema.Struct({
   secret: Schema.optionalKey(Schema.String),
   clearSecret: Schema.optionalKey(Schema.Boolean),
   maxResults: Schema.optionalKey(WebSearchConfig.fields.maxResults),
+  researchMaxSearchQueries: WebSearchConfig.fields.researchMaxSearchQueries,
 });
 export type UpdateWebSearchToolInput = typeof UpdateWebSearchToolInput.Type;
 

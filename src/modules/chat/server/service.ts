@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   BranchNotAllowed,
   ConversationBusy,
@@ -19,6 +19,7 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ChatRepo, type CreateTurnInput, type EditContent, type HistorySnapshot } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
@@ -96,6 +97,7 @@ export class ChatService extends Context.Service<
     // Winds a streaming assistant message down early, keeping the partial
     // answer. `stopped: false` means there was nothing to stop here.
     stopGeneration(input: {
+      researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
       messageId: string;
@@ -118,6 +120,7 @@ function makeChatService() {
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
+    const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
 
     // The composer's toggle gates web_search only; read_url is gated by user URLs.
     const searchToolEnabled = Effect.gen(function* () {
@@ -137,6 +140,7 @@ function makeChatService() {
         modelId: string;
         searchEnabled: boolean;
         attachmentIds: ReadonlyArray<string>;
+        generationMode?: "chat" | "research" | undefined;
       }) {
         if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
           return yield* new InvalidMessage({
@@ -154,6 +158,21 @@ function makeChatService() {
           return yield* new ModelNotFound({ modelId: input.modelId });
         }
 
+        if (input.generationMode === "research") {
+          const reader = Option.isSome(urlReaderOption)
+            ? yield* urlReaderOption.value.availability()
+            : null;
+          if (
+            !model.capabilities.tools ||
+            !(yield* searchToolEnabled) ||
+            !reader?.configured ||
+            !reader.enabled
+          )
+            return yield* new InvalidMessage({
+              reason:
+                "Deep research requires a tool-capable model and enabled search and URL reader.",
+            });
+        }
         if (input.searchEnabled) {
           if (!model.capabilities.tools) {
             return yield* new ToolUnavailable({
@@ -233,7 +252,17 @@ function makeChatService() {
         return yield* new InvalidMessage({ reason: "message is empty" });
       }
       // The server stays authoritative even when the composer hides the toggle.
-      const { attachmentFileNames } = yield* validateGenerationOptions(input);
+      yield* repo.research?.reap() ?? Effect.void;
+      let generationMode = input.generationMode ?? "chat";
+      if (input.questionResponse && input.conversationId) {
+        yield* repo.getConversation(input.userId, input.conversationId);
+        generationMode =
+          (yield* repo.listMessages(input.conversationId)).at(-1)?.generationMode ?? "chat";
+      }
+      const { attachmentFileNames } = yield* validateGenerationOptions({
+        ...input,
+        generationMode,
+      });
 
       // One transaction: a lost attachment claim must not leave behind an
       // empty conversation or a user message nobody will answer.
@@ -256,6 +285,7 @@ function makeChatService() {
         userId: input.userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
+        researchRunId: turn.assistant.researchRunId ?? undefined,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
         timeZone: input.timeZone,
@@ -325,6 +355,8 @@ function makeChatService() {
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: input.assistantMessageId,
+        researchRunId:
+          (yield* repo.getMessage(input.assistantMessageId))?.researchRunId ?? undefined,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
         timeZone: input.timeZone,
@@ -343,6 +375,7 @@ function makeChatService() {
       modelId?: string | undefined;
       timeZone?: string | undefined;
     }) {
+      yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
 
@@ -421,7 +454,21 @@ function makeChatService() {
       const usedSearch = (yield* repo.listToolCalls([message.id])).some(
         (call) => call.toolName === "web_search",
       );
-      const searchEnabled = usedSearch && model.capabilities.tools && (yield* searchToolEnabled);
+      const searchEnabled =
+        message.generationMode === "research" ||
+        (usedSearch && model.capabilities.tools && (yield* searchToolEnabled));
+      if (message.generationMode === "research")
+        yield* validateGenerationOptions({
+          userId: input.userId,
+          modelId,
+          searchEnabled: false,
+          attachmentIds: [],
+          generationMode: "research",
+        }).pipe(
+          Effect.catchTag("ToolUnavailable", (error) =>
+            Effect.fail(new InvalidMessage({ reason: error.reason })),
+          ),
+        );
 
       const restarted = yield* restartAssistant({
         expectedMessages: all,
@@ -451,6 +498,7 @@ function makeChatService() {
       conversationId: string;
       messageId: string;
     }) {
+      yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
 
@@ -563,7 +611,7 @@ function makeChatService() {
       ) {
         return yield* new InvalidMessage({ reason: "message is empty" });
       }
-      yield* validateGenerationOptions(input);
+      yield* validateGenerationOptions({ ...input, generationMode: message.generationMode });
       const edit: EditContent = input.questionResponse
         ? { questionResponse: input.questionResponse }
         : { content: input.content };
@@ -625,6 +673,7 @@ function makeChatService() {
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: created.message.id,
+        researchRunId: created.message.researchRunId ?? undefined,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
         timeZone: input.timeZone,
@@ -634,10 +683,12 @@ function makeChatService() {
     });
 
     const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
+      researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
       messageId: string;
     }) {
+      yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
       const message = yield* repo.getMessage(input.messageId);
@@ -647,7 +698,14 @@ function makeChatService() {
       // Already finished (or generating on another instance) — the client
       // learns the real state from the `done` event either way.
       if (message.status !== "streaming") return { stopped: false };
-      const stopped = yield* engine.stopGeneration(input.messageId);
+      if (message.researchRunId && input.researchRunId !== message.researchRunId)
+        return { stopped: false };
+      const durable =
+        message.researchRunId && repo.research
+          ? yield* repo.research.cancel(message.id, message.researchRunId)
+          : false;
+      const stopped =
+        (yield* engine.stopGeneration(input.messageId, input.researchRunId)) || durable;
       return { stopped };
     });
 
@@ -668,6 +726,7 @@ function makeChatService() {
       conversationId: string;
       title: string;
     }) {
+      yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
       yield* repo.updateConversation(input.conversationId, { title: input.title });

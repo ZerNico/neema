@@ -1,4 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Option, Schema } from "effect";
+import { ResearchProgress } from "../research-schema.ts";
 import { useEffect, useReducer, useRef } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
 import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
@@ -24,6 +26,8 @@ export interface ToolSource {
 interface ToolActivityBase {
   callId: string;
   name: string;
+  runId?: string;
+  taskId?: string;
   turnIndex?: number;
   callIndex?: number;
   /** UTF-16 offset in the original assistant content, captured at start. */
@@ -55,7 +59,20 @@ export interface AskToolActivity extends ToolActivityBase {
   questions?: ReadonlyArray<AskUserQuestion>;
 }
 
-export type ToolActivity = WebToolActivity | MemoryToolActivity | AskToolActivity;
+export interface ResearchToolActivity extends ToolActivityBase {
+  family: "research";
+  progress?: ResearchProgress;
+  sources?: ToolSource[];
+}
+
+export const readResearchProgress = (value: unknown): ResearchProgress | null =>
+  Option.getOrNull(Schema.decodeUnknownOption(ResearchProgress)(value));
+
+export type ToolActivity =
+  | WebToolActivity
+  | MemoryToolActivity
+  | AskToolActivity
+  | ResearchToolActivity;
 
 export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
   activity.family === "web";
@@ -68,6 +85,8 @@ export const isMemoryToolActivity = (activity: ToolActivity): activity is Memory
 // may have produced.
 export interface CompactionActivity {
   eventId: string;
+  runId?: string;
+  taskId?: string;
   textOffset?: number;
   beforeTurnIndex: number;
   passIndex: number;
@@ -151,6 +170,9 @@ export function applyToolChunk(
   if (typeof envelope !== "object" || envelope === null) return tools;
   const e = envelope as {
     result?: unknown;
+    progress?: unknown;
+    runId?: string;
+    taskId?: string;
     v?: number;
     family?: string;
     phase?: string;
@@ -173,11 +195,10 @@ export function applyToolChunk(
     error?: string;
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
-  if (e.family !== undefined && e.family !== "web" && e.family !== "memory" && e.family !== "ask")
+  if (e.family !== "web" && e.family !== "memory" && e.family !== "ask" && e.family !== "research")
     return tools;
 
-  // Historical envelopes predate the discriminator and are all web activity.
-  const family = e.family === "memory" || e.family === "ask" ? e.family : "web";
+  const family = e.family;
   if (onlyFamily !== undefined && family !== onlyFamily) return tools;
   const index = tools.findIndex((activity) => activity.callId === e.callId);
   const existing = index === -1 ? undefined : tools[index];
@@ -188,6 +209,39 @@ export function applyToolChunk(
   const position = textOffset === undefined ? {} : { textOffset };
   // Bootstrap can replay older progress after a terminal durable row was read.
   if (existing && existing.status !== "running") return tools;
+
+  if (family === "research") {
+    const progress = readResearchProgress(e.progress);
+    if (
+      !progress ||
+      e.name !== "deep_research" ||
+      progress.runId !== e.callId ||
+      (e.runId !== undefined && e.runId !== progress.runId) ||
+      (e.phase !== "start" && e.phase !== "progress" && e.phase !== "result")
+    )
+      return tools;
+    if (existing && e.phase === "start") return tools;
+    const failed = ["error", "interrupted", "aborted"].includes(progress.phase);
+    const next: ResearchToolActivity = {
+      family: "research",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      runId: progress.runId,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? 0,
+      status: e.phase === "result" ? (failed ? "error" : "complete") : "running",
+      progress,
+      ...(e.sources
+        ? { sources: e.sources }
+        : existing?.family === "research" && existing.sources
+          ? { sources: existing.sources }
+          : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
 
   if (family === "ask") {
     if (
@@ -253,6 +307,16 @@ export function applyToolChunk(
     const activity: WebToolActivity = {
       family: "web",
       ...position,
+      ...(existing?.runId
+        ? { runId: existing.runId }
+        : typeof e.runId === "string"
+          ? { runId: e.runId }
+          : {}),
+      ...(existing?.taskId
+        ? { taskId: existing.taskId }
+        : typeof e.taskId === "string"
+          ? { taskId: e.taskId }
+          : {}),
       callId: e.callId!,
       name: e.name!,
       turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
@@ -313,6 +377,8 @@ export function applyCompactionChunk(
     v?: number;
     phase?: string;
     eventId?: string;
+    runId?: string;
+    taskId?: string;
     beforeTurnIndex?: number;
     passIndex?: number;
     scope?: "history" | "active_rounds";
@@ -336,6 +402,16 @@ export function applyCompactionChunk(
   const textOffset = existing ? existing.textOffset : readTextOffset(e.textOffset);
   const next: CompactionActivity = {
     eventId: e.eventId,
+    ...(existing?.runId
+      ? { runId: existing.runId }
+      : typeof e.runId === "string"
+        ? { runId: e.runId }
+        : {}),
+    ...(existing?.taskId
+      ? { taskId: existing.taskId }
+      : typeof e.taskId === "string"
+        ? { taskId: e.taskId }
+        : {}),
     ...(textOffset === undefined ? {} : { textOffset }),
     beforeTurnIndex: existing?.beforeTurnIndex ?? e.beforeTurnIndex,
     passIndex: existing?.passIndex ?? e.passIndex,
@@ -427,6 +503,7 @@ export function useMessageStream(
    * the row, so the id alone can't signal "this is a new generation".
    */
   epoch = 0,
+  runId: string | null = null,
 ) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
@@ -447,7 +524,7 @@ export function useMessageStream(
       activeRef.current = null;
       return;
     }
-    const generationKey = `${messageId}:${epoch}`;
+    const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
     if (activeRef.current !== generationKey) {
       activeRef.current = generationKey;
       dispatch({
@@ -462,21 +539,38 @@ export function useMessageStream(
     }
 
     const after = initial?.lastSeq ?? 0;
-    const source = new EventSource(`/api/messages/${messageId}/stream?after=${after}`);
+    const source = new EventSource(
+      `/api/messages/${messageId}/stream?after=${after}${runId ? `&runId=${encodeURIComponent(runId)}` : ""}`,
+    );
+    let closed = false;
+    const acceptsRun = (eventRunId: string | undefined) => {
+      if (closed || activeRef.current !== generationKey) return false;
+      if ((eventRunId ?? null) === runId) return true;
+      closed = true;
+      source.close();
+      if (conversationId)
+        void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      return false;
+    };
 
     source.addEventListener("chunk", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         seq: number;
         kind?: "text" | "reasoning" | "tool" | "compaction";
         delta: string;
+        runId?: string;
       };
+      if (!acceptsRun(data.runId)) return;
       dispatch({ kind: "chunk", seq: data.seq, chunkKind: data.kind ?? "text", delta: data.delta });
     });
 
     source.addEventListener("done", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         status: "complete" | "error" | "aborted";
+        runId?: string;
       };
+      if (!acceptsRun(data.runId)) return;
+      closed = true;
       dispatch({ kind: "done", status: data.status });
       source.close();
       // Errors and stops refresh the canonical row immediately — feedback
@@ -494,9 +588,12 @@ export function useMessageStream(
       // browser keeps retrying, which is the desired resume behavior.
     };
 
-    return () => source.close();
+    return () => {
+      closed = true;
+      source.close();
+    };
     // initial is intentionally captured only when the generation changes
-  }, [messageId, epoch, conversationId, queryClient]);
+  }, [messageId, epoch, runId, conversationId, queryClient]);
 
   // The reducer accumulates raw deltas (lastSeq must track receipt exactly —
   // resume depends on it); only the strings the UI renders are word-paced.

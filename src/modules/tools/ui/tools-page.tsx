@@ -19,6 +19,7 @@ import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 import { cn } from "~/ui/utils";
+import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
   getDocumentParserTool,
   getMemoryTool,
@@ -68,6 +69,7 @@ const WebSearchForm = Schema.Struct({
   baseUrl: Schema.String.check(Schema.isMinLength(1, { message: "Enter the base URL." })),
   secret: Schema.String,
   maxResults: integerBetween(1, 20),
+  researchMaxSearchQueries: integerBetween(RESEARCH_SEARCH_BUDGET.min, RESEARCH_SEARCH_BUDGET.max),
 });
 
 const UrlReaderForm = Schema.Struct({
@@ -201,7 +203,7 @@ function WebSearchSection() {
   const invalidate = useInvalidateTools("web-search");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
-  const config = (tool?.config ?? {}) as { baseUrl?: string; maxResults?: number };
+  const config = (tool?.config ?? {}) as Partial<WebSearchConfig>;
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateWebSearchTool({ data: { enabled } }),
@@ -229,6 +231,9 @@ function WebSearchSection() {
       baseUrl: config.baseUrl ?? "",
       secret: "",
       maxResults: String(config.maxResults ?? 8),
+      researchMaxSearchQueries: String(
+        config.researchMaxSearchQueries ?? RESEARCH_SEARCH_BUDGET.default,
+      ),
     },
     validators: { onSubmit: Schema.toStandardSchemaV1(WebSearchForm) },
     onSubmit: async ({ value }) => {
@@ -237,6 +242,7 @@ function WebSearchSection() {
           data: {
             baseUrl: value.baseUrl,
             maxResults: Number(value.maxResults),
+            researchMaxSearchQueries: Number(value.researchMaxSearchQueries),
             ...(value.secret ? { secret: value.secret } : {}),
           },
         });
@@ -244,7 +250,7 @@ function WebSearchSection() {
         toast.error("Could not save the web search settings.");
         return;
       }
-      form.reset({ baseUrl: value.baseUrl, secret: "", maxResults: value.maxResults });
+      form.reset({ ...value, secret: "" });
       await invalidate();
     },
   });
@@ -356,6 +362,23 @@ function WebSearchSection() {
                   min={1}
                   max={20}
                   className="max-w-48"
+                />
+              )}
+            </form.Field>
+            <form.Field
+              name="researchMaxSearchQueries"
+              validators={{
+                onSubmit: Schema.toStandardSchemaV1(WebSearchForm.fields.researchMaxSearchQueries),
+              }}
+            >
+              {(field) => (
+                <NumberField
+                  field={field}
+                  label="Search queries per research run"
+                  description="Maximum individual queries shared across all research workers, not a target. Applies to newly started research runs only; ordinary chat is unchanged."
+                  min={RESEARCH_SEARCH_BUDGET.min}
+                  max={RESEARCH_SEARCH_BUDGET.max}
+                  step={1}
                 />
               )}
             </form.Field>

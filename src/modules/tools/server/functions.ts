@@ -12,6 +12,7 @@ import {
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend } from "./search.ts";
+import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor } from "./web-search.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -153,3 +154,16 @@ export const updateDocumentParserTool = createServerFn({ method: "POST" })
       ),
     );
   });
+
+export const getResearchAvailability = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(() =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const search = yield* (yield* WebSearchExecutor).availability();
+        const reader = yield* (yield* UrlReaderExecutor).availability();
+        const configured = search.configured && reader.configured;
+        return { configured, enabled: configured && search.enabled && reader.enabled };
+      }),
+    ),
+  );

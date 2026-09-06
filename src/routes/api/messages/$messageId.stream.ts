@@ -29,7 +29,11 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
             // Ownership check: the conversation must belong to the caller.
             yield* repo.getConversation(session.user.id, message.conversationId);
 
-            return engine.subscribe(params.messageId, afterSeq);
+            return engine.subscribe(
+              params.messageId,
+              afterSeq,
+              url.searchParams.get("runId") ?? undefined,
+            );
           }).pipe(Effect.catchTag("ConversationNotFound", () => Effect.succeed(null))),
         );
 
@@ -37,8 +41,16 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
 
         return sseResponse(stream, (event) =>
           event.kind === "chunk"
-            ? sseFrame("chunk", { seq: event.seq, kind: event.chunkKind, delta: event.delta })
-            : sseFrame("done", { status: event.status }),
+            ? sseFrame("chunk", {
+                seq: event.seq,
+                kind: event.chunkKind,
+                delta: event.delta,
+                ...(event.runId ? { runId: event.runId } : {}),
+              })
+            : sseFrame("done", {
+                status: event.status,
+                ...(event.runId ? { runId: event.runId } : {}),
+              }),
         );
       },
     },

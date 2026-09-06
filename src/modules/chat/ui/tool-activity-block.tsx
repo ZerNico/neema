@@ -72,10 +72,16 @@ const openedPages = (activities: ReadonlyArray<WebToolActivity>): ToolPageStatus
   return [...byUrl.values()];
 };
 
-const uniqueSourceCount = (activities: ReadonlyArray<WebToolActivity>): number => {
+const uniqueSourceCount = (
+  activities: ReadonlyArray<WebToolActivity>,
+  used: ReadonlySet<number> | undefined,
+): number => {
   const urls = new Set<string>();
   for (const activity of activities) {
-    for (const source of activity.sources ?? []) urls.add(urlKey(source.url));
+    for (const source of activity.sources ?? []) {
+      if (used && !used.has(source.index)) continue;
+      urls.add(urlKey(source.url));
+    }
   }
   return urls.size;
 };
@@ -135,9 +141,12 @@ const pagePriority: Record<ToolPageStatus["status"], number> = {
 
 export function ToolActivityBlock({
   activities,
+  usedSources,
   onViewSources,
 }: {
   activities: WebToolActivity[];
+  /** Indexes the message lists as sources; absent counts every hit. */
+  usedSources?: ReadonlySet<number>;
   onViewSources?: () => void;
 }) {
   const anyRunning = activities.some((activity) => activity.status === "running");
@@ -176,7 +185,7 @@ export function ToolActivityBlock({
   const reads = activities.filter((activity) => activity.name === "read_url");
   const queries = uniqueTargets(activities);
   const pages = openedPages(activities);
-  const sourceCount = uniqueSourceCount(activities);
+  const sourceCount = uniqueSourceCount(activities, usedSources);
   const failedPages = pages.filter((page) => page.status === "error").length;
   const failedSearches = searches.filter((activity) => activity.status === "error").length;
   const failedReads = reads.filter((activity) => activity.status === "error").length;

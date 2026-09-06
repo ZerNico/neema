@@ -23,6 +23,7 @@ export const FakeDocumentParser = Layer.succeed(DocumentParser, {
 const unavailable = (tool: "web_search" | "read_url") => () =>
   Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
 export const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
+  researchSearchLimit: () => Effect.die("no research in these tests"),
   handler: unavailable("web_search"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });

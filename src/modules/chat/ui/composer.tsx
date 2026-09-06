@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChatInput } from "./chat-input.tsx";
+import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 
 export function Composer({
@@ -14,7 +15,11 @@ export function Composer({
   controlsDisabled,
 }: {
   /** Rejects on failure — the draft and chips survive so the user can retry. */
-  onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
+  onSend: (
+    content: string,
+    attachmentIds: ReadonlyArray<string>,
+    generationMode?: GenerationMode,
+  ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
   onStop?: (() => void) | undefined;
   disabled: boolean;
@@ -26,6 +31,7 @@ export function Composer({
   controlsDisabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
+  const [researchEnabled, setResearchEnabled] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachmentUploads();
 
@@ -41,9 +47,13 @@ export function Composer({
     attachments.submit((attachmentIds) => {
       const content = draftRef.current.trim();
       if (!content && attachmentIds.length === 0) return;
-      void onSend(content, attachmentIds).then(
+      const request = researchEnabled
+        ? onSend(content, attachmentIds, "research")
+        : onSend(content, attachmentIds);
+      void request.then(
         () => {
           setDraft("");
+          setResearchEnabled(false);
           // The message owns them now; dropping the chips must not delete them.
           attachments.markClaimed();
           textareaRef.current?.focus();
@@ -67,6 +77,8 @@ export function Composer({
       onModelChange={onModelChange}
       searchEnabled={searchEnabled}
       onSearchEnabledChange={onSearchEnabledChange}
+      researchEnabled={researchEnabled}
+      onResearchEnabledChange={setResearchEnabled}
       attachments={attachments}
     />
   );

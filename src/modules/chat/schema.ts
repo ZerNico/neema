@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GenerationMode } from "./research-schema.ts";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { AttachmentIds } from "~/modules/attachments/schema.ts";
 
@@ -9,6 +10,7 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
 const generationFields = {
+  generationMode: Schema.optionalKey(GenerationMode),
   timeZone: TimeZone,
   modelId: Schema.String,
   content: MessageContent,
@@ -50,6 +52,7 @@ export const ListConversationsInput = Schema.Struct({
 });
 
 export const MessageIdInput = Schema.Struct({
+  researchRunId: Schema.optionalKey(Schema.String),
   conversationId: Schema.String,
   messageId: Schema.String,
 });
@@ -99,6 +102,8 @@ export const RenameConversationInput = Schema.Struct({
 // `result` carries the summary so the finished block reads the same live as
 // it does after the conversation refetches the checkpoint.
 const compactionPositionFields = {
+  runId: Schema.optionalKey(Schema.String),
+  taskId: Schema.optionalKey(Schema.String),
   eventId: Schema.String,
   beforeTurnIndex: Schema.Int,
   passIndex: Schema.Int,

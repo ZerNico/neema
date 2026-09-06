@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { Prompt } from "effect/unstable/ai";
 import { vi } from "vitest";
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
+import { ResearchCoordinatorTools } from "~/modules/chat/server/research/runner.ts";
 import { ProviderRepo } from "./repo.ts";
-import { AiGateway, catalogPricing, inferType } from "./gateway.ts";
+import { AiGateway, ProviderUnreachable, catalogPricing, inferType } from "./gateway.ts";
 
 describe("provider catalog normalization", () => {
   it("preserves input-only pricing for embedding configuration", () => {
@@ -47,6 +48,7 @@ const usageChunk = (usage: Record<string, unknown>) => ({
 // would leave every later test talking to the first stub.
 const requests: Array<{ url: string; body: unknown }> = [];
 let responseBody = "";
+let responseStatus = 200;
 
 vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
   requests.push({
@@ -58,13 +60,19 @@ vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
     ),
   });
   return Promise.resolve(
-    new Response(responseBody, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    new Response(responseBody, {
+      status: responseStatus,
+      headers: {
+        "content-type": responseStatus === 200 ? "text/event-stream" : "application/json",
+      },
+    }),
   );
 });
 
-const stubProvider = (body: string) => {
+const stubProvider = (body: string, status = 200) => {
   requests.length = 0;
   responseBody = body;
+  responseStatus = status;
   return requests;
 };
 
@@ -167,5 +175,161 @@ describe("side generations", () => {
       expect(result.usage.inputTokens.total).toBeUndefined();
       expect(result.usage.outputTokens.total).toBeUndefined();
     }),
+  );
+});
+
+describe("provider failure diagnostics", () => {
+  it.effect("preserves the rejection kind and HTTP status without copying provider payloads", () =>
+    Effect.gen(function* () {
+      stubProvider(
+        JSON.stringify({
+          error: { message: "PRIVATE request body sk-secret", type: "invalid_request_error" },
+        }),
+        400,
+      );
+      const error = yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
+      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      expect(error).toBeInstanceOf(ProviderUnreachable);
+      if (error instanceof ProviderUnreachable) {
+        expect(error.diagnostic).toEqual({ kind: "InvalidRequestError", status: 400 });
+        expect(JSON.stringify(error.diagnostic)).not.toMatch(
+          /PRIVATE|sk-secret|authorization|headers/,
+        );
+      }
+    }),
+  );
+  it.effect("retains an SSE error code without treating it as an HTTP rejection", () =>
+    Effect.gen(function* () {
+      stubProvider(
+        sse([
+          chunk(
+            {},
+            {
+              error: { code: 400, message: "PRIVATE request body sk-secret" },
+            },
+          ),
+        ]),
+      );
+      const error = yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
+      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      expect(error).toBeInstanceOf(ProviderUnreachable);
+      if (error instanceof ProviderUnreachable)
+        expect(error.diagnostic).toEqual({ kind: "ProviderStreamError", code: 400 });
+    }),
+  );
+  it.effect("distinguishes invalid streamed output from HTTP request rejection", () =>
+    Effect.gen(function* () {
+      stubProvider(sse([{ invalid: "PRIVATE" }]));
+      const error = yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
+      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      expect(error).toBeInstanceOf(ProviderUnreachable);
+      if (error instanceof ProviderUnreachable)
+        expect(error.diagnostic).toEqual({ kind: "InvalidOutputError" });
+    }),
+  );
+});
+
+describe("research streaming request ceilings", () => {
+  it.effect("sends object-root coordinator tool schemas through the real provider adapter", () =>
+    Effect.gen(function* () {
+      const tasks = [{ title: "Evidence", assignment: "Investigate primary sources." }];
+      const dispatch = vi.fn();
+      const finish = vi.fn();
+      const recorded = stubProvider(
+        sse([
+          chunk({
+            tool_calls: [
+              {
+                index: 0,
+                id: "dispatch-1",
+                type: "function",
+                function: { name: "dispatch_research", arguments: JSON.stringify({ tasks }) },
+              },
+              {
+                index: 1,
+                id: "finish-1",
+                type: "function",
+                function: { name: "finish_research", arguments: "{}" },
+              },
+            ],
+          }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      const toolkit = yield* ResearchCoordinatorTools.pipe(
+        Effect.provide(
+          ResearchCoordinatorTools.toLayer({
+            dispatch_research: (params) =>
+              Effect.sync(() => {
+                dispatch(params);
+                return { accepted: params.tasks.length };
+              }),
+            finish_research: (params) =>
+              Effect.sync(() => {
+                finish(params);
+                return { ok: true };
+              }),
+          }),
+        ),
+      );
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(
+          gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Coordinate"), toolkit }),
+        ),
+      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+      expect(dispatch).toHaveBeenCalledWith({ tasks });
+      expect(finish).toHaveBeenCalledWith({});
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.body).toMatchObject({
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "dispatch_research",
+              parameters: { type: "object", required: ["tasks"] },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "finish_research",
+              parameters: { type: "object", additionalProperties: false },
+            },
+          },
+        ],
+      });
+    }),
+  );
+
+  it.effect(
+    "passes optional maxOutputTokens through streaming without changing ordinary defaults",
+    () =>
+      Effect.gen(function* () {
+        const recorded = stubProvider(
+          sse([
+            chunk({ content: "bounded" }),
+            usageChunk({ prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 }),
+          ]),
+        );
+        yield* Effect.flatMap(AiGateway, (gateway) =>
+          Stream.runDrain(
+            gateway.streamChat({
+              modelId: "m1",
+              prompt: Prompt.make("Investigate"),
+              maxOutputTokens: 4096,
+            }),
+          ),
+        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        expect(recorded).toHaveLength(1);
+        expect(recorded[0]?.body).toMatchObject({ stream: true, max_tokens: 4096 });
+        recorded.length = 0;
+        yield* Effect.flatMap(AiGateway, (gateway) =>
+          Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Hello") })),
+        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        expect(recorded[0]?.body).not.toHaveProperty("max_tokens");
+      }),
   );
 });

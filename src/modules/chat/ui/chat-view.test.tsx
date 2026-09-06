@@ -17,6 +17,7 @@ import {
   sendMessage,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
 const { navigate, markClaimed, resetUploads, streamProbe } = vi.hoisted(() => ({
@@ -325,9 +326,11 @@ const renderView = (
     <QueryClientProvider client={client}>
       <SyncProbe />
       <ConfirmProvider>
-        <Suspense fallback={null}>
-          <ChatView conversationId="c1" />
-        </Suspense>
+        <DetailPanelProvider>
+          <Suspense fallback={null}>
+            <ChatView conversationId="c1" />
+          </Suspense>
+        </DetailPanelProvider>
       </ConfirmProvider>
     </QueryClientProvider>,
   );
@@ -706,6 +709,7 @@ describe("ChatView question handoff", () => {
       }),
       "c1",
       0,
+      null,
     );
   });
 
@@ -749,7 +753,7 @@ describe("ChatView question handoff", () => {
     expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeDisabled();
     await act(async () => resolve({ conversationId: "c1", assistantMessageId: "next" }));
     await waitFor(() =>
-      expect(streamProbe).toHaveBeenLastCalledWith("next", expect.any(Object), "c1", 0),
+      expect(streamProbe).toHaveBeenLastCalledWith("next", expect.any(Object), "c1", 0, null),
     );
     expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toHaveValue(
       "Keep my separate draft",

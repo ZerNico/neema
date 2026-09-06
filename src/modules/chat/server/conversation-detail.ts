@@ -19,6 +19,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   // Ownership first and alone: an unauthorized id must fail before any of its
   // children are read.
   const conversation = yield* repo.getConversation(userId, conversationId);
+  yield* repo.research?.reap() ?? Effect.void;
   // The source of a branch, for the "branched from" link. Read through the
   // same ownership check, and null when it has been deleted since. It depends
   // on the conversation only, so it rides with the messages.

@@ -11,6 +11,7 @@ import {
   applyToolChunk,
   toMemoryActivityOutcome,
   readTextOffset,
+  readResearchProgress,
   useMessageStream,
   type CompactionActivity,
   type ToolActivity,
@@ -25,6 +26,7 @@ import {
   sendMessage,
   stopGeneration,
 } from "../server/functions.ts";
+import type { GenerationMode } from "../research-schema.ts";
 import { Composer } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
@@ -32,9 +34,11 @@ import { buildMessageStamps } from "./timestamps.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
+import { ResearchPanelOwner } from "./research-panel.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+import { mergeSource } from "~/modules/tools/sources.ts";
 import { Button } from "~/ui/primitives/button.tsx";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -54,10 +58,28 @@ export function toActivity(row: {
   turnIndex: number;
   callIndex: number;
   textOffset?: number | null;
+  researchRunId?: string | null;
+  researchTaskId?: string | null;
   error: { code: string; message: string } | null;
 }): ToolActivity {
   const textOffset = readTextOffset(row.textOffset);
   const position = textOffset === undefined ? {} : { textOffset };
+  if (row.toolName === "deep_research") {
+    const result = (row.result ?? {}) as { progress?: unknown; sources?: ToolSource[] };
+    const progress = readResearchProgress(result.progress);
+    return {
+      family: "research",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: progress ? row.status : "error",
+      ...(progress ? { progress, runId: progress.runId } : {}),
+      ...(result.sources ? { sources: result.sources } : {}),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
   if (row.toolName === "ask_user") {
     const questions = readPresentedQuestions(row.result);
     return {
@@ -99,6 +121,8 @@ export function toActivity(row: {
   return {
     family: "web",
     ...position,
+    ...(row.researchRunId ? { runId: row.researchRunId } : {}),
+    ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
     callId: row.id,
     name: row.toolName,
     turnIndex: row.turnIndex,
@@ -122,10 +146,14 @@ function toCompactionActivity(row: {
   outcome: "summary" | "hard_truncation" | null;
   summary: string | null;
   textOffset?: number | null;
+  researchRunId?: string | null;
+  researchTaskId?: string | null;
 }): CompactionActivity {
   const textOffset = readTextOffset(row.textOffset);
   return {
     eventId: row.id,
+    ...(row.researchRunId ? { runId: row.researchRunId } : {}),
+    ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
     ...(textOffset === undefined ? {} : { textOffset }),
     beforeTurnIndex: row.beforeTurnIndex,
     passIndex: row.passIndex,
@@ -212,14 +240,20 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       compactions,
       lastSeq,
     };
-  }, [streamingMessage?.id, retryEpoch]);
+  }, [streamingMessage?.id, streamingMessage?.researchRunId, retryEpoch]);
   // oxlint-enable react/memo-dependencies
 
+  // A sync refresh can see the terminal row before SSE has delivered its last
+  // chunks and done marker. Keep that subscription alive so the sticky overlay
+  // can drain instead of getting stranded with stale tools and streaming status.
+  const subscribedMessage =
+    streamingMessage ?? data.messages.find((message) => message.id === overlayId);
   const stream = useMessageStream(
-    streamingMessage?.id ?? null,
+    subscribedMessage?.id ?? null,
     initialStream,
     conversationId,
     retryEpoch,
+    subscribedMessage?.researchRunId ?? null,
   );
 
   const questionResponses = useMemo(
@@ -238,7 +272,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   const sendMutation = useMutation({
     onMutate: () => setEditingMessageId(null),
-    mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
+    mutationFn: (input: {
+      content: string;
+      attachmentIds: ReadonlyArray<string>;
+      generationMode?: GenerationMode;
+    }) =>
       sendMessage({
         data: {
           conversationId,
@@ -247,6 +285,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           searchEnabled,
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
+          ...(input.generationMode ? { generationMode: input.generationMode } : {}),
         },
       }),
     onSuccess: () => {
@@ -329,7 +368,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const stopMutation = useMutation({
-    mutationFn: (messageId: string) => stopGeneration({ data: { conversationId, messageId } }),
+    mutationFn: (input: { messageId: string; researchRunId?: string }) =>
+      stopGeneration({ data: { conversationId, ...input } }),
     // No invalidation here: the generation finalizes itself and the `done`
     // event already carries the terminal status back through the stream hook.
   });
@@ -634,9 +674,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
       const inheritedSources = [...inheritedByIndex.values()];
       for (const activity of toolActivities) {
-        if (activity.family !== "web") continue;
+        if (activity.family !== "web" && activity.family !== "research") continue;
         for (const source of activity.sources ?? []) {
-          if (!inheritedByIndex.has(source.index)) inheritedByIndex.set(source.index, source);
+          inheritedByIndex.set(
+            source.index,
+            mergeSource(inheritedByIndex.get(source.index), source),
+          );
         }
       }
       const stamp = stamps?.get(message.id);
@@ -753,6 +796,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             ...projected,
             editState: {
               initialDraft: activeEditingMessage.content,
+              researchEnabled: activeEditingMessage.generationMode === "research",
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
               saveDisabled: editPending,
@@ -832,6 +876,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ) : null}
       <div className="min-h-0 flex-1">
         {/* lastSeq covers tool-activity-only updates too */}
+        <ResearchPanelOwner messages={display} />
         <VirtualMessageList messages={display} followKey={stream.lastSeq} />
       </div>
       {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
@@ -857,10 +902,24 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             </div>
           ) : null}
           <Composer
-            onSend={(content, attachmentIds) =>
-              sendMutation.mutateAsync({ content, attachmentIds })
+            onSend={(content, attachmentIds, generationMode) =>
+              sendMutation.mutateAsync({
+                content,
+                attachmentIds,
+                ...(generationMode ? { generationMode } : {}),
+              })
             }
-            {...(stoppableId ? { onStop: () => stopMutation.mutate(stoppableId) } : {})}
+            {...(stoppableId
+              ? {
+                  onStop: () =>
+                    stopMutation.mutate({
+                      messageId: stoppableId,
+                      ...(streamingMessage?.researchRunId
+                        ? { researchRunId: streamingMessage.researchRunId }
+                        : {}),
+                    }),
+                }
+              : {})}
             disabled={actionsDisabled}
             textareaDisabled={activeEditingMessage !== null && (!editingAnswers || editPending)}
             controlsDisabled={mutationPending}
@@ -898,7 +957,11 @@ export function NewChatView({ user }: { user: { name: string } }) {
   const slide = useRef<Promise<void>>(Promise.resolve());
 
   const sendMutation = useMutation({
-    mutationFn: (input: { content: string; attachmentIds: ReadonlyArray<string> }) =>
+    mutationFn: (input: {
+      content: string;
+      attachmentIds: ReadonlyArray<string>;
+      generationMode?: GenerationMode;
+    }) =>
       sendMessage({
         data: {
           conversationId: null,
@@ -907,6 +970,7 @@ export function NewChatView({ user }: { user: { name: string } }) {
           searchEnabled,
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
+          ...(input.generationMode ? { generationMode: input.generationMode } : {}),
         },
       }),
     // Fires when the request starts, i.e. after any queued upload settled —
@@ -952,8 +1016,12 @@ export function NewChatView({ user }: { user: { name: string } }) {
       <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
-            onSend={(content, attachmentIds) =>
-              sendMutation.mutateAsync({ content, attachmentIds })
+            onSend={(content, attachmentIds, generationMode) =>
+              sendMutation.mutateAsync({
+                content,
+                attachmentIds,
+                ...(generationMode ? { generationMode } : {}),
+              })
             }
             disabled={sendMutation.isPending}
             modelId={modelId}

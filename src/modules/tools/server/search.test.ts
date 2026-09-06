@@ -113,6 +113,35 @@ describe("SearxngBackend", () => {
     ),
   );
 
+  it.effect("fails when every engine is unresponsive instead of returning nothing", () =>
+    Effect.gen(function* () {
+      const backend = yield* SearchBackend;
+      const error = yield* backend
+        .search(connection, { query: "x", maxResults: 5 })
+        .pipe(Effect.flip);
+      expect(error.message).toBe(
+        "search engines unavailable (too many requests, Suspended: CAPTCHA)",
+      );
+    }).pipe(
+      Effect.provide(
+        backendWith(
+          () =>
+            new Response(
+              JSON.stringify({
+                results: [],
+                unresponsive_engines: [
+                  ["brave", "too many requests"],
+                  ["google", "too many requests"],
+                  ["startpage", "Suspended: CAPTCHA"],
+                ],
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            ),
+        ),
+      ),
+    ),
+  );
+
   it.effect("fails on malformed json bodies", () =>
     Effect.gen(function* () {
       const backend = yield* SearchBackend;

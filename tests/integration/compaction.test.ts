@@ -203,6 +203,7 @@ const FakeDocumentParser = Layer.succeed(DocumentParser, {
 const unavailable = (tool: "web_search" | "read_url") => () =>
   Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
 const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
+  researchSearchLimit: () => Effect.die("no research in these tests"),
   handler: () =>
     Effect.succeed((params: { readonly queries: ReadonlyArray<string> }) =>
       Effect.succeed({

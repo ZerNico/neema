@@ -68,6 +68,10 @@ export const messages = pgTable(
     // final assembled text; for streaming messages this is written on completion
     content: text().notNull().default(""),
     // Structured answer; content is its server-generated model/provenance projection.
+    generationMode: text("generation_mode", { enum: ["chat", "research"] })
+      .notNull()
+      .default("chat"),
+    researchRunId: text("research_run_id"),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
     // final assembled reasoning/thinking text; empty for non-reasoning models
     reasoning: text().notNull().default(""),
@@ -129,6 +133,8 @@ export const messageToolCalls = pgTable(
     messageId: text("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
+    researchRunId: text("research_run_id"),
+    researchTaskId: text("research_task_id"),
     // one displayed assistant message can span several model turns
     turnIndex: integer("turn_index").notNull(),
     callIndex: integer("call_index").notNull(),
@@ -202,6 +208,8 @@ export const messageCompactionEvents = pgTable(
     messageId: text("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
+    researchRunId: text("research_run_id"),
+    researchTaskId: text("research_task_id"),
     checkpointId: text("checkpoint_id").references(() => conversationCompactionCheckpoints.id, {
       onDelete: "set null",
     }),

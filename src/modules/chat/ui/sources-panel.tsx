@@ -1,24 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { Badge } from "~/ui/primitives/badge";
-import { useDetailPanel, useDetailPanelFocus } from "~/ui/detail-panel";
-import { cn } from "~/ui/utils";
+import { useDetailPanel } from "~/ui/detail-panel";
 
-function SourceRow({ source, focused }: { source: ToolSource; focused: boolean }) {
-  const ref = useRef<HTMLLIElement>(null);
-  useEffect(() => {
-    if (focused) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [focused]);
-
+function SourceRow({ source }: { source: ToolSource }) {
   return (
-    <li
-      ref={ref}
-      className={cn(
-        "rounded-lg border p-3 transition-colors",
-        focused ? "border-primary bg-accent/50" : "border-transparent",
-      )}
-    >
+    <li className="rounded-lg p-3">
       <a
         href={source.url}
         target="_blank"
@@ -26,9 +14,6 @@ function SourceRow({ source, focused }: { source: ToolSource; focused: boolean }
         className="group flex flex-col gap-1.5"
       >
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground w-4 shrink-0 text-xs tabular-nums">
-            {source.index}
-          </span>
           <Favicon url={source.url} className="size-4" />
           <span className="text-muted-foreground min-w-0 truncate text-xs">
             {hostOf(source.url)}
@@ -43,7 +28,7 @@ function SourceRow({ source, focused }: { source: ToolSource; focused: boolean }
           </p>
         ) : null}
         <Badge variant="secondary" className="mt-0.5 w-fit text-[0.65rem]">
-          {source.read ? "read in full" : "snippet only"}
+          {source.read ? "page extracted" : "snippet only"}
         </Badge>
       </a>
     </li>
@@ -51,36 +36,31 @@ function SourceRow({ source, focused }: { source: ToolSource; focused: boolean }
 }
 
 /**
- * Opens this message's sources in the detail panel, optionally focusing one row.
+ * Opens this message's sources in the detail panel.
  *
  * `sources` is snapshotted into the panel body on each open; it doesn't
  * subscribe to changes while the panel stays open.
  */
 export function useSourcesPanel(messageId: string, sources: ToolSource[]) {
   const panel = useDetailPanel();
-  return useCallback(
-    (focus?: number) => {
-      panel.open({
-        id: `sources:${messageId}`,
-        title: "Sources",
-        subtitle: `${sources.length}`,
-        body: <SourcesPanelBody sources={sources} />,
-        ...(focus !== undefined ? { focus } : {}),
-      });
-    },
-    [panel, messageId, sources],
-  );
+  return useCallback(() => {
+    panel.open({
+      id: `sources:${messageId}`,
+      title: "Sources",
+      subtitle: `${sources.length}`,
+      body: <SourcesPanelBody sources={sources} />,
+    });
+  }, [panel, messageId, sources]);
 }
 
-// The detail-panel body for a message's sources. Takes only the source list —
-// which for a completed message is stable — plus the panel's focus hint so a
-// citation-chip click scrolls its row into view and highlights it.
+// The detail-panel body for a message's sources. Takes only the source list,
+// which for a completed message is stable. Rows are keyed by the citation
+// index but never show it: the number is the model's handle, not the reader's.
 export function SourcesPanelBody({ sources }: { sources: ToolSource[] }) {
-  const focus = useDetailPanelFocus();
   return (
     <ul className="flex flex-col gap-1">
       {sources.map((source) => (
-        <SourceRow key={source.index} source={source} focused={focus === source.index} />
+        <SourceRow key={source.index} source={source} />
       ))}
     </ul>
   );

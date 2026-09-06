@@ -33,9 +33,21 @@ export function projectAssistantBody({
   tools: ToolActivity[];
   compactions: CompactionActivity[];
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
+  const researchRuns = new Set(
+    tools.flatMap((activity) =>
+      activity.family === "research" && activity.progress ? [activity.progress.runId] : [],
+    ),
+  );
   const activities: PositionedActivity[] = [
-    ...tools.map((activity): PositionedActivity => ({ kind: "tool", activity })),
-    ...compactions.map((activity): PositionedActivity => ({ kind: "compaction", activity })),
+    ...tools
+      .filter(
+        (activity) =>
+          !(activity.family === "web" && activity.runId && researchRuns.has(activity.runId)),
+      )
+      .map((activity): PositionedActivity => ({ kind: "tool", activity })),
+    ...compactions
+      .filter((activity) => !(activity.runId && researchRuns.has(activity.runId)))
+      .map((activity): PositionedActivity => ({ kind: "compaction", activity })),
   ];
   // Logical ordering is authoritative for equal offsets and legacy messages.
   // oxlint-disable-next-line no-array-sort -- fresh array

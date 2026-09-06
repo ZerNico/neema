@@ -89,6 +89,15 @@ importers:
       linkedom:
         specifier: ^0.18.13
         version: 0.18.13
+      mdast-util-from-markdown:
+        specifier: 2.0.3
+        version: 2.0.3
+      mdast-util-gfm-footnote:
+        specifier: 2.1.0
+        version: 2.1.0
+      micromark-extension-gfm-footnote:
+        specifier: 2.1.0
+        version: 2.1.0
       pg:
         specifier: ^8.16.0
         version: 8.23.0

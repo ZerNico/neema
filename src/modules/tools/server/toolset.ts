@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import type { WebExecutionPolicy } from "./execution-policy.ts";
+import { Effect, type Scope } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
@@ -54,64 +55,65 @@ export const prepareWebTools: (input: {
   authority: UrlAuthority;
   /** The composer's web toggle: search is offered only when the user asked. */
   requestSearch: boolean;
-}) => Effect.Effect<PreparedWebTools | undefined> = Effect.fn("tools.prepareWebTools")(
-  function* (input) {
-    // An unavailable tool is skipped, not fatal: validation only guarantees the
-    // tools the user explicitly asked for, and an admin flipping one off
-    // mid-conversation should degrade the toolkit, not kill the generation.
-    const search = input.requestSearch
-      ? yield* input.webSearch
-          .handler(input.indexer, input.authority)
+  policy?: WebExecutionPolicy;
+}) => Effect.Effect<PreparedWebTools | undefined, never, Scope.Scope> = Effect.fn(
+  "tools.prepareWebTools",
+)(function* (input) {
+  // An unavailable tool is skipped, not fatal: validation only guarantees the
+  // tools the user explicitly asked for, and an admin flipping one off
+  // mid-conversation should degrade the toolkit, not kill the generation.
+  const search = input.requestSearch
+    ? yield* input.webSearch
+        .handler(input.indexer, input.authority, input.policy)
+        .pipe(Effect.catchTag("ToolUnavailable", unavailable))
+    : null;
+  const reader =
+    search !== null || input.authority.seeded
+      ? yield* input.urlReader
+          .handler(input.indexer, input.authority, input.policy)
           .pipe(Effect.catchTag("ToolUnavailable", unavailable))
       : null;
-    const reader =
-      search !== null || input.authority.seeded
-        ? yield* input.urlReader
-            .handler(input.indexer, input.authority)
-            .pipe(Effect.catchTag("ToolUnavailable", unavailable))
-        : null;
 
-    const tools = { search: search !== null, reader: reader !== null };
-    if (search && reader) {
-      return {
-        tools,
-        group: {
-          toolkit: Toolkit.make(webSearchTool, urlReaderTool),
-          handlers: { web_search: search, read_url: reader },
-        },
-      };
-    }
-    if (search) {
-      return {
-        tools,
-        group: {
-          toolkit: Toolkit.make(webSearchTool),
-          handlers: { web_search: search },
-        },
-      };
-    }
-    if (reader) {
-      return {
-        tools,
-        group: {
-          toolkit: Toolkit.make(urlReaderTool),
-          handlers: { read_url: reader },
-        },
-      };
-    }
-    return undefined;
-  },
-);
+  const tools = { search: search !== null, reader: reader !== null };
+  if (search && reader) {
+    return {
+      tools,
+      group: {
+        toolkit: Toolkit.make(webSearchTool, urlReaderTool),
+        handlers: { web_search: search, read_url: reader },
+      },
+    };
+  }
+  if (search) {
+    return {
+      tools,
+      group: {
+        toolkit: Toolkit.make(webSearchTool),
+        handlers: { web_search: search },
+      },
+    };
+  }
+  if (reader) {
+    return {
+      tools,
+      group: {
+        toolkit: Toolkit.make(urlReaderTool),
+        handlers: { read_url: reader },
+      },
+    };
+  }
+  return undefined;
+});
 
 // Backward-compatible wrapper for tests and callers that only need web tools.
 // The stream engine uses `prepareWebTools` directly once it can add other groups.
 export const prepareWebToolkit: (
   input: Parameters<typeof prepareWebTools>[0],
-) => Effect.Effect<PreparedWebToolkit | undefined> = Effect.fn("tools.prepareWebToolkit")(
-  function* (input) {
-    const prepared = yield* prepareWebTools(input);
-    if (!prepared) return undefined;
-    const toolkit = yield* mergeToolGroups([prepared.group]);
-    return toolkit ? { tools: prepared.tools, toolkit } : undefined;
-  },
-);
+) => Effect.Effect<PreparedWebToolkit | undefined, never, Scope.Scope> = Effect.fn(
+  "tools.prepareWebToolkit",
+)(function* (input) {
+  const prepared = yield* prepareWebTools(input);
+  if (!prepared) return undefined;
+  const toolkit = yield* mergeToolGroups([prepared.group]);
+  return toolkit ? { tools: prepared.tools, toolkit } : undefined;
+});

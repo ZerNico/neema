@@ -4,6 +4,7 @@ import {
   chatModelsQuery,
   conversationQuery,
   webSearchAvailabilityQuery,
+  researchAvailabilityQuery,
 } from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
 import { EmptyState } from "~/ui/page-shell.tsx";
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
       context.queryClient.ensureQueryData(chatModelsQuery),
       // Prefetch keeps optional search-config failures out of the route error boundary.
       context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
+      context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),
     ]);
     // The server function normally throws `notFound()`. Keep this runtime guard
     // too: a stale or malformed cached result must never reach ChatView, whose

@@ -9,6 +9,7 @@ import {
 const env = (value: Record<string, unknown>) => JSON.stringify({ v: 1, ...value });
 
 const start = env({
+  family: "web",
   phase: "start",
   callId: "c1",
   name: "web_search",
@@ -193,6 +194,7 @@ describe("applyToolChunk", () => {
         phase: "start",
         callId: "c1",
         name: "read_url",
+        family: "web",
         args: { targets: ["https://a.dev/x", "https://b.dev/y"] },
       }),
     );
@@ -203,6 +205,7 @@ describe("applyToolChunk", () => {
         phase: "progress",
         callId: "c1",
         name: "read_url",
+        family: "web",
         summary: { targets: ["https://a.dev/x", "https://b.dev/y"], resultCount: 0 },
         pages: [
           { url: "https://a.dev/x", title: "A", status: "reading" },
@@ -352,29 +355,15 @@ describe("applyToolChunk", () => {
     expect(replayed).toHaveLength(1);
   });
 
-  it("treats a missing family as web, including on old tool names", () => {
-    const tools = applyToolChunk(
-      [],
-      env({
-        phase: "start",
-        callId: "legacy",
-        name: "save_memory",
-        args: { targets: ["legacy target"] },
-      }),
-    );
-
-    expect(tools).toEqual([
-      {
-        family: "web",
-        callId: "legacy",
-        name: "save_memory",
-        turnIndex: 0,
-        callIndex: 0,
-        targets: ["legacy target"],
-        status: "running",
-      },
-    ]);
-  });
+  it.each(["web_search", "read_url", "save_memory"])(
+    "rejects %s envelopes without a family",
+    (name) => {
+      const tools = applyToolChunk([], start);
+      expect(applyToolChunk(tools, env({ phase: "start", callId: "missing-family", name }))).toBe(
+        tools,
+      );
+    },
+  );
 
   it("ignores malformed or unversioned envelopes", () => {
     const seed: ToolActivity[] = [

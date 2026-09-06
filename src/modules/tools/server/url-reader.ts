@@ -1,3 +1,4 @@
+import type { WebExecutionPolicy } from "./execution-policy.ts";
 import { Context, Effect, Layer } from "effect";
 import { Tool } from "effect/unstable/ai";
 import {
@@ -73,6 +74,7 @@ export class UrlReaderExecutor extends Context.Service<
     handler(
       indexer: SourceIndexer,
       authority: UrlAuthority,
+      policy?: WebExecutionPolicy,
     ): Effect.Effect<
       (
         params: UrlReadParams,
@@ -92,6 +94,7 @@ export class UrlReaderExecutor extends Context.Service<
       const makeHandler = Effect.fn("UrlReaderExecutor.handler")(function* (
         indexer: SourceIndexer,
         authority: UrlAuthority,
+        policy?: WebExecutionPolicy,
       ) {
         const tool = yield* repo.getUrlReader();
         if (!tool) {
@@ -106,6 +109,16 @@ export class UrlReaderExecutor extends Context.Service<
           params: UrlReadParams,
           ctx: { preliminary: (result: Result) => Effect.Effect<void> },
         ) {
+          if (policy && !policy.admit("read", params.urls.length))
+            return {
+              ok: false,
+              targets: [...params.urls],
+              resultCount: 0,
+              pagesFetched: 0,
+              results: [],
+              failures: [],
+              error: "Research web budget or exploration deadline reached.",
+            } satisfies Result;
           const targets = uniqueTargets(params.urls);
           const entries = targets.map((target, index) => ({
             target,
@@ -158,6 +171,7 @@ export class UrlReaderExecutor extends Context.Service<
                 return yield* extractor
                   .extract({ url: entry.canonical, charCap: config.perPageCharCap })
                   .pipe(
+                    (effect) => (policy ? policy.run(effect) : effect),
                     Effect.map((extracted): ReadOutcome => {
                       const title = extracted.title ?? new URL(extracted.url).hostname;
                       pages[entry.index] = { url: extracted.url, title, status: "done" };

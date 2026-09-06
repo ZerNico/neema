@@ -4,7 +4,10 @@ import {
   listChatModels,
   listConversations,
 } from "../server/functions.ts";
-import { getWebSearchAvailability } from "~/modules/tools/server/functions.ts";
+import {
+  getResearchAvailability,
+  getWebSearchAvailability,
+} from "~/modules/tools/server/functions.ts";
 
 export const CONVERSATIONS_PAGE_SIZE = 30;
 
@@ -41,6 +44,12 @@ export const chatModelsQuery = queryOptions({
   queryKey: ["chat-models"],
   queryFn: () => listChatModels(),
   staleTime: 60_000,
+});
+
+export const researchAvailabilityQuery = queryOptions({
+  queryKey: ["tools", "research", "availability"],
+  queryFn: () => getResearchAvailability(),
+  staleTime: 30_000,
 });
 
 export const webSearchAvailabilityQuery = queryOptions({

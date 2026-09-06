@@ -10,31 +10,30 @@ import { useIsMobile } from "~/ui/use-mobile";
 import { cn } from "~/ui/utils";
 
 export interface DetailPanelRequest {
-  /** Identity of the content. Re-opening the same id swaps focus without remounting. */
+  /** Identity of the content. Refreshing the same id preserves body state. */
   id: string;
   title: string;
-  subtitle?: string;
-  /**
-   * The panel body.
-   *
-   * Props are snapshotted at open time and refreshed on re-open. A body that
-   * must track live data between opens should take an id and subscribe with
-   * its own hooks.
-   */
+  /** Snapshotted like the body; live owners refresh both after committing data. */
+  subtitle?: ReactNode;
+  /** Props are snapshotted at open time, then updated by re-open or refresh. */
   body: ReactNode;
-  /** Free-form hint for the body (e.g. which row to scroll to). Updates on re-open. */
-  focus?: string | number;
 }
 
 export interface DetailPanelApi {
   open: (request: DetailPanelRequest) => void;
   close: () => void;
+  /** Update only the currently selected identity; never open or switch a panel. */
+  refresh: (request: DetailPanelRequest) => void;
+  closeIfSelected: (id: string) => void;
 }
 
 // Actions are split from state so that opening or closing the panel doesn't
 // re-render every consumer that only ever calls open() — i.e. every message.
 const DetailPanelContext = createContext<DetailPanelApi | null>(null);
 const DetailPanelStateContext = createContext<DetailPanelRequest | null>(null);
+// Live owners subscribe to identity, not the request they refresh: updating a
+// body must not trigger another owner render and refresh feedback loop.
+const DetailPanelSelectedIdContext = createContext<string | null>(null);
 
 // A general-purpose detail region beside the main content — the sources list is
 // the first tenant, not the only intended one.
@@ -52,6 +51,12 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
 
   const open = useCallback((request: DetailPanelRequest) => setState(request), []);
   const close = useCallback(() => setState(null), []);
+  const refresh = useCallback((request: DetailPanelRequest) => {
+    setState((current) => (current?.id === request.id ? request : current));
+  }, []);
+  const closeIfSelected = useCallback((id: string) => {
+    setState((current) => (current?.id === id ? null : current));
+  }, []);
 
   // Otherwise navigating away leaves the panel showing the previous page's
   // detail. Derived during render — no effect needed.
@@ -62,11 +67,18 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
     setState(null);
   }
 
-  const api = useMemo<DetailPanelApi>(() => ({ open, close }), [open, close]);
+  const api = useMemo<DetailPanelApi>(
+    () => ({ open, close, refresh, closeIfSelected }),
+    [open, close, refresh, closeIfSelected],
+  );
 
   return (
     <DetailPanelContext.Provider value={api}>
-      <DetailPanelStateContext.Provider value={state}>{children}</DetailPanelStateContext.Provider>
+      <DetailPanelSelectedIdContext.Provider value={state?.id ?? null}>
+        <DetailPanelStateContext.Provider value={state}>
+          {children}
+        </DetailPanelStateContext.Provider>
+      </DetailPanelSelectedIdContext.Provider>
     </DetailPanelContext.Provider>
   );
 }
@@ -142,14 +154,14 @@ export function DetailPanelRail({ className }: { className?: string }) {
   );
 }
 
-/** Stable `{ open, close }` — safe to depend on from memo hooks. */
+/** Stable actions — safe to depend on from memo hooks. */
 export function useDetailPanel(): DetailPanelApi {
   const api = useContext(DetailPanelContext);
   if (!api) throw new Error("useDetailPanel must be used within a DetailPanelProvider");
   return api;
 }
 
-/** The focus hint of the open panel — for bodies that scroll or highlight a row. */
-export function useDetailPanelFocus(): string | number | undefined {
-  return useContext(DetailPanelStateContext)?.focus;
+/** Selection-only subscription: body/subtitle refreshes do not notify owners. */
+export function useDetailPanelSelectedId(): string | null {
+  return useContext(DetailPanelSelectedIdContext);
 }

@@ -76,6 +76,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           modelId: data.modelId,
           content: data.content,
+          generationMode: data.generationMode,
           searchEnabled: data.searchEnabled,
           timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
@@ -197,6 +198,7 @@ export const stopGeneration = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
+          researchRunId: data.researchRunId,
         }),
       ).pipe(
         Effect.catchTags({

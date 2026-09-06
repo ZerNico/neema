@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolsPage } from "./tools-page.tsx";
+import type { PublicTool } from "../server/repo.ts";
 import {
+  getDocumentParserTool,
+  getMemoryTool,
+  getUrlReaderTool,
+  getWebSearchTool,
   testSearchConnection,
   updateDocumentParserTool,
   updateMemoryTool,
@@ -46,9 +51,9 @@ const deferred = <T,>() => {
 
 const tool = (
   name: string,
-  config: Record<string, unknown>,
-  extra: Record<string, unknown> = {},
-) => ({
+  config: PublicTool["config"],
+  extra: Partial<PublicTool> = {},
+): PublicTool => ({
   id: name,
   name,
   kind: name === "document_parser" ? "local" : name,
@@ -64,7 +69,14 @@ const renderPage = ({
   webSearch = tool("web_search", { backend: "searxng", baseUrl: "http://searx", maxResults: 8 }),
 }: { webSearch?: ReturnType<typeof tool> | null } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(["admin", "tools", "memory"], tool("memory", {}));
+  const memory = tool("memory", {});
+  vi.mocked(getMemoryTool).mockResolvedValue(memory);
+  vi.mocked(getWebSearchTool).mockResolvedValue(webSearch);
+  vi.mocked(getUrlReaderTool).mockResolvedValue(tool("read_url", { perPageCharCap: 12000 }));
+  vi.mocked(getDocumentParserTool).mockResolvedValue(
+    tool("document_parser", { maxChars: 120000, maxPages: 200 }),
+  );
+  client.setQueryData(["admin", "tools", "memory"], memory);
   client.setQueryData(["admin", "tools", "web-search"], webSearch);
   client.setQueryData(
     ["admin", "tools", "url-reader"],
@@ -114,7 +126,7 @@ describe("ToolsPage", () => {
 
     await waitFor(() =>
       expect(updateWebSearchTool).toHaveBeenCalledWith({
-        data: { baseUrl: "http://searx", maxResults: 5 },
+        data: { baseUrl: "http://searx", maxResults: 5, researchMaxSearchQueries: 80 },
       }),
     );
     const [save] = saveButtons();
@@ -124,6 +136,73 @@ describe("ToolsPage", () => {
 
     pending.resolve(undefined);
     await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
+  });
+
+  it("loads and saves the research search budget without changing the pending label", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<unknown>();
+    vi.mocked(updateWebSearchTool).mockReturnValue(pending.promise as never);
+    renderPage({
+      webSearch: tool("web_search", {
+        backend: "searxng",
+        baseUrl: "http://searx",
+        maxResults: 8,
+        researchMaxSearchQueries: 40,
+      }),
+    });
+    const cap = screen.getByLabelText("Search queries per research run");
+    expect(cap).toHaveValue(40);
+    await user.clear(cap);
+    await user.type(cap, "60{Enter}");
+    await waitFor(() =>
+      expect(updateWebSearchTool).toHaveBeenCalledWith({
+        data: { baseUrl: "http://searx", maxResults: 8, researchMaxSearchQueries: 60 },
+      }),
+    );
+    const [save] = saveButtons();
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("aria-busy", "true");
+    expect(save).toHaveTextContent("Save");
+    vi.mocked(getWebSearchTool).mockResolvedValue(
+      tool("web_search", {
+        backend: "searxng",
+        baseUrl: "http://searx",
+        maxResults: 8,
+        researchMaxSearchQueries: 60,
+      }),
+    );
+    pending.resolve(undefined);
+    await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
+    await waitFor(() => expect(cap).toHaveValue(60));
+  });
+
+  it.each([
+    ["11", "Between 12 and 120."],
+    ["121", "Between 12 and 120."],
+    ["12.5", "Enter a whole number."],
+  ])("rejects research budget %s before saving", async (value, error) => {
+    const user = userEvent.setup();
+    renderPage();
+    const cap = screen.getByLabelText("Search queries per research run");
+    expect(cap).toHaveValue(80);
+    await user.clear(cap);
+    await user.type(cap, `${value}{Enter}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent(error);
+    expect(updateWebSearchTool).not.toHaveBeenCalled();
+  });
+
+  it("retains the edited research budget after a failed save", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateWebSearchTool).mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+    const cap = screen.getByLabelText("Search queries per research run");
+    await user.clear(cap);
+    await user.type(cap, "24{Enter}");
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not save the web search settings."),
+    );
+    expect(cap).toHaveValue(24);
+    expect(saveButtons()[0]).not.toHaveAttribute("aria-busy");
   });
 
   it("shows a range error for an out-of-range result count", async () => {

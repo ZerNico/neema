@@ -402,6 +402,24 @@ describe("hardTruncateHistory", () => {
 });
 
 describe("buildSummaryPrompt", () => {
+  it.each([1000, 2000, 6000])(
+    "budgets the entire summarizer prompt within %i tokens",
+    (maxInputTokens) => {
+      const prompt = buildSummaryPrompt({
+        aged: [{ role: "assistant", content: "new evidence ".repeat(10000) }],
+        previousSummary: "previous briefing ".repeat(10000),
+        sourceManifest: "[1] title https://evidence.example/source\n".repeat(10000),
+        maxTranscriptChars: 100000,
+        maxInputTokens,
+      });
+      expect(
+        estimatePromptTokens(prompt.content as ReadonlyArray<Prompt.MessageEncoded>),
+      ).toBeLessThanOrEqual(maxInputTokens);
+      expect(JSON.stringify(prompt)).toContain("omitted");
+      expect(prompt.content.at(-1)?.role).toBe("user");
+    },
+  );
+
   const aged: Prompt.MessageEncoded[] = [
     { role: "user", content: "deploy to staging with FOO_BAR=1" },
     { role: "assistant", content: "done, see /var/log/deploy.log" },
@@ -610,6 +628,41 @@ const earlierCheckpoint = {
 };
 
 describe("prepareCompactedHistory", () => {
+  it("reuses the run's retained projection without compacting unchanged history again", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const h = harness();
+        const input = request(history(30));
+        const first = yield* prepareCompactedHistory(h.deps, input);
+        expect(first.startIndex).toBeGreaterThan(0);
+        const next = yield* prepareCompactedHistory(h.deps, { ...input, projection: first });
+        expect(next.startIndex).toBe(first.startIndex);
+        expect(next.injectedMessages).toEqual(first.injectedMessages);
+        expect(h.generateText).toHaveBeenCalledOnce();
+      }),
+    ));
+
+  it("never resurrects history or a checkpoint discarded by overflow repair", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const h = harness();
+        const input = request(history(10), { existingCheckpoint: earlierCheckpoint });
+        const first = yield* prepareCompactedHistory(h.deps, input);
+        const repaired = shrinkForOverflow({ ...input, decision: first, calibrationFactor: 1 })!;
+        expect(repaired).not.toBeNull();
+        const next = yield* prepareCompactedHistory(h.deps, {
+          ...input,
+          projection: { ...repaired, checkpoint: null },
+          contextLength: 64000,
+        });
+        expect(next.startIndex).toBe(repaired.startIndex);
+        expect(next.checkpoint).toBeNull();
+        expect(next.injectedMessages).toEqual(repaired.injectedMessages);
+        expect(JSON.stringify(next.injectedMessages)).not.toContain(earlierCheckpoint.summary);
+        expect(h.generateText).not.toHaveBeenCalled();
+      }),
+    ));
+
   it("leaves a short conversation entirely alone", () =>
     Effect.runPromise(
       Effect.gen(function* () {

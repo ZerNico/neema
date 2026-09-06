@@ -27,6 +27,8 @@ export interface SearchHit {
 }
 
 const SearxngResponse = Schema.Struct({
+  // [engine, reason] pairs, e.g. ["brave", "too many requests"].
+  unresponsive_engines: Schema.optionalKey(Schema.Array(Schema.Array(Schema.String))),
   results: Schema.Array(
     Schema.Struct({
       url: Schema.String,
@@ -88,6 +90,16 @@ export class SearchBackend extends Context.Service<
           }
           const json = yield* res.json;
           const decoded = yield* decodeSearxng(json);
+          // An empty page with every engine down is the backend failing, and a
+          // caller that sees [] instead keeps searching a wall. Surface it.
+          const unresponsive = decoded.unresponsive_engines ?? [];
+          if (decoded.results.length === 0 && unresponsive.length > 0) {
+            const reasons = [...new Set(unresponsive.map(([, reason]) => reason ?? "unavailable"))];
+            return yield* new SearchBackendError({
+              backend: "searxng",
+              message: `search engines unavailable (${reasons.join(", ")})`,
+            });
+          }
 
           // Dedupe by normalized URL, keep search order, cap at maxResults.
           const seen = new Set<string>();

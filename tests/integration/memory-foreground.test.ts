@@ -306,6 +306,7 @@ const FakeMemoryService = Layer.succeed(MemoryService, {
 });
 
 const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
+  researchSearchLimit: () => Effect.die("no research in these tests"),
   handler: () =>
     Effect.succeed((params: { readonly queries: ReadonlyArray<string> }) =>
       Effect.succeed({
