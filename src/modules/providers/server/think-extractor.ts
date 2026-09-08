@@ -11,7 +11,7 @@ const CLOSE_TAG = "</think>";
 
 // Longest suffix of `text` that is a proper prefix of `tag` (a possibly
 // split tag straddling a chunk boundary). Returns 0 if none.
-const partialTagSuffix = (text: string, tag: string): number => {
+export const partialTagSuffix = (text: string, tag: string): number => {
   const max = Math.min(text.length, tag.length - 1);
   for (let len = max; len > 0; len--) {
     if (text.endsWith(tag.slice(0, len))) return len;

@@ -408,35 +408,29 @@ describe("knowledge-backed generations", () => {
     expect(promptText(requests[requests.length - 3]!.prompt)).not.toContain("clause clause");
   });
 
-  it("refuses an oversized selection on a model without tools before writing a turn", async () => {
+  it("offers retrieval for an oversized selection on a model without native tool calling", async () => {
     const owner = await createUser();
     const { collectionId } = await collectionWith(owner, [["Long", "clause ".repeat(9_000)]]);
-    const before = (
-      await exec(`select count(*)::int as total from conversations where user_id = '${owner}'`)
-    ).rows[0];
-    const failure = await run(
-      Effect.flip(
-        Effect.flatMap(ChatService, (chat) =>
-          chat.sendMessage({
-            userId: owner,
-            conversationId: null,
-            modelId: noToolModelId,
-            content: "Summarize.",
-            searchEnabled: false,
-            attachmentIds: [],
-            collectionIds: [collectionId],
-          }),
-        ),
-      ),
-    );
-    expect(failure).toMatchObject({
-      _tag: "InvalidMessage",
-      reason: expect.stringContaining("tool-capable"),
+    // The gateway polyfills tool calling for such a model, so the turn is
+    // written and dispatched with the retrieval toolkit like any other.
+    script = (input) => {
+      expect(promptText(input.prompt)).toContain("Selected knowledge requires retrieval");
+      expect(input.toolkit?.tools["search_knowledge"]).toBeDefined();
+      return Stream.make(text("Retrieval is available."), finish());
+    };
+    const sent = await send({
+      userId: owner,
+      modelId: noToolModelId,
+      collectionIds: [collectionId],
     });
-    expect(
-      (await exec(`select count(*)::int as total from conversations where user_id = '${owner}'`))
-        .rows[0],
-    ).toEqual(before);
+    expect(await settle(sent.assistantMessageId)).toMatchObject({
+      status: "complete",
+      content: "Retrieval is available.",
+    });
+    expect(await configRow(sent.assistantMessageId)).toMatchObject({
+      knowledge_mode: "retrieval",
+      collection_ids: [collectionId],
+    });
   });
 
   it("installs an agent snapshot, honors explicit search off, and freezes it across later edits", async () => {
@@ -606,7 +600,7 @@ describe("knowledge-backed generations", () => {
     },
   );
 
-  it("rejects a non-tool structured continuation before consuming its question", async () => {
+  it("continues a structured question on a model without native tool calling", async () => {
     const owner = await createUser();
     const { collectionId } = await collectionWith(owner, [["Large", "evidence ".repeat(9000)]]);
     script = (input) =>
@@ -628,12 +622,8 @@ describe("knowledge-backed generations", () => {
           questionResponse: { callId: String(call.id), response: { kind: "skip" } },
         }),
       );
-    expect(await run(Effect.flip(answer(noToolModelId)))).toMatchObject({
-      _tag: "InvalidMessage",
-      reason: expect.stringContaining("tool-capable"),
-    });
     script = () => Stream.make(text("continued"), finish());
-    const continued = await run(answer(smallModelId));
+    const continued = await run(answer(noToolModelId));
     expect(await settle(continued.assistantMessageId)).toMatchObject({
       status: "complete",
       content: "continued",

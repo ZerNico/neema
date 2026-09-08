@@ -495,15 +495,15 @@ export class StreamEngine extends Context.Service<
             ...priorSources.filter(isWebSource).map((source) => source.url),
           ]);
           const indexer = createSourceIndexer(priorSources);
-          const webTools = model?.capabilities.tools
-            ? yield* prepareWebTools({
-                webSearch,
-                urlReader,
-                indexer,
-                authority,
-                requestSearch: input.searchEnabled,
-              })
-            : undefined;
+          // Every chat model takes tools: the gateway polyfills prompt-based
+          // calling for models without native support (`hermes-tools.ts`).
+          const webTools = yield* prepareWebTools({
+            webSearch,
+            urlReader,
+            indexer,
+            authority,
+            requestSearch: input.searchEnabled,
+          });
 
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
@@ -517,20 +517,18 @@ export class StreamEngine extends Context.Service<
                   manifest: config.manifest,
                 })
               : null;
-          const askTools = model?.capabilities.tools ? prepareAskUserTool() : undefined;
+          const askTools = prepareAskUserTool();
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
-          const planTools =
-            config.planEnabled && model?.capabilities.tools ? preparePlanTool() : undefined;
+          const planTools = config.planEnabled ? preparePlanTool() : undefined;
           let knowledgeContext: PreparedKnowledgeContext | null = null;
-          const knowledgeTools =
-            knowledgeSession && model?.capabilities.tools
-              ? yield* prepareKnowledgeTools({
-                  userId: input.userId,
-                  session: knowledgeSession,
-                  indexer,
-                }).pipe(Effect.provideService(KnowledgeService, knowledgeService))
-              : null;
+          const knowledgeTools = knowledgeSession
+            ? yield* prepareKnowledgeTools({
+                userId: input.userId,
+                session: knowledgeSession,
+                indexer,
+              }).pipe(Effect.provideService(KnowledgeService, knowledgeService))
+            : null;
 
           // Memory is one stable snapshot for this whole generation. A memory
           // saved during a tool round becomes context on the next user turn, not
@@ -558,7 +556,6 @@ export class StreamEngine extends Context.Service<
           // sits in the prompt or in tool results, and neither may become
           // durable personal memory.
           const memoryTools =
-            model?.capabilities.tools &&
             memorySettings.effectiveAutoSaveEnabled &&
             sourceUserMessage &&
             !sourceHasAttachments &&
@@ -774,7 +771,6 @@ export class StreamEngine extends Context.Service<
               userId: input.userId,
               session: knowledgeSession,
               indexer,
-              toolsSupported: model?.capabilities.tools ?? false,
               mode: config.knowledgeMode === "retrieval" ? "retrieval" : "context",
               budget: computeBudget({
                 contextLength: model?.contextLength,

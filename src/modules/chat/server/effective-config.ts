@@ -7,24 +7,10 @@ import { KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import { KnowledgeRepo, type ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import { KNOWLEDGE_CONTEXT_LIMITS } from "~/modules/knowledge/server/context.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
-import { InvalidMessage } from "../errors.ts";
 import { COMPACTION_CONFIG, computeBudget } from "./compaction.ts";
 import type { GenerationConfig } from "./repo.ts";
 
 export type KnowledgeMode = "none" | "context" | "retrieval";
-
-/** One replay policy for retry, edit, and validated question continuations. */
-export const validateGenerationModel = (
-  config: Pick<GenerationConfig, "knowledgeMode">,
-  model: { capabilities: { tools: boolean } },
-): Effect.Effect<void, InvalidMessage> =>
-  config.knowledgeMode === "retrieval" && !model.capabilities.tools
-    ? Effect.fail(
-        new InvalidMessage({
-          reason: "this answer used knowledge retrieval, which needs a tool-capable model",
-        }),
-      )
-    : Effect.void;
 
 /**
  * A metadata-only estimate of whether a whole selection could be included
@@ -111,7 +97,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     /** Collections selected in the composer, beside any the agent attaches. */
     collectionIds?: ReadonlyArray<string> | undefined;
     searchEnabled: boolean;
-    model: { capabilities: { tools: boolean }; contextLength: number | null | undefined };
+    model: { contextLength: number | null | undefined };
     /** Whether web search could run at all; an agent preference cannot force it. */
     searchAvailable: boolean;
   }) {
@@ -124,10 +110,10 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       return yield* new KnowledgeRejected({ reason: "select at most five knowledge collections" });
 
     // Preferences degrade rather than fail: an agent that likes search must not
-    // break on a model or an instance that has none.
-    const searchEnabled =
-      input.searchEnabled && input.model.capabilities.tools && input.searchAvailable;
-    const planEnabled = (snapshot?.planEnabled ?? false) && input.model.capabilities.tools;
+    // break on an instance that has none. Tool support itself is never a
+    // question: models without native calling are polyfilled in the gateway.
+    const searchEnabled = input.searchEnabled && input.searchAvailable;
+    const planEnabled = snapshot?.planEnabled ?? false;
 
     const manifest =
       collectionIds.length === 0
@@ -139,11 +125,6 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
         : fitsDirectContext({ manifest, contextLength: input.model.contextLength, searchEnabled })
           ? "context"
           : "retrieval";
-    if (knowledgeMode === "retrieval" && !input.model.capabilities.tools)
-      return yield* new InvalidMessage({
-        reason:
-          "The selected knowledge does not fit this model's context. Choose a tool-capable model, or select fewer documents.",
-      });
 
     return {
       agentId: input.agent?.agentId ?? null,

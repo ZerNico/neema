@@ -332,7 +332,12 @@ export function ModelSettingsFields({
           <FieldDescription>
             Multimodal embedding models can accept images as input.
           </FieldDescription>
-        ) : null}
+        ) : (
+          <FieldDescription>
+            Models without native tool calling still use tools through the built-in prompt-based
+            fallback.
+          </FieldDescription>
+        )}
         <div className="grid gap-2 sm:grid-cols-2">
           {visibleCapabilities.map((capability) => {
             const label = draft.type === "embedding" ? "Image input" : capability.label;

@@ -306,7 +306,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     enabled: searchEnabled,
     setEnabled: setSearchEnabled,
     reset: resetSearchEnabled,
-  } = useSearchMode(effectiveModelId);
+  } = useSearchMode();
   const context = useContextSelection({ mode: "installed", agent: data.agent });
 
   const sendMutation = useMutation({
@@ -1023,7 +1023,7 @@ export function NewChatView({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modelId, setModelId] = useState<string | null>(null);
-  const { enabled: searchEnabled, setEnabled: setSearchEnabled } = useSearchMode(modelId);
+  const { enabled: searchEnabled, setEnabled: setSearchEnabled } = useSearchMode();
   const context = useContextSelection({
     mode: "draft",
     agent: initialAgentId ? { id: initialAgentId, name: null } : null,

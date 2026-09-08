@@ -18,6 +18,7 @@ import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import type { ModelCapabilities, ModelPricing, ModelType } from "../model-config.ts";
+import { withHermesTools } from "./hermes-tools.ts";
 import { ProviderRepo } from "./repo.ts";
 import { extractThinkTags } from "./think-extractor.ts";
 
@@ -373,7 +374,7 @@ export class AiGateway extends Context.Service<
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
 
-        const layer = OpenRouterLanguageModel.model(model.modelKey, config ?? {}).pipe(
+        const adapter = OpenRouterLanguageModel.model(model.modelKey, config ?? {}).pipe(
           Layer.provide(
             OpenRouterClient.layer({
               apiKey: provider.apiKey,
@@ -382,6 +383,10 @@ export class AiGateway extends Context.Service<
           ),
           Layer.provide(FetchHttpClient.layer),
         );
+        // `capabilities.tools` means native tool calling. Without it the
+        // Hermes polyfill sits between the adapter and the toolkit loop:
+        // adapter → hermes → think extraction (in streamChat/generateText).
+        const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
         return { providerId: model.providerId, layer };
       });
 

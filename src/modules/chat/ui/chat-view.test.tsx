@@ -785,7 +785,8 @@ describe("ChatView question handoff", () => {
           callId: "ask-1",
           response: { kind: "answers", answers: [{ selected: [0], custom: "" }] },
           modelId: "m2",
-          searchEnabled: false,
+          // Model Two has no native tool calling; search is still offered.
+          searchEnabled: true,
           timeZone: "Europe/Berlin",
         },
       }),
@@ -958,7 +959,8 @@ describe("ChatView retry", () => {
 
     await act(async () => resolve({} as never));
     await waitFor(() => expect(screen.getByTestId("composer-model")).toHaveTextContent("m2"));
-    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+    // Model Two has no native tool calling; search stays on regardless.
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("on");
 
     fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
     await waitFor(() =>
@@ -967,7 +969,7 @@ describe("ChatView retry", () => {
           conversationId: "c1",
           modelId: "m2",
           content: "hello",
-          searchEnabled: false,
+          searchEnabled: true,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
           // Collections are per message, like files: always sent, empty here.

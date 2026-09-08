@@ -320,7 +320,7 @@ function AgentForm({
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Working checklist</span>
                 <span className="text-muted-foreground text-xs">
-                  Let tool-capable models keep a checklist for multi-step requests.
+                  Let the model keep a checklist for multi-step requests.
                 </span>
               </div>
               <form.Field name="planEnabled">

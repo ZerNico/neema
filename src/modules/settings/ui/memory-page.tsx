@@ -179,7 +179,7 @@ export function MemoryPage() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Automatically save useful memories</span>
                 <span className="text-muted-foreground text-xs">
-                  Let tool-capable models save durable facts and preferences during a response.
+                  Let the model save durable facts and preferences during a response.
                 </span>
               </div>
               <Switch

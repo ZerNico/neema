@@ -25,11 +25,7 @@ import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
-import {
-  installAgentSelection,
-  resolveEffectiveGeneration,
-  validateGenerationModel,
-} from "./effective-config.ts";
+import { installAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import {
   ChatRepo,
   type ConversationDefaults,
@@ -196,27 +192,13 @@ function makeChatService() {
           const reader = Option.isSome(urlReaderOption)
             ? yield* urlReaderOption.value.availability()
             : null;
-          if (
-            !model.capabilities.tools ||
-            !(yield* searchToolEnabled) ||
-            !reader?.configured ||
-            !reader.enabled
-          )
+          if (!(yield* searchToolEnabled) || !reader?.configured || !reader.enabled)
             return yield* new InvalidMessage({
-              reason:
-                "Deep research requires a tool-capable model and enabled search and URL reader.",
+              reason: "Deep research requires enabled search and URL reader.",
             });
         }
-        if (input.searchEnabled) {
-          if (!model.capabilities.tools) {
-            return yield* new ToolUnavailable({
-              tool: "web_search",
-              reason: "model does not support tool calling",
-            });
-          }
-          if (!(yield* searchToolEnabled)) {
-            return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
-          }
+        if (input.searchEnabled && !(yield* searchToolEnabled)) {
+          return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
         }
 
         const attachmentFileNames = yield* validateAttachments(
@@ -285,7 +267,7 @@ function makeChatService() {
       (input: {
         userId: string;
         searchEnabled: boolean;
-        model: { capabilities: { tools: boolean }; contextLength: number | null | undefined };
+        model: { contextLength: number | null | undefined };
         searchAvailable: boolean;
         collectionIds?: ReadonlyArray<string> | undefined;
       }): ResolveGeneration =>
@@ -298,10 +280,7 @@ function makeChatService() {
                 continuation.manifest,
                 tx,
               )
-              .pipe(
-                Effect.andThen(validateGenerationModel(continuation, input.model)),
-                Effect.as(continuation),
-              )
+              .pipe(Effect.as(continuation))
           : resolveEffectiveGeneration({
               tx,
               userId: input.userId,
@@ -332,7 +311,7 @@ function makeChatService() {
         ...input,
         generationMode,
       });
-      const searchAvailable = model.capabilities.tools && (yield* searchToolEnabled);
+      const searchAvailable = yield* searchToolEnabled;
 
       // An agent is chosen when a chat starts and pinned from then on: the
       // conversation keeps the installed revision, and neither a swap nor a
@@ -546,17 +525,11 @@ function makeChatService() {
       // Replay the saved snapshot and manifest, with fresh authorization.
       const config = yield* repo.getGenerationConfig(message.id);
       yield* knowledge.authorizeManifest(input.userId, config.collectionIds, config.manifest);
-      yield* validateGenerationModel(config, model).pipe(
-        Effect.catchTag("InvalidMessage", (error) =>
-          Effect.fail(new RetryNotAllowed({ messageId: input.messageId, reason: error.reason })),
-        ),
-      );
       const usedSearch = (yield* repo.listToolCalls([message.id])).some(
         (call) => call.toolName === "web_search",
       );
       const searchEnabled =
-        message.generationMode === "research" ||
-        (usedSearch && model.capabilities.tools && (yield* searchToolEnabled));
+        message.generationMode === "research" || (usedSearch && (yield* searchToolEnabled));
       if (message.generationMode === "research")
         yield* validateGenerationOptions({
           userId: input.userId,
@@ -715,7 +688,7 @@ function makeChatService() {
         ...input,
         generationMode: message.generationMode,
       });
-      const searchAvailable = model.capabilities.tools && (yield* searchToolEnabled);
+      const searchAvailable = yield* searchToolEnabled;
       const edit: EditContent = input.questionResponse
         ? { questionResponse: input.questionResponse }
         : { content: input.content };
@@ -725,7 +698,6 @@ function makeChatService() {
         // survives with its configuration, re-authorized like a retry.
         const config = yield* repo.getGenerationConfig(assistant.id);
         yield* knowledge.authorizeManifest(input.userId, config.collectionIds, config.manifest);
-        yield* validateGenerationModel(config, model);
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
           expectedMessages: all,

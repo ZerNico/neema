@@ -243,7 +243,8 @@ describe("ChatInput default model", () => {
     (initialModelId) => {
       renderDefaultProbe(initialModelId);
       expect(screen.getByTestId("selected-default")).toHaveTextContent("vision");
-      expect(screen.getByTestId("default-search")).toHaveTextContent("off");
+      // The default model has no native tool calling; search stays available.
+      expect(screen.getByTestId("default-search")).toHaveTextContent("on");
     },
   );
 
@@ -297,7 +298,7 @@ function InitialControls({
   onModelChange: (id: string) => void;
   onSubmit: () => void;
 }) {
-  const search = useSearchMode(modelId);
+  const search = useSearchMode();
   return (
     <ChatInput
       value="Hello"
@@ -317,7 +318,8 @@ describe("ChatInput first render", () => {
     { id: null, label: "Vision Model", search: true, configured: true, empty: false },
     { id: "removed", label: "Vision Model", search: true, configured: true, empty: false },
     { id: "vision", label: "Vision Model", search: true, configured: true, empty: false },
-    { id: "text-only", label: "Text Only", search: false, configured: true, empty: false },
+    // No native tool calling: search is still offered, the gateway polyfills it.
+    { id: "text-only", label: "Text Only", search: true, configured: true, empty: false },
     { id: null, label: "Vision Model", search: false, configured: false, empty: false },
     { id: null, label: "Select model", search: false, configured: true, empty: true },
   ])(

@@ -97,9 +97,9 @@ function MemorySection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Assistant memory</span>
             <span className="text-muted-foreground text-xs">
-              Globally allow saved memories to be referenced and tool-capable models to save new
-              ones automatically. User preferences and manual memory management remain available
-              while this is off.
+              Globally allow saved memories to be referenced and the model to save new ones
+              automatically. User preferences and manual memory management remain available while
+              this is off.
             </span>
           </div>
           <Switch

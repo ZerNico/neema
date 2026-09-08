@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Redacted, Stream } from "effect";
-import { Prompt } from "effect/unstable/ai";
+import { Deferred, Effect, Fiber, Layer, Redacted, Schema, Stream } from "effect";
+import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
 import { vi } from "vitest";
 import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
@@ -121,14 +121,24 @@ const stubProvider = (body: string, status = 200) => {
   return requests;
 };
 
-const repoStub = Layer.succeed(ProviderRepo)(
-  ProviderRepo.of({
-    getModel: () => Effect.succeed({ id: "m1", providerId: "p1", modelKey: "vendor/model" }),
-    getProviderWithKey: () =>
-      Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1" }),
-    // The gateway reaches for nothing else.
-  } as unknown as ProviderRepo["Service"]),
-);
+const repoWith = (tools: boolean) =>
+  Layer.succeed(ProviderRepo)(
+    ProviderRepo.of({
+      getModel: () =>
+        Effect.succeed({
+          id: "m1",
+          providerId: "p1",
+          modelKey: "vendor/model",
+          capabilities: { reasoning: false, tools, vision: false, files: false },
+        }),
+      getProviderWithKey: () =>
+        Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1" }),
+      // The gateway reaches for nothing else.
+    } as unknown as ProviderRepo["Service"]),
+  );
+const repoStub = repoWith(true);
+// A model that cannot take a `tools` parameter: the gateway polyfills it.
+const noToolsRepo = repoWith(false);
 
 const generate = Effect.flatMap(AiGateway, (gateway) =>
   gateway.generateText({ modelId: "m1", prompt: Prompt.make("Summarize this") }),
@@ -407,6 +417,132 @@ describe("research streaming request ceilings", () => {
         ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
         expect(recorded[0]?.body).not.toHaveProperty("max_tokens");
       }),
+  );
+});
+
+const messagesOf = (body: unknown) =>
+  (body as { messages: Array<{ role: string; content: unknown; tool_calls?: unknown }> }).messages;
+
+describe("prompt-based tool calling for models without native support", () => {
+  const webSearch = Tool.make("web_search", {
+    description: "Search the web",
+    parameters: Schema.Struct({ queries: Schema.Array(Schema.String) }),
+    success: Schema.Struct({ hits: Schema.Number }),
+  });
+  const toolkit = Toolkit.make(webSearch).pipe(
+    Effect.provide(
+      Toolkit.make(webSearch).toLayer({ web_search: () => Effect.succeed({ hits: 2 }) }),
+    ),
+  );
+  const hermesCall = `<tool_call>\n${JSON.stringify({ name: "web_search", arguments: { queries: ["effect 4"] } })}\n</tool_call>`;
+
+  it.effect("runs a full tool round trip without tools or tool roles on the wire", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ role: "assistant", content: "" }),
+          chunk({ content: "Let me check. " }),
+          chunk({ content: hermesCall.slice(0, 20) }),
+          chunk({ content: hermesCall.slice(20) }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }),
+        ]),
+      );
+      const gateway = yield* AiGateway;
+      const prompt = Prompt.make([
+        { role: "system", content: "Stable policy" },
+        { role: "user", content: "What is new in Effect 4?" },
+      ]);
+      const parts = yield* Stream.runCollect(
+        gateway.streamChat({ modelId: "m1", prompt, toolkit: yield* toolkit }),
+      ).pipe(Effect.map((chunks) => Array.from(chunks)));
+
+      // Request: no native tool parameters, the Hermes block appended to the
+      // app's own system prompt.
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.body).not.toHaveProperty("tools");
+      expect(recorded[0]?.body).not.toHaveProperty("tool_choice");
+      const system = messagesOf(recorded[0]?.body)[0]!;
+      expect(system.role).toBe("system");
+      const systemText = JSON.stringify(system.content);
+      expect(systemText.indexOf("Stable policy")).toBeLessThan(systemText.indexOf("<tools>"));
+      expect(systemText).toContain('\\"name\\":\\"web_search\\"');
+      expect(systemText).toContain("<tool_call>");
+
+      // Response: the block became a tool call the library resolved.
+      const call = parts.find((part) => part.type === "tool-call");
+      expect(call).toMatchObject({ name: "web_search", params: { queries: ["effect 4"] } });
+      const result = parts.find((part) => part.type === "tool-result");
+      expect(result).toMatchObject({ name: "web_search", result: { hits: 2 } });
+      expect(parts.find((part) => part.type === "finish")).toMatchObject({
+        reason: "tool-calls",
+      });
+      const text = parts.flatMap((part) => (part.type === "text-delta" ? [part.delta] : []));
+      expect(text.join("")).toBe("Let me check. ");
+
+      // Continuation: the loop in streaming.ts feeds the parts back verbatim.
+      // The wire then carries the call and its result as Hermes text.
+      stubProvider(
+        sse([
+          chunk({ content: "Effect 4 has a new Layer API." }),
+          usageChunk({ prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }),
+        ]),
+      );
+      const next = yield* Stream.runCollect(
+        gateway.streamChat({
+          modelId: "m1",
+          prompt: Prompt.concat(prompt, Prompt.fromResponseParts(parts)),
+          toolkit: yield* toolkit,
+        }),
+      ).pipe(Effect.map((chunks) => Array.from(chunks)));
+      expect(next.find((part) => part.type === "finish")).toMatchObject({ reason: "stop" });
+      const messages = messagesOf(recorded[0]?.body);
+      expect(messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "assistant",
+        "user",
+      ]);
+      expect(messages.some((message) => message.tool_calls !== undefined)).toBe(false);
+      expect(messages[2]?.content).toContain("<tool_call>");
+      expect(messages[2]?.content).toContain('"name":"web_search"');
+      expect(JSON.stringify(messages[3]?.content)).toContain("<tool_response>");
+      expect(JSON.stringify(messages[3]?.content)).toContain('\\"hits\\":2');
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(noToolsRepo)))),
+  );
+
+  it.effect("leaves tool-free generations untouched", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ content: "Title" }),
+          usageChunk({ prompt_tokens: 7, completion_tokens: 1, total_tokens: 8 }),
+        ]),
+      );
+      const result = yield* Effect.flatMap(AiGateway, (gateway) =>
+        gateway.generateText({ modelId: "m1", prompt: Prompt.make("Name this chat") }),
+      );
+      expect(result.text).toBe("Title");
+      expect(JSON.stringify(recorded[0]?.body)).not.toContain("<tools>");
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(noToolsRepo)))),
+  );
+
+  it.effect("keeps native tool parameters for a model that supports them", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ content: "No tools needed." }),
+          usageChunk({ prompt_tokens: 7, completion_tokens: 1, total_tokens: 8 }),
+        ]),
+      );
+      const gateway = yield* AiGateway;
+      yield* Stream.runDrain(
+        gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Hi"), toolkit: yield* toolkit }),
+      );
+      expect(recorded[0]?.body).toMatchObject({
+        tools: [{ type: "function", function: { name: "web_search" } }],
+      });
+      expect(JSON.stringify(recorded[0]?.body)).not.toContain("<tools>");
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub)))),
   );
 });
 

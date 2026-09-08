@@ -7,7 +7,9 @@ export type Capabilities = ModelCapabilities;
 
 export const CAPABILITY_META = [
   { key: "reasoning" as const, label: "Reasoning", icon: AiBrain01Icon },
-  { key: "tools" as const, label: "Tool calling", icon: ToolsIcon },
+  // Native support only: models without it still get tools through the
+  // gateway's prompt-based fallback (`hermes-tools.ts`).
+  { key: "tools" as const, label: "Native tool calling", icon: ToolsIcon },
   { key: "vision" as const, label: "Vision", icon: ViewIcon },
   { key: "files" as const, label: "File input", icon: Attachment01Icon },
 ];

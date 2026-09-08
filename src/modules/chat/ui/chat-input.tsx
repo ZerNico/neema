@@ -141,22 +141,16 @@ export const ChatInput = forwardRef<
   useEffect(() => {
     if (selectedModel && selectedModel.id !== modelId) onModelChange(selectedModel.id, "default");
   }, [modelId, onModelChange, selectedModel]);
-  const searchAvailable =
-    (searchAvailability?.enabled ?? false) && (selectedModel?.capabilities.tools ?? false);
+  // Tools never depend on which model is selected: the gateway polyfills
+  // prompt-based calling for models without native support. Only an empty
+  // model list hides the toggle, since nothing could be sent anyway.
+  const searchAvailable = (searchAvailability?.enabled ?? false) && selectedModel !== undefined;
 
-  const researchUnavailableReason = !selectedModel?.capabilities.tools
-    ? "Choose a model that supports tools."
-    : !researchAvailability
-      ? "Checking research availability…"
-      : !researchAvailability.configured || !researchAvailability.enabled
-        ? "Web search and page reading must both be enabled."
-        : null;
-
-  useEffect(() => {
-    if (!researchEnabled && searchEnabled && selectedModel && !selectedModel.capabilities.tools) {
-      onSearchEnabledChange(false);
-    }
-  }, [researchEnabled, searchEnabled, selectedModel, onSearchEnabledChange]);
+  const researchUnavailableReason = !researchAvailability
+    ? "Checking research availability…"
+    : !researchAvailability.configured || !researchAvailability.enabled
+      ? "Web search and page reading must both be enabled."
+      : null;
 
   // Parsing lets a PDF through on a model without native file input; while the
   // query is still loading we say nothing rather than flash a wrong warning.

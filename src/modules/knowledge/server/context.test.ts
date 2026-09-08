@@ -38,7 +38,6 @@ const setup = (
     budget?: Partial<KnowledgeContextBudget>;
     authorize?: KnowledgeSearchSession["authorize"];
     readBodies?: KnowledgeService["Service"]["readBodies"];
-    toolsSupported?: boolean;
     mode?: "context" | "retrieval";
     indexer?: ReturnType<typeof createSourceIndexer>;
   } = {},
@@ -48,7 +47,6 @@ const setup = (
     ...base,
     ...options.budget,
     userId: "actor",
-    toolsSupported: options.toolsSupported ?? true,
     ...(options.mode ? { mode: options.mode } : {}),
     indexer: options.indexer ?? createSourceIndexer([]),
     session: {
@@ -118,30 +116,28 @@ describe("combined knowledge context", () => {
     ).toBe(0);
   });
 
-  it.effect(
-    "includes all selected documents with durable citation references even without tools",
-    () =>
-      Effect.gen(function* () {
-        const indexer = createSourceIndexer([
-          { kind: "web" as const, index: 7, url: "https://example.com" },
-        ]);
-        const prepared = yield* setup({ toolsSupported: false, indexer });
-        expect(prepared.mode).toBe("context");
-        expect(prepared.activity?.sources.map((source) => source.index)).toEqual([8, 9]);
-        expect(prepared.activity?.sources[0]).toMatchObject({
-          versionId: "version-1",
-          startOffset: 0,
-          endOffset: 100,
-          read: true,
-        });
-        expect(prepared.messages.map((message) => message.role)).toEqual(["assistant", "user"]);
-        expect(prepared.estimatedTokens).toBe(estimatePromptTokens(prepared.messages));
-        expect(prepared.estimatedTokens).toBeLessThanOrEqual(knowledgeContextCeiling(base));
-        expect(Schema.is(KnowledgeActivityResult)(prepared.activity)).toBe(true);
-        expect(prepared.activity).not.toHaveProperty("messages");
-        expect(prepared.activity?.sources[0]).not.toHaveProperty("content");
-        expect(indexer.indexForDocument(prepared.activity!.sources[0]!)).toBe(8);
-      }),
+  it.effect("includes all selected documents with durable citation references", () =>
+    Effect.gen(function* () {
+      const indexer = createSourceIndexer([
+        { kind: "web" as const, index: 7, url: "https://example.com" },
+      ]);
+      const prepared = yield* setup({ indexer });
+      expect(prepared.mode).toBe("context");
+      expect(prepared.activity?.sources.map((source) => source.index)).toEqual([8, 9]);
+      expect(prepared.activity?.sources[0]).toMatchObject({
+        versionId: "version-1",
+        startOffset: 0,
+        endOffset: 100,
+        read: true,
+      });
+      expect(prepared.messages.map((message) => message.role)).toEqual(["assistant", "user"]);
+      expect(prepared.estimatedTokens).toBe(estimatePromptTokens(prepared.messages));
+      expect(prepared.estimatedTokens).toBeLessThanOrEqual(knowledgeContextCeiling(base));
+      expect(Schema.is(KnowledgeActivityResult)(prepared.activity)).toBe(true);
+      expect(prepared.activity).not.toHaveProperty("messages");
+      expect(prepared.activity?.sources[0]).not.toHaveProperty("content");
+      expect(indexer.indexForDocument(prepared.activity!.sources[0]!)).toBe(8);
+    }),
   );
 
   it.effect("rejects a combined corpus that exceeds the cap before reading any body", () =>
@@ -180,20 +176,17 @@ describe("combined knowledge context", () => {
     }),
   );
 
-  it.effect(
-    "requires a tool-capable model instead of silently dropping large or unavailable documents",
-    () =>
-      Effect.gen(function* () {
-        const result = yield* setup({ toolsSupported: false, manifest: [entry(1, 100_000)] }).pipe(
-          Effect.result,
-        );
-        expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure")
-          expect(result.failure).toMatchObject({
-            _tag: "KnowledgeRejected",
-            reason: expect.stringContaining("tool-capable"),
-          });
-      }),
+  it.effect("falls back to retrieval instead of silently dropping oversized documents", () =>
+    Effect.gen(function* () {
+      // Retrieval is always available: models without native tool calling
+      // are polyfilled in the gateway, so no selection is ever refused here.
+      const prepared = yield* setup({
+        manifest: [entry(1, 100_000)],
+        readBodies: () => Effect.die("must not read"),
+      });
+      expect(prepared.mode).toBe("retrieval");
+      expect(prepared.activity).toBeNull();
+    }),
   );
 
   it.effect("loads all fitting bodies together without range continuations", () =>
@@ -304,7 +297,6 @@ describe("combined knowledge context", () => {
       let authorizations = 0;
       const prepared = yield* setup({
         manifest: [],
-        toolsSupported: false,
         authorize: () =>
           Effect.sync(() => {
             authorizations++;

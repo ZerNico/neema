@@ -51,6 +51,19 @@ See README.md for architecture; this file records the sharp edges.
   stream loop must keep them out of the continuation transcript.
 - No-argument tools use `Tool.EmptyParams`, not `Schema.Struct({})`: the latter emits
   a root `anyOf` accepting objects or arrays, which is not a portable function-tool schema.
+- `capabilities.tools` means **native** tool calling and gates nothing: every chat model
+  takes every tool. A model without it is wrapped in `resolveModel` (`gateway.ts`) by the
+  Hermes polyfill (`src/modules/providers/server/hermes-tools.ts`), which renders the
+  tool signatures as a `<tools>` system block, rewrites assistant tool calls and tool
+  messages as `<tool_call>`/`<tool_response>` text so the wire never carries `tools`,
+  `tool_calls` or `role: "tool"`, and parses `<tool_call>` blocks out of the stream into
+  `tool-call` parts with `finish.reason` rewritten to `"tool-calls"`. It must stay inside
+  the provider boundary (adapter → hermes → think extraction) so the toolkit loop never
+  learns the difference. The wrapper's hooks must return **encoded** parts: the inner
+  service hands out decoded ones (`response-metadata.timestamp` is a `DateTime`), so
+  everything except the synthesized tool calls is re-encoded through
+  `Response.StreamPart(Toolkit.empty)`. Malformed JSON, an unknown tool name and fenced
+  examples of the format are re-emitted as text, never as a call.
 - Tool page bodies are never persisted. `message_tool_calls.result` holds the summary
   plus the source list (url/title/status) only.
 - Every web tool (web_search, read_url) returns the SAME result shape

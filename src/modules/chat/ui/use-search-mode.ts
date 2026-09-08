@@ -1,15 +1,16 @@
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { chatModelsQuery, webSearchAvailabilityQuery } from "../client/queries.ts";
-import { resolveChatModel } from "../client/selected-model.ts";
+import { webSearchAvailabilityQuery } from "../client/queries.ts";
 
-/** Per-message search preference, constrained by the selected model and admin config. */
-export function useSearchMode(modelId: string | null) {
-  const { data: models } = useSuspenseQuery(chatModelsQuery);
+/**
+ * Per-message search preference, constrained by the admin config. The model
+ * never matters: models without native tool calling are polyfilled in the
+ * gateway, so search is offered to all of them alike.
+ */
+export function useSearchMode() {
   const { data: availability } = useQuery(webSearchAvailabilityQuery);
   const [preferred, setPreferred] = useState(true);
-  const model = resolveChatModel(models, modelId);
-  const eligible = (availability?.enabled ?? false) && (model?.capabilities.tools ?? false);
+  const eligible = availability?.enabled ?? false;
 
   return {
     enabled: preferred && eligible,

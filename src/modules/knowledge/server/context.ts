@@ -8,7 +8,7 @@ import {
 } from "~/modules/chat/server/compaction.ts";
 import type { SourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
-import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
+import { KnowledgeNotAvailable } from "../errors.ts";
 import { KNOWLEDGE_TOOL_LIMITS, type KnowledgeActivityResult } from "../tool-schema.ts";
 import type { KnowledgeSearchSession } from "./search.ts";
 import { KnowledgeService } from "./service.ts";
@@ -105,7 +105,6 @@ export const prepareKnowledgeContext = Effect.fn("knowledge.prepareContext")(fun
     userId: string;
     session: KnowledgeSearchSession;
     indexer: SourceIndexer;
-    toolsSupported: boolean;
     /** Retrieval snapshots stay retrieval; context snapshots must fit again. */
     mode?: "context" | "retrieval";
   },
@@ -116,29 +115,20 @@ export const prepareKnowledgeContext = Effect.fn("knowledge.prepareContext")(fun
   const estimate = (messages: ReadonlyArray<Prompt.MessageEncoded>) =>
     Math.ceil(estimatePromptTokens(messages) * factor);
   const ceiling = knowledgeContextCeiling(input);
-  const retrieval = () =>
-    Effect.gen(function* () {
-      if (!input.toolsSupported)
-        return yield* new KnowledgeRejected({
-          reason:
-            "The complete knowledge selection does not fit this model's context. Choose a tool-capable model or remove selected collections.",
-        });
-      const ready = manifest.filter((entry) => entry.status === "ready" && !entry.truncated).length;
-      const failed = manifest.filter((entry) => entry.status === "failed").length;
-      const messages: ReadonlyArray<Prompt.MessageEncoded> = [
-        {
-          role: "user",
-          content: `Selected knowledge requires retrieval: ${manifest.length} documents, ${ready} ready, ${failed} failed, ${manifest.length - ready - failed} pending or incomplete. Use search_knowledge with focused queries; each hit is a short excerpt with the exact document, version and character range, and read_document opens the surrounding text at that range. Do not call list_documents to answer a question: it returns titles and ids, not content, and adds nothing a search has not already given you. Use it only when the request is about the collection as a whole (what it contains, or comparing every document). No document bodies are included here. Listing or searching is not exhaustive review; disclose any unread or unavailable material relevant to the request.`,
-        },
-      ];
-      return {
-        mode: "retrieval",
-        messages,
-        estimatedTokens: estimate(messages),
-        activity: null,
-      } satisfies PreparedKnowledgeContext;
-    });
-  if (input.mode === "retrieval") return yield* retrieval();
+  // Retrieval is always available: models without native tool calling are
+  // polyfilled in the gateway, so no selection is refused for lack of tools.
+  const retrieval = (): PreparedKnowledgeContext => {
+    const ready = manifest.filter((entry) => entry.status === "ready" && !entry.truncated).length;
+    const failed = manifest.filter((entry) => entry.status === "failed").length;
+    const messages: ReadonlyArray<Prompt.MessageEncoded> = [
+      {
+        role: "user",
+        content: `Selected knowledge requires retrieval: ${manifest.length} documents, ${ready} ready, ${failed} failed, ${manifest.length - ready - failed} pending or incomplete. Use search_knowledge with focused queries; each hit is a short excerpt with the exact document, version and character range, and read_document opens the surrounding text at that range. Do not call list_documents to answer a question: it returns titles and ids, not content, and adds nothing a search has not already given you. Use it only when the request is about the collection as a whole (what it contains, or comparing every document). No document bodies are included here. Listing or searching is not exhaustive review; disclose any unread or unavailable material relevant to the request.`,
+      },
+    ];
+    return { mode: "retrieval", messages, estimatedTokens: estimate(messages), activity: null };
+  };
+  if (input.mode === "retrieval") return retrieval();
 
   const documents: ContextDocument[] = [];
   let chars = 0;
@@ -151,10 +141,9 @@ export const prepareKnowledgeContext = Effect.fn("knowledge.prepareContext")(fun
       !Number.isSafeInteger(entry.charCount) ||
       entry.charCount < 1
     )
-      return yield* retrieval();
+      return retrieval();
     chars += entry.charCount;
-    if (Math.ceil((chars / COMPACTION_CONFIG.charsPerToken) * factor) > ceiling)
-      return yield* retrieval();
+    if (Math.ceil((chars / COMPACTION_CONFIG.charsPerToken) * factor) > ceiling) return retrieval();
     documents.push({
       source: {
         kind: "document",
@@ -179,7 +168,7 @@ export const prepareKnowledgeContext = Effect.fn("knowledge.prepareContext")(fun
       Math.ceil((chars / COMPACTION_CONFIG.charsPerToken) * factor) >
     ceiling
   )
-    return yield* retrieval();
+    return retrieval();
 
   const service = yield* KnowledgeService;
   const bodies = yield* service.readBodies(
@@ -208,7 +197,7 @@ export const prepareKnowledgeContext = Effect.fn("knowledge.prepareContext")(fun
     document.source = { ...source, snippet: textPrefix(body.text, 500) };
   }
   yield* input.session.authorize();
-  if (estimate(contextMessages(documents)) > ceiling) return yield* retrieval();
+  if (estimate(contextMessages(documents)) > ceiling) return retrieval();
 
   const registered = documents.map(({ source, content }) => ({
     source: { ...source, index: input.indexer.indexForDocument(source) },
