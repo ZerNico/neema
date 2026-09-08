@@ -82,6 +82,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           attachmentIds: data.attachmentIds,
           agentId: data.agentId,
           collectionIds: data.collectionIds,
+          skillIds: data.skillIds,
         }),
       ).pipe(
         Effect.catchTags({

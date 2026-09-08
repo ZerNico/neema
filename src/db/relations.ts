@@ -2,6 +2,55 @@ import { defineRelations } from "drizzle-orm";
 import * as schema from "./schema/index.ts";
 
 export const relations = defineRelations(schema, (r) => ({
+  skills: {
+    owner: r.one.user({ from: r.skills.userId, to: r.user.id, optional: false }),
+    revisions: r.many.skillRevisions(),
+    directGrants: r.many.skillUserGrants(),
+    groupGrants: r.many.skillGroupGrants(),
+  },
+  skillRevisions: {
+    skill: r.one.skills({ from: r.skillRevisions.skillId, to: r.skills.id, optional: false }),
+    files: r.many.skillFiles(),
+    baseline: r.one.skillRevisions({
+      from: r.skillRevisions.baselineRevisionId,
+      to: r.skillRevisions.id,
+    }),
+  },
+  skillFiles: {
+    revision: r.one.skillRevisions({
+      from: r.skillFiles.revisionId,
+      to: r.skillRevisions.id,
+      optional: false,
+    }),
+    blob: r.one.attachmentBlobs({
+      from: r.skillFiles.blobId,
+      to: r.attachmentBlobs.id,
+      optional: false,
+    }),
+  },
+  skillUserGrants: {
+    skill: r.one.skills({ from: r.skillUserGrants.skillId, to: r.skills.id, optional: false }),
+    user: r.one.user({ from: r.skillUserGrants.userId, to: r.user.id, optional: false }),
+  },
+  skillGroupGrants: {
+    skill: r.one.skills({ from: r.skillGroupGrants.skillId, to: r.skills.id, optional: false }),
+    group: r.one.groups({ from: r.skillGroupGrants.groupId, to: r.groups.id, optional: false }),
+  },
+  agentSkills: {
+    agent: r.one.agents({ from: r.agentSkills.agentId, to: r.agents.id, optional: false }),
+  },
+  messageSkills: {
+    message: r.one.messages({
+      from: r.messageSkills.messageId,
+      to: r.messages.id,
+      optional: false,
+    }),
+    revision: r.one.skillRevisions({
+      from: r.messageSkills.revisionId,
+      to: r.skillRevisions.id,
+      optional: false,
+    }),
+  },
   user: {
     conversations: r.many.conversations(),
     sessions: r.many.session(),

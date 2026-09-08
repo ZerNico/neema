@@ -1,3 +1,4 @@
+import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration } from "./generation-fence.ts";
 import {
   and,
@@ -37,6 +38,7 @@ import {
   messageAttachments,
   messageCompactionEvents,
   messageGenerationConfig,
+  messageSkills,
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
@@ -75,6 +77,8 @@ export interface GenerationConfig {
   readonly resolvedAgent: ResolvedAgentConfig | null;
   readonly standaloneCollectionIds: ReadonlyArray<string>;
   readonly collectionIds: ReadonlyArray<string>;
+  readonly standaloneSkillIds?: ReadonlyArray<string>;
+  readonly skills?: ReadonlyArray<import("~/modules/skills/schema.ts").SkillManifestEntry>;
   readonly manifest: ReadonlyArray<ManifestEntry>;
   readonly knowledgeMode: "none" | "context" | "retrieval";
   readonly searchEnabled: boolean;
@@ -86,6 +90,8 @@ export interface ConversationDefaults {
 }
 export type ResolveError =
   | AgentNotAvailable
+  | SkillNotAvailable
+  | SkillRejected
   | KnowledgeNotAvailable
   | KnowledgeRejected
   | InvalidMessage;
@@ -117,6 +123,7 @@ export type TurnFields = {
   associateAgentId?: string | undefined;
   /** Standalone collections selected for this message only. */
   collectionIds?: ReadonlyArray<string> | undefined;
+  skillIds?: ReadonlyArray<string> | undefined;
   /** Absent means a plain generation; the service always supplies one. */
   resolve?: ResolveGeneration | undefined;
 };
@@ -277,6 +284,8 @@ const toConfig = (
   resolvedAgent: row.resolvedAgent,
   standaloneCollectionIds: row.standaloneCollectionIds,
   collectionIds: row.collectionIds,
+  standaloneSkillIds: row.standaloneSkillIds,
+  skills: row.skills,
   manifest: manifest.map((entry) => ({
     collectionId: entry.collectionId,
     documentId: entry.documentId,
@@ -313,8 +322,8 @@ const resolveAttempt = (
   previous?: GenerationConfig,
 ): Effect.Effect<GenerationConfig, ResolveError> => {
   if (resolve) return resolve(tx, defaults, previous);
-  if (defaults.agent)
-    return Effect.die(new Error("Agent attempts require live configuration resolution"));
+  if (defaults.agent || previous?.skills?.length)
+    return Effect.die(new Error("Agent and skill attempts require live configuration resolution"));
   return Effect.succeed(previous ?? PLAIN_GENERATION);
 };
 
@@ -351,12 +360,28 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       agentId: config.agentId,
       resolvedAgent: config.resolvedAgent,
       standaloneCollectionIds: [...config.standaloneCollectionIds],
+      standaloneSkillIds: [...(config.standaloneSkillIds ?? [])],
+      skills: [...(config.skills ?? [])],
       knowledgeMode: config.knowledgeMode,
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
       collectionIds: [...config.collectionIds],
     })
     .pipe(Effect.orDie);
+  yield* tx.delete(messageSkills).where(eq(messageSkills.messageId, messageId)).pipe(Effect.orDie);
+  if (config.skills?.length)
+    yield* tx
+      .insert(messageSkills)
+      .values(
+        config.skills.map((entry, position) => ({
+          messageId,
+          skillId: entry.skillId,
+          revisionId: entry.revisionId,
+          explicit: entry.explicit,
+          position,
+        })),
+      )
+      .pipe(Effect.orDie);
   if (config.manifest.length > 0)
     yield* tx
       .insert(messageKnowledgeVersions)
@@ -437,6 +462,7 @@ export class ChatRepo extends Context.Service<
         messageId: string;
         agent: { name: string; icon: string } | null;
         collectionIds: ReadonlyArray<string>;
+        skills?: ReadonlyArray<{ id: string; name: string }>;
       }>
     >;
     updateConversation(
@@ -876,13 +902,18 @@ export class ChatRepo extends Context.Service<
                 icon: string;
               } | null>`case when ${messageGenerationConfig.resolvedAgent} is null then null else jsonb_build_object('name', ${messageGenerationConfig.resolvedAgent}->>'name', 'icon', ${messageGenerationConfig.resolvedAgent}->>'icon') end`,
               collectionIds: messageGenerationConfig.collectionIds,
+              skills: sql<
+                Array<{ id: string; name: string }>
+              >`coalesce((select jsonb_agg(jsonb_build_object('id', entry->>'skillId', 'name', entry->>'name')) from jsonb_array_elements(${messageGenerationConfig.skills}) entry where (entry->>'explicit')::boolean), '[]'::jsonb)`,
             })
             .from(messageGenerationConfig)
             .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
             .pipe(Effect.orDie);
           if (rows.length !== new Set(messageIds).size)
             return yield* Effect.die(new Error("Missing generation configuration in conversation"));
-          return rows.filter((row) => row.agent || row.collectionIds.length > 0);
+          return rows.filter(
+            (row) => row.agent || row.collectionIds.length > 0 || row.skills.length > 0,
+          );
         }),
 
         updateConversation: Effect.fn("ChatRepo.updateConversation")(
@@ -1141,6 +1172,21 @@ export class ChatRepo extends Context.Service<
                     .insert(messageGenerationConfig)
                     .values(
                       configs.map((row) => ({ ...row, messageId: clonedIds.get(row.messageId)! })),
+                    )
+                    .pipe(Effect.orDie);
+                const skillRefs = yield* tx
+                  .select()
+                  .from(messageSkills)
+                  .where(inArray(messageSkills.messageId, [...clonedIds.keys()]))
+                  .pipe(Effect.orDie);
+                if (skillRefs.length)
+                  yield* tx
+                    .insert(messageSkills)
+                    .values(
+                      skillRefs.map((row) => ({
+                        ...row,
+                        messageId: clonedIds.get(row.messageId)!,
+                      })),
                     )
                     .pipe(Effect.orDie);
                 const manifests = yield* tx

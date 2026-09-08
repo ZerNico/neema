@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo } from "react";
 import type {
   KnowledgeToolActivity,
+  SkillToolActivity,
   ResearchToolActivity,
   WebToolActivity,
 } from "../client/use-message-stream.ts";
@@ -38,9 +39,24 @@ interface ActivityItem {
 }
 
 /** Web and knowledge steps, grouped by task like the runner groups them. */
-export type ResearchStepActivity = WebToolActivity | KnowledgeToolActivity;
+export type ResearchStepActivity = WebToolActivity | KnowledgeToolActivity | SkillToolActivity;
 
 const describe = (activity: ResearchStepActivity): { verb: string; items: ActivityItem[] } => {
+  if (activity.family === "skill")
+    return {
+      verb:
+        activity.status === "running"
+          ? "Using skill guidance"
+          : activity.status === "error"
+            ? "Skill guidance unavailable"
+            : "Used skill guidance",
+      items: [
+        {
+          key: activity.callId,
+          label: `${activity.skillName}${activity.path && activity.path !== "SKILL.md" ? ` · ${activity.path}` : ""}`,
+        },
+      ],
+    };
   if (activity.family === "knowledge") {
     const running = activity.status === "running";
     const count = activity.summary?.passagesReturned ?? 0;
@@ -96,7 +112,7 @@ function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
             />
           ) : failed ? (
             <HugeiconsIcon icon={Alert02Icon} className="text-warning size-3.5" aria-hidden />
-          ) : activity.family === "knowledge" ? (
+          ) : activity.family === "knowledge" || activity.family === "skill" ? (
             <HugeiconsIcon
               icon={File01Icon}
               className="text-muted-foreground size-3.5"
@@ -314,7 +330,9 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
     if (currentRunId !== undefined && currentRunId !== runId) return null;
     const webActivities = activities.filter(
       (candidate): candidate is ResearchStepActivity =>
-        (candidate.family === "web" || candidate.family === "knowledge") &&
+        (candidate.family === "web" ||
+          candidate.family === "knowledge" ||
+          candidate.family === "skill") &&
         candidate.runId === runId,
     );
     return researchPanelRequest(messageId, activity, webActivities);

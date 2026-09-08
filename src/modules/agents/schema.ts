@@ -26,6 +26,7 @@ export const AgentSettings = Schema.Struct({
   starters: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
     Schema.isMaxLength(AGENT_LIMITS.maxStarters),
   ),
+  skillIds: Schema.optional(Schema.Array(ResourceId).check(Schema.isMaxLength(20))),
   collectionIds: Schema.Array(ResourceId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),
@@ -60,4 +61,5 @@ export interface AgentSelectionDetail extends AgentSummary {
   starters: ReadonlyArray<string>;
   model: { id: string; name: string | null; available: boolean } | null;
   collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  skills?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
 }

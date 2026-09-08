@@ -1,3 +1,4 @@
+import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantImage } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
@@ -25,7 +26,7 @@ import {
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
-import { agentIcon, CollectionChip } from "./context-picker.tsx";
+import { agentIcon, CollectionChip, ContextChip } from "./context-picker.tsx";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
@@ -164,6 +165,7 @@ export interface DisplayMessage {
   agent?: { name: string; icon: string } | null;
   /** Collections the user added with this message, shown beside its files. */
   collectionIds?: ReadonlyArray<string>;
+  skills?: ReadonlyArray<{ id: string; name: string }>;
   editedAt?: Date | null;
   /**
    * Sources from earlier messages in the conversation. Citation numbering is
@@ -318,8 +320,15 @@ function UserBubble({ message }: { message: DisplayMessage }) {
       ) : (
         <div className="group/user flex w-full flex-col items-end">
           {(message.attachments && message.attachments.length > 0) ||
-          (message.collectionIds && message.collectionIds.length > 0) ? (
+          (message.collectionIds && message.collectionIds.length > 0) ||
+          (message.skills && message.skills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
+              {message.skills?.map((skill) => (
+                <ContextChip
+                  key={skill.id}
+                  item={{ kind: "skill", id: skill.id, name: skill.name }}
+                />
+              ))}
               {message.collectionIds?.map((collectionId) => (
                 <CollectionChip key={collectionId} collectionId={collectionId} />
               ))}
@@ -463,6 +472,8 @@ const AssistantBody = memo(function AssistantBody({
         />
       );
     }
+    if (part.kind === "skill")
+      return <SkillActivityBlock key={part.key} activities={part.activities} />;
     if (part.kind === "knowledge") {
       return <KnowledgeActivityBlock key={part.key} activities={part.activities} />;
     }
@@ -486,7 +497,9 @@ const AssistantBody = memo(function AssistantBody({
           activity={part.activity}
           webActivities={message.toolActivities.filter(
             (activity): activity is ResearchStepActivity =>
-              (activity.family === "web" || activity.family === "knowledge") &&
+              (activity.family === "web" ||
+                activity.family === "knowledge" ||
+                activity.family === "skill") &&
               !!runId &&
               activity.runId === runId,
           )}
@@ -496,7 +509,7 @@ const AssistantBody = memo(function AssistantBody({
     }
     // Direct context is shown on the question that added the collection, not
     // as an activity on the answer; its citations still resolve.
-    if (part.activity.family === "knowledge") return null;
+    if (part.activity.family === "knowledge" || part.activity.family === "skill") return null;
     if (part.activity.family === "plan")
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {

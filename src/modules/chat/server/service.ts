@@ -1,3 +1,4 @@
+import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { Context, Effect, Layer, Option } from "effect";
 import {
   BranchNotAllowed,
@@ -25,7 +26,11 @@ import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
-import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
+import {
+  resolveAgentSelection,
+  resolveEffectiveGeneration,
+  resolveAttemptSkills,
+} from "./effective-config.ts";
 import {
   ChatRepo,
   type ConversationDefaults,
@@ -65,6 +70,8 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
+      | SkillNotAvailable
+      | SkillRejected
       | KnowledgeNotAvailable
       | KnowledgeRejected
     >;
@@ -88,6 +95,8 @@ export class ChatService extends Context.Service<
       | InvalidMessage
       | AttachmentNotAvailable
       | AttachmentUnsupported
+      | SkillNotAvailable
+      | SkillRejected
       | KnowledgeNotAvailable
     >;
     // Forks the conversation at an assistant message into a new one holding a
@@ -121,6 +130,8 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
+      | SkillNotAvailable
+      | SkillRejected
       | KnowledgeNotAvailable
       | KnowledgeRejected
     >;
@@ -273,6 +284,7 @@ function makeChatService() {
         model: { contextLength: number | null | undefined };
         searchAvailable: boolean;
         collectionIds?: ReadonlyArray<string> | undefined;
+        skillIds?: ReadonlyArray<string> | undefined;
         attempt?: "send" | "retry" | "edit";
       }): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
@@ -286,6 +298,13 @@ function makeChatService() {
             );
             return {
               ...continuation,
+              // Plain knowledge retains its old manifest semantics; skills deliberately do not.
+              skills: yield* resolveAttemptSkills(
+                tx,
+                input.userId,
+                continuation.standaloneSkillIds ?? [],
+                [],
+              ),
               searchEnabled:
                 input.attempt === "retry" || input.attempt === "edit"
                   ? input.searchEnabled
@@ -306,6 +325,7 @@ function makeChatService() {
             userId: input.userId,
             agent,
             collectionIds: continuation?.standaloneCollectionIds ?? input.collectionIds,
+            skillIds: continuation?.standaloneSkillIds ?? input.skillIds,
             searchEnabled:
               input.attempt !== "edit" && continuation
                 ? continuation.searchEnabled
@@ -359,6 +379,7 @@ function makeChatService() {
           model,
           searchAvailable,
           collectionIds: input.collectionIds,
+          skillIds: input.skillIds,
         }),
       });
 

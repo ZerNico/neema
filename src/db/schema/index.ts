@@ -9,3 +9,4 @@ export * from "./memory.ts";
 export * from "./providers.ts";
 export * from "./tools.ts";
 export * from "./research.ts";
+export * from "./skills.ts";

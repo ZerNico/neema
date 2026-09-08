@@ -129,6 +129,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           void queryClient.invalidateQueries({ queryKey: ["sharing"] });
           refreshKnowledge();
           void queryClient.invalidateQueries({ queryKey: ["agents"] });
+          void queryClient.invalidateQueries({ queryKey: ["skills"] });
           break;
         case "models.defaults.changed":
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });

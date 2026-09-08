@@ -26,6 +26,7 @@ const generationFields = {
    * Omitted keeps whatever is installed.
    */
   agentId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),
   /** Standalone collections beside the agent's; omitted keeps the current selection. */
   collectionIds: Schema.optionalKey(
     Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),

@@ -10,10 +10,14 @@ import {
 export const Route = createFileRoute("/_app/")({
   // `?agent=<id>` from an agent page pre-selects it in the composer. The
   // server still authorizes the install at send time.
-  validateSearch: (search: Record<string, unknown>) =>
-    typeof search["agent"] === "string" && search["agent"].length <= 128
+  validateSearch: (search: Record<string, unknown>): { agent?: string; skill?: string } => ({
+    ...(typeof search["agent"] === "string" && search["agent"].length <= 128
       ? { agent: search["agent"] }
-      : {},
+      : {}),
+    ...(typeof search["skill"] === "string" && search["skill"].length <= 128
+      ? { skill: search["skill"] }
+      : {}),
+  }),
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(chatModelsQuery),
@@ -29,6 +33,13 @@ export const Route = createFileRoute("/_app/")({
 function NewChatPage() {
   // `user` comes from the parent `_app` route's beforeLoad context.
   const { user } = Route.useRouteContext();
-  const { agent } = Route.useSearch();
-  return <NewChatView key={agent ?? ""} user={user} initialAgentId={agent ?? null} />;
+  const { agent, skill } = Route.useSearch();
+  return (
+    <NewChatView
+      key={JSON.stringify([agent, skill])}
+      user={user}
+      initialAgentId={agent ?? null}
+      initialSkillId={skill ?? null}
+    />
+  );
 }

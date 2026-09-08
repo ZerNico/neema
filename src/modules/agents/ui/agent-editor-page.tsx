@@ -21,6 +21,8 @@ import type { CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
+import { skillsQuery } from "~/modules/skills/client/queries.ts";
+import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
@@ -60,6 +62,7 @@ const empty: AgentSettings = {
   planEnabled: false,
   starters: [],
   collectionIds: [],
+  skillIds: [],
 };
 
 // Owner-only editor. Recipients start chats from the agent list instead.
@@ -138,6 +141,9 @@ function AgentForm({
 }) {
   const { data: models } = useSuspenseQuery(chatModelsQuery);
   const collections = useQuery(knowledgeCollectionsQuery);
+  const skills = useQuery(skillsQuery);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [skillAnchor, setSkillAnchor] = useState<HTMLButtonElement | null>(null);
   const formElement = useRef<HTMLFormElement>(null);
   const [invalidSubmit, setInvalidSubmit] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -154,6 +160,7 @@ function AgentForm({
           planEnabled: agent.planEnabled,
           starters: [...agent.starters],
           collectionIds: agent.collections.map((collection) => collection.id),
+          skillIds: (agent.skills ?? []).map((skill) => skill.id),
         } satisfies AgentSettings)
       : empty,
     validators: { onSubmit: Schema.toStandardSchemaV1(AgentSettings) },
@@ -168,9 +175,7 @@ function AgentForm({
             data: { agentId: agent.id, expectedRevision: agent.configRevision, ...settings },
           });
           await onSaved(agent.id);
-          toast.success(
-            "Agent saved. Changes apply to future responses, including in existing chats.",
-          );
+          toast.success("Agent saved.");
         } else {
           const id = await createAgent({ data: settings });
           await onSaved(id);
@@ -441,6 +446,78 @@ function AgentForm({
             }}
           </form.Field>
         </Section>
+        <Section
+          title="Skills"
+          description="Optional guidance this agent can load. People using it need separate access to each skill."
+        >
+          <form.Field name="skillIds">
+            {(field) => {
+              const ids = field.state.value ?? [];
+              return (
+                <div className="space-y-3">
+                  {ids.length > 0 ? (
+                    <ListCard>
+                      {ids.map((id) => {
+                        const skill = skills.data?.find((candidate) => candidate.id === id);
+                        return (
+                          <ListRow key={id}>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {skill?.name ?? "Unavailable skill"}
+                              </p>
+                              <p className="text-muted-foreground truncate text-xs">
+                                {skill?.description ??
+                                  "Remove this dependency or restore access before using the agent."}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove ${skill?.name ?? "unavailable skill"}`}
+                              onClick={() =>
+                                field.handleChange(ids.filter((value) => value !== id))
+                              }
+                            >
+                              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                            </Button>
+                          </ListRow>
+                        );
+                      })}
+                    </ListCard>
+                  ) : null}
+                  {skills.isError ? (
+                    <ErrorState
+                      title="Could not load skills"
+                      onRetry={() => void skills.refetch()}
+                    />
+                  ) : (
+                    <Button
+                      ref={setSkillAnchor}
+                      type="button"
+                      variant="outline"
+                      disabled={!skills.data}
+                      onClick={() => setSkillPickerOpen(true)}
+                    >
+                      <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" strokeWidth={2} />
+                      Add skills
+                    </Button>
+                  )}
+                  <SkillPicker
+                    items={skills.data ?? []}
+                    selectedIds={ids}
+                    onChange={field.handleChange}
+                    open={skillPickerOpen}
+                    onOpenChange={setSkillPickerOpen}
+                    anchor={skillAnchor}
+                    limit={20}
+                  />
+                  <FieldError errors={field.state.meta.errors} />
+                </div>
+              );
+            }}
+          </form.Field>
+        </Section>
         <form.Field name="icon">
           {(field) => (
             <Field>
@@ -614,14 +691,7 @@ function AgentForm({
           </p>
         ) : null}
         <form.AppForm>
-          <div className="flex flex-wrap items-center gap-3">
-            <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
-            {agent ? (
-              <span className="text-muted-foreground text-xs">
-                Changes apply to future responses, including in existing chats.
-              </span>
-            ) : null}
-          </div>
+          <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
         </form.AppForm>
       </form>
       {agent ? (

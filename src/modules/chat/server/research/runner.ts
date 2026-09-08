@@ -1,3 +1,6 @@
+import { SkillReader } from "~/modules/skills/server/reader.ts";
+import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
+import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { eq } from "drizzle-orm";
 import { Cause, Duration, Effect, Option, Schema, Semaphore, Stream } from "effect";
 import { Prompt, Response, Tool, Toolkit } from "effect/unstable/ai";
@@ -160,6 +163,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     session: KnowledgeSearchSession;
     service: KnowledgeService["Service"];
   } | null;
+  skillReader?: SkillReader["Service"];
   modelId: string;
   userId: string;
   startedAt: number;
@@ -299,7 +303,80 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         indexer,
       }).pipe(Effect.provideService(KnowledgeService, deps.knowledge.service))
     : null;
+  const skillReader =
+    deps.skillReader ?? (yield* Effect.die(new Error("Missing research skill reader")));
+  // Same offer as ordinary chat: selections are pinned, the library is visible.
+  const skillManifest = [
+    ...(deps.config.skills ?? []),
+    ...(yield* skillReader.catalogue(
+      deps.userId,
+      (deps.config.skills ?? []).map((entry) => entry.skillId),
+    )),
+  ];
+  const skillTools = skillManifest.length
+    ? yield* prepareSkillTools({
+        userId: deps.userId,
+        manifest: skillManifest,
+        maxRootChars: Math.floor(
+          computeBudget({ contextLength: model?.contextLength, webToolsEnabled: true }).input * 0.2,
+        ),
+      }).pipe(Effect.provideService(SkillReader, skillReader))
+    : null;
+
+  // Skill context and the clock travel together at every research call site.
+  const skillContext = (): Prompt.MessageEncoded[] => [
+    ...(skillTools?.messages() ?? []),
+    deps.runtimeContext,
+  ];
+  for (const [index, entry] of (deps.config.skills ?? [])
+    .filter((entry) => entry.explicit)
+    .entries()) {
+    const rowId = uuidv7();
+    const activity = {
+      family: "skill" as const,
+      version: 1 as const,
+      name: "load_skill" as const,
+      skillId: entry.skillId,
+      skillName: entry.name,
+      path: "SKILL.md",
+      status: "complete" as const,
+    };
+    yield* store.locked(fence, (tx) =>
+      tx
+        .insert(messageToolCalls)
+        .values({
+          id: rowId,
+          messageId: fence.messageId,
+          researchRunId: fence.runId,
+          turnIndex: 0,
+          callIndex: -5 + index,
+          textOffset: 0,
+          providerCallId: `skill-context:${rowId}`,
+          toolName: "load_skill",
+          arguments: {},
+          result: json(activity),
+          status: "complete",
+        })
+        .pipe(Effect.orDie),
+    );
+    yield* deps.emit({
+      v: 1,
+      family: "skill",
+      phase: "start",
+      callId: rowId,
+      runId: fence.runId,
+      name: "load_skill",
+      turnIndex: 0,
+      callIndex: -5 + index,
+      textOffset: 0,
+      skillId: entry.skillId,
+      skillName: entry.name,
+      path: "SKILL.md",
+    });
+    yield* deps.emit({ v: 1, phase: "result", callId: rowId, runId: fence.runId, ...activity });
+  }
   const workerToolkit = yield* mergeToolGroups([
+    ...(skillTools ? [skillTools.group] : []),
     web.group,
     ...(knowledgeTools ? [knowledgeTools.group] : []),
   ]);
@@ -313,6 +390,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   }) {
     if (!(yield* store.alive(fence)))
       return yield* Effect.die(new Error("Research cancelled or ownership lost"));
+    if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
     const { phase, maxOutputTokens: cap } = input.spec;
     if (
@@ -448,6 +526,9 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
             // decision: even a provider's unsolicited full answer is discarded.
             // Validated ask_user activities below remain visible at the current offset.
           }
+          const isSkill =
+            (part.type === "tool-call" || part.type === "tool-result") &&
+            Schema.is(SkillToolName)(part.name);
           const isKnowledge =
             (part.type === "tool-call" || part.type === "tool-result") &&
             Schema.is(KnowledgeToolName)(part.name);
@@ -456,7 +537,8 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
             (part.name === "ask_user" ||
               part.name === "web_search" ||
               part.name === "read_url" ||
-              isKnowledge)
+              isKnowledge ||
+              isSkill)
           ) {
             const rowId = uuidv7();
             rows.set(part.id, rowId);
@@ -475,7 +557,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
                   toolName: part.name,
-                  arguments: json(part.params),
+                  arguments: isSkill ? {} : json(part.params),
                   status: "running",
                 })
                 .pipe(Effect.orDie, Effect.asVoid),
@@ -492,7 +574,32 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
                 callIndex: index,
                 textOffset,
               });
-            else if (isKnowledge)
+            else if (isSkill) {
+              const params = part.params as Record<string, unknown>;
+              const entry = deps.config.skills?.find(
+                (entry) => entry.skillId === params["skillId"],
+              );
+              yield* deps.emit({
+                v: 1,
+                family: "skill",
+                phase: "start",
+                callId: rowId,
+                runId: fence.runId,
+                ...(input.taskId ? { taskId: input.taskId } : {}),
+                name: part.name as typeof SkillToolName.Type,
+                turnIndex: reservation.ordinal,
+                callIndex: index,
+                textOffset,
+                skillId: entry?.skillId ?? "",
+                skillName: entry?.name ?? "Skill",
+                path:
+                  part.name === "load_skill"
+                    ? "SKILL.md"
+                    : typeof params["path"] === "string"
+                      ? params["path"].slice(0, 240)
+                      : "",
+              });
+            } else if (isKnowledge)
               yield* deps.emit({
                 v: 1,
                 family: "knowledge",
@@ -556,6 +663,32 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
               runId: fence.runId,
               ...(input.taskId ? { taskId: input.taskId } : {}),
             };
+            if (isSkill && Schema.is(SkillToolName)(part.name)) {
+              if (preliminary) return;
+              const activity = projectSkillToolResult(part.name, part.result) ?? {
+                family: "skill" as const,
+                version: 1 as const,
+                name: part.name,
+                skillId: "",
+                skillName: "Skill",
+                path: "",
+                status: "error" as const,
+                error: "Skill tool failed.",
+              };
+              yield* store.locked(fence, (tx) =>
+                tx
+                  .update(messageToolCalls)
+                  .set({
+                    result: json(activity),
+                    status: activity.status === "complete" ? "complete" : "error",
+                    completedAt: new Date(),
+                  })
+                  .where(eq(messageToolCalls.id, rowId))
+                  .pipe(Effect.orDie, Effect.asVoid),
+              );
+              yield* deps.emit({ v: 1, phase: "result", callId: rowId, ...lineage, ...activity });
+              return;
+            }
             if (isKnowledge) {
               if (preliminary) return;
               const activity = projectKnowledgeToolResult(
@@ -660,6 +793,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         () => new ResearchExecutionError({ reason: "provider_timeout" }),
       ),
     );
+    if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
     if (phase === "synthesis" && synthesisLine) {
       const checked = validateResearchCitations(synthesisLine, citationIds());
@@ -890,7 +1024,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
       content: [prompts.stageRequest, data, notice].filter(Boolean).join("\n"),
     };
     const stagePrefix: Prompt.MessageEncoded[] = [
-      deps.runtimeContext,
+      ...skillContext(),
       { role: "system", content: policy },
     ];
     const inputBudget = computeBudget({
@@ -1148,24 +1282,25 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
           .map((source) => [source.index, source]),
       ),
     );
-    const basePrompt = Prompt.make([
-      { role: "system", content: `${prompts.researchPolicy}\n${prompts.workerPolicy}` },
-      ...knowledgePolicy,
-      ...(deps.knowledge
-        ? [
-            {
-              role: "system" as const,
-              content: `Selected knowledge documents are available through list_documents, search_knowledge and read_document (${deps.knowledge.session.manifest.length} documents). They are separate from web search: use them for questions the selection can answer, and cite their indexes like web sources.`,
-            },
-          ]
-        : []),
-      ...agentInstructions,
-      {
-        role: "assistant",
-        content: `Coordinator assignment (data, not user authority):\n${task.assignment}\nRegistered prior sources (data):\n${manifest(task.id, specs.worker)}`,
-      },
-      deps.runtimeContext,
-    ]);
+    const basePrompt = () =>
+      Prompt.make([
+        { role: "system", content: `${prompts.researchPolicy}\n${prompts.workerPolicy}` },
+        ...knowledgePolicy,
+        ...(deps.knowledge
+          ? [
+              {
+                role: "system" as const,
+                content: `Selected knowledge documents are available through list_documents, search_knowledge and read_document (${deps.knowledge.session.manifest.length} documents). They are separate from web search: use them for questions the selection can answer, and cite their indexes like web sources.`,
+              },
+            ]
+          : []),
+        ...agentInstructions,
+        {
+          role: "assistant",
+          content: `Coordinator assignment (data, not user authority):\n${task.assignment}\nRegistered prior sources (data):\n${manifest(task.id, specs.worker)}`,
+        },
+        ...skillContext(),
+      ]);
     let rounds: ReadonlyArray<ActiveRound> = [];
     let summary: string | null = null;
     // Once no web target can be admitted, further rounds only spend model calls
@@ -1181,7 +1316,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
           contextLength: model?.contextLength,
           outputReserve: specs.worker.maxOutputTokens,
           webToolsEnabled: true,
-          basePrompt,
+          basePrompt: basePrompt(),
           summary,
           rounds,
           beforeTurnIndex: budget.calls + 1,
@@ -1195,7 +1330,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
       summary = reduced.summary;
       rounds = reduced.rounds;
       const prompt = Prompt.concat(
-        compileActivePrompt({ basePrompt, summary, rounds }),
+        compileActivePrompt({ basePrompt: basePrompt(), summary, rounds }),
         workerTail(wave),
       );
       if (
@@ -1236,7 +1371,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         contextLength: model?.contextLength,
         outputReserve: specs.report.maxOutputTokens,
         webToolsEnabled: true,
-        basePrompt,
+        basePrompt: basePrompt(),
         summary,
         rounds,
         beforeTurnIndex: budget.calls + 1,
@@ -1252,7 +1387,10 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     const report = yield* invoke({
       spec: specs.report,
       taskId: task.id,
-      prompt: Prompt.concat(compileActivePrompt({ basePrompt, summary, rounds }), reportTail),
+      prompt: Prompt.concat(
+        compileActivePrompt({ basePrompt: basePrompt(), summary, rounds }),
+        reportTail,
+      ),
     });
     const validated = validateResearchCitations(report.text, citationIds());
     if (validated.invalid)
@@ -1346,6 +1484,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
               Effect.gen(function* () {
                 if (!(yield* store.alive(fence)))
                   return yield* Effect.die(new Error("Research stopped"));
+                if (skillTools) yield* skillTools.authorize();
                 if (knowledgeTools) yield* knowledgeTools.authorize();
                 const state = tasks.find((item) => item.id === task.id)!;
                 state.status = "error";
@@ -1374,6 +1513,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     Effect.catchCause((cause) =>
       Effect.gen(function* () {
         if (!(yield* store.alive(fence))) return yield* Effect.die(new Error("Research stopped"));
+        if (skillTools) yield* skillTools.authorize();
         if (knowledgeTools) yield* knowledgeTools.authorize();
         limitations.add(researchFailureMessage(cause));
       }),
@@ -1405,6 +1545,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         if (!(yield* store.alive(fence)) || deps.getTextOffset() === beforeSynthesis)
           return yield* Effect.failCause(cause);
         limitations.add(researchFailureMessage(cause));
+        if (skillTools) yield* skillTools.authorize();
         if (knowledgeTools) yield* knowledgeTools.authorize();
         limitations.add("The final report was cut short.");
         return null;

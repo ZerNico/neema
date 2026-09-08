@@ -96,6 +96,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
           name: liveAgent?.row.name ?? null,
           icon: liveAgent?.row.icon ?? "robot",
           collectionIds: liveAgent?.collectionIds ?? [],
+          skillIds: liveAgent?.skillIds ?? [],
           available: liveAgent !== null,
         }
       : null,

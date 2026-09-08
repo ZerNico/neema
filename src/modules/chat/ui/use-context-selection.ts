@@ -6,7 +6,15 @@ import type { ContextSelection } from "./context-picker.tsx";
 type AgentIdentity = NonNullable<ContextSelection["agent"]>;
 type ContextInput =
   | { mode: "draft"; agent: AgentIdentity | null }
-  | { mode: "installed"; agent: (AgentIdentity & { collectionIds: ReadonlyArray<string> }) | null };
+  | {
+      mode: "installed";
+      agent:
+        | (AgentIdentity & {
+            collectionIds: ReadonlyArray<string>;
+            skillIds?: ReadonlyArray<string>;
+          })
+        | null;
+    };
 
 /** Association is fixed; identity/dependencies refresh and standalone inputs stay local. */
 export function useContextSelection(initial: ContextInput) {
@@ -23,6 +31,11 @@ export function useContextSelection(initial: ContextInput) {
       ? (initial.agent?.collectionIds ?? [])
       : (detail.data?.collections.map((collection) => collection.id) ?? []),
   );
+  const agentSkillIds = new Set(
+    initial.mode === "installed"
+      ? (initial.agent?.skillIds ?? [])
+      : (detail.data?.skills?.map((skill) => skill.id) ?? []),
+  );
   const selection: ContextSelection = {
     agent: agent
       ? {
@@ -37,6 +50,7 @@ export function useContextSelection(initial: ContextInput) {
     selection,
     detail,
     agentCollectionIds,
+    agentSkillIds,
     agentLocked,
     onAgentChange: (agentId: string | null) => {
       if (agentLocked) return;

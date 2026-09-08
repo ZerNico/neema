@@ -21,6 +21,8 @@ import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
+import { SkillRepo } from "~/modules/skills/server/repo.ts";
+import { SkillService } from "~/modules/skills/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
@@ -47,6 +49,7 @@ const ReposLayer = Layer.mergeAll(
   ToolsRepo.layer,
   GroupRepo.layer,
   KnowledgeRepo.layer,
+  SkillRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
@@ -66,6 +69,7 @@ const KnowledgeLayer = Layer.mergeAll(
   KnowledgeService.layer,
   AgentService.layer,
   SharingService.layer,
+  SkillService.layer,
 ).pipe(Layer.provideMerge(EmbeddingSpace.layer), Layer.provideMerge(CoreLayer));
 const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(KnowledgeLayer));
 const AppLayer = ChatService.layer.pipe(

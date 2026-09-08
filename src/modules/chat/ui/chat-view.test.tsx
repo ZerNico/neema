@@ -924,6 +924,7 @@ describe("ChatView search mode", () => {
           attachmentIds: [],
           // Collections are per message, like files: always sent, empty here.
           collectionIds: [],
+          skillIds: [],
         },
       }),
     );
@@ -974,6 +975,7 @@ describe("ChatView retry", () => {
           attachmentIds: [],
           // Collections are per message, like files: always sent, empty here.
           collectionIds: [],
+          skillIds: [],
         },
       }),
     );

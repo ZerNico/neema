@@ -62,6 +62,7 @@ export interface ContextSelection {
 export interface ComposerContext {
   selection: ContextSelection;
   agentCollectionIds: ReadonlySet<string>;
+  agentSkillIds?: ReadonlySet<string>;
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
   onCollectionsChange: (
@@ -214,6 +215,7 @@ export function CollectionPicker({
 }: PickerPopupProps & {
   selection: ContextSelection;
   agentCollectionIds: ReadonlySet<string>;
+  agentSkillIds?: ReadonlySet<string>;
   onCollectionsChange: (
     collectionIds: ReadonlyArray<string>,
     additions?: ReadonlyArray<string>,
@@ -325,7 +327,7 @@ export function CollectionPicker({
  * read as one row: an icon tile, a name, and a one-line note underneath.
  */
 export interface ContextChipItem {
-  readonly kind: "agent" | "collection";
+  readonly kind: "agent" | "collection" | "skill";
   readonly id: string | null;
   /** Null when the id no longer resolves to something the viewer may read. */
   readonly name: string | null;
@@ -337,6 +339,7 @@ export function contextChipItems(
   selection: ContextSelection,
   options: {
     agentCollectionIds: ReadonlySet<string>;
+    agentSkillIds?: ReadonlySet<string>;
     collections: ReadonlyArray<{ id: string; name: string }> | undefined;
     agents: ReadonlyArray<{ id: string; name: string; icon: string }> | undefined;
   },
@@ -381,6 +384,7 @@ export function ContextChips({
 }: {
   selection: ContextSelection;
   agentCollectionIds: ReadonlySet<string>;
+  agentSkillIds?: ReadonlySet<string>;
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
   onCollectionsChange: (
@@ -436,7 +440,12 @@ export function ContextChip({
 }) {
   const unavailable = item.name === null && item.id !== null;
   const label =
-    item.name ?? (item.kind === "agent" ? "Agent unavailable" : "Collection unavailable");
+    item.name ??
+    (item.kind === "agent"
+      ? "Agent unavailable"
+      : item.kind === "skill"
+        ? "Skill unavailable"
+        : "Collection unavailable");
   return (
     <span
       title={label}
@@ -448,7 +457,13 @@ export function ContextChip({
     >
       <span className="bg-muted text-muted-foreground grid size-9 shrink-0 place-items-center rounded-xl">
         <HugeiconsIcon
-          icon={item.kind === "agent" ? agentIcon(item.icon ?? "robot") : FolderLibraryIcon}
+          icon={
+            item.kind === "agent"
+              ? agentIcon(item.icon ?? "robot")
+              : item.kind === "skill"
+                ? Book02Icon
+                : FolderLibraryIcon
+          }
           strokeWidth={2}
           className="size-4"
         />

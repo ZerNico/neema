@@ -1,0 +1,2 @@
+ALTER TABLE "message_generation_config" ADD COLUMN "standalone_skill_ids" jsonb DEFAULT '[]' NOT NULL;--> statement-breakpoint
+ALTER TABLE "message_generation_config" ADD COLUMN "skills" jsonb DEFAULT '[]' NOT NULL;

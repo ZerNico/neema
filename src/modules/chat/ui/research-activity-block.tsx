@@ -46,6 +46,7 @@ const currentDetail = (webActivities: ReadonlyArray<ResearchStepActivity>): stri
     else if (!latest || latest.status !== "running") latest = activity;
   }
   if (!latest) return null;
+  if (latest.family === "skill") return `Using ${latest.skillName} guidance`;
   if (latest.family === "knowledge")
     return latest.name === "list_documents"
       ? "Listing documents"

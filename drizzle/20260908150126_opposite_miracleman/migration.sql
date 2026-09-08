@@ -1,0 +1,1 @@
+ALTER TABLE "skill_revisions" ADD CONSTRAINT "skill_revisions_baseline_revision_id_skill_revisions_id_fkey" FOREIGN KEY ("baseline_revision_id") REFERENCES "skill_revisions"("id") ON DELETE SET NULL;

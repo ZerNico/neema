@@ -1,3 +1,5 @@
+import type { SkillSummary } from "~/modules/skills/schema.ts";
+import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import {
   ArrowUp02Icon,
   Attachment01Icon,
@@ -21,6 +23,7 @@ import {
   AgentPicker,
   CollectionPicker,
   ContextChips,
+  ContextChip,
   ContextMenuItems,
   type ContextPickerKind,
   type ComposerContext,
@@ -74,6 +77,13 @@ export const ChatInput = forwardRef<
     attachments?: AttachmentUploads | undefined;
     /** Agent and collections for the next turn; absent hides the controls (edits). */
     context?: ComposerContext | undefined;
+    skills?:
+      | {
+          items: readonly SkillSummary[];
+          selectedIds: readonly string[];
+          onChange: (ids: string[]) => void;
+        }
+      | undefined;
     placeholder?: string;
     textareaLabel?: string;
     autoFocus?: boolean;
@@ -98,6 +108,7 @@ export const ChatInput = forwardRef<
     onResearchEnabledChange,
     attachments,
     context,
+    skills,
     placeholder = "Message…",
     textareaLabel,
     autoFocus = false,
@@ -127,8 +138,8 @@ export const ChatInput = forwardRef<
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | null>(null);
-  const [picker, setPicker] = useState<ContextPickerKind | null>(null);
+  const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | "skills" | null>(null);
+  const [picker, setPicker] = useState<ContextPickerKind | "skills" | null>(null);
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
     enabled: attachments !== undefined,
@@ -256,11 +267,42 @@ export const ChatInput = forwardRef<
       {context?.agentLocked && context.selection.agent ? (
         <AgentBar agent={context.selection.agent} />
       ) : null}
-      {(attachments && items.length > 0) ||
+      {(context?.agentSkillIds && context.agentSkillIds.size > 0) ||
+      (skills && skills.selectedIds.length > 0) ||
+      (attachments && items.length > 0) ||
       (context &&
         ((context.selection.agent && !context.agentLocked) ||
           context.selection.collectionIds.length > 0)) ? (
         <AttachmentChipRow className="px-3 pt-3">
+          {[...(context?.agentSkillIds ?? [])]
+            .filter((id) => !skills?.selectedIds.includes(id))
+            .map((id) => (
+              <ContextChip
+                key={`agent-skill:${id}`}
+                item={{
+                  kind: "skill",
+                  id,
+                  name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
+                  note: "From agent",
+                }}
+              />
+            ))}
+          {skills?.selectedIds.map((id) => (
+            <ContextChip
+              key={`skill:${id}`}
+              item={{
+                kind: "skill",
+                id,
+                name: skills.items.find((skill) => skill.id === id)?.name ?? null,
+                note: "Skill",
+              }}
+              onRemove={
+                controlsDisabled
+                  ? undefined
+                  : () => skills.onChange(skills.selectedIds.filter((selected) => selected !== id))
+              }
+            />
+          ))}
           {/* Context first: it frames the files that follow. */}
           {context ? (
             <ContextChips
@@ -291,6 +333,16 @@ export const ChatInput = forwardRef<
 
       <ChatTextarea
         ref={textareaRef}
+        skills={
+          skills && !controlsDisabled
+            ? {
+                items: skills.items.filter(
+                  (item) => !skills.selectedIds.includes(item.id) && skills.selectedIds.length < 5,
+                ),
+                onSelect: (id) => skills.onChange([...new Set([...skills.selectedIds, id])]),
+              }
+            : undefined
+        }
         value={value}
         onValueChange={onValueChange}
         onSubmit={submit}
@@ -365,6 +417,14 @@ export const ChatInput = forwardRef<
                 disabled={controlsDisabled}
               />
             ) : null}
+            {skills ? (
+              <DropdownMenuItem
+                disabled={controlsDisabled}
+                onClick={() => setPendingPicker("skills")}
+              >
+                Skills
+              </DropdownMenuItem>
+            ) : null}
             {onResearchEnabledChange || researchEnabled ? (
               <>
                 <DropdownMenuSeparator />
@@ -388,6 +448,16 @@ export const ChatInput = forwardRef<
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {skills ? (
+          <SkillPicker
+            items={skills.items}
+            selectedIds={skills.selectedIds}
+            onChange={skills.onChange}
+            open={picker === "skills"}
+            onOpenChange={(open) => setPicker(open ? "skills" : null)}
+            anchor={menuAnchor}
+          />
+        ) : null}
         {context && !context.agentLocked ? (
           <AgentPicker
             selection={context.selection}

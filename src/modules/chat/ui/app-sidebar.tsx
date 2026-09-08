@@ -1,5 +1,6 @@
 import {
   BubbleChatIcon,
+  Book02Icon,
   FolderLibraryIcon,
   Robot01Icon,
   MoreHorizontalIcon,
@@ -65,6 +66,15 @@ export function AppSidebar({
             <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
               <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
               Knowledge
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={trimmed.startsWith("/skills")}
+              render={<Link to="/skills" />}
+            >
+              <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
+              Skills
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

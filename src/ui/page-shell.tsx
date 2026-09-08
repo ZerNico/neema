@@ -104,6 +104,7 @@ export function Page({
   description,
   backTo,
   backLabel,
+  onBack,
   rootPath = "/admin",
   rootLabel = "Admin",
   actions,
@@ -114,6 +115,8 @@ export function Page({
   description?: ReactNode;
   backTo?: string;
   backLabel?: string;
+  /** Returns to a previous step within the route; replaces the back link. */
+  onBack?: () => void;
   /** Mobile-only back target when no explicit backTo is given. */
   rootPath?: string;
   rootLabel?: string;
@@ -124,6 +127,8 @@ export function Page({
   const back = backTo
     ? { to: backTo, label: backLabel ?? "Back", mobileOnly: false }
     : { to: rootPath, label: rootLabel, mobileOnly: true };
+  const backClassName =
+    "text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 -ml-1 mb-1 flex w-fit items-center gap-1 rounded-2xl text-sm transition-colors outline-none focus-visible:ring-3";
   return (
     <div className="h-full overflow-y-auto">
       <div
@@ -133,16 +138,17 @@ export function Page({
         )}
       >
         <header className="flex flex-col gap-1">
-          <Link
-            to={back.to}
-            className={cn(
-              "text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 -ml-1 mb-1 flex w-fit items-center gap-1 rounded-2xl text-sm transition-colors outline-none focus-visible:ring-3",
-              back.mobileOnly && "md:hidden",
-            )}
-          >
-            <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
-            {back.label}
-          </Link>
+          {onBack ? (
+            <button type="button" className={backClassName} onClick={onBack}>
+              <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
+              {backLabel ?? "Back"}
+            </button>
+          ) : (
+            <Link to={back.to} className={cn(backClassName, back.mobileOnly && "md:hidden")}>
+              <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
+              {back.label}
+            </Link>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h1 className="min-w-0 break-words text-lg font-medium">{title}</h1>
             {actions ? (

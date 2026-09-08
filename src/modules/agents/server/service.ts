@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect";
+import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -34,6 +35,7 @@ export class AgentService extends Context.Service<
     Effect.gen(function* () {
       const repo = yield* AgentRepo;
       const knowledge = yield* KnowledgeRepo;
+      const skillRepo = yield* SkillRepo;
       const providers = yield* ProviderRepo;
       const bus = yield* SyncBus;
       const changed = () =>
@@ -73,6 +75,7 @@ export class AgentService extends Context.Service<
           description: settings.description.trim(),
           starters: settings.starters.map((starter) => starter.trim()),
           collectionIds: [...new Set(settings.collectionIds)],
+          skillIds: [...new Set(settings.skillIds ?? [])],
         };
       });
       const load = Effect.fn("AgentService.load")(function* (
@@ -80,7 +83,11 @@ export class AgentService extends Context.Service<
         agentId: string,
         ownerOnly: boolean,
       ) {
-        const { row, ownerName, collectionIds } = yield* available(userId, agentId, ownerOnly);
+        const { row, ownerName, collectionIds, skillIds } = yield* available(
+          userId,
+          agentId,
+          ownerOnly,
+        );
         const model = row.modelId
           ? ((yield* modelFor(userId, row.modelId)) ?? {
               id: row.modelId,
@@ -100,6 +107,17 @@ export class AgentService extends Context.Service<
             ),
           { concurrency: 3 },
         );
+        const skills = yield* Effect.forEach(
+          skillIds ?? [],
+          (id) =>
+            skillRepo.get(userId, id).pipe(
+              Effect.map((skill) => ({ id, name: skill.name as string | null, available: true })),
+              Effect.catchTag("SkillNotAvailable", () =>
+                Effect.succeed({ id, name: null as string | null, available: false }),
+              ),
+            ),
+          { concurrency: 3 },
+        );
         yield* available(userId, agentId, ownerOnly);
         return {
           row,
@@ -111,6 +129,7 @@ export class AgentService extends Context.Service<
             starters: row.starters,
             model,
             collections,
+            skills,
           } satisfies AgentSelectionDetail,
         };
       });
@@ -145,5 +164,5 @@ export class AgentService extends Context.Service<
         }),
       });
     }),
-  );
+  ).pipe(Layer.provide(SkillRepo.layer));
 }

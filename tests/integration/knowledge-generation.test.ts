@@ -5,6 +5,8 @@ import { Deferred, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effec
 import { Response, type Prompt } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SkillService } from "~/modules/skills/server/service.ts";
+import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -132,6 +134,7 @@ type Services =
   | ChatService
   | StreamEngine
   | AgentService
+  | SkillService
   | AgentRepo
   | KnowledgeRepo
   | KnowledgeIndexer
@@ -199,6 +202,7 @@ const send = (input: {
   content?: string;
   agentId?: string | null;
   collectionIds?: ReadonlyArray<string>;
+  skillIds?: ReadonlyArray<string>;
   searchEnabled?: boolean;
   generationMode?: "chat" | "research";
 }) =>
@@ -214,6 +218,7 @@ const send = (input: {
         ...(input.generationMode ? { generationMode: input.generationMode } : {}),
         ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
         collectionIds: input.collectionIds ?? [],
+        skillIds: input.skillIds ?? [],
       }),
     ),
   );
@@ -269,6 +274,7 @@ beforeAll(async () => {
   const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 });
   const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(Layer.provideMerge(PgLive));
   const ReposLayer = Layer.mergeAll(
+    SkillRepo.layer,
     AnalyticsRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
@@ -287,6 +293,7 @@ beforeAll(async () => {
     FakeMemoryService,
   ).pipe(Layer.provideMerge(ReposLayer));
   const KnowledgeLayer = Layer.mergeAll(
+    SkillService.layer,
     KnowledgeIndexer.layer,
     KnowledgeSearch.layer,
     KnowledgeService.layer,
@@ -1378,6 +1385,94 @@ describe("knowledge-backed generations", () => {
     expect(JSON.stringify(root?.result)).toContain(documents[0]!.versionId);
   });
 
+  it("shares one skill session and budget across research workers without leaking bodies outward", async () => {
+    const owner = await createUser();
+    const id = await run(
+      Effect.flatMap(SkillService, (service) =>
+        service.save(owner, {
+          files: [
+            {
+              path: "SKILL.md",
+              content:
+                "---\nname: review\ndescription: Review carefully\n---\nRESEARCH_ROOT_GUIDANCE",
+            },
+            { path: "references/depth.md", content: "SUPPORTING_DETAIL for careful review" },
+          ],
+        }),
+      ),
+    );
+    const phaseOf = (input: GatewayInput) => {
+      const content = promptText(input.prompt);
+      if (content.includes("You compact the older part of a chat conversation"))
+        return "compaction";
+      if (input.toolkit?.tools["ask_user"]) return "clarification";
+      if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
+      if (input.toolkit?.tools["web_search"]) return "worker";
+      if (content.includes("Write a concise research plan")) return "planning";
+      if (content.includes("Write a concise, evidence-dense report")) return "report";
+      return "synthesis";
+    };
+    let coordinatorTurns = 0;
+    const workerPrompts: string[] = [];
+    const remainingSeen: number[] = [];
+    script = (input) => {
+      const phase = phaseOf(input);
+      if (phase === "clarification") return Stream.make(text("No clarification needed."), finish());
+      if (phase === "planning") return Stream.make(text("Consult the skill."), finish());
+      if (phase === "coordinator")
+        return ++coordinatorTurns === 1
+          ? tool(input, "dispatch_research", {
+              tasks: [
+                { title: "First", assignment: "Apply the review guidance." },
+                { title: "Second", assignment: "Apply the review guidance again." },
+              ],
+            })
+          : tool(input, "finish_research", {});
+      if (phase === "worker") {
+        workerPrompts.push(promptText(input.prompt));
+        expect(input.toolkit?.tools["read_skill_file"]).toBeDefined();
+        const rounds = input.prompt.content.filter((message) => message.role === "tool").length;
+        if (rounds === 0)
+          return tool(input, "read_skill_file", {
+            skillId: id,
+            path: "references/depth.md",
+            offset: 0,
+          });
+        return Stream.make(finish());
+      }
+      if (phase === "report") return Stream.make(text("Report of the review."), finish());
+      return Stream.make(text("# Findings\nThe review guidance was applied.\n"), finish());
+    };
+    const sent = await send({
+      userId: owner,
+      modelId: researchModelId,
+      content: "Review this.",
+      skillIds: [id],
+      generationMode: "research",
+    });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    const calls = (
+      await exec(
+        `select tool_name, status, research_task_id is not null as task, result from message_tool_calls where message_id = '${sent.assistantMessageId}' order by turn_index, call_index`,
+      )
+    ).rows;
+    const reads = calls.filter((call) => call.tool_name === "read_skill_file");
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(read).toMatchObject({ status: "complete", task: true });
+      expect((read.result as { family: string }).family).toBe("skill");
+      remainingSeen.push(0);
+    }
+    // Root instructions reach every worker; file bodies never enter durable rows.
+    expect(workerPrompts.every((prompt) => prompt.includes("RESEARCH_ROOT_GUIDANCE"))).toBe(true);
+    expect(JSON.stringify(calls)).not.toContain("SUPPORTING_DETAIL");
+    expect(JSON.stringify(calls)).not.toContain("RESEARCH_ROOT_GUIDANCE");
+    const outer = (
+      await exec(`select content from messages where id = '${sent.assistantMessageId}'`)
+    ).rows[0]!.content as string;
+    expect(outer).not.toContain("SUPPORTING_DETAIL");
+  });
+
   it("offers the checklist only when the agent enables it, keeps the latest list, and starts fresh on retry", async () => {
     const owner = await createUser();
     const plain = await run(
@@ -1513,6 +1608,186 @@ describe("knowledge-backed generations", () => {
           ),
         ),
       ).toMatchObject({ _tag: "KnowledgeNotAvailable" });
+    },
+  );
+});
+
+const saveGuidance = (owner: string, body: string, skillId?: string) =>
+  run(
+    Effect.flatMap(SkillService, (service) =>
+      service.save(owner, {
+        files: [
+          {
+            path: "SKILL.md",
+            content: `---\nname: review\ndescription: Review carefully\n---\n${body}`,
+          },
+        ],
+        ...(skillId ? { skillId, expectedRevision: 1 } : {}),
+      }),
+    ),
+  );
+const skillConfig = async (messageId: string) =>
+  (
+    await exec(
+      `select standalone_skill_ids, skills from message_generation_config where message_id = '${messageId}'`,
+    )
+  ).rows[0]!;
+
+describe("portable skill generation attempts", () => {
+  it("cannot complete successfully when skill access is lost during the last model call", async () => {
+    const owner = await createUser();
+    const id = await saveGuidance(owner, "Guidance captured before deletion");
+    const gate = {
+      reached: await run(Deferred.make<void>()),
+      release: await run(Deferred.make<void>()),
+    };
+    hold = gate;
+    const first = await send({ userId: owner, skillIds: [id] });
+    await run(Deferred.await(gate.reached));
+    try {
+      await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
+    } finally {
+      await run(Deferred.succeed(gate.release, undefined));
+      hold = null;
+    }
+    expect(await settle(first.assistantMessageId)).toMatchObject({ status: "error" });
+  });
+
+  it("retains an explicit overlap when an agent drops its skill dependency", async () => {
+    const owner = await createUser();
+    const id = await saveGuidance(owner, "Original overlapping guidance");
+    const agentId = await run(
+      Effect.flatMap(AgentService, (service) =>
+        service.create(owner, { ...agentSettings(), skillIds: [id] }),
+      ),
+    );
+    const first = await send({ userId: owner, agentId, skillIds: [id] });
+    expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+    await editAgent(owner, agentId);
+    await saveGuidance(owner, "Current standalone guidance", id);
+    await run(retry(owner, first.conversationId, first.assistantMessageId));
+    expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await skillConfig(first.assistantMessageId)).toMatchObject({
+      standalone_skill_ids: [id],
+      skills: [{ skillId: id, explicit: true }],
+    });
+    const next = await send({ userId: owner, conversationId: first.conversationId });
+    expect(await settle(next.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await skillConfig(next.assistantMessageId)).toMatchObject({
+      standalone_skill_ids: [],
+      skills: [],
+    });
+  });
+
+  it.each(["send", "retry", "edit", "branch-retry"] as const)(
+    "resolves latest skill instructions for %s without native tool gating",
+    async (action) => {
+      const owner = await createUser();
+      const id = await saveGuidance(owner, "UNIQUE_OLD_GUIDANCE");
+      const first = await send({ userId: owner, modelId: noToolModelId, skillIds: [id] });
+      expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+      const old = await skillConfig(first.assistantMessageId);
+      expect(
+        requests.some((request) => promptText(request.prompt).includes("UNIQUE_OLD_GUIDANCE")),
+      ).toBe(true);
+      await saveGuidance(owner, "UNIQUE_CURRENT_GUIDANCE", id);
+      requests.length = 0;
+      let messageId = first.assistantMessageId;
+      if (action === "send") {
+        messageId = (
+          await send({ userId: owner, conversationId: first.conversationId, skillIds: [id] })
+        ).assistantMessageId;
+      } else if (action === "edit") {
+        const question = (
+          await exec(
+            `select id from messages where conversation_id = '${first.conversationId}' and role = 'user'`,
+          )
+        ).rows[0]!;
+        messageId = (
+          await run(
+            Effect.flatMap(ChatService, (chat) =>
+              chat.editMessage({
+                userId: owner,
+                conversationId: first.conversationId,
+                messageId: String(question.id),
+                modelId: noToolModelId,
+                content: "Edited skill question",
+                searchEnabled: false,
+                attachmentIds: [],
+              }),
+            ),
+          )
+        ).assistantMessageId;
+      } else if (action === "branch-retry") {
+        const branch = await run(
+          Effect.flatMap(ChatService, (chat) =>
+            chat.branchConversation({
+              userId: owner,
+              conversationId: first.conversationId,
+              messageId,
+            }),
+          ),
+        );
+        messageId = String(
+          (
+            await exec(
+              `select id from messages where conversation_id = '${branch.conversationId}' and role = 'assistant'`,
+            )
+          ).rows[0]!.id,
+        );
+        expect(await skillConfig(messageId)).toEqual(old);
+        expect(
+          (await exec(`select revision_id from message_skills where message_id = '${messageId}'`))
+            .rows,
+        ).toHaveLength(1);
+        await run(retry(owner, branch.conversationId, messageId));
+      } else await run(retry(owner, first.conversationId, messageId));
+      expect(await settle(messageId)).toMatchObject({ status: "complete" });
+      expect(await skillConfig(messageId)).toMatchObject({ standalone_skill_ids: [id] });
+      expect((await skillConfig(messageId)).skills).not.toEqual(old.skills);
+      expect(
+        requests.some((request) => promptText(request.prompt).includes("UNIQUE_CURRENT_GUIDANCE")),
+      ).toBe(true);
+      expect(
+        requests.every((request) => !promptText(request.prompt).includes("UNIQUE_OLD_GUIDANCE")),
+      ).toBe(true);
+      expect(JSON.stringify(await toolCalls(messageId))).not.toContain("UNIQUE_CURRENT_GUIDANCE");
+    },
+  );
+
+  it.each(["retry", "edit"] as const)(
+    "preserves answers and descendants when a skill blocks %s",
+    async (action) => {
+      const owner = await createUser();
+      const id = await saveGuidance(owner, "Protected guidance");
+      const first = await send({ userId: owner, skillIds: [id] });
+      await settle(first.assistantMessageId);
+      const next = await send({ userId: owner, conversationId: first.conversationId });
+      await settle(next.assistantMessageId);
+      const snapshot = async () =>
+        (
+          await exec(
+            `select id, content, status from messages where conversation_id = '${first.conversationId}' order by created_at, id`,
+          )
+        ).rows;
+      const before = await snapshot();
+      await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
+      const attempt: Effect.Effect<unknown, unknown, ChatService> =
+        action === "retry"
+          ? retry(owner, first.conversationId, first.assistantMessageId)
+          : Effect.flatMap(ChatService, (chat) =>
+              chat.editMessage({
+                userId: owner,
+                conversationId: first.conversationId,
+                messageId: String(before[0]!.id),
+                modelId: noToolModelId,
+                content: "Must not replace the question",
+                searchEnabled: false,
+                attachmentIds: [],
+              }),
+            );
+      expect(await run(Effect.flip(attempt))).toMatchObject({ _tag: "SkillNotAvailable" });
+      expect(await snapshot()).toEqual(before);
     },
   );
 });

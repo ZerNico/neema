@@ -4,6 +4,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { KnowledgeRejected } from "~/modules/knowledge/errors.ts";
+import { resolveSkillManifest } from "~/modules/skills/server/repo.ts";
 import { KnowledgeRepo, type ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import { KNOWLEDGE_CONTEXT_LIMITS } from "~/modules/knowledge/server/context.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
@@ -11,6 +12,19 @@ import { COMPACTION_CONFIG, computeBudget } from "./compaction.ts";
 import type { GenerationConfig } from "./repo.ts";
 
 export type KnowledgeMode = "none" | "context" | "retrieval";
+
+export const resolveAttemptSkills = (
+  tx: DbTx | undefined,
+  userId: string,
+  standaloneIds: readonly string[],
+  agentIds: readonly string[],
+) => {
+  if (!standaloneIds.length && !agentIds.length) return Effect.succeed([]);
+  if (!tx) return Effect.die(new Error("Skill attempts require transactional resolution"));
+  return resolveSkillManifest(tx, userId, standaloneIds, agentIds).pipe(
+    Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+  );
+};
 
 /**
  * A metadata-only estimate of whether a whole selection could be included
@@ -75,6 +89,7 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
       icon: stored.row.icon,
       instructions: stored.row.instructions,
       collectionIds: stored.collectionIds,
+      skillIds: stored.skillIds ?? [],
       searchEnabled: stored.row.searchEnabled,
       planEnabled: stored.row.planEnabled,
     },
@@ -96,6 +111,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     agent?: AgentSelection | null | undefined;
     /** Collections selected in the composer, beside any the agent attaches. */
     collectionIds?: ReadonlyArray<string> | undefined;
+    skillIds?: ReadonlyArray<string> | undefined;
     searchEnabled: boolean;
     model: { contextLength: number | null | undefined };
     /** Whether web search could run at all; an agent preference cannot force it. */
@@ -126,7 +142,15 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
           ? "context"
           : "retrieval";
 
+    const skillManifest = yield* resolveAttemptSkills(
+      input.tx,
+      input.userId,
+      input.skillIds ?? [],
+      resolvedAgent?.skillIds ?? [],
+    );
     return {
+      standaloneSkillIds: [...(input.skillIds ?? [])],
+      skills: skillManifest,
       agentId: input.agent?.agentId ?? null,
       resolvedAgent,
       standaloneCollectionIds: [...(input.collectionIds ?? [])],

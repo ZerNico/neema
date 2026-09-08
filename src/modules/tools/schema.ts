@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
+import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
 import { PlanStep } from "./plan-schema.ts";
 import { Source, WebSource } from "./source-schema.ts";
@@ -138,6 +139,7 @@ const planEnvelopeFields = {
 };
 export const ToolChunkEnvelope = Schema.Union([
   KnowledgeToolEnvelope,
+  SkillToolEnvelope,
   Schema.Struct({
     ...planEnvelopeFields,
     phase: Schema.Literals(["start"]),

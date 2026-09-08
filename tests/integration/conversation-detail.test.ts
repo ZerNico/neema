@@ -246,6 +246,7 @@ describe("loadConversationDetail", () => {
           name: "Renamed",
           icon: "code",
           collectionIds: ["unavailable-dependency"],
+          skillIds: [],
           available: true,
         });
         expect(JSON.stringify(renamed)).not.toContain("SECRET");
@@ -257,6 +258,7 @@ describe("loadConversationDetail", () => {
           name: null,
           icon: "robot",
           collectionIds: [],
+          skillIds: [],
           available: false,
         });
         expect(revoked.messages).toEqual(first.messages);
@@ -267,6 +269,7 @@ describe("loadConversationDetail", () => {
           name: null,
           icon: "robot",
           collectionIds: [],
+          skillIds: [],
           available: false,
         });
         expect(deleted.messages).toEqual(first.messages);

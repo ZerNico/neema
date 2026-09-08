@@ -1,20 +1,11 @@
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import {
-  agents,
-  agentUserGrants,
-  agentGroupGrants,
-  knowledgeCollections,
-  knowledgeCollectionUserGrants,
-  knowledgeCollectionGroupGrants,
-  groups,
-  groupMembers,
-  user,
-} from "~/db/schema/index.ts";
+import { groups, groupMembers, user } from "~/db/schema/index.ts";
 import { KnowledgeNotAvailable, SharingNotAllowed } from "~/modules/knowledge/errors.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { SharingRateLimited } from "../errors.ts";
+import { sharingResources } from "./resources.ts";
 import type { ResourceGrants, SharedResource, ShareRecipient } from "../schema.ts";
 
 const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
@@ -29,7 +20,7 @@ type Change =
   | { action: "revokeGroup"; groupId: string }
   | { action: "publish"; audience: "private" | "instance" };
 
-/** Shared policy, separate FK-backed grant tables for the two resource types. */
+/** Shared policy, separate FK-backed grant tables for each resource type. */
 export class SharingService extends Context.Service<
   SharingService,
   {
@@ -69,21 +60,13 @@ export class SharingService extends Context.Service<
           });
           return Effect.void;
         });
-      const owned = (userId: string, resource: SharedResource) =>
-        resource.kind === "agent"
-          ? db
-              .select({ audience: agents.audience })
-              .from(agents)
-              .where(and(eq(agents.id, resource.id), eq(agents.userId, userId)))
-          : db
-              .select({ audience: knowledgeCollections.audience })
-              .from(knowledgeCollections)
-              .where(
-                and(
-                  eq(knowledgeCollections.id, resource.id),
-                  eq(knowledgeCollections.userId, userId),
-                ),
-              );
+      const owned = (userId: string, resource: SharedResource) => {
+        const { table, available } = sharingResources[resource.kind];
+        return db
+          .select({ audience: table.audience })
+          .from(table)
+          .where(and(eq(table.id, resource.id), eq(table.userId, userId), available));
+      };
       return SharingService.of({
         detail: Effect.fn("SharingService.detail")(function* (userId, resource) {
           const [owner] = yield* owned(userId, resource).pipe(Effect.orDie);
@@ -94,36 +77,21 @@ export class SharingService extends Context.Service<
             .where(eq(user.id, userId))
             .pipe(Effect.orDie);
           const canPublish = actor?.role === "admin";
-          const users = yield* (
-            resource.kind === "agent"
-              ? db
-                  .select({ userId: user.id, name: user.name, email: user.email })
-                  .from(agentUserGrants)
-                  .innerJoin(user, eq(user.id, agentUserGrants.userId))
-                  .where(eq(agentUserGrants.agentId, resource.id))
-                  .orderBy(asc(user.name))
-              : db
-                  .select({ userId: user.id, name: user.name, email: user.email })
-                  .from(knowledgeCollectionUserGrants)
-                  .innerJoin(user, eq(user.id, knowledgeCollectionUserGrants.userId))
-                  .where(eq(knowledgeCollectionUserGrants.collectionId, resource.id))
-                  .orderBy(asc(user.name))
-          ).pipe(Effect.orDie);
-          const granted = yield* (
-            resource.kind === "agent"
-              ? db
-                  .select({ groupId: groups.id, name: groups.name })
-                  .from(agentGroupGrants)
-                  .innerJoin(groups, eq(groups.id, agentGroupGrants.groupId))
-                  .where(eq(agentGroupGrants.agentId, resource.id))
-                  .orderBy(asc(groups.name))
-              : db
-                  .select({ groupId: groups.id, name: groups.name })
-                  .from(knowledgeCollectionGroupGrants)
-                  .innerJoin(groups, eq(groups.id, knowledgeCollectionGroupGrants.groupId))
-                  .where(eq(knowledgeCollectionGroupGrants.collectionId, resource.id))
-                  .orderBy(asc(groups.name))
-          ).pipe(Effect.orDie);
+          const descriptor = sharingResources[resource.kind];
+          const users = yield* db
+            .select({ userId: user.id, name: user.name, email: user.email })
+            .from(descriptor.userGrants)
+            .innerJoin(user, eq(user.id, descriptor.userGrants.userId))
+            .where(eq(descriptor.userResourceId, resource.id))
+            .orderBy(asc(user.name))
+            .pipe(Effect.orDie);
+          const granted = yield* db
+            .select({ groupId: groups.id, name: groups.name })
+            .from(descriptor.groupGrants)
+            .innerJoin(groups, eq(groups.id, descriptor.groupGrants.groupId))
+            .where(eq(descriptor.groupResourceId, resource.id))
+            .orderBy(asc(groups.name))
+            .pipe(Effect.orDie);
           const eligibleGroups = yield* db
             .select({ id: groups.id, name: groups.name })
             .from(groups)
@@ -168,22 +136,16 @@ export class SharingService extends Context.Service<
                   .from(user)
                   .where(eq(user.id, userId))
                   .for("share");
-                const rows = yield* resource.kind === "agent"
-                  ? tx
-                      .select({ id: agents.id })
-                      .from(agents)
-                      .where(and(eq(agents.id, resource.id), eq(agents.userId, userId)))
-                      .for("update")
-                  : tx
-                      .select({ id: knowledgeCollections.id })
-                      .from(knowledgeCollections)
-                      .where(
-                        and(
-                          eq(knowledgeCollections.id, resource.id),
-                          eq(knowledgeCollections.userId, userId),
-                        ),
-                      )
-                      .for("update");
+                const descriptor = sharingResources[resource.kind];
+                const { table, userGrants, userResourceId, groupGrants, groupResourceId } =
+                  descriptor;
+                const rows = yield* tx
+                  .select({ id: table.id })
+                  .from(table)
+                  .where(
+                    and(eq(table.id, resource.id), eq(table.userId, userId), descriptor.available),
+                  )
+                  .for("update");
                 if (!actor || rows.length === 0)
                   return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
                 switch (change.action) {
@@ -203,54 +165,31 @@ export class SharingService extends Context.Service<
                       return yield* new SharingNotAllowed({
                         reason: "could not share with that account",
                       });
-                    const [count] = yield* resource.kind === "agent"
-                      ? tx
-                          .select({
-                            value: sql<number>`count(*)::int`,
-                            existing: sql<boolean>`coalesce(bool_or(${agentUserGrants.userId} = ${recipient.id}), false)`,
-                          })
-                          .from(agentUserGrants)
-                          .where(eq(agentUserGrants.agentId, resource.id))
-                      : tx
-                          .select({
-                            value: sql<number>`count(*)::int`,
-                            existing: sql<boolean>`coalesce(bool_or(${knowledgeCollectionUserGrants.userId} = ${recipient.id}), false)`,
-                          })
-                          .from(knowledgeCollectionUserGrants)
-                          .where(eq(knowledgeCollectionUserGrants.collectionId, resource.id));
+                    const [count] = yield* tx
+                      .select({
+                        value: sql<number>`count(*)::int`,
+                        existing: sql<boolean>`coalesce(bool_or(${userGrants.userId} = ${recipient.id}), false)`,
+                      })
+                      .from(userGrants)
+                      .where(eq(userResourceId, resource.id));
                     if (count?.existing) break;
                     if ((count?.value ?? 0) >= 100)
                       return yield* new SharingNotAllowed({
                         reason: "direct sharing limit reached",
                       });
-                    if (resource.kind === "agent")
-                      yield* tx
-                        .insert(agentUserGrants)
-                        .values({ agentId: resource.id, userId: recipient.id })
-                        .onConflictDoNothing();
-                    else
-                      yield* tx
-                        .insert(knowledgeCollectionUserGrants)
-                        .values({ collectionId: resource.id, userId: recipient.id })
-                        .onConflictDoNothing();
+                    yield* tx.execute(
+                      sql`insert into ${userGrants} (${sql.identifier(userResourceId.name)}, user_id) values (${resource.id}, ${recipient.id}) on conflict do nothing`,
+                    );
                     break;
                   }
                   case "group": {
-                    const [count] = yield* resource.kind === "agent"
-                      ? tx
-                          .select({
-                            value: sql<number>`count(*)::int`,
-                            existing: sql<boolean>`coalesce(bool_or(${agentGroupGrants.groupId} = ${change.groupId}), false)`,
-                          })
-                          .from(agentGroupGrants)
-                          .where(eq(agentGroupGrants.agentId, resource.id))
-                      : tx
-                          .select({
-                            value: sql<number>`count(*)::int`,
-                            existing: sql<boolean>`coalesce(bool_or(${knowledgeCollectionGroupGrants.groupId} = ${change.groupId}), false)`,
-                          })
-                          .from(knowledgeCollectionGroupGrants)
-                          .where(eq(knowledgeCollectionGroupGrants.collectionId, resource.id));
+                    const [count] = yield* tx
+                      .select({
+                        value: sql<number>`count(*)::int`,
+                        existing: sql<boolean>`coalesce(bool_or(${groupGrants.groupId} = ${change.groupId}), false)`,
+                      })
+                      .from(groupGrants)
+                      .where(eq(groupResourceId, resource.id));
                     // Policy controls new grants, not an idempotent repeat of an
                     // existing one after the member loses sharing permission.
                     if (count?.existing) break;
@@ -285,57 +224,27 @@ export class SharingService extends Context.Service<
                           reason: "group is not available for sharing",
                         });
                     }
-                    if (resource.kind === "agent")
-                      yield* tx
-                        .insert(agentGroupGrants)
-                        .values({ agentId: resource.id, groupId: change.groupId })
-                        .onConflictDoNothing();
-                    else
-                      yield* tx
-                        .insert(knowledgeCollectionGroupGrants)
-                        .values({ collectionId: resource.id, groupId: change.groupId })
-                        .onConflictDoNothing();
+                    yield* tx.execute(
+                      sql`insert into ${groupGrants} (${sql.identifier(groupResourceId.name)}, group_id) values (${resource.id}, ${change.groupId}) on conflict do nothing`,
+                    );
                     break;
                   }
                   case "revokeUser":
-                    if (resource.kind === "agent")
-                      yield* tx
-                        .delete(agentUserGrants)
-                        .where(
-                          and(
-                            eq(agentUserGrants.agentId, resource.id),
-                            eq(agentUserGrants.userId, change.userId),
-                          ),
-                        );
-                    else
-                      yield* tx
-                        .delete(knowledgeCollectionUserGrants)
-                        .where(
-                          and(
-                            eq(knowledgeCollectionUserGrants.collectionId, resource.id),
-                            eq(knowledgeCollectionUserGrants.userId, change.userId),
-                          ),
-                        );
+                    yield* tx
+                      .delete(userGrants)
+                      .where(
+                        and(eq(userResourceId, resource.id), eq(userGrants.userId, change.userId)),
+                      );
                     break;
                   case "revokeGroup":
-                    if (resource.kind === "agent")
-                      yield* tx
-                        .delete(agentGroupGrants)
-                        .where(
-                          and(
-                            eq(agentGroupGrants.agentId, resource.id),
-                            eq(agentGroupGrants.groupId, change.groupId),
-                          ),
-                        );
-                    else
-                      yield* tx
-                        .delete(knowledgeCollectionGroupGrants)
-                        .where(
-                          and(
-                            eq(knowledgeCollectionGroupGrants.collectionId, resource.id),
-                            eq(knowledgeCollectionGroupGrants.groupId, change.groupId),
-                          ),
-                        );
+                    yield* tx
+                      .delete(groupGrants)
+                      .where(
+                        and(
+                          eq(groupResourceId, resource.id),
+                          eq(groupGrants.groupId, change.groupId),
+                        ),
+                      );
                     break;
                   case "publish":
                     // Publication is still an owner sharing action, with an additional
@@ -344,16 +253,10 @@ export class SharingService extends Context.Service<
                       return yield* new SharingNotAllowed({
                         reason: "only admin owners can publish to the instance",
                       });
-                    if (resource.kind === "agent")
-                      yield* tx
-                        .update(agents)
-                        .set({ audience: change.audience, updatedAt: new Date() })
-                        .where(eq(agents.id, resource.id));
-                    else
-                      yield* tx
-                        .update(knowledgeCollections)
-                        .set({ audience: change.audience, updatedAt: new Date() })
-                        .where(eq(knowledgeCollections.id, resource.id));
+                    yield* tx
+                      .update(table)
+                      .set({ audience: change.audience, updatedAt: new Date() })
+                      .where(eq(table.id, resource.id));
                 }
               }),
             )

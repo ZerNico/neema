@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { cn } from "~/ui/utils";
+import { useSkillSlash, type TextareaSkills } from "~/modules/skills/ui/use-skill-slash.tsx";
 
 export const CHAT_INPUT_SHELL_CLASS = cn(
   "border-border bg-background w-full rounded-[1.375rem] border shadow-sm transition-shadow",
@@ -18,6 +19,7 @@ export const ChatTextarea = forwardRef<
     autoFocus?: boolean;
     disabled?: boolean;
     className?: string;
+    skills?: TextareaSkills | undefined;
   }
 >(function ChatTextarea(
   {
@@ -30,11 +32,13 @@ export const ChatTextarea = forwardRef<
     autoFocus = false,
     disabled = false,
     className,
+    skills,
   },
   forwardedRef,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(forwardedRef, () => textareaRef.current!);
+  const slash = useSkillSlash(textareaRef, value, onValueChange, skills);
 
   // The controlled value is the resize trigger, not a value read by the effect.
   // Layout effect: the textarea must reach its grown height before ancestors
@@ -49,32 +53,41 @@ export const ChatTextarea = forwardRef<
   // oxlint-enable react/exhaustive-effect-dependencies
 
   return (
-    <textarea
-      ref={textareaRef}
-      rows={1}
-      value={value}
-      onChange={(event) => onValueChange(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing) return;
-        if (event.key === "Escape" && onCancel) {
-          event.preventDefault();
-          onCancel();
-          return;
-        }
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          onSubmit();
-        }
-      }}
-      placeholder={placeholder}
-      aria-label={ariaLabel}
-      autoFocus={autoFocus}
-      disabled={disabled}
-      className={cn(
-        "placeholder:text-muted-foreground block max-h-52 w-full resize-none overflow-y-auto",
-        "bg-transparent px-4 pb-1 pt-3.5 text-sm leading-6 outline-none disabled:opacity-60",
-        className,
-      )}
-    />
+    <>
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        value={value}
+        {...slash.aria}
+        onSelect={slash.onSelectionChange}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+          slash.onSelectionChange();
+        }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (slash.onKeyDown(event)) return;
+          if (event.key === "Escape" && onCancel) {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            onSubmit();
+          }
+        }}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        className={cn(
+          "placeholder:text-muted-foreground block max-h-52 w-full resize-none overflow-y-auto",
+          "bg-transparent px-4 pb-1 pt-3.5 text-sm leading-6 outline-none disabled:opacity-60",
+          className,
+        )}
+      />
+      {slash.popup}
+    </>
   );
 });

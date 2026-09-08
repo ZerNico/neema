@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
@@ -18,6 +20,7 @@ interface ComposerProps {
     content: string,
     attachmentIds: ReadonlyArray<string>,
     generationMode?: GenerationMode,
+    skillIds?: ReadonlyArray<string>,
   ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
   onStop?: (() => void) | undefined;
@@ -29,6 +32,7 @@ interface ComposerProps {
   onSearchEnabledChange: (enabled: boolean) => void;
   controlsDisabled?: boolean;
   context?: ComposerContext | undefined;
+  initialSkillId?: string | null | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -43,9 +47,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     textareaDisabled = false,
     controlsDisabled,
     context,
+    initialSkillId,
   },
   ref,
 ) {
+  const skills = useQuery(skillsQuery);
+  const [skillIds, setSkillIds] = useState<string[]>(() =>
+    initialSkillId ? [initialSkillId] : [],
+  );
   const [draft, setDraft] = useState("");
   const [researchEnabled, setResearchEnabled] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -77,11 +86,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const content = draftRef.current.trim();
       if (!content && attachmentIds.length === 0) return;
       const request = researchEnabled
-        ? onSend(content, attachmentIds, "research")
-        : onSend(content, attachmentIds);
+        ? onSend(content, attachmentIds, "research", skillIds)
+        : onSend(content, attachmentIds, undefined, skillIds);
       void request.then(
         () => {
           setDraft("");
+          setSkillIds([]);
           setResearchEnabled(false);
           // The message owns them now; dropping the chips must not delete them.
           attachments.markClaimed();
@@ -95,6 +105,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   return (
     <ChatInput
       ref={textareaRef}
+      skills={{ items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds }}
       value={draft}
       onValueChange={setDraft}
       onSubmit={send}

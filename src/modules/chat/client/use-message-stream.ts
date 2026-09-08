@@ -1,3 +1,4 @@
+import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
 import {
   KnowledgeToolEnvelope,
@@ -32,6 +33,13 @@ export interface KnowledgeToolActivity extends ToolActivityBase {
   family: "knowledge";
   summary?: KnowledgeActivitySummary;
   sources?: ToolSource[];
+}
+
+export interface SkillToolActivity extends ToolActivityBase {
+  family: "skill";
+  skillId: string;
+  skillName: string;
+  path: string;
 }
 
 interface ToolActivityBase {
@@ -85,7 +93,8 @@ export type ToolActivity =
   | AskToolActivity
   | PlanToolActivity
   | ResearchToolActivity
-  | KnowledgeToolActivity;
+  | KnowledgeToolActivity
+  | SkillToolActivity;
 
 export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
   activity.family === "web";
@@ -216,7 +225,8 @@ export function applyToolChunk(
     e.family !== "ask" &&
     e.family !== "plan" &&
     e.family !== "research" &&
-    e.family !== "knowledge"
+    e.family !== "knowledge" &&
+    e.family !== "skill"
   )
     return tools;
 
@@ -232,6 +242,29 @@ export function applyToolChunk(
   // Bootstrap can replay older progress after a terminal durable row was read.
   if (existing && existing.status !== "running") return tools;
 
+  if (family === "skill") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(SkillToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const next: SkillToolActivity = {
+      family: "skill",
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      skillId: parsed.skillId,
+      skillName: parsed.skillName,
+      path: parsed.path,
+      ...(parsed.runId ? { runId: parsed.runId } : {}),
+      ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: parsed.phase === "start" ? "running" : parsed.status,
+      ...(parsed.phase === "result" && parsed.error ? { error: parsed.error } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
   if (family === "knowledge") {
     const parsed = Option.getOrNull(Schema.decodeUnknownOption(KnowledgeToolEnvelope)(envelope));
     if (!parsed || (existing && parsed.phase === "start")) return tools;

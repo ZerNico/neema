@@ -1,3 +1,6 @@
+vi.mock("~/modules/skills/server/functions.ts", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+}));
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -163,7 +166,9 @@ describe("research composer", () => {
     await enableResearch();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], "research"));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("Investigate this", [], "research", []),
+    );
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
     expect(researchPill()).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -173,7 +178,7 @@ describe("research composer", () => {
     expect(researchPill()).toBeNull();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Thanks" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", []));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", [], undefined, []));
   });
 
   it("explains disabled research and blocks an already-selected request if availability changes", async () => {

@@ -1,3 +1,6 @@
+vi.mock("~/modules/skills/server/functions.ts", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+}));
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -110,9 +113,6 @@ describe("AgentEditorPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Starter 1" }), {
       target: { value: "Review carefully" },
     });
-    expect(
-      screen.getByText("Changes apply to future responses, including in existing chats."),
-    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(updateAgent).toHaveBeenCalledWith({
@@ -128,6 +128,7 @@ describe("AgentEditorPage", () => {
           planEnabled: true,
           starters: ["Review carefully"],
           collectionIds: [],
+          skillIds: [],
         },
       }),
     );

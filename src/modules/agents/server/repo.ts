@@ -1,9 +1,17 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { agents, agentCollections, knowledgeCollections, user } from "~/db/schema/index.ts";
+import {
+  agents,
+  agentCollections,
+  agentSkills,
+  skills,
+  knowledgeCollections,
+  user,
+} from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
+import { skillReadable } from "~/modules/skills/server/access.ts";
 import { Db } from "~/server/db.ts";
 import { AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
@@ -18,6 +26,7 @@ export interface StoredAgent {
   row: AgentRow;
   ownerName: string | null;
   collectionIds: ReadonlyArray<string>;
+  skillIds?: ReadonlyArray<string>;
 }
 const owned = (userId: string, agentId: string) =>
   and(eq(agents.id, agentId), eq(agents.userId, userId));
@@ -95,7 +104,15 @@ export class AgentRepo extends Context.Service<
                 if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
                   return yield* new AgentRejected({ reason: "agent limit reached" });
               }
-              const { collectionIds, ...settings } = input;
+              const { collectionIds, skillIds = [], ...settings } = input;
+              if (skillIds.length) {
+                const available = yield* tx
+                  .select({ id: skills.id })
+                  .from(skills)
+                  .where(and(inArray(skills.id, [...skillIds]), skillReadable(userId)));
+                if (available.length !== skillIds.length)
+                  return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
+              }
               if (collectionIds.length) {
                 const available = yield* tx
                   .select({ id: knowledgeCollections.id })
@@ -122,6 +139,7 @@ export class AgentRepo extends Context.Service<
                   })
                   .where(owned(userId, id));
                 yield* tx.delete(agentCollections).where(eq(agentCollections.agentId, id));
+                yield* tx.delete(agentSkills).where(eq(agentSkills.agentId, id));
               } else {
                 yield* tx.insert(agents).values({ id, userId, ...values });
               }
@@ -133,6 +151,12 @@ export class AgentRepo extends Context.Service<
                     position,
                   })),
                 );
+              if (skillIds.length)
+                yield* tx
+                  .insert(agentSkills)
+                  .values(
+                    skillIds.map((skillId, position) => ({ agentId: id, skillId, position })),
+                  );
               return id;
             }),
           )
@@ -178,6 +202,9 @@ export class AgentRepo extends Context.Service<
             .select({
               row: agents,
               ownerName: user.name,
+              skillIds: sql<
+                string[]
+              >`array(select ask.skill_id from agent_skills ask where ask.agent_id = ${agents.id} order by ask.position)`,
               collectionIds: sql<
                 string[]
               >`array(select ac.collection_id from agent_collections ac where ac.agent_id = ${agents.id} order by ac.position)`,

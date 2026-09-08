@@ -1,3 +1,4 @@
+import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { applyImageChunk } from "../client/use-message-stream.ts";
 import type { AssistantImage } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
@@ -73,6 +74,24 @@ export function toActivity(row: {
 }): ToolActivity {
   const textOffset = readTextOffset(row.textOffset);
   const position = textOffset === undefined ? {} : { textOffset };
+  if (Schema.is(SkillToolName)(row.toolName)) {
+    const result = Option.getOrNull(Schema.decodeUnknownOption(SkillActivity)(row.result));
+    return {
+      family: "skill",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      skillId: result?.skillId ?? "",
+      skillName: result?.skillName ?? "Skill",
+      path: result?.path ?? "",
+      status:
+        row.status === "running" ? "running" : result?.status === "complete" ? "complete" : "error",
+      ...(row.researchRunId ? { runId: row.researchRunId } : {}),
+      ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
+    };
+  }
   if (row.toolName === "update_plan") {
     const result = Option.getOrNull(Schema.decodeUnknownOption(PlanToolResult)(row.result));
     const steps = result?.outcome === "updated" ? result.steps : null;
@@ -336,6 +355,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       content: string;
       attachmentIds: ReadonlyArray<string>;
       generationMode?: GenerationMode;
+      skillIds?: ReadonlyArray<string>;
     }) =>
       sendMessage({
         data: {
@@ -346,6 +366,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+          skillIds: [...(input.skillIds ?? [])],
           ...context.sendFields,
         },
       }),
@@ -750,6 +771,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return result;
   }, [data.generations, data.messages]);
+  const skillsByUserMessage = useMemo(() => {
+    const byAssistant = new Map(
+      (data.generations ?? []).map((row) => [row.messageId, row.skills ?? []] as const),
+    );
+    const result = new Map<string, ReadonlyArray<{ id: string; name: string }>>();
+    let previousUser: string | null = null;
+    for (const message of data.messages) {
+      if (message.role === "user") previousUser = message.id;
+      else if (message.role === "assistant" && previousUser) {
+        const skills = byAssistant.get(message.id);
+        if (skills?.length) result.set(previousUser, skills);
+      }
+    }
+    return result;
+  }, [data.generations, data.messages]);
   const baseDisplay = useMemo(() => {
     // Citation numbering is conversation-scoped: each message inherits every
     // source discovered before it, deduplicated by index and message order.
@@ -810,6 +846,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
         ...(agentByMessage.has(message.id) ? { agent: agentByMessage.get(message.id)! } : {}),
+        ...(skillsByUserMessage.has(message.id)
+          ? { skills: skillsByUserMessage.get(message.id)! }
+          : {}),
         ...(collectionsByUserMessage.has(message.id)
           ? { collectionIds: collectionsByUserMessage.get(message.id)! }
           : {}),
@@ -841,6 +880,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     actionsDisabled,
     agentByMessage,
     collectionsByUserMessage,
+    skillsByUserMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,
@@ -994,11 +1034,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ) : null}
           <Composer
             ref={composer}
-            onSend={(content, attachmentIds, generationMode) =>
+            onSend={(content, attachmentIds, generationMode, skillIds) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
                 ...(generationMode ? { generationMode } : {}),
+                ...(skillIds ? { skillIds } : {}),
               })
             }
             {...(stoppableId
@@ -1042,10 +1083,12 @@ const prefersReducedMotion = () =>
 export function NewChatView({
   user,
   initialAgentId = null,
+  initialSkillId = null,
 }: {
   user: { name: string };
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
+  initialSkillId?: string | null;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1091,6 +1134,7 @@ export function NewChatView({
       content: string;
       attachmentIds: ReadonlyArray<string>;
       generationMode?: GenerationMode;
+      skillIds?: ReadonlyArray<string>;
     }) =>
       sendMessage({
         data: {
@@ -1101,6 +1145,7 @@ export function NewChatView({
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+          skillIds: [...(input.skillIds ?? [])],
           ...context.sendFields,
         },
       }),
@@ -1187,11 +1232,13 @@ export function NewChatView({
       <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
-            onSend={(content, attachmentIds, generationMode) =>
+            initialSkillId={initialSkillId}
+            onSend={(content, attachmentIds, generationMode, skillIds) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
                 ...(generationMode ? { generationMode } : {}),
+                ...(skillIds ? { skillIds } : {}),
               })
             }
             disabled={sendMutation.isPending}

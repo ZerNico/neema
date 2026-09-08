@@ -107,6 +107,7 @@ export type ResolvedAgentConfig = {
   icon: string;
   instructions: string;
   collectionIds: ReadonlyArray<string>;
+  skillIds?: ReadonlyArray<string>;
   searchEnabled: boolean;
   planEnabled: boolean;
 };
@@ -134,6 +135,11 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
   /** Original standalone inputs, including overlaps with agent dependencies. */
   standaloneCollectionIds: jsonb("standalone_collection_ids")
     .$type<string[]>()
+    .notNull()
+    .default([]),
+  standaloneSkillIds: jsonb("standalone_skill_ids").$type<string[]>().notNull().default([]),
+  skills: jsonb("skills")
+    .$type<import("~/modules/skills/schema.ts").SkillManifestEntry[]>()
     .notNull()
     .default([]),
   /** How this generation was allowed to reach its knowledge. */

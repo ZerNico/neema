@@ -1,3 +1,6 @@
+vi.mock("~/modules/skills/server/functions.ts", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+}));
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";

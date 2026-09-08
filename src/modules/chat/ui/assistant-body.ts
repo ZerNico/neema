@@ -4,6 +4,7 @@ import type {
   ToolActivity,
   WebToolActivity,
   KnowledgeToolActivity,
+  SkillToolActivity,
 } from "../client/use-message-stream.ts";
 
 type PositionedActivity =
@@ -15,6 +16,7 @@ export type AssistantBodyPart =
   | { kind: "image"; key: string; image: AssistantImage }
   | { kind: "text"; key: string; content: string; streaming: boolean }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
+  | { kind: "skill"; key: string; activities: SkillToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
   | { kind: "tool"; key: string; activity: Exclude<ToolActivity, WebToolActivity> }
   | { kind: "compaction"; key: string; activity: CompactionActivity };
@@ -51,7 +53,9 @@ export function projectAssistantBody({
       .filter(
         (activity) =>
           !(
-            (activity.family === "web" || activity.family === "knowledge") &&
+            (activity.family === "web" ||
+              activity.family === "knowledge" ||
+              activity.family === "skill") &&
             activity.runId &&
             researchRuns.has(activity.runId)
           ),
@@ -105,6 +109,15 @@ export function projectAssistantBody({
         parts.push({
           kind: "web",
           key: `web-${item.activity.callId}`,
+          activities: [item.activity],
+        });
+    } else if (item.activity.family === "skill") {
+      const last = parts.at(-1);
+      if (last?.kind === "skill") last.activities.push(item.activity);
+      else
+        parts.push({
+          kind: "skill",
+          key: `skill-${item.activity.callId}`,
           activities: [item.activity],
         });
     } else if (item.activity.family === "knowledge" && item.activity.name !== "knowledge_context") {

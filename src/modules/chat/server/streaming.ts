@@ -1,3 +1,6 @@
+import { SkillReader } from "~/modules/skills/server/reader.ts";
+import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
+import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedImage } from "./generated-images.ts";
 import { GenerationFence, type GenerationIdentity } from "./generation-fence.ts";
@@ -169,6 +172,7 @@ export class StreamEngine extends Context.Service<
       const memory = yield* MemoryService;
       const knowledgeSearch = yield* KnowledgeSearch;
       const knowledgeService = yield* KnowledgeService;
+      const skillReader = yield* SkillReader;
       const attachments = yield* AttachmentRepo;
       const promptDeps: PromptDeps = {
         attachments,
@@ -487,6 +491,7 @@ export class StreamEngine extends Context.Service<
               runtimeContext,
               config,
               knowledge: researchKnowledge,
+              skillReader,
               modelId: input.modelId,
               userId: input.userId,
               startedAt: research.run.createdAt.getTime(),
@@ -552,6 +557,28 @@ export class StreamEngine extends Context.Service<
                   manifest: config.manifest,
                 })
               : null;
+          // Selected and agent-attached skills are pinned by the attempt; the
+          // rest of the reader's library is offered as metadata so the model
+          // can find a relevant skill without being told to use it.
+          const skillManifest = [
+            ...(config.skills ?? []),
+            ...(yield* skillReader.catalogue(
+              input.userId,
+              (config.skills ?? []).map((entry) => entry.skillId),
+            )),
+          ];
+          const skillTools = skillManifest.length
+            ? yield* prepareSkillTools({
+                userId: input.userId,
+                manifest: skillManifest,
+                maxRootChars: Math.floor(
+                  computeBudget({
+                    contextLength: model?.contextLength,
+                    webToolsEnabled: !!webTools,
+                  }).input * 0.2,
+                ),
+              }).pipe(Effect.provideService(SkillReader, skillReader))
+            : null;
           const askTools = prepareAskUserTool();
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
@@ -594,7 +621,11 @@ export class StreamEngine extends Context.Service<
             memorySettings.effectiveAutoSaveEnabled &&
             sourceUserMessage &&
             !sourceHasAttachments &&
-            !knowledgeSession
+            !knowledgeSession &&
+            // A pinned selection loads its instructions before the first call;
+            // an ambient offer is only a name until the model loads it, which
+            // the per-round switch below handles.
+            !config.skills?.length
               ? prepareMemoryTool({
                   memory,
                   userId: input.userId,
@@ -605,6 +636,7 @@ export class StreamEngine extends Context.Service<
                 })
               : undefined;
           const commonGroups = [
+            ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
             ...(askTools ? [askTools] : []),
@@ -727,11 +759,20 @@ export class StreamEngine extends Context.Service<
               ? Prompt.make([systemReminderMessage(sections.join("\n\n"))])
               : null;
           };
-          // History planning excludes the runtime block; reserve its cost here.
-          // Active-round planning already counts it in buildBaseTranscript().
-          const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
+          // Everything that sits after retained history, in order. It is the one
+          // list the transcript and the compaction budget both read, so a block
+          // added here cannot end up in the prompt without being budgeted.
+          // Rebuilt per call: loaded skills and the clock change, and being
+          // after history keeps the cacheable prefix intact when they do.
+          const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
             ...(knowledgeContext?.messages ?? []),
+            ...(skillTools?.messages() ?? []),
             runtimeContext,
+          ];
+          // Reminders are appended per request rather than stored in the
+          // transcript, so only the budget adds them to the tail.
+          const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
+            ...trailingContext(),
             ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
           ];
 
@@ -895,6 +936,45 @@ export class StreamEngine extends Context.Service<
               });
             }
           }
+          for (const [index, entry] of (config.skills ?? [])
+            .filter((entry) => entry.explicit)
+            .entries()) {
+            const rowId = uuidv7();
+            const activity = {
+              family: "skill" as const,
+              version: 1 as const,
+              name: "load_skill" as const,
+              skillId: entry.skillId,
+              skillName: entry.name,
+              path: "SKILL.md",
+              status: "complete" as const,
+            };
+            yield* repo.insertToolCall({
+              id: rowId,
+              messageId: input.messageId,
+              turnIndex: 0,
+              callIndex: -5 + index,
+              textOffset: 0,
+              providerCallId: `skill-context:${rowId}`,
+              toolName: "load_skill",
+              arguments: {},
+            });
+            yield* pushToolChunk({
+              v: 1,
+              family: "skill",
+              phase: "start",
+              callId: rowId,
+              name: "load_skill",
+              turnIndex: 0,
+              callIndex: -5 + index,
+              textOffset: 0,
+              skillId: entry.skillId,
+              skillName: entry.name,
+              path: "SKILL.md",
+            });
+            yield* repo.completeToolCall({ id: rowId, result: activity, status: "complete" });
+            yield* pushToolChunk({ v: 1, phase: "result", callId: rowId, ...activity });
+          }
           const executionGroups = [
             ...commonGroups,
             ...(retrievalEnabled && knowledgeTools ? [knowledgeTools.group] : []),
@@ -949,10 +1029,7 @@ export class StreamEngine extends Context.Service<
                   (message, index) =>
                     retainedHistory.get(index + compaction.startIndex) ?? [message],
                 ),
-              ...(knowledgeContext?.messages ?? []),
-              // A fixed snapshot after history preserves its cacheable prefix.
-              // Tool rounds append after it; no clock updates inside the loop.
-              runtimeContext,
+              ...trailingContext(),
             ]);
           let activeSummary: string | null = null;
           let activeRounds: ReadonlyArray<ActiveRound> = [];
@@ -1017,6 +1094,7 @@ export class StreamEngine extends Context.Service<
           let questionPresented = false;
           let webAttempted = false;
           for (let turn = 0; turn <= maxToolRounds; turn++) {
+            if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
             else if (knowledgeSession) yield* knowledgeSession.authorize();
             const toolRoundsLeft = turn < maxToolRounds;
@@ -1038,9 +1116,12 @@ export class StreamEngine extends Context.Service<
             const drain = Effect.suspend(() => {
               // Once memory or either web tool has run, remove save_memory from
               // subsequent model turns. This bounds memory to one attempt and
-              // prevents web/tool output from becoming durable memory.
+              // prevents web/tool output from becoming durable memory. Loading a
+              // skill puts its instructions in context, so it counts too.
               const activeToolkit =
-                memoryTools?.attempted() || webAttempted ? nonMemoryToolkit : toolkit;
+                memoryTools?.attempted() || webAttempted || skillTools?.hasLoaded()
+                  ? nonMemoryToolkit
+                  : toolkit;
               modelCallOpen = true;
               return gateway
                 .streamChat({
@@ -1149,11 +1230,13 @@ export class StreamEngine extends Context.Service<
                                 ? "ask"
                                 : part.name === "update_plan"
                                   ? "plan"
-                                  : Schema.is(KnowledgeToolName)(part.name)
-                                    ? "knowledge"
-                                    : part.name === "web_search" || part.name === "read_url"
-                                      ? "web"
-                                      : null;
+                                  : Schema.is(SkillToolName)(part.name)
+                                    ? "skill"
+                                    : Schema.is(KnowledgeToolName)(part.name)
+                                      ? "knowledge"
+                                      : part.name === "web_search" || part.name === "read_url"
+                                        ? "web"
+                                        : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1175,7 +1258,7 @@ export class StreamEngine extends Context.Service<
                             // of proposed content. Chat activity stores only that
                             // the tool ran, so deleting memory actually removes it.
                             arguments:
-                              family === "memory"
+                              family === "memory" || family === "skill"
                                 ? {}
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
@@ -1207,6 +1290,30 @@ export class StreamEngine extends Context.Service<
                                     textOffset,
                                   },
                             );
+                            return;
+                          }
+                          if (family === "skill") {
+                            const entry = config.skills?.find(
+                              (entry) => entry.skillId === args["skillId"],
+                            );
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "skill",
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as typeof SkillToolName.Type,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                              skillId: entry?.skillId ?? "",
+                              skillName: entry?.name ?? "Skill",
+                              path:
+                                part.name === "load_skill"
+                                  ? "SKILL.md"
+                                  : typeof args["path"] === "string"
+                                    ? args["path"].slice(0, 240)
+                                    : "",
+                            });
                             return;
                           }
                           if (family === "knowledge") {
@@ -1349,6 +1456,31 @@ export class StreamEngine extends Context.Service<
                             return;
                           }
 
+                          if (Schema.is(SkillToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = projectSkillToolResult(part.name, part.result) ?? {
+                              family: "skill" as const,
+                              version: 1 as const,
+                              name: part.name,
+                              skillId: "",
+                              skillName: "Skill",
+                              path: "",
+                              status: "error" as const,
+                              error: "Skill tool failed.",
+                            };
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: activity as unknown as JsonValue,
+                              status: activity.status === "complete" ? "complete" : "error",
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              phase: "result",
+                              callId: rowId,
+                              ...activity,
+                            });
+                            return;
+                          }
                           if (Schema.is(KnowledgeToolName)(part.name)) {
                             if (isPreliminary) return;
                             const activity = projectKnowledgeToolResult(
@@ -1613,6 +1745,7 @@ export class StreamEngine extends Context.Service<
               );
 
             yield* runProviderCall(0);
+            if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
             else if (knowledgeSession) yield* knowledgeSession.authorize();
 
@@ -1862,5 +1995,5 @@ export class StreamEngine extends Context.Service<
 
       return StreamEngine.of({ startGeneration, stopGeneration, subscribe });
     }),
-  );
+  ).pipe(Layer.provideMerge(SkillReader.layer));
 }
