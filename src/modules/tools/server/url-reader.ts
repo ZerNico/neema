@@ -5,7 +5,7 @@ import {
   UrlReadParams,
   WebToolResult,
   type PageStatus,
-  type Source,
+  type WebSource,
   type WebToolFailure,
   type WebToolResult as Result,
 } from "../schema.ts";
@@ -204,7 +204,7 @@ export class UrlReaderExecutor extends Context.Service<
           const failures = [...refused, ...extractionFailures];
           let remainingChars = MAX_CHARS_ACROSS_URLS;
           let remainingPages = successful.length;
-          const sources: Source[] = [];
+          const sources: WebSource[] = [];
           const results: Array<Result["results"][number]> = [];
           for (const { extracted } of successful) {
             authority.allow(extracted.url);
@@ -222,7 +222,14 @@ export class UrlReaderExecutor extends Context.Service<
             remainingChars = Math.max(0, remainingChars - content.length);
             remainingPages -= 1;
             const snippet = snippetOf(content);
-            sources.push({ index, url: extracted.url, title, snippet, read: true });
+            sources.push({
+              kind: "web" as const,
+              index,
+              url: extracted.url,
+              title,
+              snippet,
+              read: true,
+            });
             results.push({
               index,
               title,

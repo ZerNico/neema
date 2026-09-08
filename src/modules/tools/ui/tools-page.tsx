@@ -1,11 +1,6 @@
-import {
-  Brain02Icon,
-  FileValidationIcon,
-  GlobalSearchIcon,
-  Link01Icon,
-} from "@hugeicons/core-free-icons";
+import { NumberField, integerBetween, useInvalidateTools } from "./tool-fields.tsx";
+import { Brain02Icon, GlobalSearchIcon, Link01Icon } from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import type { AnyFieldApi } from "@tanstack/react-form";
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -14,19 +9,17 @@ import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 import { cn } from "~/ui/utils";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
-  getDocumentParserTool,
   getMemoryTool,
   getUrlReaderTool,
   getWebSearchTool,
   testSearchConnection,
-  updateDocumentParserTool,
   updateMemoryTool,
   updateUrlReaderTool,
   updateWebSearchTool,
@@ -42,11 +35,6 @@ export const webSearchToolQuery = queryOptions({
   queryFn: () => getWebSearchTool(),
 });
 
-export const documentParserToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "document-parser"],
-  queryFn: () => getDocumentParserTool(),
-});
-
 export const urlReaderToolQuery = queryOptions({
   queryKey: ["admin", "tools", "url-reader"],
   queryFn: () => getUrlReaderTool(),
@@ -55,15 +43,6 @@ export const urlReaderToolQuery = queryOptions({
 type TestResult =
   | { ok: true; resultCount: number; latencyMs: number }
   | { ok: false; error: string };
-
-// Number inputs are kept as strings in form state (what the <input> holds);
-// the schema parses and range-checks them, so a typo shows as a field error
-// instead of silently disabling Save.
-const integerBetween = (minimum: number, maximum: number) =>
-  Schema.NumberFromString.check(
-    Schema.isInt({ message: "Enter a whole number." }),
-    Schema.isBetween({ minimum, maximum }, { message: `Between ${minimum} and ${maximum}.` }),
-  );
 
 const WebSearchForm = Schema.Struct({
   baseUrl: Schema.String.check(Schema.isMinLength(1, { message: "Enter the base URL." })),
@@ -76,74 +55,12 @@ const UrlReaderForm = Schema.Struct({
   perPageCharCap: integerBetween(1000, 20000),
 });
 
-const DocumentParserForm = Schema.Struct({
-  maxChars: integerBetween(1000, 500_000),
-  maxPages: integerBetween(1, 2000),
-});
-
-const fieldErrors = (field: AnyFieldApi) =>
-  field.state.meta.errors.map((e: unknown) => ({
-    message:
-      typeof e === "string" ? e : ((e as { message?: string } | undefined)?.message ?? "Invalid"),
-  }));
-
-/** Number input with min/max — TextField only covers text-like controls. */
-function NumberField({
-  field,
-  label,
-  description,
-  min,
-  max,
-  step,
-  className,
-}: {
-  field: AnyFieldApi;
-  label: string;
-  description?: string;
-  min: number;
-  max: number;
-  step?: number;
-  className?: string;
-}) {
-  const showError = field.state.meta.errors.length > 0;
-  return (
-    <Field className={className} data-invalid={showError || undefined}>
-      <FieldLabel htmlFor={field.name}>{label}</FieldLabel>
-      <Input
-        id={field.name}
-        name={field.name}
-        type="number"
-        inputMode="numeric"
-        min={min}
-        max={max}
-        step={step}
-        value={field.state.value}
-        onBlur={field.handleBlur}
-        onChange={(e) => field.handleChange(e.target.value)}
-        aria-invalid={showError || undefined}
-      />
-      {description ? <FieldDescription>{description}</FieldDescription> : null}
-      {showError ? <FieldError errors={fieldErrors(field)} /> : null}
-    </Field>
-  );
-}
-
-const useInvalidateTools = (availabilityKey: string) => {
-  const queryClient = useQueryClient();
-  return () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
-      queryClient.invalidateQueries({ queryKey: ["tools", availabilityKey, "availability"] }),
-    ]);
-};
-
 export function ToolsPage() {
   return (
-    <Page title="Tools" description="Assistant tools available in chats.">
+    <Page title="Tools" description="Web tools and memory available in chats.">
       <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
-      <DocumentParserSection />
     </Page>
   );
 }
@@ -524,114 +441,9 @@ function UrlReaderSection() {
 // Local PDF text extraction, used when a model cannot take a PDF natively.
 // Kept local on purpose — the alternative would ship the user's document to a
 // third-party parser.
-function DocumentParserSection() {
-  const { data: tool } = useSuspenseQuery(documentParserToolQuery);
-  const invalidate = useInvalidateTools("document-parsing");
 
-  const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
-
-  const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateDocumentParserTool({ data: { enabled } }),
-    onSuccess: invalidate,
-    onError: () => toast.error("Could not update document parsing."),
-  });
-
-  const form = useAppForm({
-    defaultValues: {
-      maxChars: String(config.maxChars ?? 120000),
-      maxPages: String(config.maxPages ?? 200),
-    },
-    validators: { onSubmit: Schema.toStandardSchemaV1(DocumentParserForm) },
-    onSubmit: async ({ value }) => {
-      try {
-        await updateDocumentParserTool({
-          data: { maxChars: Number(value.maxChars), maxPages: Number(value.maxPages) },
-        });
-      } catch {
-        toast.error("Could not save the document parsing settings.");
-        return;
-      }
-      form.reset({ maxChars: value.maxChars, maxPages: value.maxPages });
-      await invalidate();
-    },
-  });
-
-  if (!tool) {
-    return (
-      <Section title="Document parsing">
-        <EmptyState
-          icon={FileValidationIcon}
-          title="This tool isn't set up yet."
-          description="Document parsing will appear here once it is available on this instance."
-        />
-      </Section>
-    );
-  }
-
-  return (
-    <Section title="Document parsing">
-      <ListCard>
-        <ListRow>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">PDF text extraction</span>
-            <span className="text-muted-foreground text-xs">
-              Extracts text in-process so PDFs still work on models that cannot read files natively.
-              Nothing leaves this server. Scanned PDFs without embedded text are not supported.
-            </span>
-          </div>
-          <Switch
-            checked={tool.enabled}
-            onCheckedChange={(checked) => toggle.mutate(checked)}
-            disabled={toggle.isPending}
-            aria-label="Document parsing enabled"
-          />
-        </ListRow>
-
-        <ListRow className="flex-col items-stretch gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Backend</span>
-            <Badge variant="outline">{tool.kind === "local" ? "Local (unpdf)" : tool.kind}</Badge>
-          </div>
-          <form
-            noValidate
-            className="flex flex-col gap-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void form.handleSubmit();
-            }}
-          >
-            <div className="grid grid-cols-2 gap-3">
-              <form.Field
-                name="maxChars"
-                validators={{
-                  onSubmit: Schema.toStandardSchemaV1(integerBetween(1000, 500_000)),
-                }}
-              >
-                {(field) => (
-                  <NumberField
-                    field={field}
-                    label="Max characters"
-                    min={1000}
-                    max={500000}
-                    step={1000}
-                  />
-                )}
-              </form.Field>
-              <form.Field
-                name="maxPages"
-                validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1, 2000)) }}
-              >
-                {(field) => <NumberField field={field} label="Max pages" min={1} max={2000} />}
-              </form.Field>
-            </div>
-            <div className="flex gap-2">
-              <form.AppForm>
-                <form.SubmitButton size="sm">Save</form.SubmitButton>
-              </form.AppForm>
-            </div>
-          </form>
-        </ListRow>
-      </ListCard>
-    </Section>
-  );
-}
+// Semantic search for knowledge collections. Keyword search always works;
+// this adds an embedding model. Two things are deliberately explicit here:
+// enabling means document text is sent to that provider, and switching
+// models asks whether existing vectors stay comparable — a name or a matching
+// dimension count never decides that on its own.

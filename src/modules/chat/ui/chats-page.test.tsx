@@ -63,7 +63,7 @@ beforeEach(() => {
 });
 
 describe("ChatsPage", () => {
-  it("owns a full-height scroll container for the chat list", async () => {
+  it("scrolls through the shared Page container, heading and list included", async () => {
     listMock.mockResolvedValue({
       conversations: [conversation("a", "A chat", 5)],
       nextCursor: null,

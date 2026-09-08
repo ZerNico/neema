@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { authClient } from "~/modules/auth/client.ts";
+import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { membershipsQuery } from "./groups-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { ErrorState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
@@ -34,6 +35,7 @@ export const usersQuery = queryOptions({
 export function UsersPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+  const boundary = useIdentityBoundary();
   const session = authClient.useSession();
   // Read-only here; membership is edited on the group detail pages.
   const memberships = useQuery(membershipsQuery);
@@ -41,6 +43,17 @@ export function UsersPage() {
   const users = useQuery(usersQuery);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+
+  const impersonate = useMutation({
+    mutationFn: async (userId: string) => {
+      if (!boundary) throw new Error("Missing identity boundary");
+      await boundary.changeIdentity(async () => {
+        const { error } = await authClient.admin.impersonateUser({ userId });
+        if (error) throw new Error(error.message);
+      }, "/");
+    },
+    onError: () => toast.error("Could not impersonate the user."),
+  });
 
   const setRole = useMutation({
     mutationFn: async (input: { userId: string; role: "admin" | "user" }) => {
@@ -92,7 +105,7 @@ export function UsersPage() {
         <ListCard>
           {users.data?.map((user) => {
             const isSelf = user.id === session.data?.user.id;
-            const isAdmin = user.role === "admin";
+            const isAdmin = user.role?.split(",").includes("admin") ?? false;
             const groupNames = (memberships.data ?? [])
               .filter((membership) => membership.userId === user.id)
               .map((membership) => membership.groupName);
@@ -130,13 +143,34 @@ export function UsersPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label={`Actions for ${user.name}`}
-                        disabled={isSelf}
+                        disabled={isSelf || impersonate.isPending}
                       />
                     }
                   >
                     <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {!isSelf &&
+                      !isAdmin &&
+                      !user.banned &&
+                      !session.data?.session.impersonatedBy && (
+                        <DropdownMenuItem
+                          disabled={impersonate.isPending}
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `Impersonate ${user.name}?`,
+                                description: `You will have access to ${user.name}'s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
+                                confirmLabel: "Impersonate user",
+                                destructive: false,
+                              })
+                            )
+                              impersonate.mutate(user.id);
+                          }}
+                        >
+                          Impersonate user
+                        </DropdownMenuItem>
+                      )}
                     <DropdownMenuItem
                       onClick={() =>
                         setRole.mutate({ userId: user.id, role: isAdmin ? "user" : "admin" })

@@ -1,6 +1,7 @@
 import { GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ResearchToolActivity, WebToolActivity } from "../client/use-message-stream.ts";
+import type { ResearchToolActivity } from "../client/use-message-stream.ts";
+import type { ResearchStepActivity } from "./research-panel.tsx";
 import type { ResearchPhase } from "../research-schema.ts";
 import { hostOf } from "./favicon.tsx";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
@@ -38,14 +39,21 @@ const endedEarly: Partial<Record<ResearchPhase, { alone: string; note: string }>
 };
 
 /** The newest running target, else the newest target seen — what it is on now. */
-const currentDetail = (webActivities: ReadonlyArray<WebToolActivity>): string | null => {
-  let latest: WebToolActivity | undefined;
+const currentDetail = (webActivities: ReadonlyArray<ResearchStepActivity>): string | null => {
+  let latest: ResearchStepActivity | undefined;
   for (const activity of webActivities) {
     if (activity.status === "running") latest = activity;
     else if (!latest || latest.status !== "running") latest = activity;
   }
-  const target = latest?.targets.at(-1)?.trim();
-  if (!latest || !target) return null;
+  if (!latest) return null;
+  if (latest.family === "knowledge")
+    return latest.name === "list_documents"
+      ? "Listing documents"
+      : latest.name === "search_knowledge"
+        ? "Searching knowledge"
+        : "Reading documents";
+  const target = latest.targets.at(-1)?.trim();
+  if (!target) return null;
   return latest.name === "read_url" ? `Reading ${hostOf(target)}` : `Searching “${target}”`;
 };
 
@@ -56,7 +64,7 @@ export function ResearchActivityBlock({
   onOpen,
 }: {
   activity: ResearchToolActivity;
-  webActivities: WebToolActivity[];
+  webActivities: ResearchStepActivity[];
   /** Sources the message lists (cited or read); defaults to every hit the run kept. */
   sourceCount?: number;
   /** Opens the run's activity panel; absent when no panel host is mounted. */

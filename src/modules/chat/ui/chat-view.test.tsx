@@ -45,6 +45,14 @@ vi.mock("../client/time-zone.ts", () => ({ browserTimeZone: () => "Europe/Berlin
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: vi.fn(),
 }));
+vi.mock("~/modules/knowledge/server/functions.ts", () => ({
+  listKnowledgeCollections: vi.fn(),
+  getKnowledgeCollection: vi.fn(),
+}));
+vi.mock("~/modules/agents/server/functions.ts", () => ({
+  listAgents: vi.fn(),
+  getAgent: vi.fn(),
+}));
 
 // Enough router for a chip link and a navigation; the real one would drag the
 // whole route tree in.
@@ -68,7 +76,14 @@ vi.mock("./virtual-message-list.tsx", () => ({
   VirtualMessageList: ({ messages }: { messages: ReadonlyArray<Record<string, unknown>> }) => (
     <div>
       {messages.map((message) => (
-        <div key={String(message.id)} data-message-id={String(message.id)}>
+        <div
+          key={String(message.id)}
+          data-message-id={String(message.id)}
+          data-inherited-sources={JSON.stringify(message.inheritedSources)}
+          data-collection-ids={
+            Array.isArray(message.collectionIds) ? message.collectionIds.join(",") : undefined
+          }
+        >
           <span>{String(message.content)}</span>
           {(message.toolActivities as DisplayMessage["toolActivities"]).map((activity) =>
             activity.family === "ask" ? (
@@ -253,6 +268,14 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     kind: "text" | "reasoning" | "tool" | "compaction";
     delta: string;
   }>,
+  agent: null,
+  collectionIds: [] as string[],
+  generations: [] as Array<{
+    messageId: string;
+    agent: { name: string; icon: string } | null;
+    collectionIds: ReadonlyArray<string>;
+    knowledgeMode: "none" | "context" | "retrieval";
+  }>,
   toolCalls: [] as Array<Parameters<typeof toActivity>[0] & { messageId: string }>,
   attachments: [],
   branchedFrom,
@@ -315,6 +338,24 @@ const renderView = (
         enabled: true,
         contextLength: 128_000,
         capabilities: { reasoning: false, tools: false, vision: false, files: false },
+      },
+    ],
+  );
+  client.setQueryData(
+    ["knowledge", "collections"],
+    [
+      {
+        id: "c-contracts",
+        name: "Contracts",
+        description: "",
+        audience: "private",
+        canEdit: true,
+        ownerName: null,
+        documentCount: 1,
+        readyCount: 1,
+        failedCount: 0,
+        pendingCount: 0,
+        updatedAt: "2026-01-01T00:00:00.000Z",
       },
     ],
   );
@@ -880,6 +921,8 @@ describe("ChatView search mode", () => {
           searchEnabled: false,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
+          // Collections are per message, like files: always sent, empty here.
+          collectionIds: [],
         },
       }),
     );
@@ -927,6 +970,8 @@ describe("ChatView retry", () => {
           searchEnabled: false,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
+          // Collections are per message, like files: always sent, empty here.
+          collectionIds: [],
         },
       }),
     );
@@ -1052,5 +1097,134 @@ describe("ChatView branching", () => {
     renderView();
     expect(await screen.findByText("a1")).toBeInTheDocument();
     expect(screen.queryByTestId("compaction-activity")).toBeNull();
+  });
+});
+
+it("hydrates document source activities only from an explicit knowledge envelope", () => {
+  const source = {
+    kind: "document",
+    index: 1,
+    title: "Contract",
+    snippet: "Term",
+    read: true,
+    collectionId: "c",
+    documentId: "d",
+    versionId: "v",
+    startOffset: 0,
+    endOffset: 4,
+    page: null,
+    headingPath: "",
+  };
+  const result = {
+    family: "knowledge",
+    ok: true,
+    summary: {
+      targets: [],
+      documentsListed: 0,
+      passagesReturned: 1,
+      remainingOps: 63,
+      coverage: "Excerpt only",
+    },
+    sources: [source],
+  };
+  const row = {
+    id: "read",
+    toolName: "read_document",
+    turnIndex: 0,
+    callIndex: 0,
+    textOffset: 4,
+    status: "complete" as const,
+    arguments: {},
+    result,
+    error: null,
+  };
+  expect(toActivity(row)).toMatchObject({
+    family: "knowledge",
+    status: "complete",
+    textOffset: 4,
+    sources: [source],
+  });
+  expect(toActivity({ ...row, result: { ...result, family: undefined } })).toMatchObject({
+    family: "knowledge",
+    status: "error",
+  });
+  expect(toActivity({ ...row, result: { ...result, family: undefined } })).not.toHaveProperty(
+    "sources",
+  );
+});
+
+describe("ChatView knowledge placement", () => {
+  it("passes document sources forward for inherited citations", () => {
+    const source = {
+      kind: "document" as const,
+      index: 1,
+      title: "Contract",
+      snippet: "",
+      read: true,
+      collectionId: "c",
+      documentId: "d",
+      versionId: "v",
+      startOffset: 0,
+      endOffset: 10,
+      page: null,
+      headingPath: "",
+    };
+    renderView(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        message("m-answer", "assistant", "first"),
+        message("m-later", "assistant", "inherited [^1]"),
+      ],
+      toolCalls: [
+        {
+          id: "knowledge-call",
+          messageId: "m-answer",
+          toolName: "knowledge_context",
+          status: "complete",
+          turnIndex: 0,
+          callIndex: 0,
+          textOffset: 0,
+          result: {
+            v: 1,
+            family: "knowledge",
+            ok: true,
+            targets: [],
+            summary: {
+              targets: [],
+              documentsListed: 0,
+              passagesReturned: 1,
+              remainingOps: 63,
+              coverage: "Excerpt only",
+            },
+            sources: [source],
+          },
+          error: null,
+        } as never,
+      ],
+    });
+    expect(
+      JSON.parse(
+        document
+          .querySelector('[data-message-id="m-later"]')!
+          .getAttribute("data-inherited-sources")!,
+      ),
+    ).toEqual([source]);
+  });
+
+  it("hands a turn's collections to the question that added them, not the answer", () => {
+    renderView(null, {
+      generations: [
+        {
+          messageId: "m-answer",
+          agent: null,
+          collectionIds: ["c-contracts"],
+          knowledgeMode: "context",
+        },
+      ],
+    });
+    const user = document.querySelector('[data-message-id="m-user"]')!;
+    const answer = document.querySelector('[data-message-id="m-answer"]')!;
+    expect(user).toHaveAttribute("data-collection-ids", "c-contracts");
+    expect(answer).not.toHaveAttribute("data-collection-ids");
   });
 });

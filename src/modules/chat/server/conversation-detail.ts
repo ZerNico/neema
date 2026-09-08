@@ -40,21 +40,30 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   const userIds = messages.filter((m) => m.role === "user").map((m) => m.id);
   // All four hang off the same message-id snapshot and nothing else, so they go
   // out together rather than one after the other.
-  const { pendingChunks, toolCalls, compactionEvents, attachments } = yield* Effect.all(
-    {
-      // For streaming messages the client resumes via SSE using the chunks
-      // persisted so far; ship them inline so the first paint is complete.
-      pendingChunks: streaming ? repo.chunksAfter(streaming.id, 0) : Effect.succeed([]),
-      // Durable generation activity for all assistant messages. Tool results
-      // are summaries only; compaction events carry generated summaries and
-      // safe ordering metadata, never the transcript they summarized.
-      toolCalls: repo.listToolCalls(assistantIds),
-      compactionEvents: repo.listCompactionEvents(assistantIds),
-      // Flat, like tool calls — the view groups by messageId.
-      attachments: attachmentRepo.listForMessages(userIds),
-    },
-    { concurrency: "unbounded" },
-  );
+  const { pendingChunks, toolCalls, compactionEvents, attachments, defaults, generations } =
+    yield* Effect.all(
+      {
+        // For streaming messages the client resumes via SSE using the chunks
+        // persisted so far; ship them inline so the first paint is complete.
+        pendingChunks: streaming ? repo.chunksAfter(streaming.id, 0) : Effect.succeed([]),
+        // Durable generation activity for all assistant messages. Tool results
+        // are summaries only; compaction events carry generated summaries and
+        // safe ordering metadata, never the transcript they summarized.
+        toolCalls: repo.listToolCalls(assistantIds),
+        compactionEvents: repo.listCompactionEvents(assistantIds),
+        // Flat, like tool calls — the view groups by messageId.
+        attachments: attachmentRepo.listForMessages(userIds),
+        // Only the installed agent persists between turns. Standalone knowledge
+        // is message input, not a conversation default.
+        defaults: repo.getConversationDefaults(conversation.id),
+        // What each answer ran with: the agent (for the answer's label) and the
+        // collections (shown on the *question* that added them, like attached
+        // files). Snapshot text and document manifests stay server-side; only
+        // names travel, resolved client-side against what the viewer may read.
+        generations: repo.listGenerationDisplay(assistantIds),
+      },
+      { concurrency: "unbounded" },
+    );
   return {
     conversation,
     messages,
@@ -63,5 +72,14 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     compactionEvents,
     attachments,
     branchedFrom,
+    agent: defaults.agent
+      ? {
+          id: defaults.agent.agentId,
+          name: defaults.agent.snapshot.name,
+          icon: defaults.agent.snapshot.icon,
+          collectionIds: defaults.agent.snapshot.collectionIds,
+        }
+      : null,
+    generations,
   };
 });

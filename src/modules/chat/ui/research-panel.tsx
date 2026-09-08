@@ -1,7 +1,11 @@
-import { Alert02Icon, Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, File01Icon, Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo } from "react";
-import type { ResearchToolActivity, WebToolActivity } from "../client/use-message-stream.ts";
+import type {
+  KnowledgeToolActivity,
+  ResearchToolActivity,
+  WebToolActivity,
+} from "../client/use-message-stream.ts";
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
@@ -33,7 +37,36 @@ interface ActivityItem {
   url?: string;
 }
 
-const describe = (activity: WebToolActivity): { verb: string; items: ActivityItem[] } => {
+/** Web and knowledge steps, grouped by task like the runner groups them. */
+export type ResearchStepActivity = WebToolActivity | KnowledgeToolActivity;
+
+const describe = (activity: ResearchStepActivity): { verb: string; items: ActivityItem[] } => {
+  if (activity.family === "knowledge") {
+    const running = activity.status === "running";
+    const count = activity.summary?.passagesReturned ?? 0;
+    const documents = activity.summary?.documentsListed ?? 0;
+    // Targets are opaque version ids: name what happened, not the handle.
+    return activity.name === "list_documents"
+      ? {
+          verb: running ? "Listing documents" : "Listed documents",
+          items: running ? [] : [{ key: "count", label: `${documents} documents` }],
+        }
+      : activity.name === "search_knowledge"
+        ? {
+            verb: running ? "Searching knowledge" : "Searched knowledge",
+            items: [
+              ...(activity.summary?.targets ?? []).map((query) => ({
+                key: query,
+                label: `“${query}”`,
+              })),
+              ...(running ? [] : [{ key: "count", label: `${count} excerpts` }]),
+            ],
+          }
+        : {
+            verb: running ? "Reading documents" : "Read documents",
+            items: running ? [] : [{ key: "count", label: `${count} excerpts` }],
+          };
+  }
   const targets = activity.targets.map((target) => target.trim()).filter(Boolean);
   if (activity.name === "read_url")
     return {
@@ -46,9 +79,10 @@ const describe = (activity: WebToolActivity): { verb: string; items: ActivityIte
   };
 };
 
-function ActivityRow({ activity }: { activity: WebToolActivity }) {
+function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
   const { verb, items } = describe(activity);
   const failed = activity.status === "error";
+  const resultCount = activity.family === "web" ? activity.resultCount : undefined;
   return (
     <li className="flex min-w-0 gap-2 py-1 text-xs leading-relaxed">
       {/* h-lh: exactly one line of the text beside it, so the icon centres on
@@ -62,6 +96,12 @@ function ActivityRow({ activity }: { activity: WebToolActivity }) {
             />
           ) : failed ? (
             <HugeiconsIcon icon={Alert02Icon} className="text-warning size-3.5" aria-hidden />
+          ) : activity.family === "knowledge" ? (
+            <HugeiconsIcon
+              icon={File01Icon}
+              className="text-muted-foreground size-3.5"
+              aria-hidden
+            />
           ) : activity.name === "read_url" ? (
             <HugeiconsIcon icon={Tick02Icon} className="text-success size-3.5" aria-hidden />
           ) : (
@@ -98,8 +138,8 @@ function ActivityRow({ activity }: { activity: WebToolActivity }) {
             )}
           </span>
         ))}
-        {activity.resultCount !== undefined && activity.name !== "read_url" && !failed ? (
-          <span className="text-muted-foreground/70"> · {activity.resultCount} results</span>
+        {resultCount !== undefined && activity.name !== "read_url" && !failed ? (
+          <span className="text-muted-foreground/70"> · {resultCount} results</span>
         ) : null}
       </div>
     </li>
@@ -111,7 +151,7 @@ function TaskGroup({
   activities,
 }: {
   task: ResearchTaskProgress | null;
-  activities: WebToolActivity[];
+  activities: ResearchStepActivity[];
 }) {
   return (
     <section className="min-w-0">
@@ -150,14 +190,14 @@ export function ResearchActivityBody({
   running,
 }: {
   progress: ResearchProgress | undefined;
-  webActivities: WebToolActivity[];
+  webActivities: ResearchStepActivity[];
   running: boolean;
 }) {
   // Ordinal is dispatch order, which is what a reader expects to scroll through.
   // oxlint-disable-next-line no-array-sort -- fresh array
   const tasks = [...(progress?.tasks ?? [])].sort((a, b) => a.ordinal - b.ordinal);
-  const byTask = new Map<string, WebToolActivity[]>();
-  const unassigned: WebToolActivity[] = [];
+  const byTask = new Map<string, ResearchStepActivity[]>();
+  const unassigned: ResearchStepActivity[] = [];
   for (const activity of webActivities) {
     const list = activity.taskId ? byTask.get(activity.taskId) : undefined;
     if (activity.taskId && tasks.some((task) => task.id === activity.taskId)) {
@@ -208,7 +248,7 @@ const runIdOf = (activity: ResearchToolActivity) => activity.progress?.runId ?? 
 function researchPanelRequest(
   messageId: string,
   activity: ResearchToolActivity,
-  webActivities: WebToolActivity[],
+  webActivities: ResearchStepActivity[],
 ): DetailPanelRequest | null {
   const runId = runIdOf(activity);
   if (!runId) return null;
@@ -231,7 +271,7 @@ function researchPanelRequest(
 export function useResearchPanel(
   messageId: string,
   activity: ResearchToolActivity,
-  webActivities: WebToolActivity[],
+  webActivities: ResearchStepActivity[],
 ) {
   const panel = useDetailPanel();
   return useCallback(() => {
@@ -273,8 +313,9 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
     // A retry can replace the durable run before its fresh stream data arrives.
     if (currentRunId !== undefined && currentRunId !== runId) return null;
     const webActivities = activities.filter(
-      (candidate): candidate is WebToolActivity =>
-        candidate.family === "web" && candidate.runId === runId,
+      (candidate): candidate is ResearchStepActivity =>
+        (candidate.family === "web" || candidate.family === "knowledge") &&
+        candidate.runId === runId,
     );
     return researchPanelRequest(messageId, activity, webActivities);
   }, [messageId, currentRunId, activities, selectedId]);

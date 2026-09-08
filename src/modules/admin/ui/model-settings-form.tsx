@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useId, type Dispatch, type SetStateAction } from "react";
+import { useId, useState, type Dispatch, type SetStateAction } from "react";
 import {
   EMPTY_CAPABILITIES,
   MODEL_TYPES,
@@ -23,6 +23,7 @@ import {
   useComboboxAnchor,
 } from "~/ui/primitives/combobox";
 import {
+  FieldError,
   Field,
   FieldContent,
   FieldDescription,
@@ -31,6 +32,7 @@ import {
   FieldSet,
   FieldTitle,
 } from "~/ui/primitives/field";
+import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import {
   Select,
@@ -39,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 
 // Sentence-case labels for the type enum wherever it is shown to a person
@@ -151,6 +154,7 @@ export function ModelSettingsFields({
   setDraft,
   groups,
   modelKey,
+  onDetectDimensions,
   autoFocusDisplayName = false,
   disabled = false,
 }: {
@@ -158,9 +162,18 @@ export function ModelSettingsFields({
   setDraft: Dispatch<SetStateAction<ModelSettingsDraft>>;
   groups: PickableGroup[];
   modelKey?: string;
+  /**
+   * Asks the provider for the vector width with one probe request. Resolves to
+   * a number to fill in, or a message to show; absent hides the control.
+   */
+  onDetectDimensions?:
+    | (() => Promise<{ ok: true; dimensions: number } | { ok: false; error: string }>)
+    | undefined;
   autoFocusDisplayName?: boolean;
   disabled?: boolean;
 }) {
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
   const id = useId();
   const groupAnchor = useComboboxAnchor();
   const contextInvalid =
@@ -245,17 +258,53 @@ export function ModelSettingsFields({
           {draft.type === "embedding" ? (
             <Field data-invalid={dimensionsInvalid}>
               <FieldLabel htmlFor={`${id}-embedding-dimensions`}>Dimensions</FieldLabel>
-              <Input
-                id={`${id}-embedding-dimensions`}
-                type="number"
-                min={1}
-                step={1}
-                value={draft.embeddingDimensions}
-                onChange={(event) => patch({ embeddingDimensions: event.target.value })}
-                placeholder="Provider default"
-                aria-invalid={dimensionsInvalid}
-              />
-              <FieldDescription>Leave empty to use the provider default.</FieldDescription>
+              <div className="flex gap-2">
+                <Input
+                  id={`${id}-embedding-dimensions`}
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draft.embeddingDimensions}
+                  onChange={(event) => patch({ embeddingDimensions: event.target.value })}
+                  placeholder="Provider default"
+                  aria-invalid={dimensionsInvalid}
+                />
+                {onDetectDimensions ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={disabled || detecting}
+                    aria-busy={detecting || undefined}
+                    onClick={() => {
+                      setDetecting(true);
+                      setDetectError(null);
+                      void onDetectDimensions()
+                        .then((result) => {
+                          if (result.ok) patch({ embeddingDimensions: String(result.dimensions) });
+                          else setDetectError(result.error);
+                        })
+                        .catch((error: unknown) =>
+                          setDetectError(
+                            error instanceof Error
+                              ? error.message
+                              : "Could not detect embedding dimensions.",
+                          ),
+                        )
+                        .finally(() => setDetecting(false));
+                    }}
+                  >
+                    {detecting ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+                    Detect
+                  </Button>
+                ) : null}
+              </div>
+              {detectError ? <FieldError>{detectError}</FieldError> : null}
+              <FieldDescription>
+                Catalogs do not state this. Detect sends one short embedding request and reads the
+                width back, or leave it empty to use the provider default. Any width up to 8,192
+                works: knowledge search compares vectors exactly rather than through an index, so
+                wide models are fine at this scale.
+              </FieldDescription>
             </Field>
           ) : null}
         </div>

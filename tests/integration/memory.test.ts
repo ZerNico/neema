@@ -20,6 +20,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 11).toString("base64");
 
@@ -91,7 +92,7 @@ const createSource = async (userId: string, content = "I prefer concise answers"
 };
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,

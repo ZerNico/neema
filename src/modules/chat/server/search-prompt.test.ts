@@ -8,7 +8,11 @@ import {
   withSearchReminder,
 } from "./search-prompt.ts";
 
-const source = (index: number, overrides: Partial<CitableSource> = {}): CitableSource => ({
+const source = (
+  index: number,
+  overrides: Partial<Extract<CitableSource, { readonly url: string }>> = {},
+): CitableSource => ({
+  kind: "web" as const,
   index,
   url: `https://example.com/${index}`,
   title: `Result ${index}`,

@@ -3,6 +3,7 @@ import type { Source } from "./schema.ts";
 import { mergeSources } from "./sources.ts";
 
 const hit: Source = {
+  kind: "web" as const,
   index: 1,
   url: "https://a.example",
   title: "Search title",

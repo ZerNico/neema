@@ -112,3 +112,13 @@ export const GroupMemberInput = Schema.Struct({
   groupId: Schema.String,
   userId: Schema.String,
 });
+
+export const UpdateGroupMemberSharingInput = Schema.Struct({
+  ...GroupMemberInput.fields,
+  canShare: Schema.Boolean,
+});
+
+export const ProbeEmbeddingDimensionsInput = Schema.Struct({
+  providerId: Schema.String,
+  modelKey: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+});

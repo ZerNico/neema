@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { IdentityBoundary, useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
+import type { SessionIdentity } from "~/modules/auth/identity.ts";
+import { sessionIdentityQuery, sessionUserQuery } from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
@@ -13,24 +15,41 @@ export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ context }) => {
     const user = await context.queryClient.ensureQueryData(sessionUserQuery);
     if (!user) throw redirect({ to: "/login" });
-    return { user };
+    const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
+    if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
+    return { user, identity };
   },
   loader: async ({ context }) => {
     await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery(""));
-    return { user: context.user };
+    return { user: context.user, identity: context.identity };
   },
   component: AppLayout,
 });
 
 function AppLayout() {
-  const { user } = Route.useLoaderData();
-  useSync();
+  const { user, identity } = Route.useLoaderData();
+  return (
+    <IdentityBoundary identity={identity}>
+      <AuthenticatedLayout user={user} identity={identity} />
+    </IdentityBoundary>
+  );
+}
+
+function AuthenticatedLayout({
+  user,
+  identity,
+}: {
+  user: Parameters<typeof AppSidebar>[0]["user"];
+  identity: SessionIdentity;
+}) {
+  const boundary = useIdentityBoundary();
+  useSync(boundary?.reconcile);
 
   return (
     <AppMotionProvider>
       <ConfirmProvider>
         <SidebarProvider>
-          <SessionAppSidebar initialUser={user} />
+          <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
           <SidebarInset className="h-svh overflow-hidden">
             <DetailPanelProvider>
               <header className="border-border flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -54,9 +73,17 @@ function AppLayout() {
 
 export function SessionAppSidebar({
   initialUser,
+  impersonating = false,
 }: {
   initialUser: Parameters<typeof AppSidebar>[0]["user"];
+  impersonating?: boolean;
 }) {
   const { data: sessionUser } = useQuery(sessionUserQuery);
-  return <AppSidebar user={sessionUser ?? initialUser} />;
+  if (sessionUser === null || (sessionUser && sessionUser.id !== initialUser.id)) return null;
+  return (
+    <AppSidebar
+      user={sessionUser === undefined ? initialUser : sessionUser}
+      impersonating={impersonating}
+    />
+  );
 }

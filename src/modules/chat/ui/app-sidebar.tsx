@@ -1,34 +1,22 @@
 import {
   BubbleChatIcon,
-  Logout03Icon,
+  FolderLibraryIcon,
+  Robot01Icon,
   MoreHorizontalIcon,
   PlusSignIcon,
-  Settings02Icon,
-  UserCircleIcon,
-  UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
+import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { Suspense, useMemo, useState } from "react";
-import { toast } from "sonner";
-import { authClient } from "~/modules/auth/client.ts";
+import { AccountMenu } from "~/modules/auth/account-menu.tsx";
 import { conversationsInfiniteQuery } from "../client/queries.ts";
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
 import { createTitleRevealRegistry } from "./conversation-title.tsx";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
-import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { buttonVariants } from "~/ui/primitives/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "~/ui/primitives/dropdown-menu";
-import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import {
   Sidebar,
@@ -48,15 +36,16 @@ import { cn } from "~/ui/utils";
 
 export function AppSidebar({
   user,
+  impersonating = false,
 }: {
   user: { id: string; name: string; email: string; role?: string | null | undefined };
+  impersonating?: boolean;
 }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const onChatsPage = pathname.replace(/\/$/, "") === "/chats";
-
-  const isAdmin = user.role === "admin";
+  const trimmed = pathname.replace(/\/$/, "");
+  const onChatsPage = trimmed === "/chats";
+  const onAgentsPage = trimmed.startsWith("/agents");
+  const onKnowledgePage = trimmed.startsWith("/knowledge");
 
   return (
     <Sidebar>
@@ -72,6 +61,18 @@ export function AppSidebar({
               Chats
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
+              <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
+              Agents
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
+              <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
+              Knowledge
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
@@ -84,62 +85,7 @@ export function AppSidebar({
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
-                <Avatar className="size-8">
-                  <AvatarFallback>
-                    {user.name.slice(0, 2).toUpperCase() || (
-                      <HugeiconsIcon icon={UserIcon} strokeWidth={2} className="size-4" />
-                    )}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="text-muted-foreground truncate text-xs">{user.email}</span>
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="w-56">
-                <DropdownMenuItem render={<Link to="/settings" />}>
-                  <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />
-                  Settings
-                </DropdownMenuItem>
-                {isAdmin ? (
-                  <DropdownMenuItem render={<Link to="/admin" />}>
-                    <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
-                    Admin
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                {/* Same inset as a DropdownMenuItem so the switch lines up
-                    with the rows around it. */}
-                <div
-                  className="flex items-center px-3 py-2"
-                  // Keep the menu open while switching themes.
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ThemeSwitch className="w-full" />
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={async () => {
-                    const { error } = await authClient.signOut();
-                    if (error) {
-                      toast.error("Could not sign out.");
-                      return;
-                    }
-                    // The cache outlives the route, so signing out has to empty
-                    // it: the session, this list of conversations and every
-                    // conversation read through it all belong to the account
-                    // that just left.
-                    queryClient.clear();
-                    await navigate({ to: "/login" });
-                  }}
-                >
-                  <HugeiconsIcon icon={Logout03Icon} strokeWidth={2} />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AccountMenu user={user} impersonating={impersonating} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

@@ -1,8 +1,11 @@
+import { collectSources } from "./citations.ts";
+import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
+import { Option, Schema } from "effect";
 import { GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { conversationQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
@@ -27,17 +30,20 @@ import {
   stopGeneration,
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
-import { Composer } from "./composer.tsx";
+import { Composer, type ComposerHandle } from "./composer.tsx";
+import { agentIcon } from "./context-picker.tsx";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
 import { useSearchMode } from "./use-search-mode.ts";
+import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { mergeSource } from "~/modules/tools/sources.ts";
 import { Button } from "~/ui/primitives/button.tsx";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
@@ -64,6 +70,38 @@ export function toActivity(row: {
 }): ToolActivity {
   const textOffset = readTextOffset(row.textOffset);
   const position = textOffset === undefined ? {} : { textOffset };
+  if (row.toolName === "update_plan") {
+    const result = Option.getOrNull(Schema.decodeUnknownOption(PlanToolResult)(row.result));
+    const steps = result?.outcome === "updated" ? result.steps : null;
+    return {
+      family: "plan",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "running" ? "running" : steps ? "complete" : "error",
+      ...(steps ? { steps } : {}),
+    };
+  }
+  if (Schema.is(KnowledgeToolName)(row.toolName)) {
+    const result = Option.getOrNull(
+      Schema.decodeUnknownOption(KnowledgeActivityResult)(row.result),
+    );
+    return {
+      family: "knowledge",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      ...(row.researchRunId ? { runId: row.researchRunId } : {}),
+      ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "complete" && (!result || !result.ok) ? "error" : row.status,
+      ...(result ? { summary: result.summary, sources: [...result.sources] } : {}),
+      ...(row.error ? { error: row.error.message } : result?.error ? { error: result.error } : {}),
+    };
+  }
   if (row.toolName === "deep_research") {
     const result = (row.result ?? {}) as { progress?: unknown; sources?: ToolSource[] };
     const progress = readResearchProgress(result.progress);
@@ -269,6 +307,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     setEnabled: setSearchEnabled,
     reset: resetSearchEnabled,
   } = useSearchMode(effectiveModelId);
+  const context = useContextSelection({ mode: "installed", agent: data.agent });
 
   const sendMutation = useMutation({
     onMutate: () => setEditingMessageId(null),
@@ -286,10 +325,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+          ...context.sendFields,
         },
       }),
     onSuccess: () => {
       resetSearchEnabled();
+      context.settle();
       void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
     },
   });
@@ -661,6 +702,33 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Durable rows change only with query data or global action availability. Live
   // stream and edit state are layered below so every unrelated row keeps its
   // object identity across stream chunks and local editor updates.
+  const agentByMessage = useMemo(
+    () =>
+      new Map(
+        (data.generations ?? []).flatMap((row) =>
+          row.agent ? [[row.messageId, row.agent] as const] : [],
+        ),
+      ),
+    [data.generations],
+  );
+  // Collections belong to the turn that added them: the user message directly
+  // before each answer. That is where the composer showed them, so that is
+  // where they stay.
+  const collectionsByUserMessage = useMemo(() => {
+    const byAssistant = new Map(
+      (data.generations ?? []).map((row) => [row.messageId, row.collectionIds] as const),
+    );
+    const result = new Map<string, ReadonlyArray<string>>();
+    let previousUser: string | null = null;
+    for (const message of data.messages) {
+      if (message.role === "user") previousUser = message.id;
+      else if (message.role === "assistant" && previousUser) {
+        const ids = byAssistant.get(message.id);
+        if (ids && ids.length > 0) result.set(previousUser, ids);
+      }
+    }
+    return result;
+  }, [data.generations, data.messages]);
   const baseDisplay = useMemo(() => {
     // Citation numbering is conversation-scoped: each message inherits every
     // source discovered before it, deduplicated by index and message order.
@@ -673,14 +741,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       const retryTarget =
         message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
       const inheritedSources = [...inheritedByIndex.values()];
-      for (const activity of toolActivities) {
-        if (activity.family !== "web" && activity.family !== "research") continue;
-        for (const source of activity.sources ?? []) {
-          inheritedByIndex.set(
-            source.index,
-            mergeSource(inheritedByIndex.get(source.index), source),
-          );
-        }
+      for (const source of collectSources(toolActivities)) {
+        inheritedByIndex.set(source.index, mergeSource(inheritedByIndex.get(source.index), source));
       }
       const stamp = stamps?.get(message.id);
       const resolution = questionResponses.byAssistant.get(message.id);
@@ -725,6 +787,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
+        ...(agentByMessage.has(message.id) ? { agent: agentByMessage.get(message.id)! } : {}),
+        ...(collectionsByUserMessage.has(message.id)
+          ? { collectionIds: collectionsByUserMessage.get(message.id)! }
+          : {}),
         ...(message.role === "user" && message.status === "complete"
           ? {
               onEdit: () => openEdit(message.id),
@@ -751,6 +817,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     });
   }, [
     actionsDisabled,
+    agentByMessage,
+    collectionsByUserMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,
@@ -927,6 +995,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             onModelChange={setModelId}
             searchEnabled={searchEnabled}
             onSearchEnabledChange={setSearchEnabled}
+            context={context}
           />
         </div>
       </div>
@@ -943,11 +1012,41 @@ const prefersReducedMotion = () =>
   typeof window !== "undefined" &&
   (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
 
-export function NewChatView({ user }: { user: { name: string } }) {
+export function NewChatView({
+  user,
+  initialAgentId = null,
+}: {
+  user: { name: string };
+  /** Pre-selected from an agent page; sent as an explicit install. */
+  initialAgentId?: string | null;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modelId, setModelId] = useState<string | null>(null);
   const { enabled: searchEnabled, setEnabled: setSearchEnabled } = useSearchMode(modelId);
+  const context = useContextSelection({
+    mode: "draft",
+    agent: initialAgentId ? { id: initialAgentId, name: null } : null,
+  });
+  const selectedAgentId = context.selection.agent?.id ?? null;
+  const selectedAgent = context.detail;
+  const preferredModelApplied = useRef<string | null>(null);
+  const modelOverride = useRef<string | null>(null);
+  const searchOverride = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedAgentId) {
+      preferredModelApplied.current = null;
+      return;
+    }
+    if (!selectedAgent.data || preferredModelApplied.current === selectedAgentId) return;
+    preferredModelApplied.current = selectedAgentId;
+    if (searchOverride.current !== selectedAgentId)
+      setSearchEnabled(selectedAgent.data.searchEnabled);
+    if (modelOverride.current !== selectedAgentId && selectedAgent.data.model?.available)
+      setModelId(selectedAgent.data.model.id);
+  }, [selectedAgentId, selectedAgent.data, setSearchEnabled]);
+  const starters = selectedAgent.data?.starters ?? [];
+  const composer = useRef<ComposerHandle>(null);
   // Flipped the moment the first message actually leaves: the composer drops
   // into the position it occupies in ChatView, so the route swap that follows
   // lands on geometry that already matches.
@@ -971,6 +1070,7 @@ export function NewChatView({ user }: { user: { name: string } }) {
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+          ...context.sendFields,
         },
       }),
     // Fires when the request starts, i.e. after any queued upload settled —
@@ -1001,14 +1101,54 @@ export function NewChatView({ user }: { user: { name: string } }) {
       {/* Anchored to the bottom of its share of the column, so the greeting
           keeps its distance from the composer while both travel down. */}
       <div className="flex min-h-0 flex-1 flex-col justify-end px-4 pb-6">
-        <h1
+        <div
           className={cn(
-            "text-muted-foreground text-center text-2xl font-medium transition-all duration-200 ease-out motion-reduce:transition-none",
+            "flex flex-col items-center text-center transition-all duration-200 ease-out motion-reduce:transition-none",
             sending ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100",
           )}
         >
-          {greetingFor(user.name)}
-        </h1>
+          {selectedAgent.data ? (
+            // An agent chat announces itself: the agent, not the greeting,
+            // is what the first message goes to.
+            <>
+              <span className="bg-muted text-muted-foreground mb-3 grid size-12 place-items-center rounded-2xl">
+                <HugeiconsIcon
+                  icon={agentIcon(selectedAgent.data.icon)}
+                  strokeWidth={2}
+                  className="size-6"
+                  aria-hidden
+                />
+              </span>
+              <h1 className="text-foreground text-2xl font-medium">{selectedAgent.data.name}</h1>
+              {selectedAgent.data.description ? (
+                <p className="text-muted-foreground mt-1 max-w-md text-sm">
+                  {selectedAgent.data.description}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <h1 className="text-muted-foreground text-2xl font-medium">{greetingFor(user.name)}</h1>
+          )}
+        </div>
+        {starters.length > 0 && !sending ? (
+          <ul
+            aria-label="Conversation starters"
+            className="mx-auto mt-6 flex w-full max-w-3xl flex-wrap justify-center gap-2"
+          >
+            {starters.map((starter) => (
+              <li key={starter}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="max-w-72 rounded-3xl"
+                  onClick={() => composer.current?.seedDraft(starter)}
+                >
+                  <span className="truncate">{starter}</span>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       {/* Mirrors ChatView's composer wrapper exactly — same scrollbar gutter,
           max width and bottom padding — so the slide ends on the next route's
@@ -1025,9 +1165,25 @@ export function NewChatView({ user }: { user: { name: string } }) {
             }
             disabled={sendMutation.isPending}
             modelId={modelId}
-            onModelChange={setModelId}
+            onModelChange={(id, source) => {
+              if (source !== "default") modelOverride.current = selectedAgentId;
+              setModelId(id);
+            }}
             searchEnabled={searchEnabled}
-            onSearchEnabledChange={setSearchEnabled}
+            onSearchEnabledChange={(enabled) => {
+              searchOverride.current = selectedAgentId;
+              setSearchEnabled(enabled);
+            }}
+            context={{
+              ...context,
+              onAgentChange: (id) => {
+                preferredModelApplied.current = null;
+                modelOverride.current = null;
+                searchOverride.current = null;
+                context.onAgentChange(id);
+              },
+            }}
+            ref={composer}
           />
         </div>
       </div>

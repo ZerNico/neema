@@ -1,7 +1,7 @@
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { Cause, Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { GroupNameTaken, GroupNotFound } from "../errors.ts";
+import { GroupMemberNotFound, GroupNameTaken, GroupNotFound } from "../errors.ts";
 import { Db } from "~/server/db.ts";
 import { groupMembers, groups, user } from "~/db/schema/index.ts";
 
@@ -11,6 +11,8 @@ export interface GroupMember {
   userId: string;
   name: string;
   email: string;
+  role: string | null;
+  canShare: boolean;
 }
 export interface Membership {
   userId: string;
@@ -40,6 +42,11 @@ export class GroupRepo extends Context.Service<
     listGroups(): Effect.Effect<GroupWithCount[]>;
     createGroup(name: string): Effect.Effect<GroupRow, GroupNameTaken>;
     renameGroup(groupId: string, name: string): Effect.Effect<void, GroupNotFound | GroupNameTaken>;
+    setMemberSharing(
+      groupId: string,
+      userId: string,
+      canShare: boolean,
+    ): Effect.Effect<void, GroupMemberNotFound>;
     /** Cascades memberships and model-access links. */
     deleteGroup(groupId: string): Effect.Effect<void>;
     getGroup(groupId: string): Effect.Effect<GroupRow, GroupNotFound>;
@@ -98,6 +105,18 @@ export class GroupRepo extends Context.Service<
           if (rows.length === 0) return yield* new GroupNotFound({ groupId });
         }),
 
+        setMemberSharing: Effect.fn("GroupRepo.setMemberSharing")(
+          function* (groupId, userId, canShare) {
+            const rows = yield* db
+              .update(groupMembers)
+              .set({ canShare })
+              .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
+              .returning({ id: groupMembers.userId })
+              .pipe(Effect.orDie);
+            if (rows.length === 0) return yield* new GroupMemberNotFound({ groupId, userId });
+          },
+        ),
+
         deleteGroup: Effect.fn("GroupRepo.deleteGroup")(function* (groupId) {
           yield* db.delete(groups).where(eq(groups.id, groupId)).pipe(Effect.orDie);
         }),
@@ -115,7 +134,13 @@ export class GroupRepo extends Context.Service<
 
         listMembers: Effect.fn("GroupRepo.listMembers")(function* (groupId) {
           return yield* db
-            .select({ userId: user.id, name: user.name, email: user.email })
+            .select({
+              userId: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              canShare: groupMembers.canShare,
+            })
             .from(groupMembers)
             .innerJoin(user, eq(user.id, groupMembers.userId))
             .where(eq(groupMembers.groupId, groupId))

@@ -10,7 +10,13 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import { createModel, deleteModel, deleteProvider, updateProvider } from "../server/functions.ts";
+import {
+  probeEmbeddingDimensions,
+  createModel,
+  deleteModel,
+  deleteProvider,
+  updateProvider,
+} from "../server/functions.ts";
 import { groupsQuery } from "./groups-page.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
 import { ModelEditDialog, TALL_DIALOG_CLASS } from "./model-edit-dialog.tsx";
@@ -271,14 +277,11 @@ export function AddModelDialog({
   const [typed, setTyped] = useState("");
   const [draft, setDraft] = useState(emptyModelSettingsDraft);
 
-  // Selecting from the popup (incl. the creatable row) is the primary path;
-  // raw typed text works as a manual entry even without an explicit selection.
-  const effective: CatalogPick | null =
-    pick && (typed === "" || typed === pick.id)
-      ? pick
-      : typed.trim()
-        ? { id: typed.trim(), name: typed.trim(), type: "chat", contextLength: null, custom: true }
-        : null;
+  // Only an explicit selection opens the settings: a catalog row, or the
+  // creatable "Add … as custom model" row for ids the catalog does not know.
+  // Half-typed search text is not a model yet, and showing chat toggles for it
+  // suggests a choice that has not been made.
+  const effective: CatalogPick | null = pick && (typed === "" || typed === pick.id) ? pick : null;
   const settings = modelSettingsFromDraft(draft);
 
   const reset = () => {
@@ -386,6 +389,9 @@ export function AddModelDialog({
                 setDraft={setDraft}
                 groups={groups}
                 disabled={add.isPending}
+                onDetectDimensions={() =>
+                  probeEmbeddingDimensions({ data: { providerId, modelKey: effective.id } })
+                }
               />
             ) : null}
           </FieldGroup>

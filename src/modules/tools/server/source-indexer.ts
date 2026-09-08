@@ -1,36 +1,31 @@
-// Conversation-scoped citation numbering (Onyx-style), shared by every
-// source-producing tool in one generation: seeded from earlier messages'
-// persisted sources so a URL cited before keeps its number, and new sources —
-// whichever tool found them — continue one sequence instead of colliding.
+import type { DocumentLocation } from "../source-schema.ts";
+import { sourceIdentity, type SourceReference } from "../sources.ts";
 
+/** One citation sequence across web URLs and immutable document ranges. */
 export interface SourceIndexer {
   indexFor(url: string): number;
+  indexForDocument(location: DocumentLocation): number;
 }
 
-const sourceKey = (raw: string): string => {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return raw;
-    url.hash = "";
-    return url.href;
-  } catch {
-    return raw;
-  }
-};
-
 export const createSourceIndexer = (
-  seed: ReadonlyArray<{ index: number; url: string }>,
+  seed: ReadonlyArray<SourceReference & { readonly index: number }>,
 ): SourceIndexer => {
-  let nextIndex = seed.reduce((max, s) => Math.max(max, s.index), 0) + 1;
-  const indexByUrl = new Map<string, number>(seed.map((s) => [sourceKey(s.url), s.index]));
+  let nextIndex = seed.reduce((max, source) => Math.max(max, source.index), 0) + 1;
+  const indexes = new Map<string, number>();
+  for (const source of seed) {
+    const key = sourceIdentity(source);
+    if (!indexes.has(key)) indexes.set(key, source.index);
+  }
+  const allocate = (source: SourceReference) => {
+    const key = sourceIdentity(source);
+    const existing = indexes.get(key);
+    if (existing !== undefined) return existing;
+    const assigned = nextIndex++;
+    indexes.set(key, assigned);
+    return assigned;
+  };
   return {
-    indexFor(url) {
-      const key = sourceKey(url);
-      const existing = indexByUrl.get(key);
-      if (existing !== undefined) return existing;
-      const assigned = nextIndex++;
-      indexByUrl.set(key, assigned);
-      return assigned;
-    },
+    indexFor: (url) => allocate({ kind: "web", url }),
+    indexForDocument: (location) => allocate({ ...location, kind: "document" }),
   };
 };

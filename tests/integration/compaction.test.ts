@@ -16,6 +16,8 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { BlobStoreError, DocumentParseError } from "~/modules/attachments/errors.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
@@ -41,9 +43,20 @@ import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+
+// Knowledge-backed generations are exercised in knowledge.test.ts; here no
+// message carries a manifest, so the session is never opened.
+const FakeKnowledge = Layer.mergeAll(
+  Layer.succeed(KnowledgeSearch, {
+    search: () => Effect.die("knowledge search is not part of this suite"),
+    session: () => Effect.die("knowledge session is not part of this suite"),
+  } as never),
+  Layer.succeed(KnowledgeService, {} as never),
+);
 
 let container: StartedPostgreSqlContainer;
 /** No declared window: the estimator falls back to its default. */
@@ -86,6 +99,10 @@ const TOOL_SOURCE_URL = "https://example.com/current-source";
 
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
   generateText: (input) =>
     Effect.suspend(() => {
       gateway.summaryPrompts.push(JSON.stringify(input.prompt));
@@ -132,6 +149,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
           failures: [],
           sources: [
             {
+              kind: "web" as const,
               index: 1,
               url: TOOL_SOURCE_URL,
               title: "Current source",
@@ -225,7 +243,7 @@ const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -244,6 +262,7 @@ beforeAll(async () => {
     Layer.provideMerge(
       Layer.mergeAll(
         FakeGateway,
+        FakeKnowledge,
         FakeWebSearch,
         FakeUrlReader,
         FakeBlobStore,
@@ -1164,7 +1183,15 @@ describe("compaction inside a generation", () => {
             resultCount: 1,
             pagesFetched: 0,
             failures: [],
-            sources: [{ index: 7, url: sourceUrl, title: "Prior source", read: false }],
+            sources: [
+              {
+                kind: "web" as const,
+                index: 7,
+                url: sourceUrl,
+                title: "Prior source",
+                read: false,
+              },
+            ],
           },
         });
         const conversationId = turn.conversation.id;

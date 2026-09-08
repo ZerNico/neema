@@ -8,6 +8,7 @@ import {
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 
 const source = (index: number, url: string): ToolSource => ({
+  kind: "web" as const,
   index,
   url,
   title: `Title ${index}`,

@@ -21,6 +21,7 @@ import {
   listGroupMembers,
   removeGroupMember,
   renameGroup,
+  updateGroupMemberSharing,
 } from "../server/functions.ts";
 import { groupsQuery, isConflict } from "./groups-page.tsx";
 import { usersQuery } from "./users-page.tsx";
@@ -55,6 +56,7 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Skeleton } from "~/ui/primitives/skeleton";
+import { Switch } from "~/ui/primitives/switch";
 import { Spinner } from "~/ui/primitives/spinner";
 
 const membersQuery = (groupId: string) =>
@@ -99,6 +101,13 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     onError: () => toast.error("Could not remove the member."),
   });
 
+  const sharing = useMutation({
+    mutationFn: ({ userId, canShare }: { userId: string; canShare: boolean }) =>
+      updateGroupMemberSharing({ data: { groupId, userId, canShare } }),
+    onSuccess: invalidate,
+    onError: () => toast.error("Could not update sharing permission."),
+  });
+
   const removeWholeGroup = useMutation({
     mutationFn: () => deleteGroup({ data: { groupId } }),
     onSuccess: async () => {
@@ -129,7 +138,14 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       actions={
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-sm" aria-label="Group actions" />}
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Group actions"
+                disabled={sharing.isPending}
+              />
+            }
           >
             <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
@@ -165,11 +181,15 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         actions={
           <AddMemberPicker
             candidates={candidates}
-            pending={add.isPending}
+            pending={add.isPending || sharing.isPending || remove.isPending}
             onPick={(userId) => add.mutate(userId)}
           />
         }
       >
+        <p className="text-muted-foreground text-sm">
+          Can share into this group allows members to share their own agents and collections.
+          Disabling it leaves existing shares intact.
+        </p>
         {members.isLoading ? (
           <ListSkeleton />
         ) : members.isError ? (
@@ -191,11 +211,34 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                   <span className="truncate text-sm font-medium">{member.name}</span>
                   <span className="text-muted-foreground truncate text-xs">{member.email}</span>
                 </div>
+                {member.role === "admin" ? (
+                  <span className="text-muted-foreground text-xs">Always allowed — admin</span>
+                ) : (
+                  <label className="flex items-center gap-2 text-xs">
+                    Can share into this group<span className="sr-only">for {member.name}</span>
+                    <Switch
+                      checked={member.canShare}
+                      disabled={
+                        sharing.isPending ||
+                        remove.isPending ||
+                        add.isPending ||
+                        removeWholeGroup.isPending
+                      }
+                      aria-busy={
+                        (sharing.isPending && sharing.variables?.userId === member.userId) ||
+                        undefined
+                      }
+                      onCheckedChange={(canShare) =>
+                        sharing.mutate({ userId: member.userId, canShare })
+                      }
+                    />
+                  </label>
+                )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Remove ${member.name}`}
-                  disabled={remove.isPending}
+                  disabled={remove.isPending || sharing.isPending || removeWholeGroup.isPending}
                   onClick={async () => {
                     if (
                       await confirm({

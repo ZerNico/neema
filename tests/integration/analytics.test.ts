@@ -9,6 +9,10 @@ import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { usageEvents } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
@@ -27,8 +31,19 @@ import {
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+
+// Knowledge-backed generations are exercised in knowledge.test.ts; here no
+// message carries a manifest, so the session is never opened.
+const FakeKnowledge = Layer.mergeAll(
+  Layer.succeed(KnowledgeSearch, {
+    search: () => Effect.die("knowledge search is not part of this suite"),
+    session: () => Effect.die("knowledge session is not part of this suite"),
+  } as never),
+  Layer.succeed(KnowledgeService, {} as never),
+);
 
 let container: StartedPostgreSqlContainer;
 type Services =
@@ -69,6 +84,10 @@ const makeUsage = (input: {
 
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
   generateText: () =>
     Effect.succeed({
       text: "A generated title",
@@ -98,7 +117,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -110,7 +129,13 @@ beforeAll(async () => {
   const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, FakeBlobStore).pipe(
     Layer.provideMerge(PgLive),
   );
-  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    AgentRepo.layer,
+    ChatRepo.layer,
+    KnowledgeRepo.layer,
+    ProviderRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
@@ -118,6 +143,7 @@ beforeAll(async () => {
     Layer.provideMerge(
       Layer.mergeAll(
         FakeGateway,
+        FakeKnowledge,
         FakeWebSearch,
         FakeUrlReader,
         FakeBlobStore,
@@ -452,6 +478,52 @@ describe("usage aggregates", () => {
     };
   });
 
+  it("returns exact numeric token totals above 2^31 across every aggregate", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const userId = yield* makeUser();
+        const base = {
+          userId,
+          modelId: null,
+          kind: "chat" as const,
+          modelName: `Large ${userId}`,
+          status: "complete" as const,
+          inputTokens: 1_500_000_001,
+          outputTokens: 1_400_000_001,
+          cachedInputTokens: 1_300_000_001,
+          reasoningTokens: 1_200_000_001,
+          cost: 0,
+          costSource: "provider" as const,
+          createdAt: WINDOW_FROM,
+        };
+        // Each column fits int, but both the aggregate and per-row input +
+        // output exceed it. Group ordering must widen before adding too.
+        yield* db.insert(usageEvents).values([
+          { ...base, id: uuidv7() },
+          { ...base, id: uuidv7() },
+        ]);
+        const scope = { from: WINDOW_FROM, to: WINDOW_TO, userId };
+        return {
+          summary: yield* analytics.summary(scope),
+          daily: yield* analytics.daily(scope),
+          models: yield* analytics.byModel(scope),
+          users: (yield* analytics.byUser(scope)).filter((row) => row.userId === userId),
+        };
+      }),
+    );
+    const tokens = { inputTokens: 3_000_000_002, outputTokens: 2_800_000_002 };
+    const detail = { ...tokens, cachedInputTokens: 2_600_000_002, reasoningTokens: 2_400_000_002 };
+    expect(result.summary).toMatchObject(detail);
+    expect(result.daily).toHaveLength(1);
+    expect(result.daily[0]).toMatchObject(detail);
+    expect(result.models).toHaveLength(1);
+    expect(result.models[0]).toMatchObject(tokens);
+    expect(result.users).toHaveLength(1);
+    expect(result.users[0]).toMatchObject(tokens);
+  });
+
   it("sums the summary and flags incomplete cost", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -715,5 +787,71 @@ describe("usage aggregates", () => {
     );
     expect(result.a.inputTokens).toBe(310);
     expect(result.b).toMatchObject({ messages: 0, inputTokens: 0, cost: 0, activeUsers: 0 });
+  });
+});
+
+describe("embedding ledger isolation", () => {
+  it("includes provider costs and unknown attempts without manufacturing chat generations", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const analytics = yield* AnalyticsRepo;
+        const base = {
+          userId,
+          modelId: null,
+          modelName: "Embedding model",
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+        };
+        yield* analytics.record({
+          ...base,
+          kind: "embedding_document",
+          status: "complete",
+          inputTokens: 1000,
+          usageComplete: true,
+          cost: 0.02,
+          costSource: "pricing",
+        });
+        yield* analytics.record({
+          ...base,
+          kind: "embedding_query",
+          status: "aborted",
+          inputTokens: 0,
+          usageComplete: false,
+          cost: null,
+          costSource: null,
+        });
+        const scope = { userId, from: new Date(0), to: new Date(Date.now() + 60_000) };
+        const db = yield* Db;
+        return {
+          summary: yield* analytics.summary(scope),
+          daily: yield* analytics.daily(scope),
+          models: yield* analytics.byModel(scope),
+          events: yield* db.select().from(usageEvents).where(eq(usageEvents.userId, userId)),
+        };
+      }),
+    );
+    expect(result.summary).toMatchObject({
+      messages: 0,
+      titleGenerations: 0,
+      compactionGenerations: 0,
+      attempts: 2,
+      abortedAttempts: 1,
+      inputTokens: 1000,
+      outputTokens: 0,
+      cost: 0.02,
+      costComplete: false,
+    });
+    expect(result.daily).toHaveLength(1);
+    expect(result.daily[0]).toMatchObject({ messages: 0, attempts: 2, cost: 0.02 });
+    expect(result.models).toEqual([
+      { modelName: "Embedding model", messages: 0, inputTokens: 1000, outputTokens: 0, cost: 0.02 },
+    ]);
+    expect(result.events).toHaveLength(2);
+    for (const event of result.events) {
+      expect(event.conversationId).toBeNull();
+      expect(event.messageId).toBeNull();
+    }
   });
 });

@@ -1,10 +1,11 @@
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
   attachmentBlobs,
   attachments,
+  blobCleanupIntents,
   conversations,
   messageAttachments,
   messages,
@@ -12,6 +13,7 @@ import {
 import { attachmentKind } from "../constants.ts";
 import type { Attachment, MessageAttachment } from "../schema.ts";
 import { AttachmentNotAvailable } from "../errors.ts";
+import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type AttachmentBlobRow = typeof attachmentBlobs.$inferSelect;
@@ -57,10 +59,6 @@ const withBlobColumns = {
   parsedWith: attachmentBlobs.parsedWith,
 };
 
-// Deletes attachment rows and any blob left with no references, returning the
-// storage keys whose bytes the caller must remove after the commit. Physical
-// deletion is deliberately outside the transaction: a rolled-back transaction
-// must never leave the store missing bytes it still has rows for.
 // Postgres unique_violation, wherever the driver buried it in the cause
 // chain. Anything else raised during the claim insert is a real fault and
 // must not be dressed up as a user-level conflict.
@@ -79,35 +77,30 @@ const isUniqueViolation = (error: unknown): boolean => {
   return false;
 };
 
-const deleteAttachmentRows = (tx: DbTx, attachmentIds: ReadonlyArray<string>) =>
+const deleteAttachmentRows = (
+  tx: DbTx,
+  attachmentIds: ReadonlyArray<string>,
+  onlyUnclaimed = false,
+) =>
   Effect.gen(function* () {
     if (attachmentIds.length === 0) return [] as string[];
     const rows = yield* tx
       .select({ blobId: attachments.blobId })
       .from(attachments)
       .where(inArray(attachments.id, [...attachmentIds]));
-    yield* tx.delete(attachments).where(inArray(attachments.id, [...attachmentIds]));
-
     const blobIds = [...new Set(rows.map((row) => row.blobId))];
-    if (blobIds.length === 0) return [] as string[];
-    const orphaned = yield* tx
-      .select({ id: attachmentBlobs.id, storageKey: attachmentBlobs.storageKey })
-      .from(attachmentBlobs)
+    yield* lockBlobs(tx, blobIds);
+    yield* tx
+      .delete(attachments)
       .where(
         and(
-          inArray(attachmentBlobs.id, blobIds),
-          sql`not exists (select 1 from ${attachments} where ${attachments.blobId} = ${attachmentBlobs.id})`,
+          inArray(attachments.id, [...attachmentIds]),
+          onlyUnclaimed
+            ? sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id})`
+            : undefined,
         ),
       );
-    if (orphaned.length > 0) {
-      yield* tx.delete(attachmentBlobs).where(
-        inArray(
-          attachmentBlobs.id,
-          orphaned.map((blob) => blob.id),
-        ),
-      );
-    }
-    return orphaned.map((blob) => blob.storageKey);
+    return yield* collectOrphanedBlobs(tx, blobIds);
   });
 
 export class AttachmentRepo extends Context.Service<
@@ -125,7 +118,11 @@ export class AttachmentRepo extends Context.Service<
       size: number;
       mediaType: string;
       fileName: string;
-    }): Effect.Effect<{ attachment: Attachment; deduped: boolean }>;
+    }): Effect.Effect<{
+      attachment: Attachment;
+      deduped: boolean;
+      unusedStorageKey: string | null;
+    }>;
     /** Blob row for a (user, sha256) pair, or null. */
     findBlob(userId: string, sha256: string): Effect.Effect<AttachmentBlobRow | null>;
     /** Attachment + blob + who (if anyone) has claimed it, for policy checks. */
@@ -185,6 +182,24 @@ export class AttachmentRepo extends Context.Service<
     }): Effect.Effect<void>;
     /** Unclaimed uploads older than the cutoff (tab closed before sending). */
     sweepUnclaimed(olderThan: Date): Effect.Effect<ReadonlyArray<string>>;
+    /**
+     * Records that bytes are about to be written for a key no row owns yet.
+     * Written before the store call, so a crash in between is still recoverable.
+     */
+    recordBlobCandidate(storageKey: string): Effect.Effect<void>;
+    /** Drops a resolved intent once its bytes are registered or deleted. */
+    clearBlobIntents(storageKeys: ReadonlyArray<string>): Effect.Effect<void>;
+    /**
+     * Claims due cleanup intents. `orphan` keys are deleted outright;
+     * `candidate` keys are only returned once nothing owns them, because the
+     * registration that wrote them may have committed after the caller failed.
+     * Claiming backs the row off so a failing store cannot spin.
+     */
+    claimBlobCleanup(input: {
+      limit: number;
+      candidateCutoff: Date;
+      retryAfter: Date;
+    }): Effect.Effect<ReadonlyArray<string>>;
   }
 >()("chat/attachments/AttachmentRepo") {
   static readonly layer = Layer.effect(
@@ -209,24 +224,25 @@ export class AttachmentRepo extends Context.Service<
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              const existing = yield* selectBlob(tx, input.userId, input.sha256);
-              let blob = existing[0];
-              if (!blob) {
-                const inserted = yield* tx
-                  .insert(attachmentBlobs)
-                  .values({
-                    id: uuidv7(),
-                    userId: input.userId,
-                    sha256: input.sha256,
-                    storageKey: input.storageKey,
-                    size: input.size,
-                    mediaType: input.mediaType,
-                  })
-                  .onConflictDoNothing()
-                  .returning();
-                // A concurrent upload of the same bytes won the insert race.
-                blob = inserted[0] ?? (yield* selectBlob(tx, input.userId, input.sha256))[0]!;
-              }
+              const id = uuidv7();
+              // Upsert locks the winning incarnation until its new reference
+              // commits; selecting then inserting would race last-ref deletion.
+              const [blob] = yield* tx
+                .insert(attachmentBlobs)
+                .values({
+                  id,
+                  userId: input.userId,
+                  sha256: input.sha256,
+                  storageKey: input.storageKey,
+                  size: input.size,
+                  mediaType: input.mediaType,
+                })
+                .onConflictDoUpdate({
+                  target: [attachmentBlobs.userId, attachmentBlobs.sha256],
+                  set: { id: sql`${attachmentBlobs.id}` },
+                })
+                .returning();
+              if (!blob) return yield* Effect.die("blob upsert returned no row");
               const rows = yield* tx
                 .insert(attachments)
                 .values({
@@ -244,7 +260,8 @@ export class AttachmentRepo extends Context.Service<
                   size: blob.size,
                   mediaType: blob.mediaType,
                 }),
-                deduped: existing.length > 0,
+                deduped: blob.id !== id,
+                unusedStorageKey: blob.storageKey === input.storageKey ? null : input.storageKey,
               };
             }),
           )
@@ -302,7 +319,7 @@ export class AttachmentRepo extends Context.Service<
                   ),
                 );
               if (rows.length === 0) return null;
-              return yield* deleteAttachmentRows(tx, [attachmentId]);
+              return yield* deleteAttachmentRows(tx, [attachmentId], true);
             }),
           )
           .pipe(Effect.orDie);
@@ -325,6 +342,18 @@ export class AttachmentRepo extends Context.Service<
           .where(eq(messageAttachments.messageId, input.messageId))
           .pipe(Effect.orDie);
         const previous = linked.map((row) => row.attachmentId);
+        const affected = [...new Set([...previous, ...requested])];
+        if (affected.length > 0) {
+          const rows = yield* tx
+            .select({ blobId: attachments.blobId })
+            .from(attachments)
+            .where(and(inArray(attachments.id, affected), eq(attachments.userId, input.userId)))
+            .pipe(Effect.orDie);
+          yield* lockBlobs(
+            tx,
+            rows.map((row) => row.blobId),
+          ).pipe(Effect.orDie);
+        }
 
         // Drop every link first so a reorder cannot trip the (message,
         // position) or (attachment) unique indexes mid-flight.
@@ -412,6 +441,10 @@ export class AttachmentRepo extends Context.Service<
           )
           .pipe(Effect.orDie);
         if (linked.length === 0) return;
+        yield* lockBlobs(
+          tx,
+          linked.map((row) => row.blobId),
+        ).pipe(Effect.orDie);
 
         // Fresh attachment rows are not an option but a requirement:
         // message_attachments.attachment_id is unique, so a row can only ever
@@ -533,6 +566,96 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const recordBlobCandidate = Effect.fn("AttachmentRepo.recordBlobCandidate")(function* (
+        storageKey: string,
+      ) {
+        yield* db
+          .insert(blobCleanupIntents)
+          .values({ storageKey, kind: "candidate" })
+          // A key already marked for deletion stays marked: it is the same
+          // question either way — does any row own these bytes?
+          .onConflictDoNothing()
+          .pipe(Effect.orDie);
+      });
+
+      const clearBlobIntents = Effect.fn("AttachmentRepo.clearBlobIntents")(function* (
+        storageKeys: ReadonlyArray<string>,
+      ) {
+        if (storageKeys.length === 0) return;
+        yield* db
+          .delete(blobCleanupIntents)
+          .where(inArray(blobCleanupIntents.storageKey, [...storageKeys]))
+          .pipe(Effect.orDie);
+      });
+
+      const claimBlobCleanup = Effect.fn("AttachmentRepo.claimBlobCleanup")(function* (input: {
+        limit: number;
+        candidateCutoff: Date;
+        retryAfter: Date;
+      }) {
+        return yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              // Due-ness is judged by the database's clock, the same clock that
+              // stamped `not_before` and `created_at`. Comparing against a JS
+              // Date lets a few milliseconds of skew between app and database
+              // hide rows that are already due — and a reconciler that quietly
+              // sees nothing is exactly the failure this ledger exists to prevent.
+              const due = yield* tx
+                .select()
+                .from(blobCleanupIntents)
+                .where(
+                  and(
+                    sql`${blobCleanupIntents.notBefore} <= now()`,
+                    // An upload in flight is not yet evidence of anything.
+                    or(
+                      eq(blobCleanupIntents.kind, "orphan"),
+                      lte(blobCleanupIntents.createdAt, input.candidateCutoff),
+                    ),
+                  ),
+                )
+                .orderBy(asc(blobCleanupIntents.notBefore))
+                .limit(input.limit)
+                .for("update", { skipLocked: true });
+              if (due.length === 0) return [] as string[];
+
+              // Ownership, never the caller's error, decides a candidate: the
+              // registration may have committed even though it reported failure.
+              const owned = new Set(
+                (yield* tx
+                  .select({ storageKey: attachmentBlobs.storageKey })
+                  .from(attachmentBlobs)
+                  .where(
+                    inArray(
+                      attachmentBlobs.storageKey,
+                      due.map((row) => row.storageKey),
+                    ),
+                  )).map((row) => row.storageKey),
+              );
+              const settled = due
+                .filter((row) => owned.has(row.storageKey))
+                .map((row) => row.storageKey);
+              if (settled.length > 0)
+                yield* tx
+                  .delete(blobCleanupIntents)
+                  .where(inArray(blobCleanupIntents.storageKey, settled));
+              const removable = due
+                .filter((row) => !owned.has(row.storageKey))
+                .map((row) => row.storageKey);
+              if (removable.length > 0)
+                yield* tx
+                  .update(blobCleanupIntents)
+                  .set({
+                    attempts: sql`${blobCleanupIntents.attempts} + 1`,
+                    notBefore: input.retryAfter,
+                  })
+                  .where(inArray(blobCleanupIntents.storageKey, removable));
+              return removable;
+            }),
+          )
+          .pipe(Effect.orDie);
+      });
+
       const sweepUnclaimed = Effect.fn("AttachmentRepo.sweepUnclaimed")(function* (
         olderThan: Date,
       ) {
@@ -552,6 +675,7 @@ export class AttachmentRepo extends Context.Service<
               return yield* deleteAttachmentRows(
                 tx,
                 stale.map((row) => row.id),
+                true,
               );
             }),
           )
@@ -563,6 +687,9 @@ export class AttachmentRepo extends Context.Service<
         findBlob,
         findForAccess,
         deleteUnclaimed,
+        recordBlobCandidate,
+        clearBlobIntents,
+        claimBlobCleanup,
         reconcile,
         cloneForMessages,
         releaseForMessages,

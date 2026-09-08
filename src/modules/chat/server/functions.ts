@@ -80,9 +80,16 @@ export const sendMessage = createServerFn({ method: "POST" })
           searchEnabled: data.searchEnabled,
           timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
+          agentId: data.agentId,
+          collectionIds: data.collectionIds,
         }),
       ).pipe(
         Effect.catchTags({
+          AgentNotAvailable: () =>
+            Effect.die(new Response("The selected agent is not available", { status: 404 })),
+          KnowledgeNotAvailable: () =>
+            Effect.die(new Response("A selected collection is not available", { status: 404 })),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ConversationBusy: () =>
@@ -117,6 +124,11 @@ export const answerQuestion = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          KnowledgeNotAvailable: () =>
+            Effect.die(
+              new Response("Knowledge this answer used is no longer available", { status: 409 }),
+            ),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           QuestionUnavailable: () =>
             Effect.die(
               new Response("These questions are no longer available. Refresh the conversation.", {
@@ -162,6 +174,10 @@ export const retryMessage = createServerFn({ method: "POST" })
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
           AttachmentUnsupported: (e) =>
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          KnowledgeNotAvailable: () =>
+            Effect.die(
+              new Response("Knowledge this answer used is no longer available", { status: 409 }),
+            ),
         }),
       ),
     ),
@@ -221,6 +237,11 @@ export const editMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          KnowledgeNotAvailable: () =>
+            Effect.die(
+              new Response("Knowledge this answer used is no longer available", { status: 409 }),
+            ),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),

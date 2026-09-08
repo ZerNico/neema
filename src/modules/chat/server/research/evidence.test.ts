@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Source } from "~/modules/tools/schema.ts";
+import type { WebSource } from "~/modules/tools/schema.ts";
 import {
   boundEvidence,
   boundedSourceManifest,
@@ -7,7 +7,8 @@ import {
   evidenceTokens,
 } from "./evidence.ts";
 
-const sources: Source[] = Array.from({ length: 12 }, (_, i) => ({
+const sources: WebSource[] = Array.from({ length: 12 }, (_, i) => ({
+  kind: "web" as const,
   index: i + 1,
   url: `https://evidence.example/${i + 1}`,
   title: `Source ${i + 1}`,

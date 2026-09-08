@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
-import { getSessionUser } from "./server/functions.ts";
+import { getSessionUser, getSessionIdentity } from "./server/functions.ts";
 
 export const authClient = createAuthClient({
   plugins: [adminClient()],
@@ -21,5 +21,11 @@ export type SessionData = typeof authClient.$Infer.Session;
 export const sessionUserQuery = queryOptions({
   queryKey: ["session-user"],
   queryFn: () => getSessionUser(),
+  staleTime: 30_000,
+});
+
+export const sessionIdentityQuery = queryOptions({
+  queryKey: ["session-identity"],
+  queryFn: () => getSessionIdentity(),
   staleTime: 30_000,
 });

@@ -2,7 +2,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFootnoteFromMarkdown } from "mdast-util-gfm-footnote";
 import { gfmFootnote } from "micromark-extension-gfm-footnote";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
-import { mergeSources } from "~/modules/tools/sources.ts";
+import { mergeSources, sourceTarget } from "~/modules/tools/sources.ts";
 
 /** Matches the href streamdown gives a GFM footnote reference. */
 export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
@@ -30,7 +30,7 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
     // Indexes with no matching source — the model invented them.
     .replace(/\[\^(\d+)\]/g, (match, n: string) => (known.has(Number(n)) ? match : ""));
 
-  const definitions = sources.map((s) => `[^${s.index}]: ${s.url}`).join("\n");
+  const definitions = sources.map((s) => `[^${s.index}]: ${sourceTarget(s)}`).join("\n");
   // Mid-stream the answer can end inside an unterminated code fence; without
   // this the definitions would land *inside* it and render as code.
   const openFence = (body.match(/^\s*```/gm)?.length ?? 0) % 2 === 1 ? "\n```" : "";
@@ -77,7 +77,9 @@ export function selectAnswerSources(
 export function collectSources(activities: ReadonlyArray<ToolActivity>): ToolSource[] {
   return mergeSources(
     activities.flatMap((activity) =>
-      activity.family === "web" || activity.family === "research" ? (activity.sources ?? []) : [],
+      activity.family === "web" || activity.family === "research" || activity.family === "knowledge"
+        ? (activity.sources ?? [])
+        : [],
     ),
   );
 }

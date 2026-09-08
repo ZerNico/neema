@@ -1,4 +1,6 @@
 import { Layer, ManagedRuntime } from "effect";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
@@ -8,11 +10,17 @@ import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
+import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
+import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
@@ -32,11 +40,13 @@ const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).p
 // has to be provided to it rather than merged beside it.
 const ReposLayer = Layer.mergeAll(
   AnalyticsRepo.layer,
+  AgentRepo.layer,
   ChatRepo.layer,
   MemoryRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,
   GroupRepo.layer,
+  KnowledgeRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
@@ -48,7 +58,16 @@ const CoreLayer = Layer.mergeAll(
   AttachmentService.layer,
   DocumentParser.layer,
 ).pipe(Layer.provideMerge(ReposLayer));
-const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(CoreLayer));
+// Knowledge indexing sits above the gateway and the parser: it embeds through
+// one and extracts through the other.
+const KnowledgeLayer = Layer.mergeAll(
+  KnowledgeIndexer.workers.pipe(Layer.provideMerge(KnowledgeIndexer.layer)),
+  KnowledgeSearch.layer,
+  KnowledgeService.layer,
+  AgentService.layer,
+  SharingService.layer,
+).pipe(Layer.provideMerge(EmbeddingSpace.layer), Layer.provideMerge(CoreLayer));
+const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(KnowledgeLayer));
 const AppLayer = ChatService.layer.pipe(
   Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(CoreWithMemoryLayer))),
 );

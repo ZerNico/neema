@@ -47,7 +47,14 @@ const web: WebToolActivity = {
   textOffset: 4,
   turnIndex: 5,
   sources: [
-    { index: 1, url: "https://example.org", title: "Evidence", snippet: "Finding", read: true },
+    {
+      kind: "web" as const,
+      index: 1,
+      url: "https://example.org",
+      title: "Evidence",
+      snippet: "Finding",
+      read: true,
+    },
   ],
 };
 

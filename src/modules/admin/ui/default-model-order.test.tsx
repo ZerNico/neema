@@ -82,7 +82,8 @@ describe("DefaultModelOrder", () => {
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const user = userEvent.setup();
     fireEvent.click(screen.getByRole("combobox", { name: "Model to add" }));
-    const option = await screen.findByRole("option", { name: "Beta · Provider" });
+    // The option's accessible name concatenates the name and provider spans.
+    const option = await screen.findByRole("option", { name: /^Beta\s*Provider$/ });
     expect(screen.queryByRole("option", { name: /Embedding/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Alpha/ })).not.toBeInTheDocument();
     await user.click(option);

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Context, Effect } from "effect";
 import { BlobStoreError } from "../errors.ts";
 
@@ -6,8 +7,8 @@ import { BlobStoreError } from "../errors.ts";
  * `blobStorageKey` below; every backend must treat them as flat identifiers
  * (the filesystem one maps the slashes to directories, S3 will not need to).
  *
- * `put` is idempotent: keys are content-addressed, so re-putting the same key
- * is a no-op rather than an error.
+ * `put` is idempotent for a given incarnation. Database deduplication chooses
+ * the shared incarnation; a new upload never reuses a deleted object key.
  */
 export class BlobStore extends Context.Service<
   BlobStore,
@@ -27,12 +28,17 @@ export class BlobStore extends Context.Service<
 
 // Two levels of hex sharding keep any single directory small even with a lot
 // of blobs per user.
-export const blobStorageKey = (userId: string, sha256: string): string =>
-  `blobs/${userId}/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}`;
+export const blobStorageKey = (
+  userId: string,
+  sha256: string,
+  incarnation: string = randomUUID(),
+): string => `blobs/${userId}/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}.${incarnation}`;
 
 export const userBlobPrefix = (userId: string): string => `blobs/${userId}`;
 
-const KEY_PATTERN = /^blobs\/[A-Za-z0-9_-]{1,64}(\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64})?$/;
+const KEY_PATTERN =
+  /^blobs\/[A-Za-z0-9_-]{1,64}\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64}\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const PREFIX_PATTERN = /^blobs\/[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Keys and prefixes only ever come from the helpers above, but they end up as
@@ -45,6 +51,6 @@ export const assertValidBlobKey = (
   operation: BlobStoreError["operation"],
   key: string,
 ): Effect.Effect<void, BlobStoreError> =>
-  isValidBlobKey(key)
+  (operation === "deletePrefix" ? PREFIX_PATTERN.test(key) : isValidBlobKey(key))
     ? Effect.void
     : Effect.fail(new BlobStoreError({ operation, key, message: "malformed storage key" }));

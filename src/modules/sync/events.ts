@@ -5,6 +5,10 @@ import { Schema } from "effect";
 // events small enough for Postgres NOTIFY (8kB limit) and avoids stale data.
 
 export const SyncEvent = Schema.Union([
+  // No resource ids or titles: every client refetches only its authorized view.
+  Schema.Struct({ type: Schema.Literal("resources.changed") }),
+  // Frequent worker transitions affect knowledge status only, not access policy.
+  Schema.Struct({ type: Schema.Literal("knowledge.index.changed") }),
   Schema.Struct({
     type: Schema.Literal("conversation.created"),
     conversationId: Schema.String,

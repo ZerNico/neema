@@ -1,3 +1,8 @@
+import { File01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import type { DocumentSource } from "~/modules/tools/source-schema.ts";
+import { documentLocationLabel } from "~/modules/tools/sources.ts";
+import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
 import { useCallback } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
@@ -5,6 +10,7 @@ import { Badge } from "~/ui/primitives/badge";
 import { useDetailPanel } from "~/ui/detail-panel";
 
 function SourceRow({ source }: { source: ToolSource }) {
+  if (source.kind === "document") return <DocumentSourceRow source={source} />;
   return (
     <li className="rounded-lg p-3">
       <a
@@ -31,6 +37,36 @@ function SourceRow({ source }: { source: ToolSource }) {
           {source.read ? "page extracted" : "snippet only"}
         </Badge>
       </a>
+    </li>
+  );
+}
+
+function DocumentSourceRow({ source }: { source: DocumentSource }) {
+  const open = useDocumentSourcePanel(source);
+  return (
+    <li className="rounded-lg p-3">
+      <button
+        type="button"
+        onClick={open}
+        className="group flex w-full flex-col gap-1.5 text-left"
+        aria-label={`Source: ${source.title || "Document"}`}
+      >
+        <div className="text-muted-foreground flex items-center gap-2 text-xs">
+          <HugeiconsIcon icon={File01Icon} className="size-4" aria-hidden />
+          <span className="min-w-0 truncate">{documentLocationLabel(source)}</span>
+        </div>
+        <p className="group-hover:text-primary text-sm leading-snug font-medium transition-colors">
+          {source.title || "Document"}
+        </p>
+        {source.snippet ? (
+          <p className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">
+            {source.snippet}
+          </p>
+        ) : null}
+        <Badge variant="secondary" className="mt-0.5 w-fit text-2xs">
+          {source.read ? "excerpt read" : "search excerpt"}
+        </Badge>
+      </button>
     </li>
   );
 }

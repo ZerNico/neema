@@ -21,7 +21,9 @@ import {
   readPresentedQuestions,
 } from "~/modules/tools/ask-user-schema.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
-import { Prompt, type Response } from "effect/unstable/ai";
+import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
+import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
+import { Prompt, Tool, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
@@ -33,6 +35,19 @@ import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.t
 import { memorySystemPolicy, renderMemoryContext } from "~/modules/memory/server/memory-prompt.ts";
 import { prepareMemoryTool } from "~/modules/memory/server/memory-tool.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
+import {
+  KNOWLEDGE_SYSTEM_HINT,
+  prepareKnowledgeContext,
+  type PreparedKnowledgeContext,
+} from "~/modules/knowledge/server/context.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { prepareKnowledgeTools } from "~/modules/knowledge/server/tools.ts";
+import {
+  KNOWLEDGE_TOOL_LIMITS,
+  KnowledgeToolName,
+  projectKnowledgeToolResult,
+} from "~/modules/knowledge/tool-schema.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
@@ -41,12 +56,13 @@ import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
-import { mergeSource, mergeSources } from "~/modules/tools/sources.ts";
-import type { Source, ToolChunkEnvelope } from "~/modules/tools/schema.ts";
+import { isWebSource, sourceTarget, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
+import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
 import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
   calibrationFactor,
   compileActivePrompt,
+  computeBudget,
   estimatePromptTokens,
   latestValidCheckpoint,
   prepareCompactedActiveRounds,
@@ -91,6 +107,12 @@ export type StreamEvent =
 // One assistant message may span several model turns when tools are involved:
 // model → tool_calls → execute → feed results back → model continues.
 const MAX_TOOL_ROUNDS = 4;
+/**
+ * Knowledge-backed chats list, read and compare documents in batches, which
+ * takes more rounds than a web lookup. A ceiling, not a target: the budget of
+ * knowledge operations and the tools-off final pass still apply.
+ */
+const MAX_KNOWLEDGE_TOOL_ROUNDS = 24;
 
 // Message and tool-call rows are shipped to the client wholesale, so the
 // stored error must not carry provider stack traces or internal URLs — the
@@ -139,6 +161,8 @@ export class StreamEngine extends Context.Service<
       const providers = yield* ProviderRepo;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
+      const knowledgeSearch = yield* KnowledgeSearch;
+      const knowledgeService = yield* KnowledgeService;
       const attachments = yield* AttachmentRepo;
       const promptDeps: PromptDeps = {
         attachments,
@@ -188,6 +212,9 @@ export class StreamEngine extends Context.Service<
         if (currentMessage?.generationMode === "research" && !claim) return;
         const research = claim && repo.research ? { ...claim, store: repo.research } : null;
         let researchPhase: ResearchPhase = "error";
+        // The frozen configuration this answer runs with. Dispatch consumes it
+        // read-only: identity is decided at turn time, access is rechecked here.
+        const config = yield* repo.getGenerationConfig(input.messageId);
         const runtimeContext = runtimeContextMessage(new Date(), input.timeZone);
         // Snapshot the model row up front: the ledger wants its display name
         // and pricing even if the admin deletes or reprices it mid-generation.
@@ -398,6 +425,19 @@ export class StreamEngine extends Context.Service<
 
         const generate = Effect.gen(function* () {
           if (research) {
+            // Research reads the same frozen configuration; its knowledge
+            // session is scoped to `generate` like the ordinary path's.
+            const researchKnowledge =
+              config.knowledgeMode !== "none"
+                ? {
+                    session: yield* knowledgeSearch.session({
+                      userId: input.userId,
+                      collectionIds: config.collectionIds,
+                      manifest: config.manifest,
+                    }),
+                    service: knowledgeService,
+                  }
+                : null;
             const work = runResearch({
               store: research.store,
               fence: research.fence,
@@ -410,6 +450,8 @@ export class StreamEngine extends Context.Service<
               history: completed,
               priorSources,
               runtimeContext,
+              config,
+              knowledge: researchKnowledge,
               modelId: input.modelId,
               userId: input.userId,
               startedAt: research.run.createdAt.getTime(),
@@ -450,17 +492,45 @@ export class StreamEngine extends Context.Service<
           // earlier persisted sources seed it for direct reads and follow-ups.
           const authority = createUrlAuthority([
             ...readerUrls,
-            ...priorSources.map((source) => source.url),
+            ...priorSources.filter(isWebSource).map((source) => source.url),
           ]);
+          const indexer = createSourceIndexer(priorSources);
           const webTools = model?.capabilities.tools
             ? yield* prepareWebTools({
                 webSearch,
                 urlReader,
-                indexer: createSourceIndexer(priorSources),
+                indexer,
                 authority,
                 requestSearch: input.searchEnabled,
               })
             : undefined;
+
+          // Knowledge: one authorized session over the saved manifest for the
+          // whole generation. Access loss anywhere fails the generation rather
+          // than answering from the part that remains. The session is scoped
+          // to `generate`, so a stopped answer closes it.
+          const knowledgeSession =
+            config.knowledgeMode !== "none"
+              ? yield* knowledgeSearch.session({
+                  userId: input.userId,
+                  collectionIds: config.collectionIds,
+                  manifest: config.manifest,
+                })
+              : null;
+          const askTools = model?.capabilities.tools ? prepareAskUserTool() : undefined;
+          // The checklist is an agent preference. Retry and edit start from a
+          // clean list: a completed step is a claim about work this attempt did.
+          const planTools =
+            config.planEnabled && model?.capabilities.tools ? preparePlanTool() : undefined;
+          let knowledgeContext: PreparedKnowledgeContext | null = null;
+          const knowledgeTools =
+            knowledgeSession && model?.capabilities.tools
+              ? yield* prepareKnowledgeTools({
+                  userId: input.userId,
+                  session: knowledgeSession,
+                  indexer,
+                }).pipe(Effect.provideService(KnowledgeService, knowledgeService))
+              : null;
 
           // Memory is one stable snapshot for this whole generation. A memory
           // saved during a tool round becomes context on the next user turn, not
@@ -484,11 +554,15 @@ export class StreamEngine extends Context.Service<
           // it cannot become trusted durable provenance. Web tools may coexist with
           // memory initially because their output has not entered the transcript
           // yet; once either web tool runs, later rounds remove save_memory.
+          // Knowledge-backed generations never offer save_memory: document text
+          // sits in the prompt or in tool results, and neither may become
+          // durable personal memory.
           const memoryTools =
             model?.capabilities.tools &&
             memorySettings.effectiveAutoSaveEnabled &&
             sourceUserMessage &&
-            !sourceHasAttachments
+            !sourceHasAttachments &&
+            !knowledgeSession
               ? prepareMemoryTool({
                   memory,
                   userId: input.userId,
@@ -498,16 +572,19 @@ export class StreamEngine extends Context.Service<
                   ordinals: renderedMemory?.ordinals ?? new Map(),
                 })
               : undefined;
-          const askTools = model?.capabilities.tools ? prepareAskUserTool() : undefined;
-          const nonMemoryToolkit = yield* mergeToolGroups([
+          const commonGroups = [
             ...(webTools ? [webTools.group] : []),
+            ...(planTools ? [planTools.group] : []),
             ...(askTools ? [askTools] : []),
-          ]);
-          const toolkit = yield* mergeToolGroups([
-            ...(askTools ? [askTools] : []),
-            ...(webTools ? [webTools.group] : []),
+          ];
+          // Reserve retrieval schemas before preparation: a context selection
+          // may downgrade once rendered. Execution tools are built afterwards.
+          const budgetToolkit = yield* mergeToolGroups([
+            ...commonGroups,
+            ...(knowledgeTools ? [knowledgeTools.group] : []),
             ...(memoryTools ? [memoryTools.group] : []),
           ]);
+          let retrievalEnabled = config.knowledgeMode === "retrieval";
 
           // Select once, before resolving attachments: the checkpoint replaces
           // its covered prefix entirely, including blobs that may no longer exist.
@@ -554,7 +631,7 @@ export class StreamEngine extends Context.Service<
           // Keyed off web tools, not any toolkit: memory must not preserve
           // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
-            webToolsEnabled: webTools !== undefined,
+            webToolsEnabled: webTools !== undefined || knowledgeSession !== null,
             messages: historySuffix,
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
@@ -567,19 +644,34 @@ export class StreamEngine extends Context.Service<
           };
           const sourceManifest = () =>
             recapSources()
-              .map((source) => `[${source.index}] ${source.title} — ${source.url}`)
+              .map((source) => `[${source.index}] ${source.title} — ${sourceTarget(source)}`)
               .join("\n");
-          const reminderPrompt = (lastCycle: boolean) =>
-            webTools
-              ? Prompt.make([
-                  systemReminderMessage(
-                    buildSearchReminder({ sources: recapSources(), lastCycle }),
-                  ),
-                ])
+          // The knowledge budget line is per-turn state: it belongs in the
+          // trailing reminder, never in the cacheable prefix.
+          const knowledgeReminder = () =>
+            knowledgeTools && retrievalEnabled
+              ? `Knowledge operations remaining: ${knowledgeTools.remaining()} of ${KNOWLEDGE_TOOL_LIMITS.operations}. Only returned excerpts are evidence; disclose unread or unavailable material.`
               : null;
+          // The current checklist replaces the previous one here too: the prompt
+          // never accumulates old revisions.
+          const planReminder = () => {
+            const snapshot = planTools?.current();
+            return snapshot ? renderPlanReminder(snapshot) : null;
+          };
+          const reminderPrompt = (lastCycle: boolean) => {
+            const sections = [
+              webTools ? buildSearchReminder({ sources: recapSources(), lastCycle }) : null,
+              knowledgeReminder(),
+              planReminder(),
+            ].filter(Boolean);
+            return sections.length > 0
+              ? Prompt.make([systemReminderMessage(sections.join("\n\n"))])
+              : null;
+          };
           // History planning excludes the runtime block; reserve its cost here.
           // Active-round planning already counts it in buildBaseTranscript().
           const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
+            ...(knowledgeContext?.messages ?? []),
             runtimeContext,
             ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
           ];
@@ -588,6 +680,9 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
+            ...(knowledgeSession
+              ? [{ role: "system" as const, content: KNOWLEDGE_SYSTEM_HINT }]
+              : []),
             ...(askTools
               ? [
                   {
@@ -618,6 +713,16 @@ export class StreamEngine extends Context.Service<
                   },
                 ]
               : []),
+            // Agent instructions are user-level configuration: they shape the
+            // answer but cannot override application policy above them.
+            ...(config.snapshot?.instructions.trim()
+              ? [
+                  {
+                    role: "user" as const,
+                    content: `<agent-instructions name=${JSON.stringify(config.snapshot.name)}>\n${config.snapshot.instructions}\n</agent-instructions>`,
+                  },
+                ]
+              : []),
           ];
 
           // Synchronously, before a single token streams: a summary written
@@ -644,11 +749,112 @@ export class StreamEngine extends Context.Service<
             },
           );
 
+          // Selected knowledge, decided against the exact rendered prompt: the
+          // turn-time mode is a ceiling ("context" may still downgrade to
+          // retrieval here), never the other way round. It sits after the
+          // retained history and before the runtime block, and is itself part of
+          // the protected trailing context — overflow repair drops history
+          // turns, not document bodies.
+          if (knowledgeSession && config) {
+            const toolSchemaTokens = budgetToolkit
+              ? estimatePromptTokens([
+                  {
+                    role: "assistant",
+                    content: JSON.stringify(
+                      Object.values(budgetToolkit.tools).map((tool) => ({
+                        name: tool.name,
+                        description: tool.description ?? "",
+                        parameters: Tool.getJsonSchema(tool),
+                      })),
+                    ),
+                  },
+                ])
+              : 0;
+            const prepared = yield* prepareKnowledgeContext({
+              userId: input.userId,
+              session: knowledgeSession,
+              indexer,
+              toolsSupported: model?.capabilities.tools ?? false,
+              mode: config.knowledgeMode === "retrieval" ? "retrieval" : "context",
+              budget: computeBudget({
+                contextLength: model?.contextLength,
+                webToolsEnabled: webTools !== undefined,
+              }),
+              baseMessages: [
+                ...fixedPrefix,
+                ...compaction.injectedMessages,
+                ...historyMessages.slice(compaction.startIndex),
+                ...historyBudgetTail(false),
+              ],
+              toolSchemaTokens,
+              toolResultReserveTokens: knowledgeTools ? KNOWLEDGE_TOOL_LIMITS.resultTokens : 0,
+              priorUsage,
+            }).pipe(Effect.provideService(KnowledgeService, knowledgeService));
+            knowledgeContext = prepared;
+            retrievalEnabled = prepared.mode === "retrieval";
+            if (prepared.activity) {
+              // Direct context registers its sources like a tool would, through
+              // an application-authored activity: replay, reload and branch all
+              // render these citations from the same durable row.
+              const rowId = uuidv7();
+              yield* repo.insertToolCall({
+                id: rowId,
+                messageId: input.messageId,
+                turnIndex: 0,
+                callIndex: 0,
+                textOffset: 0,
+                providerCallId: `knowledge-context:${rowId}`,
+                toolName: "knowledge_context",
+                arguments: {},
+              });
+              yield* pushToolChunk({
+                v: 1,
+                family: "knowledge",
+                phase: "start",
+                callId: rowId,
+                name: "knowledge_context",
+                turnIndex: 0,
+                callIndex: 0,
+                textOffset: 0,
+              });
+              for (const source of prepared.activity.sources)
+                sourcesByIndex.set(
+                  source.index,
+                  mergeSource(sourcesByIndex.get(source.index), source),
+                );
+              yield* repo.completeToolCall({
+                id: rowId,
+                result: prepared.activity as unknown as JsonValue,
+                status: "complete",
+              });
+              yield* pushToolChunk({
+                v: 1,
+                phase: "result",
+                callId: rowId,
+                name: "knowledge_context",
+                ...prepared.activity,
+              });
+            }
+          }
+          const executionGroups = [
+            ...commonGroups,
+            ...(retrievalEnabled && knowledgeTools ? [knowledgeTools.group] : []),
+          ];
+          const nonMemoryToolkit = yield* mergeToolGroups(executionGroups);
+          const toolkit = memoryTools
+            ? yield* mergeToolGroups([...executionGroups, memoryTools.group])
+            : nonMemoryToolkit;
+          const maxToolRounds = retrievalEnabled ? MAX_KNOWLEDGE_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+
+          // Direct context reserves the first call slot; model calls start after.
+          const firstCallIndex = knowledgeContext?.activity ? 1 : 0;
+
           const buildBaseTranscript = () =>
             Prompt.make([
               ...fixedPrefix,
               ...compaction.injectedMessages,
               ...historyMessages.slice(compaction.startIndex),
+              ...(knowledgeContext?.messages ?? []),
               // A fixed snapshot after history preserves its cacheable prefix.
               // Tool rounds append after it; no clock updates inside the loop.
               runtimeContext,
@@ -715,10 +921,12 @@ export class StreamEngine extends Context.Service<
 
           let questionPresented = false;
           let webAttempted = false;
-          for (let turn = 0; turn <= MAX_TOOL_ROUNDS; turn++) {
-            const toolRoundsLeft = turn < MAX_TOOL_ROUNDS;
+          for (let turn = 0; turn <= maxToolRounds; turn++) {
+            if (knowledgeTools) yield* knowledgeTools.authorize();
+            else if (knowledgeSession) yield* knowledgeSession.authorize();
+            const toolRoundsLeft = turn < maxToolRounds;
             let finishReason = "unknown";
-            let callIndex = 0;
+            let callIndex = turn === 0 ? firstCallIndex : 0;
             const turnParts: Response.AnyPart[] = [];
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
@@ -761,9 +969,22 @@ export class StreamEngine extends Context.Service<
                       }
                       if (!isPreliminary && part.type !== "error") {
                         turnParts.push(
-                          part.type === "tool-call" && part.name === "save_memory"
+                          part.type === "tool-call" &&
+                            (part.name === "save_memory" || part.name === "update_plan")
                             ? { ...part, params: {} }
-                            : part,
+                            : part.type === "tool-result" && part.name === "update_plan"
+                              ? {
+                                  ...part,
+                                  encodedResult:
+                                    (part.result as PlanToolResult).outcome === "updated"
+                                      ? {
+                                          outcome: "updated",
+                                          message:
+                                            "The current checklist is in the trailing reminder.",
+                                        }
+                                      : part.encodedResult,
+                                }
+                              : part,
                         );
                       }
                       switch (part.type) {
@@ -784,15 +1005,22 @@ export class StreamEngine extends Context.Service<
                           return;
                         }
                         case "tool-call": {
-                          const rowId = uuidv7();
-                          callRowIds.set(part.id, rowId);
                           const args = part.params as Record<string, unknown>;
                           const family =
                             part.name === "save_memory"
                               ? "memory"
                               : part.name === "ask_user"
                                 ? "ask"
-                                : "web";
+                                : part.name === "update_plan"
+                                  ? "plan"
+                                  : Schema.is(KnowledgeToolName)(part.name)
+                                    ? "knowledge"
+                                    : part.name === "web_search" || part.name === "read_url"
+                                      ? "web"
+                                      : null;
+                          if (!family) return;
+                          const rowId = uuidv7();
+                          callRowIds.set(part.id, rowId);
                           const askArgs =
                             family === "ask"
                               ? Schema.decodeUnknownOption(AskUserParams)(args)
@@ -819,16 +1047,46 @@ export class StreamEngine extends Context.Service<
                                     : {}
                                   : (args as JsonValue),
                           });
-                          if (family === "memory" || family === "ask") {
+                          if (family === "memory" || family === "ask" || family === "plan") {
+                            yield* pushToolChunk(
+                              family === "plan"
+                                ? {
+                                    v: 1,
+                                    family,
+                                    phase: "start",
+                                    callId: rowId,
+                                    name: "update_plan",
+                                    turnIndex: turn,
+                                    callIndex: callIndex - 1,
+                                    textOffset,
+                                  }
+                                : {
+                                    v: 1,
+                                    family,
+                                    phase: "start",
+                                    callId: rowId,
+                                    name: part.name,
+                                    turnIndex: turn,
+                                    callIndex: callIndex - 1,
+                                    textOffset,
+                                  },
+                            );
+                            return;
+                          }
+                          if (family === "knowledge") {
+                            const queries = Array.isArray(args["queries"])
+                              ? args["queries"].map(String)
+                              : [];
                             yield* pushToolChunk({
                               v: 1,
                               family,
                               phase: "start",
                               callId: rowId,
-                              name: part.name,
+                              name: part.name as typeof KnowledgeToolName.Type,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
+                              ...(queries.length > 0 ? { targets: queries } : {}),
                             });
                             return;
                           }
@@ -852,7 +1110,8 @@ export class StreamEngine extends Context.Service<
                           return;
                         }
                         case "tool-result": {
-                          const rowId = callRowIds.get(part.id) ?? uuidv7();
+                          const rowId = callRowIds.get(part.id);
+                          if (!rowId) return;
                           if (part.name === "ask_user") {
                             if (isPreliminary) return;
                             const decoded = Schema.decodeUnknownOption(AskUserResult)(part.result);
@@ -882,6 +1141,39 @@ export class StreamEngine extends Context.Service<
                               result,
                             });
                             if (ok) questionPresented = true;
+                            return;
+                          }
+                          if (part.name === "update_plan") {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(PlanToolResult)(part.result);
+                            const result: PlanToolResult =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : {
+                                    v: 1,
+                                    outcome: "rejected",
+                                    message: "The checklist could not be updated.",
+                                  };
+                            const ok = result.outcome === "updated";
+                            // Durable activity retains this accepted revision; only
+                            // the model continuation compacts old lists.
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: result as unknown as JsonValue,
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : { error: { code: "PlanRejected", message: result.message } }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "plan",
+                              phase: "result",
+                              callId: rowId,
+                              name: "update_plan",
+                              ok,
+                              ...(ok ? { steps: result.steps } : { error: result.message }),
+                            });
                             return;
                           }
                           if (part.name === "save_memory") {
@@ -921,27 +1213,42 @@ export class StreamEngine extends Context.Service<
                             return;
                           }
 
-                          const result = part.result as {
-                            ok?: boolean;
-                            targets?: ReadonlyArray<string>;
-                            resultCount?: number;
-                            pagesFetched?: number;
-                            pages?: ReadonlyArray<{
-                              url: string;
-                              title?: string;
-                              status: "pending" | "reading" | "done" | "error";
-                              error?: string;
-                            }>;
-                            sources?: ReadonlyArray<{
-                              index: number;
-                              url: string;
-                              title: string;
-                              snippet: string;
-                              read: boolean;
-                            }>;
-                            failures?: ReadonlyArray<{ target: string; error: string }>;
-                            error?: string;
-                          } | null;
+                          if (Schema.is(KnowledgeToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = projectKnowledgeToolResult(
+                              part.result,
+                              part.isFailure,
+                              knowledgeTools?.remaining() ?? 0,
+                            );
+                            for (const source of activity.sources)
+                              sourcesByIndex.set(
+                                source.index,
+                                mergeSource(sourcesByIndex.get(source.index), source),
+                              );
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: activity as unknown as JsonValue,
+                              status: activity.ok ? "complete" : "error",
+                              ...(activity.ok
+                                ? {}
+                                : {
+                                    error: {
+                                      code: "ToolFailed",
+                                      message: activity.error ?? "knowledge tool failed",
+                                    },
+                                  }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                            });
+                            return;
+                          }
+
+                          const result = part.result as Partial<WebToolResult> | null;
                           const pages = result?.pages ?? [];
                           const sources = result?.sources ?? [];
                           const failures = result?.failures ?? [];
@@ -1144,6 +1451,8 @@ export class StreamEngine extends Context.Service<
               );
 
             yield* runProviderCall(0);
+            if (knowledgeTools) yield* knowledgeTools.authorize();
+            else if (knowledgeSession) yield* knowledgeSession.authorize();
 
             if (questionPresented || finishReason !== "tool-calls") break;
             // A completed response/tool batch is one atomic unit. It becomes
@@ -1163,7 +1472,7 @@ export class StreamEngine extends Context.Service<
                 firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
                   ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
                   : calibrationFactor(priorUsage);
-              const trailing = reminderPrompt(turn + 1 >= MAX_TOOL_ROUNDS);
+              const trailing = reminderPrompt(turn + 1 >= maxToolRounds);
               const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
                 { gateway, repo, providers, analytics },
                 {

@@ -11,6 +11,7 @@ import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
 import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
 /** conversations.model_id is a real FK. */
@@ -18,7 +19,7 @@ let modelId: string;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | Db, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,

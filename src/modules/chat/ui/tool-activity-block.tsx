@@ -80,7 +80,7 @@ const uniqueSourceCount = (
   for (const activity of activities) {
     for (const source of activity.sources ?? []) {
       if (used && !used.has(source.index)) continue;
-      urls.add(urlKey(source.url));
+      if (source.kind !== "document") urls.add(urlKey(source.url));
     }
   }
   return urls.size;

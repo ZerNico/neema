@@ -1,12 +1,13 @@
 import { Prompt } from "effect/unstable/ai";
 
-/** A web result the model may cite by its conversation-stable index. */
-export interface CitableSource {
+import { sourceTarget, type SourceReference } from "~/modules/tools/sources.ts";
+
+/** Evidence already copied into the conversation, not permission to reopen it. */
+export type CitableSource = SourceReference & {
   readonly index: number;
-  readonly url: string;
   readonly title: string;
   readonly snippet: string;
-}
+};
 
 // Injected ahead of history when web tools are enabled. Deliberately stable
 // within a generation: it is the head of the cacheable prefix, so nothing that
@@ -68,7 +69,10 @@ export const buildSearchReminder = (input: {
       PRIOR_SOURCES_HEADER +
         "\n" +
         input.sources
-          .map((s) => `[${s.index}] ${s.title} — ${s.url}${s.snippet ? `\n    ${s.snippet}` : ""}`)
+          .map(
+            (s) =>
+              `[${s.index}] ${s.title} — ${sourceTarget(s)}${s.snippet ? `\n    ${s.snippet}` : ""}`,
+          )
           .join("\n"),
     );
   }

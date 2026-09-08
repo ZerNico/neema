@@ -13,9 +13,11 @@ import {
   GroupIdInput,
   GroupMemberInput,
   ModelIdInput,
+  ProbeEmbeddingDimensionsInput,
   ProviderIdInput,
   RenameGroupInput,
   UpdateDefaultModelOrderInput,
+  UpdateGroupMemberSharingInput,
   UpdateModelInput,
   UpdateProviderInput,
 } from "../schema.ts";
@@ -112,6 +114,34 @@ export const deleteModel = createServerFn({ method: "POST" })
 
 // --- Groups ---
 
+const groupChanged = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.tap(() =>
+      Effect.flatMap(SyncBus, (bus) => bus.publishGlobal({ type: "resources.changed" })).pipe(
+        Effect.catchCause(() =>
+          Effect.logWarning("group changed but resource invalidation failed"),
+        ),
+      ),
+    ),
+  );
+
+export const updateGroupMemberSharing = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateGroupMemberSharingInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      groupChanged(
+        Effect.flatMap(GroupRepo, (repo) =>
+          repo.setMemberSharing(data.groupId, data.userId, data.canShare),
+        ),
+      ).pipe(
+        Effect.catchTag("GroupMemberNotFound", () =>
+          Effect.die(new Response("Group member not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
 const conflict = () => Effect.die(new Response("Group name already taken", { status: 409 }));
 const groupGone = () => Effect.die(new Response("Group not found", { status: 404 }));
 
@@ -124,7 +154,7 @@ export const createGroup = createServerFn({ method: "POST" })
   .validator(standard(CreateGroupInput))
   .handler(({ data }) =>
     runtime.runPromise(
-      GroupRepo.use((repo) => repo.createGroup(data.name)).pipe(
+      groupChanged(GroupRepo.use((repo) => repo.createGroup(data.name))).pipe(
         Effect.catchTag("GroupNameTaken", conflict),
       ),
     ),
@@ -135,7 +165,7 @@ export const renameGroup = createServerFn({ method: "POST" })
   .validator(standard(RenameGroupInput))
   .handler(({ data }) =>
     runtime.runPromise(
-      GroupRepo.use((repo) => repo.renameGroup(data.groupId, data.name)).pipe(
+      groupChanged(GroupRepo.use((repo) => repo.renameGroup(data.groupId, data.name))).pipe(
         Effect.catchTag("GroupNameTaken", conflict),
         Effect.catchTag("GroupNotFound", groupGone),
       ),
@@ -146,7 +176,7 @@ export const deleteGroup = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(GroupIdInput))
   .handler(({ data }) =>
-    runtime.runPromise(GroupRepo.use((repo) => repo.deleteGroup(data.groupId))),
+    runtime.runPromise(groupChanged(GroupRepo.use((repo) => repo.deleteGroup(data.groupId)))),
   );
 
 export const getGroup = createServerFn({ method: "GET" })
@@ -175,14 +205,18 @@ export const addGroupMember = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(GroupMemberInput))
   .handler(({ data }) =>
-    runtime.runPromise(GroupRepo.use((repo) => repo.addMember(data.groupId, data.userId))),
+    runtime.runPromise(
+      groupChanged(GroupRepo.use((repo) => repo.addMember(data.groupId, data.userId))),
+    ),
   );
 
 export const removeGroupMember = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(GroupMemberInput))
   .handler(({ data }) =>
-    runtime.runPromise(GroupRepo.use((repo) => repo.removeMember(data.groupId, data.userId))),
+    runtime.runPromise(
+      groupChanged(GroupRepo.use((repo) => repo.removeMember(data.groupId, data.userId))),
+    ),
   );
 
 // --- Model access ---
@@ -190,3 +224,24 @@ export const removeGroupMember = createServerFn({ method: "POST" })
 export const listModelAccess = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ProviderRepo.use((repo) => repo.listModelAccess())));
+
+/**
+ * One probe request to learn an embedding model's vector width before the
+ * model is saved. Catalogs do not carry it. Failures come back as a message,
+ * not an exception: the admin can still type the number by hand.
+ */
+export const probeEmbeddingDimensions = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(ProbeEmbeddingDimensionsInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      AiGateway.use((gateway) => gateway.probeEmbeddingDimensions(data)).pipe(
+        Effect.map((result) => ({ ok: true as const, dimensions: result.dimensions })),
+        Effect.catchTags({
+          ProviderUnreachable: (error) =>
+            Effect.succeed({ ok: false as const, error: error.message }),
+          ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found." }),
+        }),
+      ),
+    ),
+  );

@@ -1,3 +1,4 @@
+import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { Schema } from "effect";
 import { GenerationMode } from "./research-schema.ts";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
@@ -9,6 +10,7 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
+const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const generationFields = {
   generationMode: Schema.optionalKey(GenerationMode),
   timeZone: TimeZone,
@@ -17,6 +19,17 @@ const generationFields = {
   searchEnabled: Schema.Boolean,
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
+  /**
+   * Installs this agent's current configuration into the new conversation.
+   * Accepted only on the first message: an agent chat keeps its agent and
+   * revision for good, so sending it for an existing conversation is refused.
+   * Omitted keeps whatever is installed.
+   */
+  agentId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  /** Standalone collections beside the agent's; omitted keeps the current selection. */
+  collectionIds: Schema.optionalKey(
+    Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
+  ),
 };
 
 export const SendMessageInput = Schema.Struct({

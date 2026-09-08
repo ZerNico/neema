@@ -1,0 +1,63 @@
+import { Schema } from "effect";
+import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+
+export const AGENT_LIMITS = { maxPerUser: 100, maxInstructions: 20_000, maxStarters: 4 } as const;
+export const AgentIcon = Schema.Literals([
+  "robot",
+  "sparkles",
+  "code",
+  "book",
+  "search",
+  "pen",
+  "chart",
+  "briefcase",
+]);
+export type AgentIcon = typeof AgentIcon.Type;
+const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
+export const AgentIdInput = Schema.Struct({ agentId: ResourceId });
+export const AgentSettings = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+  description: Schema.String.check(Schema.isMaxLength(500)),
+  icon: AgentIcon,
+  instructions: Schema.String.check(Schema.isMaxLength(AGENT_LIMITS.maxInstructions)),
+  modelId: Schema.NullOr(ResourceId),
+  searchEnabled: Schema.Boolean,
+  planEnabled: Schema.Boolean,
+  starters: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
+    Schema.isMaxLength(AGENT_LIMITS.maxStarters),
+  ),
+  collectionIds: Schema.Array(ResourceId).check(
+    Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
+  ),
+});
+export type AgentSettings = typeof AgentSettings.Type;
+export const UpdateAgentInput = Schema.Struct({
+  ...AgentIdInput.fields,
+  ...AgentSettings.fields,
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
+export type UpdateAgentInput = typeof UpdateAgentInput.Type;
+export interface AgentSummary {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  audience: "private" | "instance";
+  configRevision: number;
+  canEdit: boolean;
+  ownerName: string | null;
+  updatedAt: string;
+}
+export interface AgentDetail extends AgentSelectionDetail {
+  instructions: string;
+}
+
+/** Configuration metadata intentionally visible to shared recipients. */
+export interface AgentSelectionDetail extends AgentSummary {
+  modelId: string | null;
+  searchEnabled: boolean;
+  planEnabled: boolean;
+  starters: ReadonlyArray<string>;
+  model: { id: string; name: string | null; available: boolean } | null;
+  collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+}

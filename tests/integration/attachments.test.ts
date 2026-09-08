@@ -1,20 +1,35 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { attachmentBlobs, attachments, conversations, models, tools } from "~/db/schema/index.ts";
-import { BlobStore, userBlobPrefix } from "~/modules/attachments/server/blob-store.ts";
+import {
+  attachmentBlobs,
+  attachments,
+  conversations,
+  models,
+  tools,
+  user,
+  knowledgeCollections,
+  knowledgeDocuments,
+  knowledgeDocumentVersions,
+} from "~/db/schema/index.ts";
+import {
+  BlobStore,
+  blobStorageKey,
+  userBlobPrefix,
+} from "~/modules/attachments/server/blob-store.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "attachments-it-"));
 
@@ -27,7 +42,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
 >;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -121,6 +136,100 @@ const attachmentCount = (userId: string) =>
   });
 
 describe("attachment storage", () => {
+  it("purges a deleted owner's retained knowledge files without touching another owner's bytes", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const owner = yield* makeUser();
+        const other = yield* makeUser();
+        const db = yield* Db;
+        const store = yield* BlobStore;
+        const service = yield* AttachmentService;
+        yield* upload(owner, "source.txt", "shared with retained knowledge versions");
+        yield* upload(other, "source.txt", "shared with retained knowledge versions");
+        const owned = (yield* blobsOf(owner))[0]!;
+        const unrelated = (yield* blobsOf(other))[0]!;
+        const collectionId = uuidv7();
+        const documentId = uuidv7();
+        const versionId = uuidv7();
+        yield* db
+          .insert(knowledgeCollections)
+          .values({ id: collectionId, userId: owner, name: "Owned files" });
+        yield* db
+          .insert(knowledgeDocuments)
+          .values({ id: documentId, collectionId, title: "Source", kind: "file" });
+        yield* db.insert(knowledgeDocumentVersions).values([
+          { id: versionId, documentId, revision: 1, kind: "file", blobId: owned.id },
+          { id: uuidv7(), documentId, revision: 2, kind: "file", blobId: owned.id },
+        ]);
+        yield* db
+          .update(knowledgeDocuments)
+          .set({ currentVersionId: versionId })
+          .where(eq(knowledgeDocuments.id, documentId));
+        yield* db.delete(user).where(eq(user.id, owner));
+        yield* service.purgeUserFiles(owner);
+        return {
+          ownedGone: !(yield* store.exists(owned.storageKey)),
+          otherSurvives: yield* store.exists(unrelated.storageKey),
+          orphanRows: (yield* db
+            .select()
+            .from(knowledgeDocumentVersions)
+            .where(eq(knowledgeDocumentVersions.documentId, documentId))).length,
+        };
+      }),
+    );
+    expect(result).toEqual({ ownedGone: true, otherSurvives: true, orphanRows: 0 });
+  });
+
+  it("a delayed last-reference deletion cannot delete reuploaded bytes", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* AttachmentRepo;
+        const service = yield* AttachmentService;
+        const store = yield* BlobStore;
+        const first = yield* upload(userId, "first.txt", "incarnation race");
+        const [before] = yield* blobsOf(userId);
+        // Commit row removal, but deliberately delay physical cleanup.
+        const obsoleteKeys = yield* repo.deleteUnclaimed(userId, first.id);
+        const second = yield* upload(userId, "again.txt", "incarnation race");
+        const [after] = yield* blobsOf(userId);
+        yield* service.deleteBlobs(obsoleteKeys);
+        const read = yield* service.read({ userId, attachmentId: second.id });
+        return {
+          differentKeys: before!.storageKey !== after!.storageKey,
+          oldGone: !(yield* store.exists(before!.storageKey)),
+          content: new TextDecoder().decode(read.bytes),
+        };
+      }),
+    );
+    expect(result).toEqual({ differentKeys: true, oldGone: true, content: "incarnation race" });
+  });
+
+  it("concurrent dedup losers delete only their own candidate objects", async () => {
+    const userId = await run(makeUser());
+    const uploaded = await run(
+      Effect.all(
+        Array.from({ length: 8 }, (_, i) => upload(userId, `copy-${i}.txt`, "concurrent bytes")),
+        { concurrency: 8 },
+      ),
+    );
+    const blobs = await run(blobsOf(userId));
+    expect(blobs).toHaveLength(1);
+    expect(new Set(uploaded.map((item) => item.id)).size).toBe(8);
+    const objects = readdirSync(join(process.env.BLOB_STORE_ROOT!, userBlobPrefix(userId)), {
+      recursive: true,
+      withFileTypes: true,
+    }).filter((entry) => entry.isFile());
+    expect(objects).toHaveLength(1);
+    for (const item of uploaded) {
+      const read = await run(
+        Effect.flatMap(AttachmentService, (service) =>
+          service.read({ userId, attachmentId: item.id }),
+        ),
+      );
+      expect(new TextDecoder().decode(read.bytes)).toBe("concurrent bytes");
+    }
+  });
   it("dedupes identical bytes per user and keeps users apart", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -174,6 +283,146 @@ describe("attachment storage", () => {
     // Path components are stripped before the name is ever stored.
     expect(dto.fileName).toBe("passwd");
     expect(JSON.stringify(dto)).not.toContain("blobs/");
+  });
+});
+
+describe("durable blob cleanup", () => {
+  it("removes bytes whose registration never committed, and keeps bytes that did", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const store = yield* BlobStore;
+        const repo = yield* AttachmentRepo;
+        const service = yield* AttachmentService;
+
+        // A crashed upload: bytes stored under a recorded candidate whose row
+        // never landed. Nothing that follows rows could ever find this object.
+        const stranded = blobStorageKey(userId, "a".repeat(64));
+        yield* repo.recordBlobCandidate(stranded);
+        yield* store.put(stranded, bytes("orphaned by a lost commit"));
+
+        // A registration that committed even though its caller saw a failure:
+        // the intent is still pending, but a row owns the key.
+        const registered = yield* upload(userId, "kept.txt", "registration committed");
+        const ownedKey = (yield* blobsOf(userId)).find(
+          (blob) => blob.storageKey !== stranded,
+        )!.storageKey;
+        yield* repo.recordBlobCandidate(ownedKey);
+
+        // Both are past the in-flight grace period.
+        yield* db.execute(
+          `update blob_cleanup_intents set created_at = now() - interval '1 hour'` as never,
+        );
+        const claimed = yield* repo.claimBlobCleanup({
+          limit: 10,
+          candidateCutoff: new Date(),
+          retryAfter: new Date(Date.now() + 60_000),
+        });
+        yield* service.deleteBlobs(claimed);
+
+        const intents = yield* db.execute(
+          `select storage_key, attempts from blob_cleanup_intents` as never,
+        );
+        return {
+          claimed,
+          strandedGone: !(yield* store.exists(stranded)),
+          ownedKept: yield* store.exists(ownedKey),
+          registered: registered.id,
+          intents: (intents as unknown as { rows: ReadonlyArray<unknown> }).rows,
+        };
+      }),
+    );
+    // Only the unowned key is deletable; ownership, not the caller's error, decides.
+    expect(result.claimed).toHaveLength(1);
+    expect(result.strandedGone).toBe(true);
+    expect(result.ownedKept).toBe(true);
+    // Both decisions are settled, so nothing is reconsidered forever.
+    expect(result.intents).toEqual([]);
+  });
+
+  it("finishes a committed last-reference deletion whose bytes outlived the crash", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const store = yield* BlobStore;
+        const repo = yield* AttachmentRepo;
+        const service = yield* AttachmentService;
+        const uploaded = yield* upload(userId, "notes.txt", "deleted without its bytes");
+        const key = (yield* blobsOf(userId))[0]!.storageKey;
+
+        // The transaction that removed the last reference commits, and the
+        // process dies before the post-commit delete: the row is gone but the
+        // object remains, and only the recorded intent still knows the key.
+        const orphaned = yield* repo.deleteUnclaimed(userId, uploaded.id);
+        expect(orphaned).toEqual([key]);
+        expect(yield* store.exists(key)).toBe(true);
+
+        const pending = yield* db.execute(
+          `select kind from blob_cleanup_intents where storage_key = '${key}'` as never,
+        );
+        // An orphan is due immediately: the row is already gone.
+        const claimed = yield* repo.claimBlobCleanup({
+          limit: 10,
+          candidateCutoff: new Date(Date.now() - 60_000),
+          retryAfter: new Date(Date.now() + 60_000),
+        });
+        yield* service.deleteBlobs(claimed);
+        const remaining = yield* db.execute(
+          `select storage_key from blob_cleanup_intents` as never,
+        );
+        return {
+          pending: (pending as unknown as { rows: ReadonlyArray<{ kind: string }> }).rows,
+          claimed,
+          gone: !(yield* store.exists(key)),
+          remaining: (remaining as unknown as { rows: ReadonlyArray<unknown> }).rows,
+        };
+      }),
+    );
+    expect(result.pending).toEqual([{ kind: "orphan" }]);
+    expect(result.claimed).toHaveLength(1);
+    expect(result.gone).toBe(true);
+    expect(result.remaining).toEqual([]);
+  });
+
+  it("backs a failing store off and retries it later without losing the key", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* AttachmentRepo;
+        const key = blobStorageKey(userId, "b".repeat(64));
+        yield* repo.recordBlobCandidate(key);
+        yield* db.execute(
+          `update blob_cleanup_intents set created_at = now() - interval '1 hour'` as never,
+        );
+        // First claim hands the key over and defers it.
+        const first = yield* repo.claimBlobCleanup({
+          limit: 10,
+          candidateCutoff: new Date(),
+          retryAfter: new Date(Date.now() + 3_600_000),
+        });
+        // A concurrent pass must not take the same key while it is deferred.
+        const second = yield* repo.claimBlobCleanup({
+          limit: 10,
+          candidateCutoff: new Date(),
+          retryAfter: new Date(Date.now() + 3_600_000),
+        });
+        const row = yield* db.execute(
+          `select attempts from blob_cleanup_intents where storage_key = '${key}'` as never,
+        );
+        return {
+          first,
+          second,
+          attempts: (row as unknown as { rows: ReadonlyArray<{ attempts: number }> }).rows[0],
+        };
+      }),
+    );
+    expect(result.first).toHaveLength(1);
+    expect(result.second).toEqual([]);
+    // The intent survives the failure; nothing is dropped on the floor.
+    expect(result.attempts).toEqual({ attempts: 1 });
   });
 });
 

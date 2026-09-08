@@ -10,6 +10,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
 type Services = ChatRepo | AttachmentRepo | Db;
@@ -18,7 +19,7 @@ let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 let modelId: string;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -175,6 +176,39 @@ describe("loadConversationDetail", () => {
     expect(detail.attachments).toEqual([]);
     // Nothing is streaming, so there is nothing for the client to resume from.
     expect(detail.pendingChunks).toEqual([]);
+  });
+
+  it("loads assistant display metadata in one batch without full generation configs", async () => {
+    const owner = await run(makeUser());
+    const thread = await run(seedThread(owner, "Batched metadata"));
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const ids = [thread.assistantId];
+        for (let n = 0; n < 8; n++)
+          ids.push(
+            (yield* repo.insertMessage({
+              conversationId: thread.conversationId,
+              role: "assistant",
+              status: "complete",
+              modelId,
+            })).id,
+          );
+        let batches = 0;
+        yield* loadConversationDetail(owner, thread.conversationId).pipe(
+          Effect.provideService(ChatRepo, {
+            ...repo,
+            getGenerationConfig: () => Effect.die("Display must never read generation manifests"),
+            listGenerationDisplay: (messageIds) => {
+              batches++;
+              expect(new Set(messageIds)).toEqual(new Set(ids));
+              return repo.listGenerationDisplay(messageIds);
+            },
+          }),
+        );
+        expect(batches).toBe(1);
+      }),
+    );
   });
 
   it("fails before reading anything for a conversation the caller does not own", async () => {

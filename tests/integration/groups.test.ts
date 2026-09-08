@@ -8,6 +8,10 @@ import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { modelGroupAccess, models, providers } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -27,8 +31,19 @@ import {
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+
+// Knowledge-backed generations are exercised in knowledge.test.ts; here no
+// message carries a manifest, so the session is never opened.
+const FakeKnowledge = Layer.mergeAll(
+  Layer.succeed(KnowledgeSearch, {
+    search: () => Effect.die("knowledge search is not part of this suite"),
+    session: () => Effect.die("knowledge session is not part of this suite"),
+  } as never),
+  Layer.succeed(KnowledgeService, {} as never),
+);
 
 let container: StartedPostgreSqlContainer;
 type Services = ChatRepo | ChatService | GroupRepo | ProviderRepo | SyncBus | Db;
@@ -54,6 +69,10 @@ const fakeGeneratedText = (text: string) =>
 
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
   generateText: () => fakeGeneratedText("A title"),
   streamChat: () =>
     Stream.make(
@@ -67,7 +86,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -80,7 +99,9 @@ beforeAll(async () => {
   );
   const ReposLayer = Layer.mergeAll(
     AnalyticsRepo.layer,
+    AgentRepo.layer,
     ChatRepo.layer,
+    KnowledgeRepo.layer,
     ProviderRepo.layer,
     GroupRepo.layer,
   ).pipe(
@@ -91,6 +112,7 @@ beforeAll(async () => {
     Layer.provideMerge(
       Layer.mergeAll(
         FakeGateway,
+        FakeKnowledge,
         FakeWebSearch,
         FakeUrlReader,
         FakeBlobStore,
@@ -174,6 +196,60 @@ const visibleIds = Effect.fn("test.visibleIds")(function* (userId: string) {
 });
 
 describe("group management", () => {
+  it("defaults sharing off, scopes updates, preserves duplicate adds and resets re-adds", async () => {
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* GroupRepo;
+        const userId = yield* makeUser();
+        const other = yield* makeUser("admin");
+        const group = yield* repo.createGroup(`Permissions ${uuidv7()}`);
+        const second = yield* repo.createGroup(`Isolated ${uuidv7()}`);
+        yield* repo.addMember(group.id, userId);
+        yield* repo.addMember(group.id, other);
+        yield* repo.addMember(second.id, userId);
+        expect(yield* repo.listMembers(group.id)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ userId, role: "user", canShare: false }),
+            expect.objectContaining({ userId: other, role: "admin", canShare: false }),
+          ]),
+        );
+        yield* repo.setMemberSharing(group.id, userId, true);
+        yield* repo.addMember(group.id, userId);
+        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
+          true,
+        );
+        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === other)?.canShare).toBe(
+          false,
+        );
+        expect((yield* repo.listMembers(second.id))[0]?.canShare).toBe(false);
+        yield* repo.setMemberSharing(group.id, userId, false);
+        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
+          false,
+        );
+        yield* repo.setMemberSharing(group.id, userId, true);
+        yield* repo.removeMember(group.id, userId);
+        expect(
+          yield* repo.setMemberSharing(group.id, userId, true).pipe(Effect.flip),
+        ).toMatchObject({
+          _tag: "GroupMemberNotFound",
+          groupId: group.id,
+          userId,
+        });
+        expect(
+          yield* repo.setMemberSharing(uuidv7(), userId, true).pipe(Effect.flip),
+        ).toMatchObject({
+          _tag: "GroupMemberNotFound",
+          userId,
+        });
+        expect((yield* repo.listMembers(group.id)).some((m) => m.userId === userId)).toBe(false);
+        yield* repo.addMember(group.id, userId);
+        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
+          false,
+        );
+      }),
+    );
+  });
+
   it("creates, renames and lists groups with live member counts", async () => {
     const result = await run(
       Effect.gen(function* () {

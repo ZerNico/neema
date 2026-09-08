@@ -1,0 +1,54 @@
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { agentSelectionQuery } from "~/modules/agents/client/queries.ts";
+import type { ContextSelection } from "./context-picker.tsx";
+
+type AgentIdentity = NonNullable<ContextSelection["agent"]>;
+type ContextInput =
+  | { mode: "draft"; agent: AgentIdentity | null }
+  | { mode: "installed"; agent: (AgentIdentity & { collectionIds: ReadonlyArray<string> }) | null };
+
+/** Agent dependencies are pinned; standalone knowledge belongs to the next message. */
+export function useContextSelection(initial: ContextInput) {
+  const agentLocked = initial.mode === "installed";
+  const [draftAgent, setDraftAgent] = useState(initial.agent);
+  const [standalone, setStandalone] = useState<ReadonlyArray<string>>([]);
+  const agent = agentLocked ? initial.agent : draftAgent;
+  const detail = useQuery({
+    ...agentSelectionQuery(agent?.id ?? ""),
+    enabled: !agentLocked && !!agent?.id,
+  });
+  const agentCollectionIds = new Set(
+    initial.mode === "installed"
+      ? (initial.agent?.collectionIds ?? [])
+      : (detail.data?.collections.map((collection) => collection.id) ?? []),
+  );
+  const selection: ContextSelection = {
+    agent: agent
+      ? {
+          id: agent.id,
+          name: agentLocked ? agent.name : (detail.data?.name ?? agent.name),
+          icon: (agentLocked ? agent.icon : detail.data?.icon) ?? "robot",
+        }
+      : null,
+    collectionIds: [...new Set([...agentCollectionIds, ...standalone])],
+  };
+  return {
+    selection,
+    detail,
+    agentCollectionIds,
+    agentLocked,
+    onAgentChange: (agentId: string | null) => {
+      if (agentLocked) return;
+      setDraftAgent(agentId ? { id: agentId, name: null } : null);
+    },
+    onCollectionsChange: (next: ReadonlyArray<string>) => {
+      setStandalone(next.filter((id) => !agentCollectionIds.has(id)));
+    },
+    sendFields: {
+      ...(!agentLocked && agent?.id ? { agentId: agent.id } : {}),
+      collectionIds: standalone.filter((id) => !agentCollectionIds.has(id)),
+    },
+    settle: () => setStandalone([]),
+  };
+}

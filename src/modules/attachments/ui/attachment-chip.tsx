@@ -167,9 +167,15 @@ export function AttachmentChip({
 export function AttachmentChipRow({
   children,
   className,
+  "aria-label": ariaLabel,
 }: {
   children: ReactNode;
   className?: string;
+  "aria-label"?: string;
 }) {
-  return <div className={cn("flex flex-wrap gap-1.5", className)}>{children}</div>;
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", className)} aria-label={ariaLabel}>
+      {children}
+    </div>
+  );
 }

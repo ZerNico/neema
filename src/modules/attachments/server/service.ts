@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { AttachmentNotAvailable, AttachmentRejected, BlobStoreError } from "../errors.ts";
+import type { AttachmentKind } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
 import { canAccessAttachment } from "./policy.ts";
@@ -12,6 +13,13 @@ import { validateAttachment } from "./validation.ts";
 // postpone it indefinitely.
 const ORPHAN_GRACE = Duration.hours(24);
 const SWEEP_INTERVAL = Duration.hours(6);
+// Leaked objects are not urgent, but they are invisible: reconcile often
+// enough that a crashed upload or a lost delete is measured in minutes.
+const RECONCILE_INTERVAL = Duration.minutes(5);
+const RECONCILE_BATCH = 100;
+// An upload in flight owns no row yet; only older candidates are decidable.
+const CANDIDATE_GRACE = Duration.minutes(30);
+const RECONCILE_BACKOFF = Duration.minutes(15);
 
 export interface AttachmentBytes {
   fileName: string;
@@ -28,6 +36,7 @@ export class AttachmentService extends Context.Service<
       fileName: string;
       declaredMediaType: string;
       bytes: Uint8Array;
+      allowedKinds?: ReadonlyArray<AttachmentKind>;
     }): Effect.Effect<Attachment, AttachmentRejected>;
     /** Removes an upload the user has not sent yet. */
     remove(input: {
@@ -56,16 +65,22 @@ export class AttachmentService extends Context.Service<
 
       // Physical deletion always trails the commit, so a rolled-back
       // transaction can never leave rows pointing at deleted bytes. The
-      // reverse drift (bytes with no row — a put whose row insert then
-      // failed) is harmless but currently has no collector; the sweep below
-      // only follows rows.
+      // reverse drift — bytes with no row — is covered by the cleanup ledger:
+      // `collectOrphanedBlobs` records the intent in the same transaction that
+      // removed the last reference, and uploads record one before storing, so
+      // an interrupted delete or a crashed upload is finished by the
+      // reconciler rather than leaked.
       const deleteBlobs = (keys: ReadonlyArray<string>) =>
         Effect.forEach(
           keys,
-          (key) => store.delete(key).pipe(Effect.catchTag("BlobStoreError", logBlobFailure)),
-          {
-            discard: true,
-          },
+          (key) =>
+            store
+              .delete(key)
+              .pipe(
+                Effect.andThen(repo.clearBlobIntents([key])),
+                Effect.catchTag("BlobStoreError", logBlobFailure),
+              ),
+          { discard: true },
         );
 
       const upload = Effect.fn("AttachmentService.upload")(function* (input: {
@@ -73,6 +88,7 @@ export class AttachmentService extends Context.Service<
         fileName: string;
         declaredMediaType: string;
         bytes: Uint8Array;
+        allowedKinds?: ReadonlyArray<AttachmentKind>;
       }) {
         const validated = yield* validateAttachment({
           fileName: input.fileName,
@@ -80,14 +96,23 @@ export class AttachmentService extends Context.Service<
           bytes: input.bytes,
         });
 
+        if (input.allowedKinds && !input.allowedKinds.includes(validated.kind))
+          return yield* new AttachmentRejected({
+            cause: "type",
+            reason: "upload a PDF or text document",
+          });
+
         // Hashed here, over the bytes we actually received — a client-supplied
         // hash would be both untrustworthy and a free existence oracle.
         const sha256 = createHash("sha256").update(input.bytes).digest("hex");
         const storageKey = blobStorageKey(input.userId, sha256);
 
+        // Before the bytes exist: an interrupted upload leaves an object whose
+        // row never landed, and nothing that follows rows could ever find it.
+        yield* repo.recordBlobCandidate(storageKey);
         yield* store.put(storageKey, input.bytes).pipe(Effect.orDie);
 
-        const { attachment } = yield* repo.create({
+        const { attachment, unusedStorageKey } = yield* repo.create({
           userId: input.userId,
           sha256,
           storageKey,
@@ -95,6 +120,11 @@ export class AttachmentService extends Context.Service<
           mediaType: validated.mediaType,
           fileName: validated.fileName,
         });
+        // A concurrent dedup winner owns a different key. Only our unreferenced
+        // candidate is disposable; never delete the shared winner's bytes.
+        if (unusedStorageKey) yield* deleteBlobs([unusedStorageKey]);
+        // The key a row now owns is no longer a candidate for removal.
+        else yield* repo.clearBlobIntents([storageKey]);
         return attachment;
       });
 
@@ -144,9 +174,30 @@ export class AttachmentService extends Context.Service<
         }
       });
 
+      // Finishes work whose two halves could not be atomic: bytes stored for a
+      // row that never committed, and rows deleted before their bytes were.
+      // Ownership decides, so a registration that committed after its caller
+      // failed keeps its bytes.
+      const reconcile = Effect.gen(function* () {
+        const now = Date.now();
+        const keys = yield* repo.claimBlobCleanup({
+          limit: RECONCILE_BATCH,
+          candidateCutoff: new Date(now - Duration.toMillis(CANDIDATE_GRACE)),
+          retryAfter: new Date(now + Duration.toMillis(RECONCILE_BACKOFF)),
+        });
+        if (keys.length === 0) return;
+        yield* Effect.logInfo(`reconciling ${keys.length} unreferenced blob object(s)`);
+        yield* deleteBlobs(keys);
+      });
+
       yield* sweep.pipe(
         Effect.catchCause((cause) => Effect.logError("attachment sweep failed", cause)),
         Effect.repeat(Schedule.spaced(SWEEP_INTERVAL)),
+        Effect.forkScoped,
+      );
+      yield* reconcile.pipe(
+        Effect.catchCause((cause) => Effect.logError("blob reconciliation failed", cause)),
+        Effect.repeat(Schedule.spaced(RECONCILE_INTERVAL)),
         Effect.forkScoped,
       );
 

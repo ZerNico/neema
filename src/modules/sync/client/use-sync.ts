@@ -4,29 +4,90 @@ import type { SyncEvent } from "../events.ts";
 
 // One SSE connection per tab. Applies this user's domain events (from any
 // browser/instance) to the query cache so sidebar and open chats stay in sync.
-export function useSync() {
+export function useSync(reconcileIdentity?: () => Promise<boolean>) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
     const source = new EventSource("/api/sync");
+    let knowledgeTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearKnowledgeTimer = () => {
+      clearTimeout(knowledgeTimer);
+      knowledgeTimer = undefined;
+    };
 
-    // Events published while the connection was down are gone for good (the
-    // bus is fire-and-forget), so a reconnect refetches everything the feed
-    // keeps fresh. Skipped on the initial open: mounting queries are fresh
-    // already, and invalidating here would double-fetch every page load.
+    let disposed = false;
+    let knowledgeRefreshing = false;
+    let knowledgeDirty = false;
+    const refreshKnowledge = () => {
+      clearKnowledgeTimer();
+      if (disposed || !authorized) return;
+      if (knowledgeRefreshing) {
+        knowledgeDirty = true;
+        return;
+      }
+      knowledgeRefreshing = true;
+      // An already-running request may predate this event/subscription. Let it
+      // finish without cancellation, then reconcile once more if necessary.
+      knowledgeDirty = queryClient.isFetching({ queryKey: ["knowledge"] }) > 0;
+      void queryClient
+        .invalidateQueries({ queryKey: ["knowledge"] }, { cancelRefetch: false })
+        .finally(() => {
+          knowledgeRefreshing = false;
+          if (knowledgeDirty && !disposed && authorized) queueKnowledge();
+        });
+    };
+    const queueKnowledge = () => {
+      if (disposed || !authorized) return;
+      knowledgeDirty = true;
+      if (!knowledgeRefreshing && knowledgeTimer === undefined)
+        knowledgeTimer = setTimeout(refreshKnowledge, 250);
+    };
+
+    // Knowledge may finish indexing between its initial fetch and subscription.
+    // Reconcile it on first open too; reconnects refresh every feed-backed cache.
     let opened = false;
-    source.addEventListener("open", () => {
-      if (opened) {
+    let authorized = !reconcileIdentity;
+    let connection = 0;
+    let identityRetry: ReturnType<typeof setTimeout> | undefined;
+    source.addEventListener("error", () => {
+      authorized = false;
+      connection++;
+      clearTimeout(identityRetry);
+      clearKnowledgeTimer();
+    });
+    const open = async (currentConnection: number) => {
+      const valid = reconcileIdentity ? await reconcileIdentity().catch(() => false) : true;
+      if (disposed || currentConnection !== connection) return;
+      if (!valid) {
+        identityRetry = setTimeout(() => {
+          void open(currentConnection);
+        }, 1000);
+        return;
+      }
+      authorized = true;
+      refreshKnowledge();
+      if (opened || reconcileIdentity) {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
+        void queryClient.invalidateQueries({ queryKey: ["sharing"] });
+        void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
+        void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
         void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
         void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
       }
       opened = true;
+    };
+    source.addEventListener("open", () => {
+      authorized = false;
+      clearTimeout(identityRetry);
+      clearKnowledgeTimer();
+      void open(++connection);
     });
 
     source.addEventListener("sync", (raw) => {
+      if (disposed || !authorized) return;
       const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
       switch (event.type) {
         case "conversation.created":
@@ -54,6 +115,20 @@ export function useSync() {
           // the saved source content still matches the current message.
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
           break;
+        case "knowledge.index.changed":
+          // Fixed-window coalescing, with one follow-up after an in-flight fetch.
+          queueKnowledge();
+          break;
+        case "resources.changed":
+          clearKnowledgeTimer();
+          void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
+          void queryClient.invalidateQueries({ queryKey: ["sharing"] });
+          refreshKnowledge();
+          void queryClient.invalidateQueries({ queryKey: ["agents"] });
+          break;
         case "models.defaults.changed":
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
@@ -65,6 +140,11 @@ export function useSync() {
       }
     });
 
-    return () => source.close();
-  }, [queryClient]);
+    return () => {
+      disposed = true;
+      clearTimeout(identityRetry);
+      clearKnowledgeTimer();
+      source.close();
+    };
+  }, [queryClient, reconcileIdentity]);
 }

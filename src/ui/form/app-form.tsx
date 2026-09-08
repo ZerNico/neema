@@ -55,11 +55,13 @@ function TextareaField({
   description,
   placeholder,
   rows = 4,
+  disabled = false,
 }: {
   label: string;
   description?: string;
   placeholder?: string;
   rows?: number;
+  disabled?: boolean;
 }) {
   const field = useFieldContext<string>();
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
@@ -71,6 +73,7 @@ function TextareaField({
         name={field.name}
         placeholder={placeholder}
         rows={rows}
+        disabled={disabled}
         value={field.state.value}
         onBlur={field.handleBlur}
         onChange={(event) => field.handleChange(event.target.value)}

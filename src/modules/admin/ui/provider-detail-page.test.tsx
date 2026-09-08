@@ -3,9 +3,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddModelDialog } from "./provider-detail-page.tsx";
-import { createModel } from "../server/functions.ts";
+import { probeEmbeddingDimensions, createModel } from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
+  probeEmbeddingDimensions: vi.fn(),
   createModel: vi.fn(),
   createProvider: vi.fn(),
   deleteModel: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("./model-combobox.tsx", () => ({
 }));
 
 const createMock = vi.mocked(createModel);
+const probeMock = vi.mocked(probeEmbeddingDimensions);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,6 +50,52 @@ beforeEach(() => {
 });
 
 describe("AddModelDialog", () => {
+  it("shows no model settings until something is actually picked", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["admin", "groups"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <AddModelDialog providerId="provider-1" open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    // Nothing chosen: no type selector, no toggles, and Add stays disabled.
+    expect(screen.queryByLabelText("Type")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tool calling")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add model" })).toBeDisabled();
+    // Picking is what opens the settings.
+    await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
+    expect(screen.getByLabelText("Type")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add model" })).toBeEnabled();
+  });
+
+  it("detects an embedding model's dimensions from the provider and reports failures inline", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["admin", "groups"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <AddModelDialog providerId="provider-1" open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
+    screen.getByLabelText("Type").click();
+    await user.click(await screen.findByRole("option", { name: "Embedding" }));
+
+    probeMock.mockResolvedValueOnce({ ok: false, error: "the model did not return an embedding" });
+    await user.click(screen.getByRole("button", { name: "Detect" }));
+    expect(await screen.findByText("the model did not return an embedding")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dimensions")).toHaveValue(null);
+
+    probeMock.mockResolvedValueOnce({ ok: true, dimensions: 4096 });
+    await user.click(screen.getByRole("button", { name: "Detect" }));
+    await waitFor(() => expect(screen.getByLabelText("Dimensions")).toHaveValue(4096));
+    expect(probeMock).toHaveBeenLastCalledWith({
+      data: { providerId: "provider-1", modelKey: "catalog-model" },
+    });
+    expect(screen.queryByText("the model did not return an embedding")).not.toBeInTheDocument();
+  });
+
   it("allows overriding the inferred type of a catalog model", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });

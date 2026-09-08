@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
+import { projectSessionIdentity } from "../identity.ts";
 import { auth } from "./auth.ts";
 
 /**
@@ -11,4 +12,12 @@ import { auth } from "./auth.ts";
 export const getSessionUser = createServerFn({ method: "GET" }).handler(async () => {
   const session = await auth.api.getSession({ headers: getRequestHeaders() });
   return session?.user ?? null;
+});
+
+export const getSessionIdentity = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await auth.api.getSession({
+    headers: getRequestHeaders(),
+    query: { disableCookieCache: true },
+  });
+  return projectSessionIdentity(session);
 });

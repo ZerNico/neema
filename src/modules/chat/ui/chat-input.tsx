@@ -16,6 +16,15 @@ import {
 import { resolveChatModel } from "../client/selected-model.ts";
 import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
 import { ModelPicker } from "./model-picker.tsx";
+import {
+  AgentBar,
+  AgentPicker,
+  CollectionPicker,
+  ContextChips,
+  ContextMenuItems,
+  type ContextPickerKind,
+  type ComposerContext,
+} from "./context-picker.tsx";
 import { ATTACHMENT_ACCEPT } from "~/modules/attachments/constants.ts";
 import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
@@ -55,13 +64,15 @@ export const ChatInput = forwardRef<
     textareaDisabled?: boolean;
     controlsDisabled?: boolean;
     modelId: string | null;
-    onModelChange: (modelId: string) => void;
+    onModelChange: (modelId: string, source?: "default") => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
     researchEnabled?: boolean;
     onResearchEnabledChange?: (enabled: boolean) => void;
     /** Owner-held upload state; research remains available without uploads. */
     attachments?: AttachmentUploads | undefined;
+    /** Agent and collections for the next turn; absent hides the controls (edits). */
+    context?: ComposerContext | undefined;
     placeholder?: string;
     textareaLabel?: string;
     autoFocus?: boolean;
@@ -85,6 +96,7 @@ export const ChatInput = forwardRef<
     researchEnabled = false,
     onResearchEnabledChange,
     attachments,
+    context,
     placeholder = "Message…",
     textareaLabel,
     autoFocus = false,
@@ -107,7 +119,13 @@ export const ChatInput = forwardRef<
     : attachments?.queued
       ? "Sending after uploads finish"
       : submitLabel;
-  const menuLabel = onResearchEnabledChange ? "Add files or tools" : "Add attachment";
+  const menuLabel = onResearchEnabledChange || context ? "Add files or tools" : "Add attachment";
+  // A context row closes the menu first and opens its popup once the menu is
+  // gone, anchored to the same "+" button: two overlays returning focus to
+  // each other is what a submenu would have avoided and this avoids too.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | null>(null);
+  const [picker, setPicker] = useState<ContextPickerKind | null>(null);
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
     enabled: attachments !== undefined,
@@ -121,7 +139,7 @@ export const ChatInput = forwardRef<
   const selectedModel = resolveChatModel(models, modelId);
 
   useEffect(() => {
-    if (selectedModel && selectedModel.id !== modelId) onModelChange(selectedModel.id);
+    if (selectedModel && selectedModel.id !== modelId) onModelChange(selectedModel.id, "default");
   }, [modelId, onModelChange, selectedModel]);
   const searchAvailable =
     (searchAvailability?.enabled ?? false) && (selectedModel?.capabilities.tools ?? false);
@@ -238,22 +256,42 @@ export const ChatInput = forwardRef<
         }
       }}
     >
-      {attachments && items.length > 0 ? (
+      {context?.agentLocked && context.selection.agent ? (
+        <AgentBar agent={context.selection.agent} />
+      ) : null}
+      {(attachments && items.length > 0) ||
+      (context &&
+        ((context.selection.agent && !context.agentLocked) ||
+          context.selection.collectionIds.length > 0)) ? (
         <AttachmentChipRow className="px-3 pt-3">
-          {items.map((item) => (
-            <AttachmentChip
-              key={item.localId}
-              item={item}
-              warning={warningFor(item)}
-              onRemove={controlsDisabled ? undefined : () => attachments.remove(item.localId)}
-              preview={previewFor(item)}
+          {/* Context first: it frames the files that follow. */}
+          {context ? (
+            <ContextChips
+              selection={context.selection}
+              agentCollectionIds={context.agentCollectionIds}
+              agentLocked={context.agentLocked}
+              onAgentChange={context.onAgentChange}
+              onCollectionsChange={context.onCollectionsChange}
+              disabled={controlsDisabled}
             />
-          ))}
+          ) : null}
+          {attachments
+            ? items.map((item) => (
+                <AttachmentChip
+                  key={item.localId}
+                  item={item}
+                  warning={warningFor(item)}
+                  onRemove={controlsDisabled ? undefined : () => attachments.remove(item.localId)}
+                  preview={previewFor(item)}
+                />
+              ))
+            : null}
         </AttachmentChipRow>
       ) : null}
       {attachments?.notice ? (
         <p className="text-muted-foreground px-4 pt-2 text-xs">{attachments.notice}</p>
       ) : null}
+
       <ChatTextarea
         ref={textareaRef}
         value={value}
@@ -280,7 +318,13 @@ export const ChatInput = forwardRef<
             }}
           />
         ) : null}
-        <DropdownMenu>
+        <DropdownMenu
+          onOpenChangeComplete={(open) => {
+            if (open || pendingPicker === null) return;
+            setPicker(pendingPicker);
+            setPendingPicker(null);
+          }}
+        >
           <Tooltip>
             <DropdownMenuTrigger
               render={
@@ -290,9 +334,12 @@ export const ChatInput = forwardRef<
                       size="icon-sm"
                       variant="ghost"
                       aria-label={menuLabel}
+                      ref={setMenuAnchor}
                       disabled={
                         controlsDisabled ||
-                        (!onResearchEnabledChange && (!attachments || attachments.isFull))
+                        (!onResearchEnabledChange &&
+                          !context &&
+                          (!attachments || attachments.isFull))
                       }
                       className="text-muted-foreground"
                     />
@@ -304,7 +351,10 @@ export const ChatInput = forwardRef<
             </DropdownMenuTrigger>
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start" className={cn(onResearchEnabledChange && "w-64")}>
+          <DropdownMenuContent
+            align="start"
+            className={cn((onResearchEnabledChange || context) && "w-64")}
+          >
             <DropdownMenuItem onClick={pickFiles} disabled={!attachments || attachments.isFull}>
               <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
               Attach files
@@ -327,8 +377,35 @@ export const ChatInput = forwardRef<
                 </DropdownMenuCheckboxItem>
               </>
             ) : null}
+            {context ? (
+              <ContextMenuItems
+                selection={context.selection}
+                agentLocked={context.agentLocked}
+                onPick={setPendingPicker}
+                disabled={controlsDisabled}
+              />
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {context && !context.agentLocked ? (
+          <AgentPicker
+            selection={context.selection}
+            onAgentChange={context.onAgentChange}
+            open={picker === "agent"}
+            onOpenChange={(open) => setPicker(open ? "agent" : null)}
+            anchor={menuAnchor}
+          />
+        ) : null}
+        {context ? (
+          <CollectionPicker
+            selection={context.selection}
+            agentCollectionIds={context.agentCollectionIds}
+            onCollectionsChange={context.onCollectionsChange}
+            open={picker === "collections"}
+            onOpenChange={(open) => setPicker(open ? "collections" : null)}
+            anchor={menuAnchor}
+          />
+        ) : null}
         {researchEnabled || searchAvailable ? (
           <Button
             size="sm"

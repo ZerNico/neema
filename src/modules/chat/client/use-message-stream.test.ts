@@ -257,6 +257,7 @@ describe("applyToolChunk", () => {
         },
         sources: [
           {
+            kind: "web" as const,
             index: 1,
             url: "https://a.dev/x",
             title: "A",
@@ -280,6 +281,7 @@ describe("applyToolChunk", () => {
         pagesFetched: 0,
         sources: [
           {
+            kind: "web" as const,
             index: 1,
             url: "https://a.dev/x",
             title: "A",

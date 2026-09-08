@@ -4,11 +4,19 @@ import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { usageEvents, user } from "~/db/schema/index.ts";
 
+// PostgreSQL sums integer token columns as bigint. Keep that width in SQL,
+// then reject totals outside JS's exact integer range rather than silently rounding.
+const tokenTotal = (value: unknown): number => {
+  const total = Number(value);
+  if (!Number.isSafeInteger(total)) throw new RangeError("Token total exceeds safe integer range");
+  return total;
+};
+
 export type UsageEventRow = typeof usageEvents.$inferSelect;
 
 export interface UsageEventInput {
   userId: string;
-  kind: "chat" | "title" | "compaction";
+  kind: UsageEventRow["kind"];
   modelId: string | null;
   modelName: string;
   conversationId?: string;
@@ -38,7 +46,7 @@ export interface UsageScope {
 export interface UsageSummary {
   /** Chat generations only — title runs are counted in tokens, not here. */
   messages: number;
-  /** Every generation attempt of any kind — the error-rate divisor. */
+  /** Every provider attempt of any kind — the error-rate divisor. */
   attempts: number;
   titleGenerations: number;
   compactionGenerations: number;
@@ -111,8 +119,8 @@ export class AnalyticsRepo extends Context.Service<
       // Sums are null over zero rows; coalesce keeps the shape numeric.
       const sums = {
         messages: sql<number>`count(*) filter (where ${usageEvents.kind} = 'chat')::int`,
-        inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)::int`,
-        outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)::int`,
+        inputTokens: sql`coalesce(sum(${usageEvents.inputTokens}), 0)`.mapWith(tokenTotal),
+        outputTokens: sql`coalesce(sum(${usageEvents.outputTokens}), 0)`.mapWith(tokenTotal),
         cost: sql<number>`coalesce(sum(${usageEvents.cost}), 0)`,
       };
 
@@ -120,8 +128,10 @@ export class AnalyticsRepo extends Context.Service<
       const detail = {
         attempts: sql<number>`count(*)::int`,
         errorAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'error')::int`,
-        cachedInputTokens: sql<number>`coalesce(sum(${usageEvents.cachedInputTokens}), 0)::int`,
-        reasoningTokens: sql<number>`coalesce(sum(${usageEvents.reasoningTokens}), 0)::int`,
+        cachedInputTokens: sql`coalesce(sum(${usageEvents.cachedInputTokens}), 0)`.mapWith(
+          tokenTotal,
+        ),
+        reasoningTokens: sql`coalesce(sum(${usageEvents.reasoningTokens}), 0)`.mapWith(tokenTotal),
       };
 
       return AnalyticsRepo.of({
@@ -181,7 +191,7 @@ export class AnalyticsRepo extends Context.Service<
             .from(usageEvents)
             .where(inScope(scope))
             .groupBy(usageEvents.modelName)
-            .orderBy(desc(sql`sum(${usageEvents.inputTokens} + ${usageEvents.outputTokens})`))
+            .orderBy(desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`))
             .pipe(Effect.orDie);
         }),
 
@@ -192,7 +202,7 @@ export class AnalyticsRepo extends Context.Service<
             .innerJoin(user, eq(user.id, usageEvents.userId))
             .where(inWindow(scope))
             .groupBy(user.id, user.name, user.email)
-            .orderBy(desc(sql`sum(${usageEvents.inputTokens} + ${usageEvents.outputTokens})`))
+            .orderBy(desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`))
             .pipe(Effect.orDie);
         }),
       });

@@ -3,6 +3,7 @@ import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
+import { KnowledgeSearchConfig } from "~/modules/knowledge/schema.ts";
 import { DocumentParserConfig, UrlReaderConfig, WebSearchConfig } from "../schema.ts";
 
 type ToolRow = typeof tools.$inferSelect;
@@ -17,6 +18,7 @@ const toPublic = ({ secretCiphertext, ...rest }: ToolRow): PublicTool => ({
 const decodeWebSearchConfig = Schema.decodeUnknownEffect(WebSearchConfig);
 const decodeDocumentParserConfig = Schema.decodeUnknownEffect(DocumentParserConfig);
 const decodeUrlReaderConfig = Schema.decodeUnknownEffect(UrlReaderConfig);
+const decodeKnowledgeSearchConfig = Schema.decodeUnknownEffect(KnowledgeSearchConfig);
 
 export class ToolsRepo extends Context.Service<
   ToolsRepo,
@@ -36,6 +38,15 @@ export class ToolsRepo extends Context.Service<
     } | null>;
     // Internal: decoded read_url row for the URL reader executor.
     getUrlReader(): Effect.Effect<{ enabled: boolean; config: UrlReaderConfig } | null>;
+    /**
+     * Internal: decoded knowledge_search row. `enabled` turns semantic search
+     * on; lexical search and document reads work regardless, so a missing or
+     * disabled row is a degraded index, not an unusable collection.
+     */
+    getKnowledgeSearch(): Effect.Effect<{
+      enabled: boolean;
+      config: KnowledgeSearchConfig;
+    } | null>;
     updateTool(
       name: string,
       patch: {
@@ -88,6 +99,13 @@ export class ToolsRepo extends Context.Service<
           return { enabled: row.enabled, kind: row.kind, config };
         }),
 
+        getKnowledgeSearch: Effect.fn("ToolsRepo.getKnowledgeSearch")(function* () {
+          const row = yield* getRow("knowledge_search");
+          if (!row) return null;
+          const config = yield* decodeKnowledgeSearchConfig(row.config).pipe(Effect.orDie);
+          return { enabled: row.enabled, config };
+        }),
+
         getUrlReader: Effect.fn("ToolsRepo.getUrlReader")(function* () {
           const row = yield* getRow("read_url");
           if (!row) return null;
@@ -96,6 +114,9 @@ export class ToolsRepo extends Context.Service<
         }),
 
         setToolEnabled: Effect.fn("ToolsRepo.setToolEnabled")(function* (name, enabled) {
+          // This row can only change through the admin compatibility/CAS path.
+          if (name === "knowledge_search")
+            return yield* Effect.die("knowledge search configuration requires EmbeddingSpace");
           const rows = yield* db
             .update(tools)
             .set({ enabled, updatedAt: new Date() })
@@ -112,6 +133,9 @@ export class ToolsRepo extends Context.Service<
         }),
 
         updateTool: Effect.fn("ToolsRepo.updateTool")(function* (name, patch) {
+          // This row can only change through the admin compatibility/CAS path.
+          if (name === "knowledge_search")
+            return yield* Effect.die("knowledge search configuration requires EmbeddingSpace");
           const row = yield* getRow(name);
           if (!row) return null;
           const secretCiphertext = patch.clearSecret

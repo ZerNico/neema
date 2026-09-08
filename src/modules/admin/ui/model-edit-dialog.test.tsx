@@ -4,9 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelEditDialog, type EditableModel } from "./model-edit-dialog.tsx";
-import { listGroups, listModelAccess, updateModel } from "../server/functions.ts";
+import {
+  listGroups,
+  listModelAccess,
+  updateModel,
+  probeEmbeddingDimensions,
+} from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
+  probeEmbeddingDimensions: vi.fn(),
   listGroups: vi.fn(),
   listGroupMemberships: vi.fn(),
   listModelAccess: vi.fn(),
@@ -36,6 +42,7 @@ const groups = [
 
 const model: EditableModel = {
   id: "m1",
+  providerId: "provider-1",
   modelKey: "anthropic/tiny-chat",
   displayName: "Tiny Chat",
   type: "chat",
@@ -73,6 +80,15 @@ beforeEach(() => {
 });
 
 describe("ModelEditDialog", () => {
+  it("settles Detect and shows a rejected request", async () => {
+    vi.mocked(probeEmbeddingDimensions).mockRejectedValueOnce(new Error("Connection refused"));
+    renderDialog({ type: "embedding" });
+    fireEvent.click(screen.getByRole("button", { name: "Detect" }));
+    expect(await screen.findByText("Connection refused")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Detect" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Detect" })).not.toHaveAttribute("aria-busy");
+  });
+
   it("initializes every setting and saves one complete model update", async () => {
     const { onOpenChange } = renderDialog();
 

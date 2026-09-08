@@ -1,4 +1,5 @@
 import { Prompt } from "effect/unstable/ai";
+import { sourceTarget } from "~/modules/tools/sources.ts";
 import type { Source } from "~/modules/tools/schema.ts";
 import { estimatePromptTokens } from "../compaction.ts";
 
@@ -14,10 +15,13 @@ export const evidenceTokens = (text: string) =>
 export function evidenceManifest(text: string, sources: ReadonlyArray<Source>): string {
   const cited = new Set([...text.matchAll(/\[\^?(\d+)\]/g)].map((match) => Number(match[1])));
   return sources
-    .filter((source) => cited.has(source.index) || text.includes(source.url))
+    .filter(
+      (source) =>
+        cited.has(source.index) || (source.kind !== "document" && text.includes(source.url)),
+    )
     .map(
       (source) =>
-        `[${source.index}] ${source.title} — ${source.url}${source.read ? " (page extracted)" : " (snippet only)"}`,
+        `[${source.index}] ${source.title} — ${sourceTarget(source)}${source.read ? (source.kind === "document" ? " (document excerpt read)" : " (page extracted)") : " (snippet only)"}`,
     )
     .join("\n");
 }

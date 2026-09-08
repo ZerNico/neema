@@ -359,7 +359,7 @@ describe("ChatInput first render", () => {
       if (!empty && (id === null || id === "removed")) {
         expect(initial.getByRole("button", { name: "Send" })).toBeDisabled();
         const { rerender } = render(input(id));
-        expect(onModelChange).toHaveBeenCalledWith("vision");
+        expect(onModelChange).toHaveBeenCalledWith("vision", "default");
         // The owner has not applied the callback yet: neither click nor Enter
         // may send with a different model from the one shown in the trigger.
         fireEvent.click(sendButton());

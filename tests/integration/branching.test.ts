@@ -15,6 +15,10 @@ import {
 } from "~/db/schema/index.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
@@ -32,9 +36,20 @@ import {
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+
+// Knowledge-backed generations are exercised in knowledge.test.ts; here no
+// message carries a manifest, so the session is never opened.
+const FakeKnowledge = Layer.mergeAll(
+  Layer.succeed(KnowledgeSearch, {
+    search: () => Effect.die("knowledge search is not part of this suite"),
+    session: () => Effect.die("knowledge session is not part of this suite"),
+  } as never),
+  Layer.succeed(KnowledgeService, {} as never),
+);
 
 let container: StartedPostgreSqlContainer;
 type Services = ChatRepo | ChatService | AttachmentRepo | SyncBus | Db;
@@ -62,12 +77,16 @@ const fakeGeneratedText = (text: string) =>
 
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
   generateText: () => fakeGeneratedText(GENERATED_TITLE),
   streamChat: () => Stream.fromEffect(Effect.die("no generation in these tests")),
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -78,7 +97,13 @@ beforeAll(async () => {
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
-  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    AgentRepo.layer,
+    ChatRepo.layer,
+    KnowledgeRepo.layer,
+    ProviderRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
@@ -86,6 +111,7 @@ beforeAll(async () => {
     Layer.provideMerge(
       Layer.mergeAll(
         FakeGateway,
+        FakeKnowledge,
         FakeWebSearch,
         FakeUrlReader,
         FakeBlobStore,

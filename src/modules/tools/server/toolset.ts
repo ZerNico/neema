@@ -18,13 +18,6 @@ export interface PreparedWebTools {
   group: ToolGroup;
 }
 
-export interface PreparedWebToolkit {
-  tools: { search: boolean; reader: boolean };
-  // The concrete tool set varies with admin toggles; the gateway only needs
-  // "some toolkit with handlers", which is also all the multi-turn loop uses.
-  toolkit: Toolkit.WithHandler<any>;
-}
-
 type DynamicToolkit = Toolkit.Toolkit<Record<string, Tool.Any>>;
 
 const unavailable = () => Effect.succeed(null);
@@ -103,17 +96,4 @@ export const prepareWebTools: (input: {
     };
   }
   return undefined;
-});
-
-// Backward-compatible wrapper for tests and callers that only need web tools.
-// The stream engine uses `prepareWebTools` directly once it can add other groups.
-export const prepareWebToolkit: (
-  input: Parameters<typeof prepareWebTools>[0],
-) => Effect.Effect<PreparedWebToolkit | undefined, never, Scope.Scope> = Effect.fn(
-  "tools.prepareWebToolkit",
-)(function* (input) {
-  const prepared = yield* prepareWebTools(input);
-  if (!prepared) return undefined;
-  const toolkit = yield* mergeToolGroups([prepared.group]);
-  return toolkit ? { tools: prepared.tools, toolkit } : undefined;
 });

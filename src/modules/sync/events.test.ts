@@ -59,6 +59,23 @@ describe("sync events", () => {
     }),
   );
 
+  it.effect("roundtrips global resource invalidation without resource metadata", () =>
+    Effect.gen(function* () {
+      const envelope = { scope: "global" as const, event: { type: "resources.changed" as const } };
+      expect(yield* decodeEnvelope(yield* encodeEnvelope(envelope))).toEqual(envelope);
+    }),
+  );
+
+  it.effect("roundtrips content-free knowledge indexing invalidations", () =>
+    Effect.gen(function* () {
+      const envelope = {
+        scope: "global" as const,
+        event: { type: "knowledge.index.changed" as const },
+      };
+      expect(yield* decodeEnvelope(yield* encodeEnvelope(envelope))).toEqual(envelope);
+    }),
+  );
+
   it.effect("rejects unknown event types", () =>
     Effect.gen(function* () {
       const result = yield* decodeEnvelope(

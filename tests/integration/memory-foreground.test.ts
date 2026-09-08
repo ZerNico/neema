@@ -14,6 +14,10 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
@@ -33,6 +37,7 @@ import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
 
@@ -212,6 +217,10 @@ const questionRound = (input: GatewayInput, id: string): Stream.Stream<ChatStrea
 
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
   generateText: () => Effect.die("no side generation in foreground memory tests"),
   streamChat: (input) =>
     Stream.suspend(() => {
@@ -340,12 +349,22 @@ const FakeDocumentParser = Layer.succeed(DocumentParser, {
   availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
 });
 
+// Knowledge-backed generations are exercised in knowledge.test.ts; here no
+// message carries a manifest, so the session is never opened.
+const FakeKnowledge = Layer.mergeAll(
+  Layer.succeed(KnowledgeSearch, {
+    search: () => Effect.die("knowledge search is not part of this suite"),
+    session: () => Effect.die("knowledge session is not part of this suite"),
+  } as never),
+  Layer.succeed(KnowledgeService, {} as never),
+);
+
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | StreamEngine | Db, unknown>;
 let modelId: string;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
@@ -356,7 +375,13 @@ beforeAll(async () => {
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
-  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    AgentRepo.layer,
+    ChatRepo.layer,
+    KnowledgeRepo.layer,
+    ProviderRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
@@ -364,6 +389,7 @@ beforeAll(async () => {
     Layer.provideMerge(
       Layer.mergeAll(
         FakeGateway,
+        FakeKnowledge,
         FakeMemoryService,
         FakeWebSearch,
         FakeUrlReader,
@@ -805,7 +831,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["ask_user", "web_search", "save_memory"],
+      ["web_search", "ask_user", "save_memory"],
     ]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
@@ -818,7 +844,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["ask_user", "web_search", "save_memory"],
+      ["web_search", "ask_user", "save_memory"],
       ["web_search", "ask_user"],
     ]);
   }, 60_000);

@@ -3,13 +3,18 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, SessionAppSidebar } from "./_app.tsx";
 import { sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
-import { getSessionUser } from "~/modules/auth/server/functions.ts";
+import { getSessionUser, getSessionIdentity } from "~/modules/auth/server/functions.ts";
 
-vi.mock("~/modules/auth/server/functions.ts", () => ({ getSessionUser: vi.fn() }));
+vi.mock("~/modules/auth/server/functions.ts", () => ({
+  getSessionUser: vi.fn(),
+  getSessionIdentity: vi.fn(),
+}));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
 vi.mock("~/modules/chat/ui/app-sidebar.tsx", () => ({
-  AppSidebar: ({ user }: { user: { name: string } }) => (
-    <div data-testid="sidebar-user">{user.name}</div>
+  AppSidebar: ({ user, impersonating }: { user: { name: string }; impersonating?: boolean }) => (
+    <div data-testid="sidebar-user" data-impersonating={impersonating}>
+      {user.name}
+    </div>
   ),
 }));
 
@@ -41,13 +46,17 @@ const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: fa
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getSessionIdentity).mockResolvedValue({ userId: "u1", impersonatedBy: null });
 });
 
 describe("app shell guard", () => {
   it("puts the signed-in user in the route context", async () => {
     sessionMock.mockResolvedValue(user as never);
 
-    await expect(runBeforeLoad(newClient())).resolves.toEqual({ user });
+    await expect(runBeforeLoad(newClient())).resolves.toEqual({
+      user,
+      identity: { userId: "u1", impersonatedBy: null },
+    });
   });
 
   it("reads the user through the cache instead of asking again", async () => {
@@ -87,25 +96,53 @@ describe("app shell guard", () => {
     expect(sessionMock).toHaveBeenCalledTimes(2);
   });
 
-  it("updates the sidebar when the cached session user changes", async () => {
+  it.each([false, true])(
+    "preserves route impersonation state (%s) as the cached user updates",
+    async (impersonating) => {
+      const queryClient = newClient();
+      queryClient.setQueryData(sessionUserQuery.queryKey, user);
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <SessionAppSidebar initialUser={user} impersonating={impersonating} />
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Ada");
+      expect(screen.getByTestId("sidebar-user")).toHaveAttribute(
+        "data-impersonating",
+        String(impersonating),
+      );
+
+      act(() => {
+        queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
+          current ? { ...current, name: "Grace" } : current,
+        );
+      });
+
+      await waitFor(() => expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Grace"));
+      expect(screen.getByTestId("sidebar-user")).toHaveAttribute(
+        "data-impersonating",
+        String(impersonating),
+      );
+      expect(sessionMock).not.toHaveBeenCalled();
+    },
+  );
+});
+
+it.each([null, { ...user, id: "another-user" }])(
+  "does not resurrect the initial sidebar after a confirmed identity change",
+  async (next) => {
     const queryClient = newClient();
     queryClient.setQueryData(sessionUserQuery.queryKey, user);
-
     render(
       <QueryClientProvider client={queryClient}>
         <SessionAppSidebar initialUser={user} />
       </QueryClientProvider>,
     );
-
-    expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Ada");
-
     act(() => {
-      queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
-        current ? { ...current, name: "Grace" } : current,
-      );
+      queryClient.setQueryData(sessionUserQuery.queryKey, next);
     });
-
-    await waitFor(() => expect(screen.getByTestId("sidebar-user")).toHaveTextContent("Grace"));
-    expect(sessionMock).not.toHaveBeenCalled();
-  });
-});
+    await waitFor(() => expect(screen.queryByTestId("sidebar-user")).not.toBeInTheDocument());
+  },
+);

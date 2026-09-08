@@ -2,6 +2,7 @@ import type {
   CompactionActivity,
   ToolActivity,
   WebToolActivity,
+  KnowledgeToolActivity,
 } from "../client/use-message-stream.ts";
 
 type PositionedActivity =
@@ -11,6 +12,7 @@ type PositionedActivity =
 export type AssistantBodyPart =
   | { kind: "text"; key: string; content: string; streaming: boolean }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
+  | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
   | { kind: "tool"; key: string; activity: Exclude<ToolActivity, WebToolActivity> }
   | { kind: "compaction"; key: string; activity: CompactionActivity };
 
@@ -42,7 +44,11 @@ export function projectAssistantBody({
     ...tools
       .filter(
         (activity) =>
-          !(activity.family === "web" && activity.runId && researchRuns.has(activity.runId)),
+          !(
+            (activity.family === "web" || activity.family === "knowledge") &&
+            activity.runId &&
+            researchRuns.has(activity.runId)
+          ),
       )
       .map((activity): PositionedActivity => ({ kind: "tool", activity })),
     ...compactions
@@ -81,6 +87,17 @@ export function projectAssistantBody({
         parts.push({
           kind: "web",
           key: `web-${item.activity.callId}`,
+          activities: [item.activity],
+        });
+    } else if (item.activity.family === "knowledge" && item.activity.name !== "knowledge_context") {
+      // Same shape as web: one collapsed row per run of knowledge calls, with
+      // the individual searches and reads in its disclosure.
+      const last = parts.at(-1);
+      if (last?.kind === "knowledge") last.activities.push(item.activity);
+      else
+        parts.push({
+          kind: "knowledge",
+          key: `knowledge-${item.activity.callId}`,
           activities: [item.activity],
         });
     } else {

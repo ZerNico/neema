@@ -5,6 +5,7 @@ import { TooltipProvider } from "~/ui/primitives/tooltip";
 import { CitationChip } from "./citation-chip.tsx";
 
 const source = {
+  kind: "web" as const,
   index: 1,
   url: "https://www.example.com/article",
   title: "A source title that stays readable in the preview",

@@ -11,7 +11,6 @@ import {
   getUrlReaderTool,
   getWebSearchTool,
   testSearchConnection,
-  updateDocumentParserTool,
   updateMemoryTool,
   updateUrlReaderTool,
   updateWebSearchTool,
@@ -231,33 +230,6 @@ describe("ToolsPage", () => {
       expect(updateUrlReaderTool).toHaveBeenCalledWith({ data: { perPageCharCap: 15000 } }),
     );
     expect(saveButtons()[1]).toHaveTextContent("Save");
-  });
-
-  it("submits the document parser form on Enter and flags a non-integer page count", async () => {
-    const user = userEvent.setup();
-    const pending = deferred<unknown>();
-    vi.mocked(updateDocumentParserTool).mockReturnValue(pending.promise as never);
-    renderPage();
-
-    const pages = screen.getByLabelText("Max pages");
-    await user.clear(pages);
-    await user.type(pages, "2.5{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a whole number.");
-    expect(updateDocumentParserTool).not.toHaveBeenCalled();
-
-    await user.clear(pages);
-    await user.type(pages, "300{Enter}");
-    await waitFor(() =>
-      expect(updateDocumentParserTool).toHaveBeenCalledWith({
-        data: { maxChars: 120000, maxPages: 300 },
-      }),
-    );
-    const save = saveButtons()[2]!;
-    expect(save).toHaveAttribute("aria-busy", "true");
-    expect(save.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
-    expect(save).toHaveTextContent("Save");
-    pending.resolve(undefined);
-    await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
   });
 
   it("keeps the Test connection label while testing and colours the result", async () => {

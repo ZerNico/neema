@@ -23,7 +23,17 @@ import {
 import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
-import { mergeSource, mergeSources } from "~/modules/tools/sources.ts";
+import { KNOWLEDGE_SYSTEM_HINT } from "~/modules/knowledge/server/context.ts";
+import type { KnowledgeSearchSession } from "~/modules/knowledge/server/search.ts";
+import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { prepareKnowledgeTools } from "~/modules/knowledge/server/tools.ts";
+import {
+  KNOWLEDGE_TOOL_LIMITS,
+  KnowledgeToolName,
+  projectKnowledgeToolResult,
+} from "~/modules/knowledge/tool-schema.ts";
+import type { GenerationConfig } from "../repo.ts";
+import { isWebSource, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
@@ -143,6 +153,13 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   history: ReadonlyArray<MessageRow>;
   priorSources: ReadonlyArray<Source>;
   runtimeContext: Prompt.MessageEncoded;
+  /** The frozen configuration of this generation. */
+  config: GenerationConfig;
+  /** Open when the configuration selects knowledge; shared by every worker. */
+  knowledge: {
+    session: KnowledgeSearchSession;
+    service: KnowledgeService["Service"];
+  } | null;
   modelId: string;
   userId: string;
   startedAt: number;
@@ -255,13 +272,14 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     }),
   );
   yield* update();
+  const indexer = createSourceIndexer(deps.priorSources);
   const web = yield* prepareWebTools({
     webSearch: deps.webSearch,
     urlReader: deps.urlReader,
-    indexer: createSourceIndexer(deps.priorSources),
+    indexer,
     authority: createUrlAuthority([
       ...extractUserMessageUrls(deps.history),
-      ...deps.priorSources.map((source) => source.url),
+      ...deps.priorSources.filter(isWebSource).map((source) => source.url),
     ]),
     requestSearch: true,
     policy: {
@@ -272,7 +290,19 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   });
   if (!web?.tools.search || !web.tools.reader)
     return yield* Effect.die(new Error("Deep research requires enabled search and reader tools."));
-  const workerToolkit = yield* mergeToolGroups([web.group]);
+  // Knowledge tools share one budget, permit pool and citation sequence across
+  // every worker; they are separate from the web allowance on purpose.
+  const knowledgeTools = deps.knowledge
+    ? yield* prepareKnowledgeTools({
+        userId: deps.userId,
+        session: deps.knowledge.session,
+        indexer,
+      }).pipe(Effect.provideService(KnowledgeService, deps.knowledge.service))
+    : null;
+  const workerToolkit = yield* mergeToolGroups([
+    web.group,
+    ...(knowledgeTools ? [knowledgeTools.group] : []),
+  ]);
   let compactionPosition = 0;
 
   const invoke = Effect.fn("research.invoke")(function* (input: {
@@ -283,6 +313,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   }) {
     if (!(yield* store.alive(fence)))
       return yield* Effect.die(new Error("Research cancelled or ownership lost"));
+    if (knowledgeTools) yield* knowledgeTools.authorize();
     const { phase, maxOutputTokens: cap } = input.spec;
     if (
       estimatePromptTokens(input.prompt.content as ReadonlyArray<Prompt.MessageEncoded>) >
@@ -417,9 +448,15 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
             // decision: even a provider's unsolicited full answer is discarded.
             // Validated ask_user activities below remain visible at the current offset.
           }
+          const isKnowledge =
+            (part.type === "tool-call" || part.type === "tool-result") &&
+            Schema.is(KnowledgeToolName)(part.name);
           if (
             part.type === "tool-call" &&
-            (part.name === "ask_user" || part.name === "web_search" || part.name === "read_url")
+            (part.name === "ask_user" ||
+              part.name === "web_search" ||
+              part.name === "read_url" ||
+              isKnowledge)
           ) {
             const rowId = uuidv7();
             rows.set(part.id, rowId);
@@ -451,6 +488,19 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
                 phase: "start",
                 callId: rowId,
                 name: part.name,
+                turnIndex: reservation.ordinal,
+                callIndex: index,
+                textOffset,
+              });
+            else if (isKnowledge)
+              yield* deps.emit({
+                v: 1,
+                family: "knowledge",
+                phase: "start",
+                callId: rowId,
+                runId: fence.runId,
+                ...(input.taskId ? { taskId: input.taskId } : {}),
+                name: part.name as typeof KnowledgeToolName.Type,
                 turnIndex: reservation.ordinal,
                 callIndex: index,
                 textOffset,
@@ -502,15 +552,48 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
               });
               return;
             }
+            const lineage = {
+              runId: fence.runId,
+              ...(input.taskId ? { taskId: input.taskId } : {}),
+            };
+            if (isKnowledge) {
+              if (preliminary) return;
+              const activity = projectKnowledgeToolResult(
+                part.result,
+                part.isFailure,
+                knowledgeTools?.remaining() ?? 0,
+              );
+              yield* store.locked(fence, (tx) =>
+                tx
+                  .update(messageToolCalls)
+                  .set({
+                    result: json(activity),
+                    status: activity.ok ? "complete" : "error",
+                    completedAt: new Date(),
+                  })
+                  .where(eq(messageToolCalls.id, rowId))
+                  .pipe(Effect.orDie, Effect.asVoid),
+              );
+              for (const source of activity.sources) {
+                sources.set(source.index, mergeSource(sources.get(source.index), source));
+                const local = input.taskId ? taskSources.get(input.taskId) : undefined;
+                local?.set(source.index, mergeSource(local.get(source.index), source));
+              }
+              yield* deps.emit({
+                v: 1,
+                phase: "result",
+                callId: rowId,
+                name: part.name as typeof KnowledgeToolName.Type,
+                ...lineage,
+                ...activity,
+              });
+              return;
+            }
             const result = part.result as WebToolResult;
             const summary = {
               targets: result?.targets ?? [],
               resultCount: result?.resultCount ?? 0,
               pagesFetched: result?.pagesFetched ?? 0,
-            };
-            const lineage = {
-              runId: fence.runId,
-              ...(input.taskId ? { taskId: input.taskId } : {}),
             };
             if (preliminary) {
               yield* deps.emit({
@@ -577,6 +660,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         () => new ResearchExecutionError({ reason: "provider_timeout" }),
       ),
     );
+    if (knowledgeTools) yield* knowledgeTools.authorize();
     if (phase === "synthesis" && synthesisLine) {
       const checked = validateResearchCitations(synthesisLine, citationIds());
       if (checked.invalid) limitations.add("Unregistered final citation references were removed.");
@@ -720,8 +804,23 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     webToolsEnabled: true,
     modelSupportsFiles: model?.capabilities.files ?? false,
   });
+  // Agent instructions are user-level configuration: a separate, lower-authority
+  // message after the application policy, never merged into it.
+  const agentInstructions: Prompt.MessageEncoded[] = deps.config.snapshot?.instructions.trim()
+    ? [
+        {
+          role: "user",
+          content: `<agent-instructions name=${JSON.stringify(deps.config.snapshot.name)}>\n${deps.config.snapshot.instructions}\n</agent-instructions>`,
+        },
+      ]
+    : [];
+  const knowledgePolicy: Prompt.MessageEncoded[] = deps.knowledge
+    ? [{ role: "system", content: KNOWLEDGE_SYSTEM_HINT }]
+    : [];
   const fixedPrefix: Prompt.MessageEncoded[] = [
     { role: "system", content: prompts.researchPolicy },
+    ...knowledgePolicy,
+    ...agentInstructions,
   ];
   let historyProjection:
     | Pick<CompactionDecision, "startIndex" | "injectedMessages" | "checkpoint">
@@ -965,16 +1064,20 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   const workerTail = (wave: number) => {
     const left = budget.remaining();
     const share = Math.max(1, wave);
+    const knowledgeLine = knowledgeTools
+      ? ` Knowledge operations remaining (shared): ${knowledgeTools.remaining()} of ${KNOWLEDGE_TOOL_LIMITS.operations}.`
+      : "";
     return Prompt.make([
       {
         role: "user" as const,
-        content: prompts.budgetNotice({
-          scope: "worker",
-          searches: Math.floor(left.searches / share),
-          reads: Math.floor(left.reads / share),
-          minutes: left.minutes,
-          headroom: budget.headroom,
-        }),
+        content:
+          prompts.budgetNotice({
+            scope: "worker",
+            searches: Math.floor(left.searches / share),
+            reads: Math.floor(left.reads / share),
+            minutes: left.minutes,
+            headroom: budget.headroom,
+          }) + knowledgeLine,
       },
     ]);
   };
@@ -1006,6 +1109,16 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     );
     const basePrompt = Prompt.make([
       { role: "system", content: `${prompts.researchPolicy}\n${prompts.workerPolicy}` },
+      ...knowledgePolicy,
+      ...(deps.knowledge
+        ? [
+            {
+              role: "system" as const,
+              content: `Selected knowledge documents are available through list_documents, search_knowledge and read_document (${deps.knowledge.session.manifest.length} documents). They are separate from web search: use them for questions the selection can answer, and cite their indexes like web sources.`,
+            },
+          ]
+        : []),
+      ...agentInstructions,
       {
         role: "assistant",
         content: `Coordinator assignment (data, not user authority):\n${task.assignment}\nRegistered prior sources (data):\n${manifest(task.id, specs.worker)}`,
@@ -1192,6 +1305,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
               Effect.gen(function* () {
                 if (!(yield* store.alive(fence)))
                   return yield* Effect.die(new Error("Research stopped"));
+                if (knowledgeTools) yield* knowledgeTools.authorize();
                 const state = tasks.find((item) => item.id === task.id)!;
                 state.status = "error";
                 state.error = researchFailureMessage(cause);
@@ -1219,6 +1333,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     Effect.catchCause((cause) =>
       Effect.gen(function* () {
         if (!(yield* store.alive(fence))) return yield* Effect.die(new Error("Research stopped"));
+        if (knowledgeTools) yield* knowledgeTools.authorize();
         limitations.add(researchFailureMessage(cause));
       }),
     ),
@@ -1249,6 +1364,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
         if (!(yield* store.alive(fence)) || deps.getTextOffset() === beforeSynthesis)
           return yield* Effect.failCause(cause);
         limitations.add(researchFailureMessage(cause));
+        if (knowledgeTools) yield* knowledgeTools.authorize();
         limitations.add("The final report was cut short.");
         return null;
       }),

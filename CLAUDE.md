@@ -117,9 +117,11 @@ See README.md for architecture; this file records the sharp edges.
   registered source and normalises it to `[^N]`, because models write both and the
   chip renderer keys off the footnote form. Unregistered footnote handles become
   `[unverified source]`; ordinary bracketed numbers without a registered source stay text.
-- SearXNG returns HTTP 200 with `results: []` and `unresponsive_engines` when every
-  engine is rate-limited or captcha-suspended. The backend maps that to a
-  `SearchBackendError` so the run sees a failure, not an empty topic. The budget
+- SearXNG returns HTTP 200 with `results: []` and `unresponsive_engines` for both
+  partial and total failures. The backend requests the enabled general engines from
+  `/config` (respecting time-range support) and fails only when every requested engine
+  is unresponsive. Missing config or query bang selectors leave participation unknown;
+  neither is evidence of a total outage. HTTP/transport failures still fail. The budget
   counts consecutive failed backend queries across all workers (`observeSearch`),
   once per actual backend completion, never per tool batch, waiter, cache hit,
   cancellation or refusal; at
@@ -180,6 +182,174 @@ See README.md for architecture; this file records the sharp edges.
   chat ledger row keyed by run ID. Compaction uses its call ID for a separate ledger row;
   it is excluded from the chat aggregate. Missing usage is incomplete/unknown cost, not zero.
   Branch copies terminal display snapshots with fresh IDs, never calls or ledger entries.
+
+## Agents and knowledge
+
+- An agent is a saved chat configuration, never a permission. It is chosen on the new-chat
+  screen only: the first message installs its current revision into `conversation_agents`
+  (the turn transaction re-reads it so the stored snapshot matches the write), and from then
+  on the conversation is an agent chat. `sendMessage` refuses `agentId` for an existing
+  conversation (`InvalidMessage`), so there is no swap, reselect or removal and the revision
+  never moves. The composer shows the pinned agent as a header bar (`AgentBar`) instead of a
+  removable chip, and the new-chat screen replaces the greeting with the agent's identity.
+  The "+" menu's Agent and Knowledge rows open searchable Base UI combobox popups
+  (`AgentPicker`, `CollectionPicker`) anchored to the "+" button, not submenus, so a long
+  list scales. The row queues the popup and the menu's `onOpenChangeComplete` opens it, so
+  the closing menu never steals the popup's focus. Knowledge ticks are a draft committed by
+  its Add button; Escape or an outside click discards them. Each assistant row records what it actually ran with in
+  `message_generation_config` + `message_knowledge_versions` (`src/modules/chat/server/
+effective-config.ts`, resolved inside `createTurn`/`createAssistantForEdit`). Retry and edit
+  reuse that row and re-authorize the manifest; validated structured continuations inherit
+  it and branches copy it verbatim. Every assistant must have a saved config; there is no
+  inference for missing rows. The installed snapshot carries its dependency collection IDs,
+  unioned with request-local selections even when the next request sends `collectionIds: []`.
+- The agent editor is owner-only; a recipient never sees a detail page, only Start chat on the
+  list. Rendering a read-only view would turn the page into a way to read instructions the owner
+  did not choose to display. New-chat selection uses `getAgentSelection`, a separate safe
+  projection without instructions. Installed chats use their pinned identity/dependencies
+  and never fetch the live agent. Preferred models apply once per draft selection, never
+  over a later explicit model choice.
+- OpenRouter's default `GET /models` is text-generation only: embedding models are **absent**
+  from it and appear only under `?output_modalities=embeddings`, with
+  `output_modalities: ["embeddings"]` and no `text`. `fetchCatalog` fetches both views for
+  `kind: "openrouter"` and merges by id; `inferType` maps that modality to `"embedding"`. A plain
+  OpenAI-compatible endpoint lists everything in one call and would ignore or reject the filter,
+  so it gets the single request; when it omits `architecture` the admin sets the type by hand.
+  Rerank/speech/video stay out of the registry. No catalog field carries an embedding model's
+  vector width (verified against both `/models` and `/models/:id/endpoints`), so the admin form's
+  **Detect** button sends one short `POST /embeddings` through `probeEmbeddingDimensions` and
+  reads the width back; it is the only honest source. The add-model dialog shows no settings
+  until a row is actually picked — half-typed search text is not a model. Verified against the
+  live OpenRouter API on 2026-09-07.
+- Group sharing permission is per membership: `group_members.can_share` defaults to false.
+  Admins manage it on the group's member rows. Regular owners need that exact enabled
+  membership to create an agent/collection group grant; the sharing transaction holds a
+  membership `FOR SHARE` lock through insertion so disabling/removal serializes with grants.
+  Revoking permission leaves existing grants intact and repeated grants idempotent; removal
+  and re-addition resets permission. Admin owners may share to any group or publish to the
+  instance, but admin status never permits sharing another owner's resource. Resource events
+  refresh both sharing targets and admin group-member queries.
+- An agent grant never grants its collections or model: those are checked separately, and losing
+  any selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
+  Agent instructions enter the prompt as a user-role block after the application policies.
+- Collections are selected **per message**, like attached files: the composer sends the
+  current standalone list with every message and clears it on submit, while the pinned
+  agent (and its own attached collections) stays for the conversation. The server still
+  stores what each generation ran with, so retry/edit never depend on composer state. In the
+  transcript a collection shows on the **question** that added it, by name only, beside that
+  message's file chips — never as an activity row on the answer, and never with document-level
+  detail ("included in full"). The `knowledge_context` activity still exists for citations and
+  replay; the answer simply does not render it.
+- Admin **Documents** page (`knowledge-admin-page.tsx`, `/admin/documents`) owns both halves of
+  "how documents become searchable": semantic search (embedding model) and document parsing.
+  Neither is a chat tool, so neither lives under Tools. Only enabled, `access: "public"`
+  embedding models are offered; enabling or switching confirms that document text goes to that
+  provider, and a same-dimension switch asks whether existing vectors stay comparable — "keep"
+  is the admin's claim, never inferred from a name or dimension count. Approval never
+  bulk-submits corpora; **Rebuild all** does, but queues only stale work (`rebuildAllIndexes`
+  runs the owner-scoped `rebuildIndex` per collection as each owner — no cross-user
+  transaction). Action buttons sit left-aligned in every admin section.
+- Two model pickers, on purpose: `ModelPicker` (chat composer, retry menu, agent editor) is the
+  searchable, provider-grouped, capability-annotated combobox for users choosing among many
+  models often; `ModelSelect` (`providers/ui/model-select.tsx`: default model order, semantic
+  search) is the plain admin dropdown with "Name · Provider" wording and an optional detail
+  such as "4096d". New admin model dropdowns use `ModelSelect`. A Base UI `Select` renders the
+  chosen label only when given `items`, otherwise the trigger shows the raw value; the shared
+  component passes the label both ways.
+- Knowledge mode is decided twice: metadata at turn time (`fitsDirectContext`) and the rendered
+  prompt at dispatch (`prepareKnowledgeContext`), which may downgrade "context" to retrieval but
+  never the reverse. Final toolkit assembly follows that prepared mode, not the saved
+  metadata estimate. Selection authorization failures are sticky terminal errors, including
+  after the final provider call; they never become recoverable failed tool results in chat
+  or research. Already-streamed text can remain visible but cannot complete successfully.
+  Direct context includes every selected document or none, sits after retained
+  history in protected trailing position, and registers its citations through the
+  application-authored `knowledge_context` activity. Retrieval offers `list_documents`,
+  `search_knowledge`, `read_document` (shared 64 operations, 3 permits, bounded encoded results,
+  exact continuations) with a 24-round ceiling; `save_memory` is never offered alongside knowledge.
+  The retrieval prompt and the tool descriptions steer the model to **search first**: a search
+  already returns the document/version references a read needs, so `list_documents` is for
+  questions about the collection itself, never a reflexive first call. A search hit is a bounded
+  excerpt of its chunk (`searchExcerptChars`, 800), so a three-query batch keeps all its hits
+  instead of spending the response cap on the first few whole chunks; `read_document` opens the
+  exact range. In the transcript, a run of knowledge calls is one collapsed row shaped like the
+  web row (`assistant-body.ts` groups them): the header counts excerpts, the disclosure lists
+  the queries; the start envelope carries them so the row can say what it is searching while it
+  runs. Reads and listings are counted, since their targets are opaque version ids. The source
+  viewer speaks plainly — no character offsets — and turns `[page N]` marker lines into page
+  dividers, skipping the one that merely repeats the page already named above the excerpt.
+- Document sources are `{ kind: "document", collectionId, documentId, versionId, startOffset,
+endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missing kinds
+  are invalid. Identities are namespaced so citation indexes never collide, and documents
+  grant no web URL authority. Tool result bodies are model-only: chat and research use
+  `projectKnowledgeToolResult` to validate and project results before rows and the wire.
+- Document range reads walk 4,096-code-point blocks inside PostgreSQL, counting non-BMP
+  characters as two UTF-16 units; only intersecting blocks cross the connection. Search
+  chunks are not the original body and cannot reconstruct inter-section whitespace.
+  The service rejects starts inside surrogate pairs and backs end cuts up to a complete
+  character, preserving exact continuation offsets. Document lists and download authorization
+  query metadata only; direct-context body reads are batched separately.
+- Indexing publishes a content-free `knowledge.index.changed` event, not a policy change.
+  The client coalesces these into knowledge-only refreshes, lets an in-flight fetch finish,
+  and schedules one follow-up for intervening events. First SSE open reconciles knowledge
+  too: completion can happen between the initial fetch and subscription.
+- The optional `update_plan` checklist is an agent preference (`planEnabled`), offered only to
+  tool-capable models. Each accepted call replaces the whole list; the prompt carries one current
+  snapshot in the trailing reminder, never a history of revisions, and retry/edit start clean. A
+  completed step is the model's claim about its own work, so neither the prompt nor the UI
+  presents it as verified coverage. Deep research keeps its internal plan; the two never mix.
+- Physical bytes and rows cannot commit together, so `blob_cleanup_intents` records the risky
+  half first: a `candidate` before an upload stores bytes, an `orphan` inside the transaction
+  that drops a blob's last reference. A reconciler settles them by asking whether any row owns
+  the key — never by trusting the caller's error, since registration may have committed anyway.
+  In-flight uploads are protected by a grace period, and a failing store backs off instead of
+  spinning. Post-commit deletion is still the fast path; the ledger is what makes it recoverable.
+  Due-ness is judged by the database clock (`not_before <= now()` in SQL), never a JS `Date`:
+  the two drift by milliseconds, and a reconciler that quietly sees nothing is the exact failure
+  the ledger exists to prevent.
+- Integration suites must start `POSTGRES_IMAGE` (pinned pgvector), never `postgres:17-alpine`:
+  the knowledge migrations create `vector` columns and fail on the stock image with a bare
+  "drizzle-kit migrate" error that names no cause.
+- Owners see one repair, **Rebuild index** (`rebuildIndex`): re-extract documents whose text
+  predates the current parser/chunker, then re-embed only versions not indexed for the current
+  model. Healthy documents are never touched, so it is safe to run on any doubt. The two halves
+  stay separate services (`rebuildContent`, `reindex`) for admin flows and tests; do not surface
+  them to owners as separate actions again.
+- Conversation starters render on the new-chat screen for the selected agent and only seed the
+  draft; they never send on their own.
+- **Vector width vs. pgvector.** The embedding column is bare `vector` (no fixed width) and
+  search is an exact cosine scan filtered to one space; there is deliberately no HNSW/IVFFlat
+  index. That is what lets a 3,072- or 4,096-dimension model work: pgvector stores up to 16,000
+  dims but indexes only up to 2,000. The app caps at 8,192 (gateway, admin schema, probe). Exact
+  scan is fine for the bounded corpora here (500 docs/collection, five selected collections).
+  If ANN ever becomes necessary, the options are `halfvec` (indexable to 4,000, any model) or
+  Matryoshka truncation via the `dimensions` request parameter — **only** for models trained for
+  it (OpenAI 3-series, Voyage; not Qwen3-Embedding). A per-space decision at approval time, not a
+  global index. `knowledge.test.ts` pins a 4,096-wide space.
+- The approved width (`expectedDimensions`) **verifies** embedding responses; it is never sent as
+  a `dimensions` request parameter. Sending it asks the provider to truncate, which non-Matryoshka
+  models may reject and OpenRouter's reference leaves unspecified. Every model's native width is
+  what Detect recorded, so the response check is the whole contract. `gateway.test.ts` pins the
+  request body.
+- `pipelineFingerprint` (parser + `CHUNKER_REVISION`) is recorded on every published version.
+  Content is immutable, so improving the pipeline never rewrites a version: `rebuildContent`
+  queues a _new_ version from the retained source for documents the current pipeline could not
+  have produced, keeps the old one readable and citable until it is ready, and skips documents
+  whose replacement is already pending. Notes and text files have their own identities, so a
+  PDF-parser change does not invalidate them.
+- Identical replacement saves reuse the latest version (pending or failed included); explicit
+  retry is separate. Research workers share the knowledge tools, budget and indexer.
+- Postgres refuses NUL (U+0000) in `text`; pdf.js emits it for private-use glyphs (emoji,
+  ticket QR fonts). `stripControlCharacters` runs on every extraction, decoded text file and
+  saved note. Without it `completeExtraction` dies (`orDie`), the worker logs, and the row
+  sits in `extracting` until the lease lapses, so the owner sees a "timeout" that is really
+  three failed attempts.
+- A textless PDF page is skipped, not a failure: the parser keeps its `[page N]` marker so
+  later page numbers stay aligned, and the version publishes with `truncated.reason` naming
+  the pages. The owner sees a plain ready document (no badge, no reason line, by request);
+  the manifest keeps `truncated: true` so direct context is refused and the model is told
+  coverage is partial.
+  A PDF with no extractable text at all still fails with the scanned-PDF hint.
 
 ## Temporal prompt context
 
@@ -294,9 +464,23 @@ See README.md for architecture; this file records the sharp edges.
   the size variants key their optical padding off it. Never `<Button render={<Link/>}
 nativeButton={false}>` for navigation — Base UI forces `role="button"`; use
   `<Link className={buttonVariants({...})}>`.
+- List rows across admin, agents and knowledge share one anatomy: a `size-9` rounded-2xl
+  muted icon tile, a two-line label (name + muted detail), badges beside the name, and a
+  trailing chevron for links. The whole row is the `Link` (`className="block"` around
+  `ListRow interactive`). Grouped lists use `Section` for their headings, never a hand-rolled
+  `<h2>`. Composer context (agent/collections) and included documents on an answer use the
+  attachment chip's shell so context and files read as one row.
 - Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`,
-  `ListCard`/`ListRow`, `EmptyState`, `ErrorState`); admin, settings, tools and the
-  chats index all use it. Confirmations go through `useConfirm()` (AlertDialog);
+  `ListCard`/`ListRow`, `EmptyState`, `ErrorState`); admin, settings, tools, agents,
+  knowledge and the chats index all use it. **`Page` is the scroll container.** The app
+  layout's `<main>` is a fixed-height flex child that never scrolls, because the chat
+  view pins its composer and virtual list to that height; every other route therefore
+  needs its own scroller, and `Page` owns it so a route built from `Page` scrolls by
+  construction. Do not wrap `Page` in another `overflow-y-auto` (nested scrollers trap
+  wheel events), and do not build a non-chat route without it. `page-shell.test.tsx`
+  pins this.
+- `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a `Group`/`RadioGroup`.
+  For a plain hint line inside a menu, render a static `<p>`, not the label primitive. Confirmations go through `useConfirm()` (AlertDialog);
   non-inline mutation failures go through `toast` from `sonner` (Toaster mounted in
   `__root.tsx`).
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive. Its

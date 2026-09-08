@@ -1,7 +1,21 @@
 import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
-import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
+import {
+  Cause,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Schema,
+  Semaphore,
+  Stream,
+} from "effect";
 import { AiError, LanguageModel, type Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import type { ModelCapabilities, ModelPricing, ModelType } from "../model-config.ts";
 import { ProviderRepo } from "./repo.ts";
@@ -71,8 +85,16 @@ const CONTEXT_OVERFLOW_PATTERNS = [
   /exceeds? the (?:model's )?(?:maximum )?(?:input )?token limit/i,
 ];
 
+const ProviderErrorMessage = Schema.Struct({ message: Schema.String });
+const providerErrorMessage = (cause: unknown): string => {
+  // SSE errors are plain objects: String(cause) would erase their message.
+  // Read only a validated string, never serialize arbitrary provider metadata.
+  const decoded = Schema.decodeUnknownOption(ProviderErrorMessage)(cause);
+  return Option.isSome(decoded) ? decoded.value.message : String(cause);
+};
+
 export const isContextOverflow = (cause: unknown): boolean => {
-  const text = String(cause);
+  const text = providerErrorMessage(cause);
   return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text));
 };
 
@@ -140,10 +162,16 @@ export const catalogPricing = (
 export const inferType = (
   outputModalities: ReadonlyArray<string> | undefined,
 ): ModelType | null => {
-  if (!outputModalities || outputModalities.includes("text")) return "chat";
-  // Image/audio generation is intentionally out of scope for the registry for now.
-  if (outputModalities.includes("image") || outputModalities.includes("audio")) return null;
-  return "chat";
+  // OpenRouter lists embedding models with `output_modalities: ["embeddings"]`
+  // (no text), so they used to fall through to "chat" and never appeared as
+  // embedding candidates in the picker. Plain OpenAI-compatible catalogs omit
+  // the field entirely, in which case the admin still sets the type by hand.
+  if (!outputModalities) return "chat";
+  if (outputModalities.includes("text")) return "chat";
+  if (outputModalities.includes("embeddings") || outputModalities.includes("embedding"))
+    return "embedding";
+  // Image/audio/video generation, reranking and speech are out of scope for the registry.
+  return null;
 };
 
 // OpenRouter-style capability signals; plain OpenAI-compatible endpoints
@@ -161,6 +189,41 @@ const inferCapabilities = (m: {
     files: (m.architecture?.input_modalities ?? []).includes("file"),
   };
 };
+
+// Embedding responses are the OpenAI-compatible shape both provider kinds
+// speak. `index` is validated rather than trusted: providers are allowed to
+// return the array out of order, and silently mismatching an embedding with
+// its input would corrupt the index in a way search cannot detect.
+const EmbeddingsResponse = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      index: Schema.Int,
+      embedding: Schema.Array(Schema.Number),
+    }),
+  ),
+});
+
+const EmbeddingTokenCount = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 2_147_483_647 }),
+);
+const EmbeddingUsage = Schema.Struct({
+  usage: Schema.Struct({
+    prompt_tokens: Schema.optionalKey(EmbeddingTokenCount),
+    total_tokens: Schema.optionalKey(EmbeddingTokenCount),
+  }),
+});
+
+export interface EmbeddingAttribution {
+  readonly userId: string;
+  readonly kind: "embedding_document" | "embedding_query";
+}
+
+export interface EmbeddingResult {
+  readonly embeddings: ReadonlyArray<ReadonlyArray<number>>;
+  readonly dimensions: number;
+  /** Absent when the provider reported none — unknown cost, never zero. */
+  readonly inputTokens: number | null;
+}
 
 // Talks to configured AI providers: model catalog for admin autocomplete, and
 // streaming chat completions for generation.
@@ -203,6 +266,32 @@ export class AiGateway extends Context.Service<
       },
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
     >;
+    /**
+     * Embeds a batch of inputs with a stored embedding model. Separate from the
+     * language-model path on purpose: `OpenRouterLanguageModel` covers chat
+     * completions only, while `POST /embeddings` is the shape both provider
+     * kinds expose. Callers batch and bound the inputs.
+     */
+    /**
+     * Sends one short input to `POST /embeddings` for a model that may not be
+     * stored yet, and returns the vector width the provider actually produced.
+     * Catalogs do not state dimensions (verified against OpenRouter), so this
+     * is the only honest source. One tiny billable request; admin-only.
+     */
+    probeEmbeddingDimensions(input: {
+      providerId: string;
+      modelKey: string;
+    }): Effect.Effect<{ dimensions: number }, ProviderUnreachable | ModelNotFound>;
+    embed(input: {
+      modelId: string;
+      inputs: ReadonlyArray<string>;
+      /** Rejects a model whose output does not match the expected width. */
+      expectedDimensions?: number;
+      expectedConnection?: EmbeddingConnection;
+      attribution: EmbeddingAttribution;
+      /** Runs after acquiring the shared permit, immediately before dispatch. */
+      beforeDispatch?: () => Effect.Effect<void, ProviderUnreachable | ModelNotFound>;
+    }): Effect.Effect<EmbeddingResult, ProviderUnreachable | ModelNotFound>;
   }
 >()("chat/providers/AiGateway") {
   static readonly layer = Layer.effect(
@@ -210,27 +299,49 @@ export class AiGateway extends Context.Service<
     Effect.gen(function* () {
       const repo = yield* ProviderRepo;
       const httpClient = yield* HttpClient.HttpClient;
+      const analytics = yield* AnalyticsRepo;
+      const embeddingPermits = yield* Semaphore.make(KNOWLEDGE_LIMITS.embeddingConcurrency);
 
       const decodeModels = Schema.decodeUnknownEffect(ModelsResponse);
+      const decodeEmbeddings = Schema.decodeUnknownEffect(EmbeddingsResponse);
 
       const fetchCatalog = Effect.fn("AiGateway.fetchCatalog")(function* (providerId: string) {
         const provider = yield* repo.getProviderWithKey(providerId);
         if (!provider) return yield* new ModelNotFound({ modelId: providerId });
 
-        // Both supported kinds expose an OpenAI-style GET /models
-        const request = HttpClientRequest.get(`${provider.baseUrl.replace(/\/$/, "")}/models`).pipe(
-          HttpClientRequest.bearerToken(provider.apiKey),
+        // Both supported kinds expose an OpenAI-style GET /models.
+        //
+        // OpenRouter's default listing is text-generation only: embedding
+        // models are absent from it and only appear when the query asks for
+        // that output modality. Fetch both views and merge, so an admin can
+        // pick an embedding model from the same autocomplete. A plain
+        // OpenAI-compatible endpoint lists everything in one call and would
+        // ignore (or reject) the filter, so it gets the single request.
+        const base = provider.baseUrl.replace(/\/$/, "");
+        const listing = (url: string) =>
+          httpClient
+            .execute(
+              HttpClientRequest.get(url).pipe(HttpClientRequest.bearerToken(provider.apiKey)),
+            )
+            .pipe(
+              Effect.flatMap((res) => res.json),
+              Effect.flatMap((json) => decodeModels(json)),
+              Effect.mapError(
+                (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
+              ),
+            );
+        const pages = yield* Effect.all(
+          provider.kind === "openrouter"
+            ? [listing(`${base}/models`), listing(`${base}/models?output_modalities=embeddings`)]
+            : [listing(`${base}/models`)],
+          { concurrency: 2 },
         );
+        const seen = new Set<string>();
+        const data = pages
+          .flatMap((page) => page.data)
+          .filter((m) => !seen.has(m.id) && seen.add(m.id));
 
-        const response = yield* httpClient.execute(request).pipe(
-          Effect.flatMap((res) => res.json),
-          Effect.flatMap((json) => decodeModels(json)),
-          Effect.mapError(
-            (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
-          ),
-        );
-
-        return response.data.flatMap((m): CatalogModel[] => {
+        return data.flatMap((m): CatalogModel[] => {
           const type = inferType(m.architecture?.output_modalities);
           return type === null
             ? []
@@ -280,8 +391,8 @@ export class AiGateway extends Context.Service<
         if (cause instanceof ProviderContextOverflow || cause instanceof ProviderUnreachable) {
           return cause;
         }
-        if (isContextOverflow(cause))
-          return new ProviderContextOverflow({ providerId, message: String(cause) });
+        const message = providerErrorMessage(cause);
+        if (isContextOverflow(message)) return new ProviderContextOverflow({ providerId, message });
         // Preserve only the adapter's fixed reason tag and HTTP status for durable
         // diagnostics. Descriptions, bodies and headers can contain private data.
         const reason = AiError.isAiError(cause) ? cause.reason : undefined;
@@ -291,7 +402,7 @@ export class AiGateway extends Context.Service<
         const streamedError = Schema.decodeUnknownOption(StreamedProviderError)(cause);
         return new ProviderUnreachable({
           providerId,
-          message: String(cause),
+          message,
           ...(reason
             ? { diagnostic: { kind: reason._tag, ...(status === undefined ? {} : { status }) } }
             : Option.isSome(streamedError)
@@ -406,7 +517,280 @@ export class AiGateway extends Context.Service<
         ).pipe(Effect.mapError((cause) => classify(providerId, cause)));
       });
 
-      return AiGateway.of({ fetchCatalog, streamChat, generateText });
+      const probeEmbeddingDimensions = Effect.fn("AiGateway.probeEmbeddingDimensions")(
+        function* (input: { providerId: string; modelKey: string }) {
+          const provider = yield* repo.getProviderWithKey(input.providerId);
+          if (!provider?.enabled) return yield* new ModelNotFound({ modelId: input.providerId });
+          const modelKey = input.modelKey.trim();
+          if (!modelKey || modelKey.length > 200)
+            return yield* new ProviderUnreachable({
+              providerId: provider.id,
+              message: "invalid model key",
+              diagnostic: { kind: "InvalidRequestError" },
+            });
+          const request = HttpClientRequest.post(
+            `${provider.baseUrl.replace(/\/$/, "")}/embeddings`,
+          ).pipe(
+            HttpClientRequest.bearerToken(provider.apiKey),
+            HttpClientRequest.bodyJsonUnsafe({ model: modelKey, input: ["dimension probe"] }),
+          );
+          const response = yield* httpClient.execute(request).pipe(
+            Effect.flatMap((res) =>
+              res.status < 200 || res.status >= 300
+                ? Effect.fail(new Error(`HTTP ${res.status}`))
+                : res.json,
+            ),
+            Effect.flatMap((json) => decodeEmbeddings(json)),
+            Effect.timeout(Duration.seconds(30)),
+            // Never persist provider response bodies or credentials.
+            Effect.mapError(
+              () =>
+                new ProviderUnreachable({
+                  providerId: provider.id,
+                  message:
+                    "the model did not return an embedding; check the key and that it is an embedding model",
+                }),
+            ),
+          );
+          const dimensions = response.data[0]?.embedding.length ?? 0;
+          if (dimensions === 0 || dimensions > 8192)
+            return yield* new ProviderUnreachable({
+              providerId: provider.id,
+              message: "embedding response has invalid dimensions",
+            });
+          return { dimensions };
+        },
+      );
+
+      const embed = Effect.fn("AiGateway.embed")(function* (input: {
+        modelId: string;
+        inputs: ReadonlyArray<string>;
+        expectedDimensions?: number;
+        expectedConnection?: EmbeddingConnection;
+        attribution: EmbeddingAttribution;
+        beforeDispatch?: () => Effect.Effect<void, ProviderUnreachable | ModelNotFound>;
+      }) {
+        const model = yield* repo.getModel(input.modelId);
+        if (!model || !model.enabled || model.type !== "embedding" || model.access !== "public") {
+          return yield* new ModelNotFound({ modelId: input.modelId });
+        }
+        const provider = yield* repo.getProviderWithKey(model.providerId);
+        if (!provider?.enabled) return yield* new ModelNotFound({ modelId: input.modelId });
+        const approved = input.expectedConnection;
+        if (
+          approved &&
+          (approved.providerId !== provider.id ||
+            approved.baseUrl !== provider.baseUrl.replace(/\/$/, "") ||
+            approved.modelKey !== model.modelKey ||
+            approved.modelDimensions !== model.embeddingDimensions)
+        ) {
+          return yield* new ProviderUnreachable({
+            providerId: provider.id,
+            message: "embedding connection changed; approval required",
+          });
+        }
+        if (
+          input.inputs.length > KNOWLEDGE_LIMITS.embeddingBatchSize ||
+          input.inputs.some(
+            (text) => !text.trim() || text.length > KNOWLEDGE_LIMITS.embeddingMaxInputChars,
+          ) ||
+          input.inputs.reduce((total, text) => total + text.length, 0) >
+            KNOWLEDGE_LIMITS.embeddingMaxBatchChars ||
+          (input.expectedDimensions !== undefined &&
+            (!Number.isInteger(input.expectedDimensions) ||
+              input.expectedDimensions < 1 ||
+              input.expectedDimensions > 8192))
+        ) {
+          return yield* new ProviderUnreachable({
+            providerId: provider.id,
+            message: "embedding request exceeds configured input limits",
+            diagnostic: { kind: "InvalidRequestError" },
+          });
+        }
+        // No provider-neutral tokenizer exists here. Budget UTF-8 bytes as
+        // tokens, plus framing headroom: deliberately conservative, especially
+        // for non-Latin text. Never silently truncate immutable chunk evidence.
+        if (
+          model.contextLength != null &&
+          input.inputs.some((text) => Buffer.byteLength(text, "utf8") + 16 > model.contextLength!)
+        ) {
+          return yield* new ProviderUnreachable({
+            providerId: provider.id,
+            message:
+              "embedding input exceeds the model context budget; select a larger-context embedding model or use smaller documents",
+            diagnostic: { kind: "InvalidRequestError" },
+          });
+        }
+        const providerId = model.providerId;
+        if (input.inputs.length === 0) {
+          return { embeddings: [], dimensions: input.expectedDimensions ?? 0, inputTokens: 0 };
+        }
+
+        // `expectedDimensions` is what the index was approved at, and it is
+        // used below to *verify* the response — never sent as a request
+        // parameter. Sending `dimensions` would ask the provider to truncate,
+        // which only Matryoshka-trained models honour; on any other model the
+        // OpenAI-compatible surface may reject it, and OpenRouter's reference
+        // leaves the behaviour unspecified. The model's native width is what
+        // Detect recorded, so the check below is the whole contract.
+        const request = HttpClientRequest.post(
+          `${provider.baseUrl.replace(/\/$/, "")}/embeddings`,
+        ).pipe(
+          HttpClientRequest.bearerToken(provider.apiKey),
+          HttpClientRequest.bodyJsonUnsafe({ model: model.modelKey, input: input.inputs }),
+        );
+
+        if (input.beforeDispatch) yield* input.beforeDispatch();
+        let started = false;
+        let inputTokens: number | null = null;
+        // The finalizer surrounds dispatch and validation, not preflight or
+        // permit waiting. Cancellation after dispatch may still be billable.
+        return yield* Effect.gen(function* () {
+          const response = yield* Effect.suspend(() => {
+            started = true;
+            return httpClient.execute(request);
+          }).pipe(
+            Effect.flatMap((res) =>
+              Effect.gen(function* () {
+                if (res.status < 200 || res.status >= 300)
+                  return yield* Effect.fail(new Error(`HTTP ${res.status}`));
+                let length = 0;
+                const parts: Uint8Array[] = [];
+                yield* Stream.runForEach(res.stream, (part) =>
+                  Effect.gen(function* () {
+                    length += part.byteLength;
+                    if (length > 8 * 1024 * 1024)
+                      return yield* Effect.fail(new Error("embedding response too large"));
+                    parts.push(part);
+                  }),
+                );
+                const bytes = new Uint8Array(length);
+                let offset = 0;
+                for (const part of parts) {
+                  bytes.set(part, offset);
+                  offset += part.byteLength;
+                }
+                return yield* Effect.try(
+                  () => JSON.parse(new TextDecoder().decode(bytes)) as unknown,
+                );
+              }),
+            ),
+            Effect.flatMap((json) => {
+              const usage = Schema.decodeUnknownOption(EmbeddingUsage)(json);
+              if (Option.isSome(usage))
+                inputTokens =
+                  usage.value.usage.prompt_tokens ?? usage.value.usage.total_tokens ?? null;
+              return decodeEmbeddings(json);
+            }),
+            Effect.timeout(Duration.seconds(45)),
+            // Never persist provider response bodies, echoed inputs or credentials.
+            Effect.mapError(
+              () =>
+                new ProviderUnreachable({
+                  providerId,
+                  message: "embedding request failed or timed out",
+                }),
+            ),
+          );
+
+          // Malformed or mismatched output is a contract failure of the model,
+          // not provider weather: retrying the same request cannot change the
+          // vector width it returns, so the job must settle as failed at once.
+          const fail = (message: string) =>
+            Effect.fail(
+              new ProviderUnreachable({
+                providerId,
+                message,
+                diagnostic: { kind: "InvalidRequestError" },
+              }),
+            );
+          if (response.data.length !== input.inputs.length) {
+            return yield* fail(
+              `embedding response covered ${response.data.length} of ${input.inputs.length} inputs`,
+            );
+          }
+
+          const byIndex = new Map(response.data.map((row) => [row.index, row]));
+          if (byIndex.size !== input.inputs.length)
+            return yield* fail("embedding response repeats an input index");
+          const ordered = [];
+          for (let index = 0; index < input.inputs.length; index++) {
+            const row = byIndex.get(index);
+            if (!row) return yield* fail(`embedding response is missing input ${index}`);
+            ordered.push(row);
+          }
+
+          const dimensions = ordered[0]!.embedding.length;
+          if (dimensions === 0 || dimensions > 8192)
+            return yield* fail("embedding response has invalid dimensions");
+          if (input.expectedDimensions !== undefined && dimensions !== input.expectedDimensions) {
+            return yield* fail(
+              `embedding model returned ${dimensions} dimensions, expected ${input.expectedDimensions}`,
+            );
+          }
+          for (const row of ordered) {
+            if (row.embedding.length !== dimensions) {
+              return yield* fail("embedding response mixes vector widths");
+            }
+            // A NaN or Infinity poisons every distance this vector takes part in.
+            if (
+              !row.embedding.every((value) => Number.isFinite(value)) ||
+              row.embedding.every((value) => value === 0)
+            ) {
+              return yield* fail("embedding response contains a non-finite value");
+            }
+          }
+
+          return {
+            embeddings: ordered.map((row) => row.embedding),
+            dimensions,
+            inputTokens,
+          } satisfies EmbeddingResult;
+        }).pipe(
+          Effect.onExit((exit) => {
+            if (!started) return Effect.void;
+            const calculatedCost =
+              inputTokens !== null &&
+              model.pricing &&
+              Number.isFinite(model.pricing.input) &&
+              model.pricing.input >= 0
+                ? (inputTokens * model.pricing.input) / 1_000_000
+                : null;
+            const cost =
+              calculatedCost !== null && Number.isFinite(calculatedCost) ? calculatedCost : null;
+            return analytics
+              .record({
+                ...input.attribution,
+                modelId: model.id,
+                modelName: model.displayName,
+                status: Exit.isSuccess(exit)
+                  ? "complete"
+                  : Cause.hasInterruptsOnly(exit.cause)
+                    ? "aborted"
+                    : "error",
+                inputTokens: inputTokens ?? 0,
+                outputTokens: 0,
+                cachedInputTokens: 0,
+                reasoningTokens: 0,
+                usageComplete: inputTokens !== null,
+                cost,
+                costSource: cost === null ? null : "pricing",
+              })
+              .pipe(
+                Effect.catchCause(() => Effect.logError("embedding usage could not be recorded")),
+              );
+          }),
+        );
+      });
+
+      return AiGateway.of({
+        fetchCatalog,
+        probeEmbeddingDimensions,
+        streamChat,
+        generateText,
+        // Shared by indexing and query requests, not one semaphore per caller.
+        embed: (input) => embeddingPermits.withPermits(1)(embed(input)),
+      });
     }),
   ).pipe(Layer.provide(FetchHttpClient.layer));
 }

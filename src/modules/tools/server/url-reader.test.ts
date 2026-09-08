@@ -5,7 +5,7 @@ import { PageExtractionError, PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend, type SearchHit } from "./search.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
-import { prepareWebToolkit } from "./toolset.ts";
+import { prepareWebTools, mergeToolGroups } from "./toolset.ts";
 import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
@@ -21,6 +21,7 @@ const FakeRepo = (readerEnabled: boolean) =>
     ToolsRepo,
     ToolsRepo.of({
       getTool: () => Effect.succeed(null),
+      getKnowledgeSearch: () => Effect.succeed(null),
       getWebSearch: () => Effect.succeed({ enabled: true, config: searchConfig, secret: null }),
       getDocumentParser: () => Effect.succeed(null),
       getUrlReader: () =>
@@ -87,13 +88,15 @@ const prepared = (
   requestSearch = true,
 ) =>
   Effect.gen(function* () {
-    return yield* prepareWebToolkit({
+    const result = yield* prepareWebTools({
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
       authority: createUrlAuthority(authorityUrls),
       requestSearch,
     });
+    if (!result) return undefined;
+    return { tools: result.tools, toolkit: (yield* mergeToolGroups([result.group]))! };
   });
 
 const runTool = (toolkit: Toolkit.WithHandler<any>, name: string, params: object) =>
@@ -224,7 +227,11 @@ describe("UrlReaderExecutor", () => {
       const final = (yield* runTool(preparedToolkit!.toolkit, "read_url", {
         urls: ["https://blog.example/x"],
       })).at(-1)!;
-      expect(final.sources?.[0]).toMatchObject({ index: 1, url: "https://blog.example/x" });
+      expect(final.sources?.[0]).toMatchObject({
+        kind: "web" as const,
+        index: 1,
+        url: "https://blog.example/x",
+      });
     }).pipe(Effect.provide(layers(true))),
   );
 

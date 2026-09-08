@@ -13,6 +13,7 @@ const completeSearch: WebToolActivity = {
   resultCount: 1,
   sources: [
     {
+      kind: "web" as const,
       index: 1,
       url: "https://effect.website/blog",
       title: "Effect blog",
@@ -115,6 +116,7 @@ describe("ToolActivityBlock", () => {
       ],
       sources: [
         {
+          kind: "web" as const,
           index: 1,
           url: "https://effect.website/blog",
           title: "Effect blog",
@@ -212,6 +214,7 @@ describe("ToolActivityBlock", () => {
             ...completeRead,
             sources: [
               {
+                kind: "web" as const,
                 index: 1,
                 url: "https://effect.website/blog",
                 title: "Effect blog",

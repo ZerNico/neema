@@ -10,16 +10,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { MAX_DEFAULT_MODELS } from "~/modules/providers/default-models.ts";
 import type { ModelRow, PublicProvider } from "~/modules/providers/server/repo.ts";
+import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/ui/primitives/select";
 import { Spinner } from "~/ui/primitives/spinner";
 import { updateDefaultModelOrder } from "../server/functions.ts";
 
@@ -50,9 +44,14 @@ export function DefaultModelOrder({
   const valid = order.every((id) =>
     models.some((model) => model.id === id && model.type === "chat"),
   );
-  const label = (model: PriorityModel) =>
-    `${model.displayName} · ${providers.find((provider) => provider.id === model.providerId)?.name ?? "Unavailable provider"}`;
-  const items = available.map((model) => ({ value: model.id, label: label(model) }));
+  const providerName = (model: PriorityModel) =>
+    providers.find((provider) => provider.id === model.providerId)?.name ?? "Unavailable provider";
+  const label = (model: PriorityModel) => `${model.displayName} · ${providerName(model)}`;
+  const options = available.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    providerName: providerName(model),
+  }));
   const selectedCandidate = available.some((model) => model.id === candidate) ? candidate : null;
 
   const save = useMutation({
@@ -149,23 +148,15 @@ export function DefaultModelOrder({
         )}
       </ListCard>
       <div className="flex flex-wrap items-center gap-2">
-        <Select
-          items={items}
+        <ModelSelect
+          models={options}
           value={selectedCandidate}
-          onValueChange={setCandidate}
-          disabled={save.isPending || available.length === 0 || order.length >= MAX_DEFAULT_MODELS}
-        >
-          <SelectTrigger aria-label="Model to add" className="w-full min-w-0 sm:w-80">
-            <SelectValue placeholder="Choose a model" />
-          </SelectTrigger>
-          <SelectContent>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={setCandidate}
+          aria-label="Model to add"
+          className="w-full min-w-0 sm:w-80"
+          emptyPlaceholder="Every chat model is already listed"
+          disabled={save.isPending || order.length >= MAX_DEFAULT_MODELS}
+        />
         <Button
           variant="outline"
           size="sm"

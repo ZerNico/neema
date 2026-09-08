@@ -1,8 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ResearchToolActivity, WebToolActivity } from "../client/use-message-stream.ts";
-import { MessageBubble } from "./message-list.tsx";
+import type {
+  KnowledgeToolActivity,
+  ResearchToolActivity,
+  WebToolActivity,
+} from "../client/use-message-stream.ts";
+import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
@@ -15,6 +19,7 @@ beforeEach(() => {
 });
 
 const source = {
+  kind: "web" as const,
   index: 1,
   url: "https://example.org/report",
   title: "Evidence",
@@ -75,7 +80,7 @@ const message = {
   reasoning: "",
   reasoningSeen: false,
   status: "streaming",
-  toolActivities: [research, search, read],
+  toolActivities: [research, search, read] as DisplayMessage["toolActivities"],
 };
 
 const tree = (
@@ -133,6 +138,53 @@ describe("research panel", () => {
       "https://example.org/report",
     );
     expect(within(panel).queryByRole("tab")).not.toBeInTheDocument();
+  });
+
+  it("lists knowledge steps under their task by outcome, never by document handle", () => {
+    const listing: KnowledgeToolActivity = {
+      family: "knowledge",
+      callId: "k-1",
+      runId: "run-1",
+      taskId: "task-1",
+      name: "list_documents",
+      status: "complete",
+      summary: {
+        targets: [],
+        documentsListed: 3,
+        passagesReturned: 0,
+        remainingOps: 63,
+        coverage: "",
+      },
+    };
+    const reading: KnowledgeToolActivity = {
+      family: "knowledge",
+      callId: "k-2",
+      runId: "run-1",
+      taskId: "task-2",
+      name: "read_document",
+      status: "running",
+    };
+    const strayRun: KnowledgeToolActivity = { ...reading, callId: "k-3", runId: "other-run" };
+    renderBubble([research, search, listing, reading, strayRun]);
+    // The research row names the newest running step of *its* run. The stray
+    // activity belongs to another run and is rendered as an ordinary knowledge
+    // row instead, so pick the research row by its own name.
+    const rows = screen.getAllByRole("button", { name: /Reading documents/ });
+    expect(rows).toHaveLength(2);
+    const researchRow = rows.find((row) => /Researching|research/i.test(row.textContent ?? ""))!;
+    expect(researchRow).toBeDefined();
+    fireEvent.click(researchRow);
+    const panel = screen.getByRole("complementary", { name: "Deep research" });
+    expect(within(panel).getByText("Listed documents")).toBeInTheDocument();
+    expect(within(panel).getByText("3 documents")).toBeInTheDocument();
+    expect(within(panel).getByText("Reading documents")).toBeInTheDocument();
+    expect(within(panel).getByText("In progress")).toBeInTheDocument();
+    expect(within(panel).queryByText(/version/)).not.toBeInTheDocument();
+    const first = within(panel).getByText("First topic");
+    const listed = within(panel).getByText("Listed documents");
+    const second = within(panel).getByText("Second topic");
+    expect(first.compareDocumentPosition(listed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(listed.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("follows progress after the opening bubble unmounts in StrictMode", async () => {

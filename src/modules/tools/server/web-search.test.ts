@@ -5,7 +5,7 @@ import { PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchBackend, SearchBackendError, type SearchHit, type SearchRequest } from "./search.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
-import { prepareWebToolkit } from "./toolset.ts";
+import { prepareWebTools, mergeToolGroups } from "./toolset.ts";
 import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
@@ -20,6 +20,7 @@ const FakeRepo = Layer.succeed(
   ToolsRepo,
   ToolsRepo.of({
     getTool: () => Effect.succeed(null),
+    getKnowledgeSearch: () => Effect.succeed(null),
     getWebSearch: () => Effect.succeed({ enabled: true, config, secret: null }),
     getDocumentParser: () => Effect.succeed(null),
     getUrlReader: () => Effect.succeed(null),
@@ -63,14 +64,14 @@ const TestLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.laye
 
 const prepared = (indexer: SourceIndexer) =>
   Effect.gen(function* () {
-    const result = yield* prepareWebToolkit({
+    const result = yield* prepareWebTools({
       webSearch: yield* WebSearchExecutor,
       urlReader: yield* UrlReaderExecutor,
       indexer,
       authority: createUrlAuthority([]),
       requestSearch: true,
     });
-    return result!.toolkit;
+    return (yield* mergeToolGroups([result!.group]))!;
   });
 
 const runSearch = (toolkit: Toolkit.WithHandler<any>, queries: string[]) =>
@@ -113,8 +114,8 @@ describe("WebSearchExecutor", () => {
     Effect.gen(function* () {
       const toolkit = yield* prepared(
         createSourceIndexer([
-          { index: 2, url: "https://effect.website" },
-          { index: 5, url: "https://old.example" },
+          { kind: "web" as const, index: 2, url: "https://effect.website" },
+          { kind: "web" as const, index: 5, url: "https://old.example" },
         ]),
       );
 

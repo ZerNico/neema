@@ -1,11 +1,19 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Redacted, Stream } from "effect";
 import { Prompt } from "effect/unstable/ai";
 import { vi } from "vitest";
+import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
 import { ResearchCoordinatorTools } from "~/modules/chat/server/research/runner.ts";
 import { ProviderRepo } from "./repo.ts";
-import { AiGateway, ProviderUnreachable, catalogPricing, inferType } from "./gateway.ts";
+import {
+  AiGateway,
+  ProviderContextOverflow,
+  ProviderUnreachable,
+  catalogPricing,
+  inferType,
+  isContextOverflow,
+} from "./gateway.ts";
 
 describe("provider catalog normalization", () => {
   it("preserves input-only pricing for embedding configuration", () => {
@@ -19,6 +27,13 @@ describe("provider catalog normalization", () => {
     expect(inferType(["text"])).toBe("chat");
     expect(inferType(["image"])).toBeNull();
     expect(inferType(["audio"])).toBeNull();
+    // OpenRouter's embedding models: no text output, an "embeddings" modality.
+    expect(inferType(["embeddings"])).toBe("embedding");
+    expect(inferType(["embedding"])).toBe("embedding");
+    // Reranking, speech and video are not registry types either.
+    expect(inferType(["rerank"])).toBeNull();
+    expect(inferType(["speech"])).toBeNull();
+    expect(inferType(["video"])).toBeNull();
   });
 });
 
@@ -46,19 +61,44 @@ const usageChunk = (usage: Record<string, unknown>) => ({
 // One stable stub for the whole file: effect memoizes the `Fetch` reference's
 // default the first time a client reads it, so swapping the global per test
 // would leave every later test talking to the first stub.
+const ledger: UsageEventInput[] = [];
+const analyticsStub = Layer.succeed(AnalyticsRepo, {
+  record: (event: UsageEventInput) =>
+    Effect.sync(() => {
+      ledger.push(event);
+    }),
+} as AnalyticsRepo["Service"]);
+const GatewayLayer = AiGateway.layer.pipe(Layer.provide(analyticsStub));
 const requests: Array<{ url: string; body: unknown }> = [];
 let responseBody = "";
 let responseStatus = 200;
+let delayedResponse: (() => Promise<Response>) | null = null;
+let embeddingContextLength: number | null = null;
+let embeddingInputPrice = 0.02;
+
+// GET catalog requests have no body; a per-URL responder lets one test answer
+// the two OpenRouter listings differently.
+let responseFor: ((url: string) => string | null) | null = null;
 
 vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
+  const url = String(input instanceof Request ? input.url : input);
   requests.push({
-    url: String(input instanceof Request ? input.url : input),
-    body: JSON.parse(
-      typeof init?.body === "string"
-        ? init.body
-        : new TextDecoder().decode(init?.body as BufferSource),
-    ),
+    url,
+    body:
+      init?.body === undefined || init.body === null
+        ? null
+        : JSON.parse(
+            typeof init.body === "string"
+              ? init.body
+              : new TextDecoder().decode(init.body as BufferSource),
+          ),
   });
+  const routed = responseFor?.(url);
+  if (routed !== null && routed !== undefined)
+    return Promise.resolve(
+      new Response(routed, { status: 200, headers: { "content-type": "application/json" } }),
+    );
+  if (delayedResponse) return delayedResponse();
   return Promise.resolve(
     new Response(responseBody, {
       status: responseStatus,
@@ -71,6 +111,11 @@ vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
 
 const stubProvider = (body: string, status = 200) => {
   requests.length = 0;
+  ledger.length = 0;
+  delayedResponse = null;
+  responseFor = null;
+  embeddingContextLength = null;
+  embeddingInputPrice = 0.02;
   responseBody = body;
   responseStatus = status;
   return requests;
@@ -87,7 +132,7 @@ const repoStub = Layer.succeed(ProviderRepo)(
 
 const generate = Effect.flatMap(AiGateway, (gateway) =>
   gateway.generateText({ modelId: "m1", prompt: Prompt.make("Summarize this") }),
-).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
 
 describe("provider prompt ordering", () => {
   it.effect(
@@ -112,7 +157,7 @@ describe("provider prompt ordering", () => {
               clock,
             ]),
           }),
-        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
         expect(recorded[0]?.body).toMatchObject({
           messages: [
             { role: "system", content: [{ type: "text", text: "Stable policy" }] },
@@ -179,6 +224,34 @@ describe("side generations", () => {
 });
 
 describe("provider failure diagnostics", () => {
+  it("classifies only string error messages, not arbitrary payload fields", () => {
+    expect(isContextOverflow({ message: "maximum context length exceeded" })).toBe(true);
+    expect(isContextOverflow(new Error("prompt is too long"))).toBe(true);
+    expect(isContextOverflow("context_length_exceeded")).toBe(true);
+    expect(isContextOverflow({ message: { detail: "context window" } })).toBe(false);
+    expect(isContextOverflow({ message: 400, metadata: "context window" })).toBe(false);
+    expect(isContextOverflow(null)).toBe(false);
+  });
+
+  for (const mode of ["chat", "side generation"] as const) {
+    it.effect(`classifies a plain-object SSE context overflow in ${mode}`, () =>
+      Effect.gen(function* () {
+        const message = "This model's maximum context length is 8192 tokens";
+        stubProvider(sse([chunk({}, { error: { code: 400, message } })]));
+        const request =
+          mode === "chat"
+            ? Effect.flatMap(AiGateway, (gateway) =>
+                Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
+              ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))))
+            : generate;
+        const error = yield* request.pipe(Effect.flip);
+        expect(error).toBeInstanceOf(ProviderContextOverflow);
+        expect(error).toMatchObject({ providerId: "p1", message });
+        expect(requests).toHaveLength(1);
+      }),
+    );
+  }
+
   it.effect("preserves the rejection kind and HTTP status without copying provider payloads", () =>
     Effect.gen(function* () {
       stubProvider(
@@ -189,7 +262,7 @@ describe("provider failure diagnostics", () => {
       );
       const error = yield* Effect.flatMap(AiGateway, (gateway) =>
         Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
-      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))), Effect.flip);
       expect(error).toBeInstanceOf(ProviderUnreachable);
       if (error instanceof ProviderUnreachable) {
         expect(error.diagnostic).toEqual({ kind: "InvalidRequestError", status: 400 });
@@ -213,10 +286,13 @@ describe("provider failure diagnostics", () => {
       );
       const error = yield* Effect.flatMap(AiGateway, (gateway) =>
         Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
-      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))), Effect.flip);
       expect(error).toBeInstanceOf(ProviderUnreachable);
-      if (error instanceof ProviderUnreachable)
+      if (error instanceof ProviderUnreachable) {
+        expect(error.message).toBe("PRIVATE request body sk-secret");
         expect(error.diagnostic).toEqual({ kind: "ProviderStreamError", code: 400 });
+        expect(JSON.stringify(error.diagnostic)).not.toMatch(/PRIVATE|sk-secret/);
+      }
     }),
   );
   it.effect("distinguishes invalid streamed output from HTTP request rejection", () =>
@@ -224,7 +300,7 @@ describe("provider failure diagnostics", () => {
       stubProvider(sse([{ invalid: "PRIVATE" }]));
       const error = yield* Effect.flatMap(AiGateway, (gateway) =>
         Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Test") })),
-      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))), Effect.flip);
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))), Effect.flip);
       expect(error).toBeInstanceOf(ProviderUnreachable);
       if (error instanceof ProviderUnreachable)
         expect(error.diagnostic).toEqual({ kind: "InvalidOutputError" });
@@ -279,7 +355,7 @@ describe("research streaming request ceilings", () => {
         Stream.runDrain(
           gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Coordinate"), toolkit }),
         ),
-      ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
       expect(dispatch).toHaveBeenCalledWith({ tasks });
       expect(finish).toHaveBeenCalledWith({});
       expect(recorded).toHaveLength(1);
@@ -322,14 +398,445 @@ describe("research streaming request ceilings", () => {
               maxOutputTokens: 4096,
             }),
           ),
-        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
         expect(recorded).toHaveLength(1);
         expect(recorded[0]?.body).toMatchObject({ stream: true, max_tokens: 4096 });
         recorded.length = 0;
         yield* Effect.flatMap(AiGateway, (gateway) =>
           Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Hello") })),
-        ).pipe(Effect.provide(AiGateway.layer.pipe(Layer.provide(repoStub))));
+        ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
         expect(recorded[0]?.body).not.toHaveProperty("max_tokens");
       }),
+  );
+});
+
+const embeddingRepo = Layer.succeed(
+  ProviderRepo,
+  ProviderRepo.of({
+    getModel: () =>
+      Effect.succeed({
+        id: "embedding",
+        providerId: "p1",
+        modelKey: "vendor/embed",
+        type: "embedding",
+        enabled: true,
+        access: "public",
+        embeddingDimensions: 3,
+        displayName: "Embedding model",
+        contextLength: embeddingContextLength,
+        pricing: { input: embeddingInputPrice, output: null },
+      }),
+    getProviderWithKey: () =>
+      Effect.succeed({
+        id: "p1",
+        enabled: true,
+        apiKey: Redacted.make("fake-key"),
+        baseUrl: "https://provider.test/v1",
+      }),
+  } as unknown as ProviderRepo["Service"]),
+);
+const embed = Effect.flatMap(AiGateway, (gateway) =>
+  gateway.embed({
+    attribution: { userId: "requester", kind: "embedding_query" },
+    modelId: "embedding",
+    inputs: ["one", "two"],
+    expectedDimensions: 3,
+  }),
+).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo))));
+
+describe("bounded embedding gateway", () => {
+  it.effect("orders indexed results and verifies the approved width without requesting it", () =>
+    Effect.gen(function* () {
+      stubProvider(
+        JSON.stringify({
+          data: [
+            { index: 1, embedding: [0, 1, 0] },
+            { index: 0, embedding: [1, 0, 0] },
+          ],
+          usage: { prompt_tokens: 5 },
+        }),
+      );
+      const result = yield* embed;
+      expect(result).toEqual({
+        embeddings: [
+          [1, 0, 0],
+          [0, 1, 0],
+        ],
+        dimensions: 3,
+        inputTokens: 5,
+      });
+      expect(ledger).toEqual([
+        {
+          userId: "requester",
+          kind: "embedding_query",
+          modelId: "embedding",
+          modelName: "Embedding model",
+          status: "complete",
+          inputTokens: 5,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          usageComplete: true,
+          cost: expect.closeTo(0.0000001, 15),
+          costSource: "pricing",
+        },
+      ]);
+      expect(requests[0]).toEqual({
+        url: "https://provider.test/v1/embeddings",
+        body: { model: "vendor/embed", input: ["one", "two"] },
+      });
+    }),
+  );
+  it.each([
+    [{ index: 0, embedding: [1, 0, 0] }],
+    [
+      { index: 0, embedding: [1, 0, 0] },
+      { index: 0, embedding: [0, 1, 0] },
+    ],
+    [{ index: 0, embedding: [1, 0, 0] }, { embedding: [0, 1, 0] }],
+    [
+      { index: 0, embedding: [1, 0] },
+      { index: 1, embedding: [0, 1] },
+    ],
+    [
+      { index: 0, embedding: [0, 0, 0] },
+      { index: 1, embedding: [0, 1, 0] },
+    ],
+  ])("rejects incomplete or malformed vectors", async (...data) => {
+    stubProvider(JSON.stringify({ data }));
+    const error = await Effect.runPromise(Effect.flip(embed));
+    expect(error._tag).toBe("ProviderUnreachable");
+  });
+  it.effect("does not copy provider payloads into embedding errors", () =>
+    Effect.gen(function* () {
+      stubProvider(JSON.stringify({ error: "private input fake-secret" }), 400);
+      const error = yield* Effect.flip(embed);
+      expect(error).toMatchObject({ message: "embedding request failed or timed out" });
+      expect(JSON.stringify(error)).not.toContain("private input");
+    }),
+  );
+  it.effect("rejects a changed approved connection before sending any input", () =>
+    Effect.gen(function* () {
+      stubProvider("{}");
+      const error = yield* Effect.flatMap(AiGateway, (gateway) =>
+        Effect.flip(
+          gateway.embed({
+            attribution: { userId: "requester", kind: "embedding_query" },
+            modelId: "embedding",
+            inputs: ["private input"],
+            expectedDimensions: 3,
+            expectedConnection: {
+              providerId: "old",
+              baseUrl: "https://old.test",
+              modelKey: "vendor/embed",
+              modelDimensions: 3,
+              preprocessingRevision: 1,
+            },
+          }),
+        ),
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo))));
+      expect(error._tag).toBe("ProviderUnreachable");
+      expect(requests).toEqual([]);
+      expect(ledger).toEqual([]);
+    }),
+  );
+});
+
+describe("embedding attempt accounting", () => {
+  const data = [
+    { index: 0, embedding: [1, 0, 0] },
+    { index: 1, embedding: [0, 1, 0] },
+  ];
+
+  it.each([undefined, -1, 1.5, 2_147_483_648, "5"])(
+    "keeps absent or invalid usage unknown (%s)",
+    async (tokens) => {
+      stubProvider(JSON.stringify({ data, usage: { prompt_tokens: tokens } }));
+      const result = await Effect.runPromise(embed);
+      expect(result.inputTokens).toBeNull();
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]).toMatchObject({
+        status: "complete",
+        inputTokens: 0,
+        usageComplete: false,
+        cost: null,
+        costSource: null,
+      });
+    },
+  );
+
+  it.effect("distinguishes known zero from unknown and retains usage on invalid vectors", () =>
+    Effect.gen(function* () {
+      stubProvider(JSON.stringify({ data, usage: { prompt_tokens: 0 } }));
+      yield* embed;
+      expect(ledger[0]).toMatchObject({ usageComplete: true, cost: 0, costSource: "pricing" });
+      stubProvider(JSON.stringify({ data: [{ index: 0 }], usage: { prompt_tokens: 17 } }));
+      yield* Effect.flip(embed);
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]).toMatchObject({ status: "error", inputTokens: 17, usageComplete: true });
+    }),
+  );
+
+  it.effect("counts each failed HTTP retry without storing provider payloads", () =>
+    Effect.gen(function* () {
+      stubProvider("private query fake-key", 503);
+      yield* Effect.flip(embed);
+      yield* Effect.flip(embed);
+      expect(requests).toHaveLength(2);
+      expect(ledger).toHaveLength(2);
+      for (const event of ledger)
+        expect(event).toMatchObject({ status: "error", usageComplete: false, cost: null });
+      expect(JSON.stringify(ledger)).not.toMatch(/private query|fake-key|vendor\/embed/);
+    }),
+  );
+
+  it.effect("does not count empty batches or rejected input as requests", () =>
+    Effect.gen(function* () {
+      stubProvider("{}");
+      const gateway = yield* AiGateway;
+      const base = {
+        modelId: "embedding",
+        attribution: { userId: "owner", kind: "embedding_document" as const },
+      };
+      yield* gateway.embed({ ...base, inputs: [] });
+      yield* Effect.flip(gateway.embed({ ...base, inputs: ["x".repeat(16_001)] }));
+      expect(requests).toEqual([]);
+      expect(ledger).toEqual([]);
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo)))),
+  );
+
+  it.effect(
+    "bounds individual inputs by the model context without billing preflight failures",
+    () =>
+      Effect.gen(function* () {
+        stubProvider(
+          JSON.stringify({
+            data: [{ index: 0, embedding: [1, 0, 0] }],
+            usage: { prompt_tokens: 2 },
+          }),
+        );
+        embeddingContextLength = 24;
+        const gateway = yield* AiGateway;
+        const base = {
+          modelId: "embedding",
+          attribution: { userId: "owner", kind: "embedding_document" as const },
+        };
+        for (const text of ["x".repeat(9), "漢字語"]) {
+          const error = yield* Effect.flip(gateway.embed({ ...base, inputs: [text] }));
+          expect(error).toMatchObject({
+            _tag: "ProviderUnreachable",
+            diagnostic: { kind: "InvalidRequestError" },
+          });
+        }
+        expect(requests).toEqual([]);
+        expect(ledger).toEqual([]);
+        yield* gateway.embed({ ...base, inputs: ["x".repeat(8)] });
+        expect(requests).toHaveLength(1);
+        expect(ledger).toHaveLength(1);
+      }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo)))),
+  );
+
+  it.effect("keeps overflowing price calculations unknown rather than persisting infinity", () =>
+    Effect.gen(function* () {
+      stubProvider(
+        JSON.stringify({
+          data: [{ index: 0, embedding: [1, 0, 0] }],
+          usage: { prompt_tokens: 100 },
+        }),
+      );
+      embeddingInputPrice = Number.MAX_VALUE;
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        gateway.embed({
+          modelId: "embedding",
+          inputs: ["one"],
+          attribution: { userId: "owner", kind: "embedding_document" },
+        }),
+      );
+      expect(ledger[0]).toMatchObject({
+        usageComplete: true,
+        inputTokens: 100,
+        cost: null,
+        costSource: null,
+      });
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo)))),
+  );
+
+  it.effect("rechecks dispatch authorization after waiting for a shared permit", () =>
+    Effect.gen(function* () {
+      stubProvider("{}");
+      const dispatched = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      delayedResponse = () => {
+        if (requests.length === 2) Effect.runSync(Deferred.succeed(dispatched, undefined));
+        return Effect.runPromise(Deferred.await(release)).then(
+          () => new Response(JSON.stringify({ data: [{ index: 0, embedding: [1, 0, 0] }] })),
+        );
+      };
+      const gateway = yield* AiGateway;
+      const base = {
+        modelId: "embedding",
+        inputs: ["one"],
+        attribution: { userId: "owner", kind: "embedding_document" as const },
+      };
+      const first = yield* gateway.embed(base).pipe(Effect.forkScoped);
+      const second = yield* gateway.embed(base).pipe(Effect.forkScoped);
+      yield* Deferred.await(dispatched);
+      let allowed = true;
+      let checks = 0;
+      const waiting = yield* gateway
+        .embed({
+          ...base,
+          beforeDispatch: () =>
+            Effect.suspend(() => {
+              checks++;
+              return allowed
+                ? Effect.void
+                : Effect.fail(
+                    new ProviderUnreachable({ providerId: "p1", message: "selection revoked" }),
+                  );
+            }),
+        })
+        .pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      expect(checks).toBe(0);
+      allowed = false;
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      expect((yield* Effect.flip(Fiber.join(waiting))).message).toBe("selection revoked");
+      expect(checks).toBe(1);
+      expect(requests).toHaveLength(2);
+      expect(ledger).toHaveLength(2);
+    }).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo))), Effect.scoped),
+  );
+
+  it.effect("shares permits and records cancellation only after request dispatch", () =>
+    Effect.gen(function* () {
+      stubProvider("{}");
+      const dispatched = yield* Deferred.make<void>();
+      delayedResponse = () => {
+        if (requests.length === 2) Effect.runSync(Deferred.succeed(dispatched, undefined));
+        return new Promise<Response>(() => {});
+      };
+      const gateway = yield* AiGateway;
+      const request = (kind: "embedding_document" | "embedding_query") =>
+        gateway.embed({
+          modelId: "embedding",
+          inputs: ["one", "two"],
+          attribution: { userId: kind === "embedding_document" ? "owner" : "requester", kind },
+        });
+      const document = yield* request("embedding_document").pipe(Effect.forkScoped);
+      const query = yield* request("embedding_query").pipe(Effect.forkScoped);
+      yield* Deferred.await(dispatched);
+      const waiting = yield* request("embedding_query").pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(waiting);
+      expect(requests).toHaveLength(2);
+      expect(ledger).toEqual([]);
+      yield* Fiber.interrupt(document);
+      yield* Fiber.interrupt(query);
+      expect(ledger).toHaveLength(2);
+      expect(ledger.map((event) => [event.userId, event.kind])).toEqual([
+        ["owner", "embedding_document"],
+        ["requester", "embedding_query"],
+      ]);
+      for (const event of ledger)
+        expect(event).toMatchObject({ status: "aborted", usageComplete: false, cost: null });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          delayedResponse = null;
+        }),
+      ),
+      Effect.provide(GatewayLayer.pipe(Layer.provide(embeddingRepo))),
+      Effect.scoped,
+    ),
+  );
+});
+
+const catalogEntry = (id: string, outputModalities: string[]) => ({
+  id,
+  name: id,
+  context_length: 8192,
+  architecture: { input_modalities: ["text"], output_modalities: outputModalities },
+});
+
+describe("provider catalog", () => {
+  it.effect("merges OpenRouter's text and embedding listings, typing embedding models", () =>
+    Effect.gen(function* () {
+      stubProvider("");
+      responseFor = (url) =>
+        url.includes("output_modalities=embeddings")
+          ? JSON.stringify({
+              data: [
+                catalogEntry("qwen/qwen3-embedding-8b", ["embeddings"]),
+                // Also present in the default listing: must not appear twice.
+                catalogEntry("vendor/model", ["text"]),
+              ],
+            })
+          : JSON.stringify({
+              data: [
+                catalogEntry("vendor/model", ["text"]),
+                catalogEntry("vendor/painter", ["image"]),
+              ],
+            });
+      const repo = Layer.succeed(ProviderRepo)(
+        ProviderRepo.of({
+          getProviderWithKey: () =>
+            Effect.succeed({
+              id: "p1",
+              kind: "openrouter",
+              apiKey: Redacted.make("sk-test"),
+              baseUrl: "https://provider.test/v1/",
+            }),
+        } as unknown as ProviderRepo["Service"]),
+      );
+      const catalog = yield* Effect.flatMap(AiGateway, (gateway) =>
+        gateway.fetchCatalog("p1"),
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repo))));
+      expect(requests.map((request) => request.url).sort()).toEqual([
+        "https://provider.test/v1/models",
+        "https://provider.test/v1/models?output_modalities=embeddings",
+      ]);
+      expect(catalog.map((model) => [model.id, model.type])).toEqual([
+        ["vendor/model", "chat"],
+        ["qwen/qwen3-embedding-8b", "embedding"],
+      ]);
+    }),
+  );
+
+  it.effect("asks a plain OpenAI-compatible endpoint once and keeps its embedding entries", () =>
+    Effect.gen(function* () {
+      stubProvider("");
+      responseFor = () =>
+        JSON.stringify({
+          data: [
+            catalogEntry("gpt", ["text"]),
+            catalogEntry("text-embedding-3-small", ["embeddings"]),
+            // No architecture at all: the admin sets the type by hand.
+            { id: "mystery", name: "mystery" },
+          ],
+        });
+      const repo = Layer.succeed(ProviderRepo)(
+        ProviderRepo.of({
+          getProviderWithKey: () =>
+            Effect.succeed({
+              id: "p2",
+              kind: "openai-compatible",
+              apiKey: Redacted.make("sk-test"),
+              baseUrl: "https://compat.test/v1",
+            }),
+        } as unknown as ProviderRepo["Service"]),
+      );
+      const catalog = yield* Effect.flatMap(AiGateway, (gateway) =>
+        gateway.fetchCatalog("p2"),
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repo))));
+      expect(requests.map((request) => request.url)).toEqual(["https://compat.test/v1/models"]);
+      expect(catalog.map((model) => [model.id, model.type])).toEqual([
+        ["gpt", "chat"],
+        ["text-embedding-3-small", "embedding"],
+        ["mystery", "chat"],
+      ]);
+    }),
   );
 });

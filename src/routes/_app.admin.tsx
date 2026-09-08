@@ -1,6 +1,7 @@
 import {
   Analytics01Icon,
   CloudServerIcon,
+  FolderLibraryIcon,
   UserGroupIcon,
   UserMultipleIcon,
   WrenchIcon,
@@ -32,6 +33,12 @@ function AdminLayout() {
           label: "Tools",
           icon: WrenchIcon,
           matchPrefix: "/admin/tools",
+        },
+        {
+          to: "/admin/documents",
+          label: "Documents",
+          icon: FolderLibraryIcon,
+          matchPrefix: "/admin/documents",
         },
         {
           to: "/admin/users",

@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  documentParserToolQuery,
   memoryToolQuery,
   ToolsPage,
   urlReaderToolQuery,
@@ -13,7 +12,6 @@ export const Route = createFileRoute("/_app/admin/tools")({
       context.queryClient.ensureQueryData(memoryToolQuery),
       context.queryClient.ensureQueryData(webSearchToolQuery),
       context.queryClient.ensureQueryData(urlReaderToolQuery),
-      context.queryClient.ensureQueryData(documentParserToolQuery),
     ]),
   component: ToolsPage,
 });

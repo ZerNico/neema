@@ -1,6 +1,6 @@
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { listModelAccess, updateModel } from "../server/functions.ts";
+import { probeEmbeddingDimensions, listModelAccess, updateModel } from "../server/functions.ts";
 import { groupsQuery } from "./groups-page.tsx";
 import {
   ModelSettingsFields,
@@ -37,6 +37,7 @@ export const TALL_DIALOG_CLASS = "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:m
 
 export interface EditableModel {
   id: string;
+  providerId: string;
   modelKey: string;
   displayName: string;
   type: ModelType;
@@ -154,6 +155,11 @@ function ModelEditForm({
             modelKey={model.modelKey}
             autoFocusDisplayName
             disabled={save.isPending}
+            onDetectDimensions={() =>
+              probeEmbeddingDimensions({
+                data: { providerId: model.providerId, modelKey: model.modelKey },
+              })
+            }
           />
         </FieldGroup>
 

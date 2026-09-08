@@ -8,7 +8,6 @@ import {
   type ResearchToolActivity,
   type ToolActivity,
   type ToolSource,
-  type WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
@@ -23,7 +22,10 @@ import {
   selectAnswerSources,
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
-import { useResearchPanel } from "./research-panel.tsx";
+import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
+import { agentIcon, CollectionChip } from "./context-picker.tsx";
+import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
+import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
@@ -154,6 +156,10 @@ export interface DisplayMessage {
   compactionActivities?: CompactionActivity[];
   /** Local send time for the action row; absent until hydration. */
   time?: MessageTime | null;
+  /** The agent this answer ran with, when one was installed. */
+  agent?: { name: string; icon: string } | null;
+  /** Collections the user added with this message, shown beside its files. */
+  collectionIds?: ReadonlyArray<string>;
   editedAt?: Date | null;
   /**
    * Sources from earlier messages in the conversation. Citation numbering is
@@ -307,9 +313,13 @@ function UserBubble({ message }: { message: DisplayMessage }) {
         <InlineMessageEditor editState={message.editState} />
       ) : (
         <div className="group/user flex w-full flex-col items-end">
-          {message.attachments && message.attachments.length > 0 ? (
+          {(message.attachments && message.attachments.length > 0) ||
+          (message.collectionIds && message.collectionIds.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
-              {message.attachments.map((attachment) => (
+              {message.collectionIds?.map((collectionId) => (
+                <CollectionChip key={collectionId} collectionId={collectionId} />
+              ))}
+              {message.attachments?.map((attachment) => (
                 <AttachmentChip
                   key={attachment.id}
                   item={{
@@ -396,6 +406,9 @@ const AssistantBody = memo(function AssistantBody({
         />
       );
     }
+    if (part.kind === "knowledge") {
+      return <KnowledgeActivityBlock key={part.key} activities={part.activities} />;
+    }
     if (part.kind === "compaction") {
       return (
         <CompactionBlock
@@ -415,13 +428,20 @@ const AssistantBody = memo(function AssistantBody({
           messageId={message.id}
           activity={part.activity}
           webActivities={message.toolActivities.filter(
-            (activity): activity is WebToolActivity =>
-              activity.family === "web" && !!runId && activity.runId === runId,
+            (activity): activity is ResearchStepActivity =>
+              (activity.family === "web" || activity.family === "knowledge") &&
+              !!runId &&
+              activity.runId === runId,
           )}
           sourceCount={sources.length}
         />
       );
     }
+    // Direct context is shown on the question that added the collection, not
+    // as an activity on the answer; its citations still resolve.
+    if (part.activity.family === "knowledge") return null;
+    if (part.activity.family === "plan")
+      return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }
@@ -461,7 +481,7 @@ function ResearchActivityRow({
 }: {
   messageId: string;
   activity: ResearchToolActivity;
-  webActivities: WebToolActivity[];
+  webActivities: ResearchStepActivity[];
   sourceCount: number;
 }) {
   const open = useResearchPanel(messageId, activity, webActivities);
@@ -647,6 +667,12 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className="flex w-full justify-start">
       <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
+        {message.agent ? (
+          <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-xs">
+            <HugeiconsIcon icon={agentIcon(message.agent.icon)} className="size-3.5" aria-hidden />
+            <span className="truncate">{message.agent.name}</span>
+          </div>
+        ) : null}
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}

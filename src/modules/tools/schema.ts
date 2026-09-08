@@ -1,6 +1,10 @@
 import { Schema } from "effect";
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
+import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
+import { PlanStep } from "./plan-schema.ts";
+import { Source, WebSource } from "./source-schema.ts";
+export { Source, WebSource, DocumentSource } from "./source-schema.ts";
 
 export const RESEARCH_SEARCH_BUDGET = { default: 80, min: 12, max: 120 } as const;
 const researchMaxSearchQueries = Schema.optionalKey(
@@ -67,19 +71,6 @@ export const PageStatus = Schema.Struct({
 });
 export type PageStatus = typeof PageStatus.Type;
 
-// A citable source. `index` is conversation-scoped: the allocator is seeded
-// from earlier messages' persisted sources, so a repeated URL keeps its first
-// number and new sources continue the sequence — the model cites [^index].
-export const Source = Schema.Struct({
-  index: Schema.Int,
-  url: Schema.String,
-  title: Schema.String,
-  snippet: Schema.String,
-  /** true when read_url extracted the page, false for snippet-only search hits. */
-  read: Schema.Boolean,
-});
-export type Source = typeof Source.Type;
-
 export const WebToolFailure = Schema.Struct({
   target: Schema.String,
   error: Schema.String,
@@ -106,7 +97,7 @@ export const WebToolResult = Schema.Struct({
   results: Schema.Array(WebToolItem),
   failures: Schema.Array(WebToolFailure),
   pages: Schema.optionalKey(Schema.Array(PageStatus)),
-  sources: Schema.optionalKey(Schema.Array(Source)),
+  sources: Schema.optionalKey(Schema.Array(WebSource)),
   error: Schema.optionalKey(Schema.String),
 });
 export type WebToolResult = typeof WebToolResult.Type;
@@ -137,8 +128,31 @@ const researchEnvelopeFields = {
   callIndex: Schema.Int,
   textOffset: Schema.optionalKey(Schema.Int),
   progress: ResearchProgress,
+  sources: Schema.optionalKey(Schema.Array(Source)),
+};
+const planEnvelopeFields = {
+  v: Schema.Literals([1]),
+  family: Schema.Literals(["plan"]),
+  callId: Schema.String,
+  name: Schema.Literals(["update_plan"]),
 };
 export const ToolChunkEnvelope = Schema.Union([
+  KnowledgeToolEnvelope,
+  Schema.Struct({
+    ...planEnvelopeFields,
+    phase: Schema.Literals(["start"]),
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    ...planEnvelopeFields,
+    phase: Schema.Literals(["result"]),
+    ok: Schema.Boolean,
+    // Only the latest list is ever published; the UI shows one collapsed row.
+    steps: Schema.optionalKey(Schema.Array(PlanStep)),
+    error: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["start"]) }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["progress"]) }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["result"]) }),
@@ -195,7 +209,7 @@ export const ToolChunkEnvelope = Schema.Union([
     ok: Schema.Boolean,
     summary: ToolSummary,
     pages: Schema.optionalKey(Schema.Array(PageStatus)),
-    sources: Schema.optionalKey(Schema.Array(Source)),
+    sources: Schema.optionalKey(Schema.Array(WebSource)),
     failures: Schema.optionalKey(Schema.Array(WebToolFailure)),
     error: Schema.optionalKey(Schema.String),
   }),

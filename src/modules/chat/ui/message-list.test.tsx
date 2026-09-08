@@ -116,6 +116,7 @@ describe("MessageBubble chronological body", () => {
                 targets: ["topic"],
                 sources: [
                   {
+                    kind: "web" as const,
                     index: 1,
                     url: "https://example.com",
                     title: "One source",
@@ -138,6 +139,7 @@ describe("MessageBubble chronological body", () => {
     const first = "- First finding[^1]\n\n```text\nunfinished fence\n";
     const last = "Second finding[^1].";
     const source = {
+      kind: "web" as const,
       index: 1,
       url: "https://example.com",
       title: "One source",
@@ -439,6 +441,7 @@ describe("MessageBubble citations", () => {
     status: "complete",
     sources: [
       {
+        kind: "web" as const,
         index: 1,
         url: "https://effect.website/blog",
         title: "Effect 4.0 released",
@@ -539,6 +542,79 @@ describe("MessageBubble actions", () => {
     );
   };
 
+  it("shows a user turn's collection by name beside its files, and no row on the answer", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      ["knowledge", "collections"],
+      [
+        {
+          id: "c-contracts",
+          name: "Contracts",
+          description: "",
+          audience: "private",
+          canEdit: true,
+          ownerName: null,
+          documentCount: 1,
+          readyCount: 1,
+          failedCount: 0,
+          pendingCount: 0,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    );
+    queryClient.setQueryData(["chat-models"], []);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MessageBubble
+          message={{
+            id: "question",
+            role: "user",
+            content: "Summarize these.",
+            reasoning: "",
+            reasoningSeen: false,
+            toolActivities: [],
+            status: "complete",
+            collectionIds: ["c-contracts"],
+          }}
+        />
+        <MessageBubble
+          message={{
+            id: "answer",
+            role: "assistant",
+            content: "Summary.",
+            reasoning: "",
+            reasoningSeen: false,
+            status: "complete",
+            toolActivities: [
+              {
+                family: "knowledge",
+                name: "knowledge_context",
+                callId: "ctx",
+                status: "complete",
+                turnIndex: 0,
+                callIndex: 0,
+                textOffset: 0,
+                summary: {
+                  targets: [],
+                  documentsListed: 1,
+                  passagesReturned: 1,
+                  remainingOps: 64,
+                  coverage: "",
+                },
+                sources: [],
+              },
+            ],
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    // The chip carries the collection's name and no document-level detail.
+    const chip = screen.getByText("Contracts");
+    expect(chip.closest(".group\\/user")).not.toBeNull();
+    expect(screen.getByText("Collection")).toBeInTheDocument();
+    expect(screen.queryByText(/Included in full|Selected documents|Reading selected/)).toBeNull();
+  });
+
   it("shows copy on completed messages without sources, but no 3-dot menu", () => {
     renderPlain();
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
@@ -559,6 +635,7 @@ describe("MessageBubble actions", () => {
             status: "complete",
             inheritedSources: [
               {
+                kind: "web" as const,
                 index: 2,
                 url: "https://effect.website",
                 title: "Effect docs",
@@ -566,7 +643,14 @@ describe("MessageBubble actions", () => {
                 read: true,
               },
               // Uncited inherited sources stay out of the chip set entirely.
-              { index: 3, url: "https://other.dev", title: "Other", snippet: "", read: false },
+              {
+                kind: "web" as const,
+                index: 3,
+                url: "https://other.dev",
+                title: "Other",
+                snippet: "",
+                read: false,
+              },
             ],
           }}
         />
@@ -955,6 +1039,7 @@ describe("MessageBubble actions", () => {
           resultCount: 1,
           sources: [
             {
+              kind: "web" as const,
               index: 1,
               url: "https://effect.website/search-result",
               title: "Search-only result",
@@ -1087,6 +1172,7 @@ describe("MessageBubble actions", () => {
                 status: "complete",
                 sources: [
                   {
+                    kind: "web" as const,
                     index: 1,
                     url: "https://effect.website/docs",
                     title: "Effect source",
@@ -1117,6 +1203,7 @@ describe("MessageBubble actions", () => {
     );
     Element.prototype.scrollIntoView = vi.fn();
     const hit = (index: number, read = false) => ({
+      kind: "web" as const,
       index,
       url: `https://example.org/${index}`,
       title: `Source ${index}`,

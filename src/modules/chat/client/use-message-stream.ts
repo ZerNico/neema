@@ -1,3 +1,7 @@
+import {
+  KnowledgeToolEnvelope,
+  type KnowledgeActivitySummary,
+} from "~/modules/knowledge/tool-schema.ts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { ResearchProgress } from "../research-schema.ts";
@@ -5,6 +9,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
 import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
+import { PlanStep } from "~/modules/tools/plan-schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -13,14 +18,19 @@ export interface ToolPageStatus {
   error?: string;
 }
 
-// A citable source. `index` is message-global, so chips and the sources panel
-// can key off it directly across multiple searches.
-export interface ToolSource {
-  index: number;
-  url: string;
-  title: string;
-  snippet: string;
-  read: boolean;
+export type { Source as ToolSource } from "~/modules/tools/source-schema.ts";
+import type { Source as ToolSource } from "~/modules/tools/source-schema.ts";
+
+export interface PlanToolActivity extends ToolActivityBase {
+  family: "plan";
+  /** The latest accepted list; absent until one lands or when the call failed. */
+  steps?: ReadonlyArray<PlanStep>;
+}
+
+export interface KnowledgeToolActivity extends ToolActivityBase {
+  family: "knowledge";
+  summary?: KnowledgeActivitySummary;
+  sources?: ToolSource[];
 }
 
 interface ToolActivityBase {
@@ -72,7 +82,9 @@ export type ToolActivity =
   | WebToolActivity
   | MemoryToolActivity
   | AskToolActivity
-  | ResearchToolActivity;
+  | PlanToolActivity
+  | ResearchToolActivity
+  | KnowledgeToolActivity;
 
 export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
   activity.family === "web";
@@ -195,7 +207,14 @@ export function applyToolChunk(
     error?: string;
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
-  if (e.family !== "web" && e.family !== "memory" && e.family !== "ask" && e.family !== "research")
+  if (
+    e.family !== "web" &&
+    e.family !== "memory" &&
+    e.family !== "ask" &&
+    e.family !== "plan" &&
+    e.family !== "research" &&
+    e.family !== "knowledge"
+  )
     return tools;
 
   const family = e.family;
@@ -209,6 +228,46 @@ export function applyToolChunk(
   const position = textOffset === undefined ? {} : { textOffset };
   // Bootstrap can replay older progress after a terminal durable row was read.
   if (existing && existing.status !== "running") return tools;
+
+  if (family === "knowledge") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(KnowledgeToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const next: KnowledgeToolActivity = {
+      family: "knowledge",
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      ...(parsed.runId ? { runId: parsed.runId } : {}),
+      ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: parsed.phase === "start" ? "running" : parsed.ok ? "complete" : "error",
+      // A running search names its queries from the start envelope; the
+      // result replaces this with the full summary.
+      ...(parsed.phase === "start" && parsed.targets
+        ? {
+            summary: {
+              targets: parsed.targets,
+              documentsListed: 0,
+              passagesReturned: 0,
+              remainingOps: 0,
+              coverage: "",
+            },
+          }
+        : {}),
+      ...(parsed.phase === "result"
+        ? {
+            summary: parsed.summary,
+            sources: [...parsed.sources],
+            ...(parsed.error ? { error: parsed.error } : {}),
+          }
+        : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
 
   if (family === "research") {
     const progress = readResearchProgress(e.progress);
@@ -262,6 +321,39 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.phase === "start" ? "running" : questions ? "complete" : "error",
       ...(questions ? { questions } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  if (family === "plan") {
+    if (
+      e.name !== "update_plan" ||
+      (e.phase !== "start" && e.phase !== "result") ||
+      (e.phase === "result" && typeof e.ok !== "boolean")
+    )
+      return tools;
+    // A terminal row stays terminal; a later call is its own activity, and the
+    // list it carries is the whole current checklist.
+    if (existing && (e.phase === "start" || existing.status !== "running")) return tools;
+    const steps =
+      e.phase === "result"
+        ? Option.getOrNull(
+            Schema.decodeUnknownOption(Schema.Array(PlanStep))(
+              (e as { steps?: unknown }).steps ?? null,
+            ),
+          )
+        : null;
+    const next: PlanToolActivity = {
+      family: "plan",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : e.ok && steps ? "complete" : "error",
+      ...(steps ? { steps } : {}),
     };
     return index === -1
       ? [...tools, next]
