@@ -12,10 +12,19 @@ export const ShareEmailInput = Schema.Struct({
 });
 export const ShareGroupInput = Schema.Struct({ ...SharedResource.fields, groupId: Id });
 export const RevokeUserInput = Schema.Struct({ ...SharedResource.fields, userId: Id });
+export const RecipientSearchInput = Schema.Struct({
+  q: Schema.String.check(Schema.isMaxLength(200)),
+});
 export const PublishResourceInput = Schema.Struct({
   ...SharedResource.fields,
   audience: Schema.Literals(["private", "instance"]),
 });
+/** A signed-in account offered by the sharing picker. */
+export interface ShareRecipient {
+  userId: string;
+  name: string;
+  email: string;
+}
 export interface ResourceGrants {
   audience: "private" | "instance";
   canPublish: boolean;

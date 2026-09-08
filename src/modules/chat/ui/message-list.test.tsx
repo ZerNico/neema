@@ -1,3 +1,4 @@
+import { RESPONSE_FAILURES } from "../generation-failure.ts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
@@ -1339,3 +1340,109 @@ describe("MessageBubble actions", () => {
     expect(screen.getByText("Couldn't summarize earlier context")).toBeInTheDocument();
   });
 });
+
+describe("generated image replies", () => {
+  const image = {
+    v: 1 as const,
+    attachment: {
+      id: "generated-private",
+      fileName: "generated.png",
+      size: 68,
+      mediaType: "image/png",
+      kind: "image" as const,
+    },
+    textOffset: 0,
+    turnIndex: 0,
+    eventIndex: 1,
+    callIndex: 0,
+  };
+  const message: DisplayMessage = {
+    id: "image-answer",
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    reasoningSeen: false,
+    toolActivities: [],
+    status: "complete",
+    images: [image],
+  };
+  it("renders a reloaded image-only reply with authenticated open/download actions and no empty copy", () => {
+    render(<MessageBubble message={message} />);
+    const img = screen.getByRole("img", { name: "Generated image" });
+    expect(img).toHaveAttribute("src", "/api/files/generated-private");
+    expect(screen.getByRole("link", { name: "Preview generated.png" })).toHaveAttribute(
+      "href",
+      "/api/files/generated-private",
+    );
+    expect(screen.queryByRole("link", { name: "Download image" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading image…")).toBeInTheDocument();
+    fireEvent.load(img);
+    expect(screen.queryByText("Loading image…")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Preview generated.png" }));
+    const dialog = screen.getByRole("dialog", { name: "generated.png" });
+    expect(within(dialog).getByRole("img", { name: "generated.png" })).toHaveAttribute(
+      "src",
+      "/api/files/generated-private",
+    );
+    expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
+      "href",
+      "/api/files/generated-private",
+    );
+  });
+  it("replaces the image URL and preview target when an answer receives a different attachment", () => {
+    const { rerender } = render(<MessageBubble message={message} />);
+    fireEvent.load(screen.getByRole("img", { name: "Generated image" }));
+    const edited = { ...image, attachment: { ...image.attachment, id: "edited-private" } };
+    rerender(<MessageBubble message={{ ...message, images: [edited] }} />);
+    expect(screen.getByRole("img", { name: "Generated image" })).toHaveAttribute(
+      "src",
+      "/api/files/edited-private",
+    );
+    expect(screen.getByText("Loading image…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Preview generated.png" }));
+    const dialog = screen.getByRole("dialog", { name: "generated.png" });
+    expect(within(dialog).getByRole("img", { name: "generated.png" })).toHaveAttribute(
+      "src",
+      "/api/files/edited-private",
+    );
+    expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
+      "href",
+      "/api/files/edited-private",
+    );
+  });
+  it("reports an unavailable authenticated image without exposing storage details", () => {
+    render(<MessageBubble message={message} />);
+    fireEvent.error(screen.getByRole("img", { name: "Generated image" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("This image could not be loaded.");
+  });
+});
+
+for (const [code, copy] of Object.entries(RESPONSE_FAILURES)) {
+  it(`shows ${code} explanation and retry without technical disclosure`, async () => {
+    const onRetry = vi.fn();
+    render(
+      <MessageBubble
+        message={{
+          id: "terminal-failure",
+          role: "assistant",
+          content: "",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "error",
+          error: `Cause([Fail(Error: [${code}])])`,
+          onRetry,
+        }}
+      />,
+    );
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText(copy.title)).toBeInTheDocument();
+    expect(within(alert).getByText(copy.description)).toBeInTheDocument();
+    expect(within(alert).queryByText("Technical details")).toBeNull();
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+}

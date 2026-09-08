@@ -281,7 +281,12 @@ export const hermesToolCalls = <E, R>(
   let textId = "hermes-text";
 
   const finish = (part: Response.FinishPart): Part =>
-    parser.calls() === 0 || part.reason === "tool-calls"
+    parser.calls() === 0 ||
+    part.reason === "tool-calls" ||
+    part.reason === "content-filter" ||
+    part.reason === "error" ||
+    part.reason === "unknown" ||
+    part.reason === "other"
       ? part
       : Response.makePart("finish", {
           reason: "tool-calls",

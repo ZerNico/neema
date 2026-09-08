@@ -4,6 +4,7 @@ import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
 import { vi } from "vitest";
 import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
+import { buildHistoryMessages, type PromptDeps } from "~/modules/chat/server/prompt.ts";
 import { ResearchCoordinatorTools } from "~/modules/chat/server/research/runner.ts";
 import { ProviderRepo } from "./repo.ts";
 import {
@@ -121,7 +122,12 @@ const stubProvider = (body: string, status = 200) => {
   return requests;
 };
 
-const repoWith = (tools: boolean) =>
+const repoWith = (
+  tools: boolean,
+  imageOutput = false,
+  kind = "openai-compatible",
+  vision = false,
+) =>
   Layer.succeed(ProviderRepo)(
     ProviderRepo.of({
       getModel: () =>
@@ -129,10 +135,10 @@ const repoWith = (tools: boolean) =>
           id: "m1",
           providerId: "p1",
           modelKey: "vendor/model",
-          capabilities: { reasoning: false, tools, vision: false, files: false },
+          capabilities: { reasoning: false, tools, vision, files: false, imageOutput },
         }),
       getProviderWithKey: () =>
-        Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1" }),
+        Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1", kind }),
       // The gateway reaches for nothing else.
     } as unknown as ProviderRepo["Service"]),
   );
@@ -316,6 +322,164 @@ describe("provider failure diagnostics", () => {
         expect(error.diagnostic).toEqual({ kind: "InvalidOutputError" });
     }),
   );
+});
+
+describe("sensitive input diagnostics for text output", () => {
+  const secret = "PRIVATE-replay-signature";
+  const details = [{ type: "reasoning.encrypted" as const, data: secret, id: "signed" }];
+  // The model still reads images, but its output capability has been disabled.
+  const layer = GatewayLayer.pipe(Layer.provide(repoWith(true, false, "openrouter", true)));
+  const request = (mode: "chat" | "side", prompt: Prompt.Prompt) =>
+    Effect.flatMap(AiGateway, (gateway) =>
+      mode === "chat"
+        ? Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt, imageOutput: false }))
+        : gateway.generateText({ modelId: "m1", prompt }).pipe(Effect.asVoid),
+    ).pipe(Effect.provide(layer));
+
+  for (const mode of ["chat", "side"] as const) {
+    for (const failure of ["sse", "http", "context"] as const) {
+      it.effect(`sanitizes compatible private history in ${mode} on ${failure} failure`, () =>
+        Effect.gen(function* () {
+          const raw = `${failure === "context" ? "maximum context length exceeded" : "invalid signature"}: ${secret}`;
+          stubProvider(
+            failure === "http"
+              ? JSON.stringify({ error: { message: raw, type: "invalid_request_error" } })
+              : sse([chunk({}, { error: { code: 400, message: raw } })]),
+            failure === "http" ? 400 : 200,
+          );
+          const history = yield* buildHistoryMessages(
+            {
+              attachments: { listWithBlobsForMessages: () => Effect.succeed([]) },
+            } as unknown as PromptDeps,
+            {
+              messages: [
+                {
+                  id: "answer",
+                  role: "assistant",
+                  content: "Original[^1]",
+                  completedAt: new Date("2026-09-08T12:00:00Z"),
+                  providerReplay: {
+                    v: 1,
+                    providerId: "p1",
+                    modelKey: "vendor/model",
+                    turns: [
+                      { turnIndex: 0, startOffset: 0, endOffset: 12, reasoningDetails: details },
+                    ],
+                  },
+                },
+              ],
+              modelIdentity: { providerId: "p1", modelKey: "vendor/model" },
+              modelSupportsFiles: false,
+              modelSupportsVision: true,
+              expandAssistantTurns: true,
+              webToolsEnabled: false,
+            },
+          );
+          const error = yield* request(
+            mode,
+            Prompt.make([...history, { role: "user", content: "Explain" }]),
+          ).pipe(Effect.flip);
+          expect(JSON.stringify(error)).not.toContain(secret);
+          expect(String(error)).not.toContain(secret);
+          if (failure === "context") {
+            expect(error).toBeInstanceOf(ProviderContextOverflow);
+          } else {
+            expect(error).toBeInstanceOf(ProviderUnreachable);
+            expect(error).toMatchObject({
+              message: "The provider could not complete this request.",
+              diagnostic:
+                failure === "http"
+                  ? { kind: "InvalidRequestError", status: 400 }
+                  : { kind: "ProviderStreamError", code: 400 },
+            });
+          }
+          // Actual adapter encoding preserves the protected assistant text and
+          // private metadata, with timestamps outside that assistant message.
+          expect(requests[0]?.body).toMatchObject({
+            modalities: ["text"],
+            messages: [
+              {
+                role: "user",
+                content: expect.stringContaining("Completed: 2026-09-08T12:00:00.000Z"),
+              },
+              { role: "assistant", content: "Original[^1]", reasoning_details: details },
+              { role: "user", content: "Explain" },
+            ],
+          });
+        }),
+      );
+    }
+    for (const source of ["reasoning", "tool-call", "image"] as const) {
+      it.effect(`sanitizes ${source} part input diagnostics in ${mode}`, () =>
+        Effect.gen(function* () {
+          stubProvider(sse([chunk({}, { error: { code: 400, message: secret } })]));
+          const part: Prompt.AssistantMessagePartEncoded =
+            source === "image"
+              ? { type: "file", mediaType: "image/png", data: "cHJpdmF0ZQ==" }
+              : source === "reasoning"
+                ? {
+                    type: "reasoning",
+                    text: "",
+                    options: { openrouter: { reasoningDetails: details } },
+                  }
+                : {
+                    type: "tool-call",
+                    id: "call",
+                    name: "inspect",
+                    params: {},
+                    options: { openrouter: { reasoningDetails: details } },
+                  };
+          const error = yield* request(
+            mode,
+            Prompt.make([
+              { role: "assistant", content: [part] },
+              ...(source === "tool-call"
+                ? [
+                    {
+                      role: "tool" as const,
+                      content: [
+                        {
+                          type: "tool-result" as const,
+                          id: "call",
+                          name: "inspect",
+                          isFailure: false,
+                          result: "ok",
+                        },
+                      ],
+                    },
+                  ]
+                : []),
+              { role: "user", content: "Explain" },
+            ]),
+          ).pipe(Effect.flip);
+          expect(error).toMatchObject({
+            message: "The provider could not complete this request.",
+            diagnostic: { kind: "ProviderStreamError", code: 400 },
+          });
+          expect(JSON.stringify(error)).not.toContain(secret);
+        }),
+      );
+    }
+    it.effect(`keeps ordinary text diagnostics with empty replay metadata in ${mode}`, () =>
+      Effect.gen(function* () {
+        stubProvider(
+          sse([chunk({}, { error: { code: 400, message: "Unsupported request parameter" } })]),
+        );
+        const error = yield* request(
+          mode,
+          Prompt.make([
+            {
+              role: "assistant",
+              content: "Answer",
+              options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
+            },
+            { role: "user", content: "Explain" },
+          ]),
+        ).pipe(Effect.flip);
+        expect(error).toMatchObject({ message: "Unsupported request parameter" });
+      }),
+    );
+  }
 });
 
 describe("research streaming request ceilings", () => {
@@ -975,4 +1139,92 @@ describe("provider catalog", () => {
       ]);
     }),
   );
+});
+
+describe("per-call image output policy", () => {
+  for (const [kind, capable, requested, modalities] of [
+    ["openai-compatible", false, false, undefined],
+    ["openai-compatible", false, true, undefined],
+    ["openai-compatible", true, true, ["text", "image"]],
+    ["openrouter", true, false, ["text"]],
+    ["openrouter", true, true, ["text", "image"]],
+  ] as const) {
+    it.effect(`${kind} capable=${capable} requested=${requested}`, () =>
+      Effect.gen(function* () {
+        const recorded = stubProvider(
+          sse([
+            chunk({ content: "<think>Internal</think>Visible" }),
+            usageChunk({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+          ]),
+        );
+        const parts = yield* Effect.flatMap(AiGateway, (gateway) =>
+          Stream.runCollect(
+            gateway.streamChat({
+              modelId: "m1",
+              prompt: Prompt.make("Draw"),
+              imageOutput: requested,
+            }),
+          ),
+        ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoWith(true, capable, kind)))));
+        if (modalities) expect(recorded[0]?.body).toMatchObject({ modalities });
+        else expect(recorded[0]?.body).not.toHaveProperty("modalities");
+        expect(parts.some((part) => part.type === "reasoning-delta")).toBe(!(capable && requested));
+      }),
+    );
+  }
+});
+
+it.effect("does not expose raw invalid image stream data in provider errors", () =>
+  Effect.gen(function* () {
+    stubProvider(sse([{ invalid: "data:image/png;base64,private-payload" }]));
+    const error = yield* Effect.flatMap(AiGateway, (gateway) =>
+      Stream.runDrain(
+        gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Draw"), imageOutput: true }),
+      ),
+    ).pipe(
+      Effect.provide(GatewayLayer.pipe(Layer.provide(repoWith(true, true, "openrouter")))),
+      Effect.flip,
+    );
+    expect(error).toMatchObject({
+      message: "The image provider could not complete this request.",
+      diagnostic: { kind: "InvalidOutputError" },
+    });
+    expect(JSON.stringify(error)).not.toContain("private-payload");
+  }),
+);
+
+describe("terminal provider responses through the pinned adapter", () => {
+  for (const native of [true, false]) {
+    for (const reason of ["stop", "content_filter", "error"] as const) {
+      it.effect(`preserves refusal text and ${reason} usage with native=${native}`, () =>
+        Effect.gen(function* () {
+          stubProvider(
+            sse([
+              chunk({ content: null, refusal: "I cannot " }),
+              chunk({ content: "", refusal: "provide that image." }),
+              {
+                ...chunk({}, { choices: [{ index: 0, delta: {}, finish_reason: reason }] }),
+                usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16, cost: 0.04 },
+              },
+            ]),
+          );
+          const parts = yield* Effect.flatMap(AiGateway, (gateway) =>
+            Stream.runCollect(
+              gateway.streamChat({ modelId: "m1", prompt: Prompt.make("Draw"), imageOutput: true }),
+            ),
+          ).pipe(
+            Effect.provide(GatewayLayer.pipe(Layer.provide(repoWith(native, true, "openrouter")))),
+          );
+          expect(
+            parts.flatMap((part) => (part.type === "text-delta" ? [part.delta] : [])).join(""),
+          ).toBe("I cannot provide that image.");
+          expect(parts.find((part) => part.type === "finish")).toMatchObject({
+            reason: reason === "content_filter" ? "content-filter" : reason,
+            usage: { inputTokens: { total: 12 }, outputTokens: { total: 4 } },
+            metadata: { openrouter: { usage: { cost: 0.04 } } },
+          });
+        }),
+      );
+    }
+  }
 });

@@ -15,6 +15,11 @@ import type { Attachment, MessageAttachment } from "../schema.ts";
 import { AttachmentNotAvailable } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 
+export interface AttachmentAssociation {
+  before(tx: DbTx): Effect.Effect<void>;
+  after(tx: DbTx, attachment: Attachment): Effect.Effect<void>;
+}
+
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type AttachmentBlobRow = typeof attachmentBlobs.$inferSelect;
 
@@ -112,6 +117,7 @@ export class AttachmentRepo extends Context.Service<
      * that the user had uploaded these bytes before.
      */
     create(input: {
+      association?: AttachmentAssociation;
       userId: string;
       sha256: string;
       storageKey: string;
@@ -156,7 +162,7 @@ export class AttachmentRepo extends Context.Service<
         userId: string;
         messages: ReadonlyArray<{ sourceMessageId: string; targetMessageId: string }>;
       },
-    ): Effect.Effect<void>;
+    ): Effect.Effect<ReadonlyMap<string, string>>;
     /** Releases every attachment linked to these messages (rewind/delete). */
     releaseForMessages(
       tx: DbTx,
@@ -214,6 +220,7 @@ export class AttachmentRepo extends Context.Service<
           .where(and(eq(attachmentBlobs.userId, userId), eq(attachmentBlobs.sha256, sha256)));
 
       const create = Effect.fn("AttachmentRepo.create")(function* (input: {
+        association?: AttachmentAssociation;
         userId: string;
         sha256: string;
         storageKey: string;
@@ -224,6 +231,7 @@ export class AttachmentRepo extends Context.Service<
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
+              if (input.association) yield* input.association.before(tx);
               const id = uuidv7();
               // Upsert locks the winning incarnation until its new reference
               // commits; selecting then inserting would race last-ref deletion.
@@ -253,6 +261,16 @@ export class AttachmentRepo extends Context.Service<
                 })
                 .returning();
               const row = rows[0]!;
+              if (input.association)
+                yield* input.association.after(
+                  tx,
+                  toAttachmentDto({
+                    id: row.id,
+                    fileName: row.fileName,
+                    size: blob.size,
+                    mediaType: blob.mediaType,
+                  }),
+                );
               return {
                 attachment: toAttachmentDto({
                   id: row.id,
@@ -417,12 +435,13 @@ export class AttachmentRepo extends Context.Service<
           messages: ReadonlyArray<{ sourceMessageId: string; targetMessageId: string }>;
         },
       ) {
-        if (input.messages.length === 0) return;
+        if (input.messages.length === 0) return new Map<string, string>();
         const targetOf = new Map(
           input.messages.map((m) => [m.sourceMessageId, m.targetMessageId] as const),
         );
         const linked = yield* tx
           .select({
+            attachmentId: attachments.id,
             messageId: messageAttachments.messageId,
             position: messageAttachments.position,
             blobId: attachments.blobId,
@@ -440,7 +459,7 @@ export class AttachmentRepo extends Context.Service<
             ),
           )
           .pipe(Effect.orDie);
-        if (linked.length === 0) return;
+        if (linked.length === 0) return new Map<string, string>();
         yield* lockBlobs(
           tx,
           linked.map((row) => row.blobId),
@@ -475,6 +494,7 @@ export class AttachmentRepo extends Context.Service<
             })),
           )
           .pipe(Effect.orDie);
+        return new Map(linked.map((row, index) => [row.attachmentId, rows[index]!.id]));
       });
 
       const releaseForMessages = Effect.fn("AttachmentRepo.releaseForMessages")(function* (

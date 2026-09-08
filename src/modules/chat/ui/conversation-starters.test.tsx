@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { getAgentSelection } from "~/modules/agents/server/functions.ts";
 import { describe, expect, it, vi } from "vitest";
 import { NewChatView } from "./chat-view.tsx";
@@ -106,6 +106,13 @@ const renderNewChat = (
     </QueryClientProvider>,
   );
 };
+
+describe("new chat composer", () => {
+  it("puts the caret in the composer on arrival", async () => {
+    renderNewChat(null);
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveFocus());
+  });
+});
 
 describe("conversation starters", () => {
   it("shows the selected agent's starters and seeds the draft without sending", () => {

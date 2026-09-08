@@ -1,4 +1,10 @@
-import { AiBrain01Icon, Attachment01Icon, ToolsIcon, ViewIcon } from "@hugeicons/core-free-icons";
+import {
+  AiBrain01Icon,
+  Attachment01Icon,
+  Image01Icon,
+  ToolsIcon,
+  ViewIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ModelCapabilities } from "../model-config.ts";
 import { cn } from "~/ui/utils";
@@ -6,6 +12,7 @@ import { cn } from "~/ui/utils";
 export type Capabilities = ModelCapabilities;
 
 export const CAPABILITY_META = [
+  { key: "imageOutput" as const, label: "Image generation", icon: Image01Icon },
   { key: "reasoning" as const, label: "Reasoning", icon: AiBrain01Icon },
   // Native support only: models without it still get tools through the
   // gateway's prompt-based fallback (`hermes-tools.ts`).
@@ -18,20 +25,46 @@ export const CAPABILITY_META = [
 export function CapabilityIcons({
   capabilities,
   className,
+  audience = "admin",
+  details = false,
 }: {
   capabilities: Capabilities | null | undefined;
   className?: string;
+  audience?: "admin" | "user";
+  details?: boolean;
 }) {
   if (!capabilities) return null;
-  const active = CAPABILITY_META.filter((c) => capabilities[c.key]);
+  const active = CAPABILITY_META.filter(
+    (c) =>
+      capabilities[c.key] &&
+      (audience === "admin" ||
+        c.key === "imageOutput" ||
+        c.key === "vision" ||
+        c.key === "files" ||
+        (details && c.key === "reasoning")),
+  );
   if (active.length === 0) return null;
   return (
     <span className={cn("text-muted-foreground flex items-center gap-1", className)}>
-      {active.map((c) => (
-        <span key={c.key} role="img" title={c.label} aria-label={c.label}>
-          <HugeiconsIcon icon={c.icon} strokeWidth={2} className="size-3.5" />
-        </span>
-      ))}
+      {active.map((meta) => {
+        const c =
+          audience === "user"
+            ? {
+                ...meta,
+                label:
+                  meta.key === "vision"
+                    ? "Reads images"
+                    : meta.key === "files"
+                      ? "Reads files"
+                      : meta.label,
+              }
+            : meta;
+        return (
+          <span key={c.key} role="img" title={c.label} aria-label={c.label}>
+            <HugeiconsIcon icon={c.icon} strokeWidth={2} className="size-3.5" />
+          </span>
+        );
+      })}
     </span>
   );
 }

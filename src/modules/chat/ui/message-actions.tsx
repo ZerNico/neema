@@ -300,15 +300,17 @@ export function MessageActions({
   return (
     <div className={cn("mt-2 flex items-center gap-1", className)}>
       {timeFirst ? stamp : null}
-      <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
-        <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
-          <HugeiconsIcon
-            icon={copied ? Tick02Icon : Copy01Icon}
-            className={copied ? "size-4 text-success" : "size-4"}
-            aria-hidden
-          />
-        </MotionSwap>
-      </ActionButton>
+      {content.length > 0 && (
+        <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
+          <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
+            <HugeiconsIcon
+              icon={copied ? Tick02Icon : Copy01Icon}
+              className={copied ? "size-4 text-success" : "size-4"}
+              aria-hidden
+            />
+          </MotionSwap>
+        </ActionButton>
+      )}
       {onEdit ? (
         <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>
           <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />

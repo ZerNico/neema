@@ -1,10 +1,11 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
-import type { Prompt } from "effect/unstable/ai";
+import { Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { eq } from "drizzle-orm";
 import {
   attachmentBlobs,
@@ -12,6 +13,7 @@ import {
   messageAttachments,
   messages,
   models,
+  usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -19,20 +21,19 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
+import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
+import { askUserTool } from "~/modules/tools/server/ask-user.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import {
-  FakeBlobStore,
-  FakeDocumentParser,
-  FakeWebSearch,
-  FakeUrlReader,
-} from "./unused-services.ts";
+import { FakeDocumentParser, FakeWebSearch, FakeUrlReader } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
@@ -52,12 +53,41 @@ const FakeKnowledge = Layer.mergeAll(
 
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
-  ChatRepo | ChatService | StreamEngine | SyncBus | Db,
+  ChatRepo | ChatService | StreamEngine | SyncBus | Db | AttachmentRepo | AttachmentService,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */
 let visionModelId: string;
 let textModelId: string;
+let imageModelId: string;
+const generatedPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+  "base64",
+);
+// Complete 1×1 RGB PNGs with distinct pixels, CRCs and compressed image data.
+const editedPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC",
+  "base64",
+);
+let nextGeneratedImage: Uint8Array | undefined;
+let terminalFixtures: ChatStreamPart[][] | undefined;
+const generatedBlobs = new Map<string, Uint8Array>();
+const ImageBlobStore = Layer.succeed(BlobStore, {
+  put: (key, bytes) =>
+    Effect.sync(() => {
+      generatedBlobs.set(key, bytes);
+    }),
+  get: (key) =>
+    generatedBlobs.has(key)
+      ? Effect.succeed(generatedBlobs.get(key)!)
+      : Effect.die("Missing test blob"),
+  delete: (key) =>
+    Effect.sync(() => {
+      generatedBlobs.delete(key);
+    }),
+  exists: (key) => Effect.succeed(generatedBlobs.has(key)),
+  deletePrefix: () => Effect.void,
+});
 
 // Set by a test that needs to act on a generation while it is mid-stream: the
 // fake provider signals `reached` once it has emitted `after` parts and then
@@ -82,6 +112,34 @@ const FakeGateway = Layer.succeed(AiGateway, {
   streamChat: (input) =>
     Stream.suspend(() => {
       streamPrompts.push(input.prompt);
+      if (terminalFixtures) {
+        const parts = terminalFixtures.shift();
+        if (!parts) return Stream.die("Unexpected extra provider call");
+        return Stream.fromIterable(parts);
+      }
+      if (input.modelId === imageModelId) {
+        expect(input.imageOutput).toBe(true);
+        return Stream.fromIterable([
+          AiResponse.makePart("text-delta", { id: "image-text", delta: "Before" }),
+          AiResponse.makePart("file", {
+            mediaType: "image/png",
+            data: nextGeneratedImage ?? generatedPng,
+          }),
+          AiResponse.makePart("text-delta", { id: "image-text", delta: "After" }),
+          AiResponse.makePart("finish", {
+            reason: "stop",
+            usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
+            metadata: {
+              openrouter: {
+                reasoningDetails: [
+                  { type: "reasoning.encrypted", data: "private-replay", id: "opaque" },
+                ],
+                usage: { cost: 0.04, prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+              },
+            },
+          }),
+        ]);
+      }
       let emitted = 0;
       return Stream.fromIterable(["alpha ", "beta ", "gamma ", "delta ", "epsilon"]).pipe(
         Stream.map((delta): ChatStreamPart => ({ type: "text-delta", id: "t", delta }) as never),
@@ -128,27 +186,23 @@ beforeAll(async () => {
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
+  const EngineCore = Layer.mergeAll(
+    FakeGateway,
+    FakeKnowledge,
+    FakeWebSearch,
+    FakeUrlReader,
+    ImageBlobStore,
+    FakeDocumentParser,
+    FakeMemoryService,
+    SyncBus.layer,
+  ).pipe(Layer.provideMerge(ReposLayer));
   const EngineLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        FakeKnowledge,
-        FakeWebSearch,
-        FakeUrlReader,
-        FakeBlobStore,
-        FakeDocumentParser,
-        FakeMemoryService,
-        SyncBus.layer,
-      ).pipe(Layer.provideMerge(ReposLayer)),
-    ),
+    Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
   );
-  // ChatService sits on top of the whole graph — the retry tests drive it
-  // end to end, everything else in this file uses the engine directly.
-  const AppLayer = ChatService.layer.pipe(
-    Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineLayer))),
-  );
+  const AppLayer = ChatService.layer.pipe(Layer.provideMerge(EngineLayer));
   runtime = ManagedRuntime.make(AppLayer);
 
+  imageModelId = uuidv7();
   visionModelId = uuidv7();
   textModelId = uuidv7();
   const providerId = uuidv7();
@@ -160,6 +214,20 @@ beforeAll(async () => {
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values([
+        {
+          id: imageModelId,
+          providerId,
+          modelKey: "image-model",
+          displayName: "Image output",
+          type: "chat",
+          capabilities: {
+            reasoning: false,
+            tools: true,
+            vision: true,
+            files: false,
+            imageOutput: true,
+          },
+        },
         {
           id: visionModelId,
           providerId,
@@ -682,6 +750,7 @@ describe("resumable streaming pipeline", () => {
         const { userId, conversation, assistant } = yield* setupConversation;
 
         yield* engine.startGeneration({
+          generationId: assistant.generationId ?? undefined,
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
@@ -735,6 +804,7 @@ describe("resumable streaming pipeline", () => {
         hold = { after: 3, reached, release };
 
         yield* engine.startGeneration({
+          generationId: assistant.generationId ?? undefined,
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
@@ -749,7 +819,10 @@ describe("resumable streaming pipeline", () => {
         );
 
         yield* Deferred.await(reached);
-        const stopped = yield* engine.stopGeneration(assistant.id);
+        const stopped = yield* engine.stopGeneration(
+          assistant.id,
+          assistant.generationId ?? undefined,
+        );
         const collected = Array.from(yield* Fiber.join(events));
 
         const final = yield* repo.getMessage(assistant.id);
@@ -1150,3 +1223,404 @@ describe("retry with a different model", () => {
     expect(result.message).toMatchObject({ status: "complete", content: "first answer" });
   }, 60_000);
 });
+
+describe("generated image streaming", () => {
+  it("keeps distinct initial and edited image bytes, history, public refs and authenticated reads", async () => {
+    const promptStart = streamPrompts.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const engine = yield* StreamEngine;
+          const files = yield* AttachmentService;
+          const db = yield* Db;
+          const { userId, conversation, assistant } = yield* setupConversation;
+          const run = (message: typeof assistant) =>
+            engine
+              .startGeneration({
+                userId,
+                conversationId: conversation.id,
+                messageId: message.id,
+                generationId: message.generationId ?? undefined,
+                modelId: imageModelId,
+                searchEnabled: false,
+              })
+              .pipe(
+                Effect.andThen(
+                  engine
+                    .subscribe(message.id, 0, message.generationId ?? undefined)
+                    .pipe(Stream.runCollect),
+                ),
+              );
+          yield* run(assistant);
+          const initial = yield* repo.getMessage(assistant.id);
+          const initialId = initial!.assistantOutput!.images[0]!.attachment.id;
+
+          const edit = yield* repo.createTurn({
+            userId,
+            conversationId: conversation.id,
+            modelId: imageModelId,
+            content: "Replace the original image with a blue image",
+            attachmentIds: [],
+          });
+          nextGeneratedImage = editedPng;
+          const editedEvents = yield* run(edit.assistant);
+          const edited = yield* repo.getMessage(edit.assistant.id);
+          expect(edited!.status).toBe("complete");
+          const editedId = edited!.assistantOutput!.images[0]!.attachment.id;
+          expect(editedId).not.toBe(initialId);
+          const event = editedEvents.find(
+            (event) => event.kind === "chunk" && event.chunkKind === "image",
+          );
+          expect(event && event.kind === "chunk" ? JSON.parse(event.delta) : null).toMatchObject({
+            attachment: { id: editedId },
+          });
+
+          for (const [id, bytes] of [
+            [initialId, generatedPng],
+            [editedId, editedPng],
+          ] as const) {
+            const file = yield* files.read({ userId, attachmentId: id });
+            expect(Buffer.from(file.bytes).equals(bytes)).toBe(true);
+            const [stored] = yield* db
+              .select()
+              .from(attachments)
+              .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+              .where(eq(attachments.id, id));
+            const sha = createHash("sha256").update(bytes).digest("hex");
+            expect(stored!.attachment_blobs.sha256).toBe(sha);
+            expect(stored!.attachment_blobs.storageKey).toContain(sha);
+          }
+          const detail = yield* loadConversationDetail(userId, conversation.id);
+          expect(
+            detail.messages.find((message) => message.id === assistant.id)!.assistantOutput!
+              .images[0]!.attachment.id,
+          ).toBe(initialId);
+          expect(
+            detail.messages.find((message) => message.id === edit.assistant.id)!.assistantOutput!
+              .images[0]!.attachment.id,
+          ).toBe(editedId);
+
+          const followup = yield* repo.createTurn({
+            userId,
+            conversationId: conversation.id,
+            modelId: imageModelId,
+            content: "Make the latest blue image larger",
+            attachmentIds: [],
+          });
+          yield* run(followup.assistant);
+          const prompts = streamPrompts.slice(promptStart);
+          expect(prompts).toHaveLength(3);
+          const replayImages = (prompt: Prompt.Prompt) =>
+            prompt.content.flatMap((message) =>
+              message.role === "assistant"
+                ? message.content.flatMap((part) =>
+                    part.type === "file" && part.data instanceof Uint8Array
+                      ? [Buffer.from(part.data).toString("base64")]
+                      : [],
+                  )
+                : [],
+            );
+          expect(replayImages(prompts[0]!)).toEqual([]);
+          expect(replayImages(prompts[1]!)).toEqual([generatedPng.toString("base64")]);
+          expect(replayImages(prompts[2]!)).toEqual([
+            generatedPng.toString("base64"),
+            editedPng.toString("base64"),
+          ]);
+          expect(JSON.stringify(prompts[1])).toContain(
+            "Replace the original image with a blue image",
+          );
+          expect(JSON.stringify(prompts[2])).toContain("Make the latest blue image larger");
+        }),
+      );
+    } finally {
+      nextGeneratedImage = undefined;
+    }
+  });
+  it("publishes ordered ref-only image chunks and replays the same durable output", async () => {
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const { userId, conversation, assistant } = yield* setupConversation;
+        yield* engine.startGeneration({
+          userId,
+          conversationId: conversation.id,
+          messageId: assistant.id,
+          generationId: assistant.generationId ?? undefined,
+          modelId: imageModelId,
+          searchEnabled: false,
+        });
+        const live = Array.from(
+          yield* engine
+            .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect),
+        );
+        const replay = Array.from(
+          yield* engine
+            .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect),
+        );
+        expect(live).toEqual(replay);
+        expect(
+          live.filter((event) => event.kind === "chunk").map((event) => event.chunkKind),
+        ).toEqual(["text", "image", "text"]);
+        expect(live.at(-1)).toMatchObject({
+          kind: "done",
+          status: "complete",
+          runId: assistant.generationId,
+        });
+        expect(JSON.stringify(live)).not.toContain(generatedPng.toString("base64"));
+        expect(JSON.stringify(live)).not.toContain("private-replay");
+        const publicDetail = yield* loadConversationDetail(userId, conversation.id);
+        expect(JSON.stringify(publicDetail)).not.toContain("private-replay");
+        expect(JSON.stringify(publicDetail)).not.toContain("providerReplay");
+        expect(JSON.stringify(publicDetail)).not.toContain(generatedPng.toString("base64"));
+        const final = yield* repo.getMessage(assistant.id);
+        expect(final).toMatchObject({
+          content: "BeforeAfter",
+          status: "complete",
+          assistantOutput: { images: [{ textOffset: 6, turnIndex: 0 }] },
+          providerReplay: { turns: [{ reasoningDetails: [{ data: "private-replay" }] }] },
+        });
+      }),
+    );
+  });
+});
+
+describe("terminal response validation", () => {
+  for (const reason of ["unknown", "other"] as const) {
+    it(`rejects ${reason} after Hermes parsing without a continuation and retains usage`, async () => {
+      const parts = await Effect.runPromise(
+        Stream.runCollect(
+          hermesToolCalls(
+            Stream.fromIterable([
+              AiResponse.makePart("text-delta", {
+                id: "t",
+                delta: `Checking. <tool_call>${JSON.stringify({ name: "ask_user", arguments: questionParams })}</tool_call>`,
+              }),
+              AiResponse.makePart("finish", {
+                reason,
+                usage: new AiResponse.Usage({
+                  inputTokens: { total: 12 },
+                  outputTokens: { total: 4 },
+                }),
+                metadata: {
+                  openrouter: {
+                    usage: {
+                      prompt_tokens: 12,
+                      completion_tokens: 4,
+                      total_tokens: 16,
+                      cost: 0.04,
+                    },
+                  },
+                },
+              }),
+            ]),
+            { tools: [askUserTool], nextId: Effect.succeed("hermes-question") },
+          ),
+        ),
+      );
+      // If the wrapper masks the finish, the ordinary loop takes this extra
+      // round and completes, rather than rejecting the incomplete first turn.
+      terminalFixtures = [
+        Array.from(parts),
+        [
+          AiResponse.makePart("text-delta", { id: "t2", delta: "A later answer." }),
+          AiResponse.makePart("finish", {
+            reason: "stop",
+            usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+          }),
+        ],
+      ];
+      try {
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const repo = yield* ChatRepo;
+            const engine = yield* StreamEngine;
+            const db = yield* Db;
+            const { userId, conversation, assistant } = yield* setupConversation;
+            yield* engine.startGeneration({
+              userId,
+              conversationId: conversation.id,
+              messageId: assistant.id,
+              generationId: assistant.generationId ?? undefined,
+              modelId: textModelId,
+              searchEnabled: false,
+            });
+            const events = yield* engine
+              .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+              .pipe(Stream.runCollect);
+            expect(events.at(-1)).toMatchObject({ kind: "done", status: "error" });
+            expect(yield* repo.getMessage(assistant.id)).toMatchObject({
+              status: "error",
+              content: "Checking. ",
+              error: { message: expect.stringContaining("[ResponseIncomplete]") },
+            });
+            const ledger = yield* db
+              .select()
+              .from(usageEvents)
+              .where(eq(usageEvents.messageId, assistant.id));
+            expect(ledger).toHaveLength(1);
+            expect(ledger[0]).toMatchObject({
+              status: "error",
+              inputTokens: 12,
+              outputTokens: 4,
+              cost: 0.04,
+            });
+            expect(terminalFixtures).toHaveLength(1);
+          }),
+        );
+      } finally {
+        terminalFixtures = undefined;
+      }
+    });
+  }
+  for (const [reason, text, image, code] of [
+    ["stop", "", false, "ResponseEmpty"],
+    ["stop", " \n", false, "ResponseEmpty"],
+    ["content-filter", "", false, "ResponseFiltered"],
+    ["error", "", false, "ResponseError"],
+    [undefined, "", false, "ResponseIncomplete"],
+    ["other", "", false, "ResponseIncomplete"],
+    ["unknown", "Partial explanation", false, "ResponseIncomplete"],
+    ["content-filter", "Partial explanation", true, "ResponseFiltered"],
+    ["error", "Partial explanation", true, "ResponseError"],
+    [undefined, "Partial explanation", true, "ResponseIncomplete"],
+    ["stop", "A text-only explanation", false, undefined],
+    ["stop", "", true, undefined],
+  ] as const) {
+    it(`handles ${reason} text=${JSON.stringify(text)} image=${image}`, async () => {
+      const parts: ChatStreamPart[] = [];
+      if (text) parts.push(AiResponse.makePart("text-delta", { id: "t", delta: text }));
+      if (image)
+        parts.push(AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }));
+      if (reason)
+        parts.push(
+          AiResponse.makePart("finish", {
+            reason,
+            usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
+            metadata: {
+              openrouter: {
+                usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16, cost: 0.04 },
+              },
+            },
+          }),
+        );
+      terminalFixtures = [parts];
+      try {
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const repo = yield* ChatRepo;
+            const engine = yield* StreamEngine;
+            const db = yield* Db;
+            const { userId, conversation, assistant } = yield* setupConversation;
+            yield* engine.startGeneration({
+              userId,
+              conversationId: conversation.id,
+              messageId: assistant.id,
+              generationId: assistant.generationId ?? undefined,
+              modelId: imageModelId,
+              searchEnabled: false,
+            });
+            const events = yield* engine
+              .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+              .pipe(Stream.runCollect);
+            const status = code ? "error" : "complete";
+            expect(events.at(-1)).toMatchObject({ kind: "done", status });
+            const message = yield* repo.getMessage(assistant.id);
+            expect(message).toMatchObject({ content: text, status });
+            expect(message?.assistantOutput?.images.length ?? 0).toBe(image ? 1 : 0);
+            if (code) expect(message?.error?.message).toContain(`[${code}]`);
+            else expect(message?.error).toBeNull();
+            const ledger = yield* db
+              .select()
+              .from(usageEvents)
+              .where(eq(usageEvents.messageId, assistant.id));
+            expect(ledger).toHaveLength(1);
+            expect(ledger[0]).toMatchObject({
+              status,
+              inputTokens: reason ? 12 : 0,
+              outputTokens: reason ? 4 : 0,
+              cost: reason ? 0.04 : null,
+            });
+            expect(JSON.stringify(events)).not.toContain(generatedPng.toString("base64"));
+            expect(terminalFixtures).toHaveLength(0);
+          }),
+        );
+      } finally {
+        terminalFixtures = undefined;
+      }
+    });
+  }
+});
+
+for (const presented of [true, false]) {
+  it(`permits ${presented ? "a question-only answer" : "a tool-only continuation before the answer"}`, async () => {
+    const result = presented
+      ? { v: 1, outcome: "presented", ...questionParams }
+      : { v: 1, outcome: "rejected", message: "Please use a sensible default." };
+    const finish = (reason: AiResponse.FinishReason) =>
+      AiResponse.makePart("finish", {
+        reason,
+        usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+      });
+    terminalFixtures = [
+      [
+        AiResponse.makePart("tool-call", {
+          id: "ask-terminal",
+          providerExecuted: false,
+          name: "ask_user",
+          params: questionParams,
+        }),
+        AiResponse.makePart("tool-result", {
+          id: "ask-terminal",
+          providerExecuted: false,
+          name: "ask_user",
+          result,
+          encodedResult: result,
+          isFailure: false,
+          preliminary: false,
+        }),
+        finish("tool-calls"),
+      ],
+      ...(presented
+        ? []
+        : [
+            [
+              AiResponse.makePart("text-delta", { id: "answer", delta: "A sensible answer." }),
+              finish("stop"),
+            ],
+          ]),
+    ];
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const engine = yield* StreamEngine;
+          const { userId, conversation, assistant } = yield* setupConversation;
+          yield* engine.startGeneration({
+            userId,
+            conversationId: conversation.id,
+            messageId: assistant.id,
+            generationId: assistant.generationId ?? undefined,
+            modelId: imageModelId,
+            searchEnabled: false,
+          });
+          const events = yield* engine
+            .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect);
+          expect(events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
+          expect(yield* repo.getMessage(assistant.id)).toMatchObject({
+            status: "complete",
+            content: presented ? "" : "A sensible answer.",
+            error: null,
+          });
+          expect(terminalFixtures).toHaveLength(0);
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+    }
+  });
+}

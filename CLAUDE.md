@@ -459,6 +459,39 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
 
 ## shadcn / UI conventions
 
+- Deep research is a checkbox item in the Add menu, below files and context. The control
+  row shows a pressed Deep research pill only while it is on, and pressing that pill turns
+  it off.
+  Mode changes only `researchEnabled`; normal chat's independent web-search preference
+  stays intact while its toggle is hidden in research. Opening a conversation or the
+  new-chat screen focuses the composer, except on a phone (`useIsMobile`), where it would
+  raise the keyboard over what the user came to read. Model picker details are opt-in;
+  native tool metadata stays admin-only, never a user suitability distinction.
+- Agent creation leads with name, instructions and Knowledge, then shows every remaining
+  setting on the same page — no More settings disclosure. Invalid fields receive focus on
+  submit. Collections are attached through a searchable picker with removable rows, not a
+  switch per collection, so the control does not grow with the account.
+  Editing shows “Changes apply to new chats” beside Save; installed snapshots never change.
+- Resource owners manage **Access** through `sharing/ui/access-dialog.tsx`, not link copying.
+  One panel: a searchable picker (groups first, then a directory of accounts fetched on
+  open and on each debounced query — never preloaded), the list of who can use it, then
+  General access. `SharingService.recipients` is a deliberate account directory readable by
+  any signed-in user, which the exact-email design originally refused; it fits a
+  single-tenant self-hosted deployment and nothing else about an account is exposed.
+  Picking a person still grants through the existing email path, so authorization is
+  unchanged. Every grant is the same permission, so rows carry a plain “Can use”
+  label — never a role picker the backend cannot honour. Audience is additive: direct
+  grants, groups and everyone signed in can overlap, so removing one grant never implies
+  other access ended and the note saying so appears only when a group or broad audience
+  actually applies. Broadening to everyone signed in confirms first; narrowing does not,
+  because it takes nothing away that was granted directly. Agent access grants no
+  dependency access. A `role="combobox"` trigger takes its name from `aria-label`, not
+  from its own text.
+- Documents say Preparing / Preparing search / Basic search, or Updating / Update failed
+  for replacements. The current version remains available during replacement. Initial and
+  replacement failures expose Try again; Rebuild index remains the only collection-wide
+  repair action. Healthy documents and partial-PDF coverage stay visually quiet.
+
 - `src/styles/app.css` must keep `@import "tw-animate-css"` and
   `@import "shadcn/tailwind.css"` right after `@import "tailwindcss"`. Every
   `data-open:animate-in` / `fade-in-0` / `zoom-in-95` class in the overlay primitives

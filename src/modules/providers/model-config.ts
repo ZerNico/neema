@@ -4,6 +4,8 @@ export type ModelType = (typeof MODEL_TYPES)[number];
 export type ModelAccess = "public" | "groups";
 
 export interface ModelCapabilities {
+  /** Native image output; absent on older model records means disabled. */
+  imageOutput?: boolean;
   reasoning: boolean;
   tools: boolean;
   vision: boolean;
@@ -31,6 +33,7 @@ export interface EmbeddingModelSettings extends CommonModelSettings {
   type: "embedding";
   embeddingDimensions: number | null;
   capabilities: {
+    imageOutput?: false;
     reasoning: false;
     tools: false;
     vision: boolean;

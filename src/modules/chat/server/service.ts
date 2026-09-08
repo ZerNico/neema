@@ -125,6 +125,7 @@ export class ChatService extends Context.Service<
     // Winds a streaming assistant message down early, keeping the partial
     // answer. `stopped: false` means there was nothing to stop here.
     stopGeneration(input: {
+      generationId?: string | undefined;
       researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
@@ -360,6 +361,7 @@ function makeChatService() {
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
         researchRunId: turn.assistant.researchRunId ?? undefined,
+        generationId: turn.assistant.generationId ?? undefined,
         modelId: input.modelId,
         searchEnabled: turn.config.searchEnabled,
         timeZone: input.timeZone,
@@ -398,23 +400,24 @@ function makeChatService() {
         attachmentIds: ReadonlyArray<string>;
       };
     }) {
-      const { claimed, orphanedKeys } = yield* repo.resetMessageForRetry({
-        expectedMessages: input.expectedMessages,
-        userId: input.userId,
-        messageId: input.assistantMessageId,
-        modelId: input.modelId,
-        deleteMessageIds: input.deleteMessageIds,
-        invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
-        searchEnabled: input.searchEnabled,
-        ...(input.edit
-          ? {
-              edit: {
-                ...input.edit,
-                conversationId: input.conversationId,
-              },
-            }
-          : {}),
-      });
+      const { claimed, orphanedKeys, generationId, researchRunId } =
+        yield* repo.resetMessageForRetry({
+          expectedMessages: input.expectedMessages,
+          userId: input.userId,
+          messageId: input.assistantMessageId,
+          modelId: input.modelId,
+          deleteMessageIds: input.deleteMessageIds,
+          invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
+          searchEnabled: input.searchEnabled,
+          ...(input.edit
+            ? {
+                edit: {
+                  ...input.edit,
+                  conversationId: input.conversationId,
+                },
+              }
+            : {}),
+        });
       // Only after the commit: a rollback must never orphan live rows' bytes.
       yield* attachmentService.deleteBlobs(orphanedKeys);
       if (!claimed) return null;
@@ -430,8 +433,8 @@ function makeChatService() {
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: input.assistantMessageId,
-        researchRunId:
-          (yield* repo.getMessage(input.assistantMessageId))?.researchRunId ?? undefined,
+        researchRunId,
+        generationId,
         modelId: input.modelId,
         searchEnabled: input.searchEnabled,
         timeZone: input.timeZone,
@@ -761,6 +764,7 @@ function makeChatService() {
         conversationId: input.conversationId,
         messageId: created.message.id,
         researchRunId: created.message.researchRunId ?? undefined,
+        generationId: created.message.generationId ?? undefined,
         modelId: input.modelId,
         searchEnabled: created.config.searchEnabled,
         timeZone: input.timeZone,
@@ -770,6 +774,7 @@ function makeChatService() {
     });
 
     const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
+      generationId?: string | undefined;
       researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
@@ -787,12 +792,21 @@ function makeChatService() {
       if (message.status !== "streaming") return { stopped: false };
       if (message.researchRunId && input.researchRunId !== message.researchRunId)
         return { stopped: false };
+      if (
+        !message.researchRunId &&
+        message.generationId &&
+        input.generationId !== message.generationId
+      )
+        return { stopped: false };
       const durable =
         message.researchRunId && repo.research
           ? yield* repo.research.cancel(message.id, message.researchRunId)
           : false;
       const stopped =
-        (yield* engine.stopGeneration(input.messageId, input.researchRunId)) || durable;
+        (yield* engine.stopGeneration(
+          input.messageId,
+          input.researchRunId ?? input.generationId,
+        )) || durable;
       return { stopped };
     });
 

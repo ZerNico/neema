@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer.tsx";
@@ -64,13 +65,54 @@ function Harness({ onSend }: { onSend: React.ComponentProps<typeof Composer>["on
     />
   );
 }
-async function enableResearch() {
-  fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+const menu = () => screen.getByRole("button", { name: "Add files or tools" });
+const researchPill = () => screen.queryByRole("button", { name: "Deep research" });
+// A checkbox item leaves the menu open, so only open it when it is not already.
+async function toggleResearch() {
+  const open = screen.queryByRole("menuitemcheckbox", { name: "Deep research" });
+  if (open) {
+    fireEvent.click(open);
+    return;
+  }
+  fireEvent.click(menu());
   fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Deep research" }));
-  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
 }
+const enableResearch = toggleResearch;
+const disableResearch = toggleResearch;
 
 describe("research composer", () => {
+  it.each([false, true])(
+    "preserves locked controls without an optional research handler (research=%s)",
+    (researchEnabled) => {
+      render(
+        <QueryClientProvider client={client()}>
+          <ChatInput
+            value="Draft"
+            onValueChange={vi.fn()}
+            onSubmit={vi.fn()}
+            disabled={false}
+            modelId="m1"
+            onModelChange={vi.fn()}
+            searchEnabled
+            onSearchEnabledChange={vi.fn()}
+            researchEnabled={researchEnabled}
+          />
+        </QueryClientProvider>,
+      );
+      if (researchEnabled) {
+        // No handler to change it with, so the pill states the mode and stays put.
+        expect(researchPill()).toBeDisabled();
+        expect(screen.queryByRole("button", { name: "Search the web" })).not.toBeInTheDocument();
+      } else {
+        expect(researchPill()).toBeNull();
+        expect(screen.getByRole("button", { name: "Search the web" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+      }
+    },
+  );
+
   it("restores the ordinary search preference when research is switched off", async () => {
     render(
       <QueryClientProvider client={client()}>
@@ -82,10 +124,33 @@ describe("research composer", () => {
     ).toBe("false");
     await enableResearch();
     expect(screen.queryByRole("button", { name: "Search the web" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Deep research" }));
+    await disableResearch();
     expect(
       screen.getByRole("button", { name: "Search the web" }).getAttribute("aria-pressed"),
     ).toBe("false");
+  });
+
+  it("preserves enabled search through keyboard research selection and back", async () => {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client()}>
+        <Harness onSend={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Search the web" }));
+    menu().focus();
+    await user.keyboard("{Enter}");
+    const research = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
+    research.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("button", { name: "Search the web" })).not.toBeInTheDocument();
+    await waitFor(() => expect(research).toHaveAttribute("aria-checked", "true"));
+    research.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Search the web" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("retains a failed research draft, resets after success, and sends the next message normally", async () => {
@@ -100,12 +165,12 @@ describe("research composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], "research"));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
-    expect(screen.getByRole("button", { name: "Deep research" })).toBeTruthy();
+    expect(researchPill()).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
       expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""),
     );
-    expect(screen.queryByRole("button", { name: "Deep research" })).toBeNull();
+    expect(researchPill()).toBeNull();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Thanks" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", []));
@@ -135,14 +200,55 @@ describe("research composer", () => {
     expect(screen.getByRole("status").textContent).toContain("page reading");
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Deep research" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
-    expect(
-      (await screen.findByRole("menuitemcheckbox", { name: "Deep research" })).getAttribute(
+    await disableResearch();
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemcheckbox", { name: "Deep research" })).toHaveAttribute(
         "aria-disabled",
+        "true",
       ),
-    ).toBe("true");
+    );
   });
+
+  it.each(["queued", "locked"] as const)(
+    "disables an already-open mode menu when %s",
+    async (reason) => {
+      const onChange = vi.fn();
+      const cache = client();
+      const view = (blocked: boolean) => (
+        <QueryClientProvider client={cache}>
+          <ChatInput
+            value="Draft"
+            onValueChange={vi.fn()}
+            onSubmit={vi.fn()}
+            disabled={false}
+            controlsDisabled={reason === "locked" && blocked}
+            modelId="m1"
+            onModelChange={vi.fn()}
+            searchEnabled={false}
+            onSearchEnabledChange={vi.fn()}
+            researchEnabled
+            onResearchEnabledChange={onChange}
+            attachments={
+              {
+                items: [],
+                isFull: false,
+                queued: reason === "queued" && blocked,
+              } as unknown as AttachmentUploads
+            }
+          />
+        </QueryClientProvider>
+      );
+      const { rerender } = render(view(false));
+      fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+      await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
+      rerender(view(true));
+      for (const option of screen.getAllByRole("menuitemcheckbox")) {
+        expect(option).toHaveAttribute("aria-disabled", "true");
+        fireEvent.click(option);
+      }
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the submitted research mode fixed while attachments finish uploading", async () => {
     const onChange = vi.fn();
@@ -164,14 +270,14 @@ describe("research composer", () => {
         />
       </QueryClientProvider>,
     );
-    const chip = screen.getByRole("button", { name: "Deep research" });
-    expect((chip as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
-    const checkbox = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
-    expect(checkbox.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(checkbox);
+    const pill = researchPill() as HTMLButtonElement;
+    expect(pill.disabled).toBe(true);
+    fireEvent.click(pill);
     expect(onChange).not.toHaveBeenCalled();
+    // The menu still opens, but every mode option is refused while uploading.
+    fireEvent.click(menu());
+    for (const option of await screen.findAllByRole("menuitemcheckbox"))
+      expect(option).toHaveAttribute("aria-disabled", "true");
   });
 
   it.each([false, true])(
@@ -199,13 +305,10 @@ describe("research composer", () => {
           />
         </QueryClientProvider>,
       );
-      fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+      fireEvent.click(menu());
       const checkbox = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
-      expect(
-        screen.getByRole("menuitem", { name: "Attach files" }).getAttribute("aria-disabled"),
-      ).toBe("true");
       fireEvent.click(checkbox);
-      expect(onChange).toHaveBeenCalledWith(true, expect.anything());
+      expect(onChange).toHaveBeenCalledWith(true);
     },
   );
 });

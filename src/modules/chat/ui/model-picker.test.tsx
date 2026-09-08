@@ -42,6 +42,21 @@ const openPicker = async () => {
 };
 
 describe("ModelPicker", () => {
+  it("keeps specifications behind a keyboard-accessible control outside options", async () => {
+    const { user, onChange } = renderPicker();
+    await openPicker();
+    expect(screen.queryByText("128k")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Native tool calling" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "Show model details" });
+    expect(toggle.closest('[role="option"]')).toBeNull();
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByText("128k")).toHaveLength(3);
+    expect(screen.queryByRole("img", { name: "Native tool calling" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: /GPT-5/ }));
+    expect(onChange).toHaveBeenCalledWith("gpt");
+  });
+
   it("groups the models under their provider", async () => {
     renderPicker();
     await openPicker();

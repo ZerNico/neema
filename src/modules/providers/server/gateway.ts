@@ -113,6 +113,22 @@ export interface CatalogModel {
 // tool-call + tool-result parts (handlers run by the library), finish, etc.
 export type ChatStreamPart = Response.AnyPart;
 
+// Sensitivity follows the outgoing input, not only the requested output mode.
+// The adapter also restores reasoning details from tool-call/reasoning parts.
+const hasSensitivePrompt = (prompt: Prompt.Prompt): boolean =>
+  prompt.content.some(
+    (message) =>
+      (message.role === "assistant" &&
+        (message.options.openrouter?.reasoningDetails?.length ?? 0) > 0) ||
+      (message.role !== "system" &&
+        message.content.some(
+          (part) =>
+            (part.type === "file" && part.mediaType.startsWith("image/")) ||
+            ((part.type === "tool-call" || part.type === "reasoning") &&
+              (part.options.openrouter?.reasoningDetails?.length ?? 0) > 0),
+        )),
+  );
+
 const StreamedProviderError = Schema.Struct({ code: Schema.Int });
 
 const ModelsResponse = Schema.Struct({
@@ -180,10 +196,14 @@ export const inferType = (
 // admin toggles capabilities manually.
 const inferCapabilities = (m: {
   supported_parameters?: ReadonlyArray<string> | null;
-  architecture?: { input_modalities?: ReadonlyArray<string> };
+  architecture?: {
+    input_modalities?: ReadonlyArray<string>;
+    output_modalities?: ReadonlyArray<string>;
+  };
 }): ModelCapabilities => {
   const params = m.supported_parameters ?? [];
   return {
+    ...(m.architecture?.output_modalities?.includes("image") ? { imageOutput: true } : {}),
     reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
     tools: params.includes("tools"),
     vision: (m.architecture?.input_modalities ?? []).includes("image"),
@@ -240,6 +260,7 @@ export class AiGateway extends Context.Service<
     // emits tool-call/tool-result parts; the caller drives the multi-turn
     // loop by feeding the parts back in as prompt history.
     streamChat(input: {
+      imageOutput?: boolean;
       modelId: string;
       prompt: Prompt.Prompt;
       toolkit?: Toolkit.WithHandler<any>;
@@ -368,13 +389,22 @@ export class AiGateway extends Context.Service<
       const resolveModel = Effect.fn("AiGateway.resolveModel")(function* (
         modelId: string,
         config?: { max_tokens?: number },
+        imageOutput = false,
       ) {
         const model = yield* repo.getModel(modelId);
         if (!model) return yield* new ModelNotFound({ modelId });
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
 
-        const adapter = OpenRouterLanguageModel.model(model.modelKey, config ?? {}).pipe(
+        const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
+        const adapter = OpenRouterLanguageModel.model(model.modelKey, {
+          ...config,
+          ...(actualImageOutput
+            ? { modalities: ["text", "image"] as const }
+            : provider.kind === "openrouter"
+              ? { modalities: ["text"] as const }
+              : {}),
+        }).pipe(
           Layer.provide(
             OpenRouterClient.layer({
               apiKey: provider.apiKey,
@@ -387,7 +417,7 @@ export class AiGateway extends Context.Service<
         // Hermes polyfill sits between the adapter and the toolkit loop:
         // adapter → hermes → think extraction (in streamChat/generateText).
         const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
-        return { providerId: model.providerId, layer };
+        return { providerId: model.providerId, layer, imageOutput: actualImageOutput };
       });
 
       // One place decides which provider rejections are recoverable, so chat
@@ -416,21 +446,51 @@ export class AiGateway extends Context.Service<
         });
       };
 
+      const requestError = (providerId: string, prompt: Prompt.Prompt, imageOutput = false) => {
+        const sensitive = imageOutput || hasSensitivePrompt(prompt);
+        return (cause: unknown) => {
+          const error = classify(providerId, cause);
+          // Provider/decode failures may quote image bytes or opaque replay signatures.
+          // Preserve categories and bounded diagnostic codes, never that quoted text.
+          if (!sensitive) return error;
+          return error instanceof ProviderContextOverflow
+            ? new ProviderContextOverflow({
+                providerId,
+                message: imageOutput
+                  ? "The image request exceeded the provider context window."
+                  : "The request exceeded the provider context window.",
+              })
+            : new ProviderUnreachable({
+                providerId,
+                message: imageOutput
+                  ? "The image provider could not complete this request."
+                  : "The provider could not complete this request.",
+                ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+              });
+        };
+      };
+
       const streamChat = (input: {
         modelId: string;
         prompt: Prompt.Prompt;
         toolkit?: Toolkit.WithHandler<any>;
         toolChoice?: "auto" | "none" | "required";
         maxOutputTokens?: number;
+        imageOutput?: boolean;
       }): Stream.Stream<
         ChatStreamPart,
         ProviderUnreachable | ProviderContextOverflow | ModelNotFound
       > =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const { providerId, layer: modelLayer } = yield* resolveModel(
+            const {
+              providerId,
+              layer: modelLayer,
+              imageOutput,
+            } = yield* resolveModel(
               input.modelId,
               input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
+              input.imageOutput === true,
             );
 
             const parts = input.toolkit
@@ -443,7 +503,7 @@ export class AiGateway extends Context.Service<
 
             // Always-on extractor: models emitting raw <think> blocks in text
             // (R1 distills, QwQ, local models) still feed the reasoning track.
-            const provided = extractThinkTags(parts).pipe(
+            const provided = (imageOutput ? parts : extractThinkTags(parts)).pipe(
               Stream.provide(modelLayer),
               // Some OpenAI-compatible providers report a rejected request as
               // an SSE error value rather than failing the stream channel.
@@ -452,7 +512,7 @@ export class AiGateway extends Context.Service<
                   ? Effect.fail(classify(providerId, part.error))
                   : Effect.succeed(part),
               ),
-              Stream.mapError((cause) => classify(providerId, cause)),
+              Stream.mapError(requestError(providerId, input.prompt, imageOutput)),
             );
             // Toolkit handlers are fully provided by the executor before they
             // reach the gateway, so no requirements remain at runtime.
@@ -519,7 +579,7 @@ export class AiGateway extends Context.Service<
                 return Effect.succeed(acc);
             }
           },
-        ).pipe(Effect.mapError((cause) => classify(providerId, cause)));
+        ).pipe(Effect.mapError(requestError(providerId, input.prompt)));
       });
 
       const probeEmbeddingDimensions = Effect.fn("AiGateway.probeEmbeddingDimensions")(

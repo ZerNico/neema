@@ -800,10 +800,32 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
       : message.content,
   }));
   const rendered = yield* buildHistoryMessages(deps.promptDeps, {
+    deferAssistantBytes: true,
     messages: history,
     webToolsEnabled: true,
     modelSupportsFiles: model?.capabilities.files ?? false,
   });
+  const historyGroups: Array<ReadonlyArray<Prompt.MessageEncoded>> = [];
+  const retainedHistory = new Map<number, ReadonlyArray<Prompt.MessageEncoded>>();
+  const loadedBytes = new Map<string, Uint8Array>();
+  const replayInput = {
+    webToolsEnabled: true,
+    modelSupportsFiles: model?.capabilities.files ?? false,
+    modelSupportsVision: model?.capabilities.vision ?? false,
+    expandAssistantTurns: true,
+    ...(model ? { modelIdentity: { providerId: model.providerId, modelKey: model.modelKey } } : {}),
+  };
+  for (let index = 0; index < history.length; index++) {
+    const message = history[index]!;
+    historyGroups.push(
+      message.assistantOutput?.images.length || message.providerReplay?.turns.length
+        ? yield* buildHistoryMessages(
+            { ...deps.promptDeps, chat: deps.repo },
+            { ...replayInput, messages: [message], deferAssistantBytes: true },
+          )
+        : [rendered[index]!],
+    );
+  }
   // Agent instructions are user-level configuration: a separate, lower-authority
   // message after the application policy, never merged into it.
   const agentInstructions: Prompt.MessageEncoded[] = deps.config.snapshot?.instructions.trim()
@@ -882,7 +904,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
     );
     const protectedTokens = estimatePromptTokens([
       ...fixedPrefix,
-      ...rendered.slice(protectedIndex),
+      ...historyGroups.slice(protectedIndex).flat(),
       ...stagePrefix,
       request,
     ]);
@@ -909,16 +931,32 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
       ...(historyProjection ? { projection: historyProjection } : {}),
       messages: history,
       renderedMessages: rendered,
+      renderedMessageGroups: historyGroups,
       fixedPrefix,
       trailingMessages,
       webToolsEnabled: spec.phase === "coordinator" || spec.phase === "clarification",
       maxStartIndex: protectedIndex,
     });
     historyProjection = decision;
+    for (let index = decision.startIndex; index < history.length; index++) {
+      if (retainedHistory.has(index)) continue;
+      const message = history[index]!;
+      retainedHistory.set(
+        index,
+        message.assistantOutput?.images.length || message.providerReplay?.turns.length
+          ? yield* buildHistoryMessages(
+              { ...deps.promptDeps, chat: deps.repo },
+              { ...replayInput, messages: [message], loadedBytes },
+            )
+          : [rendered[index]!],
+      );
+    }
     const baseMessages = [
       ...fixedPrefix,
       ...decision.injectedMessages,
-      ...rendered.slice(decision.startIndex),
+      ...rendered
+        .slice(decision.startIndex)
+        .flatMap((message, index) => retainedHistory.get(index + decision.startIndex) ?? [message]),
       ...stagePrefix,
     ];
     let evidence = "";
@@ -978,7 +1016,9 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
       Prompt.make([
         ...fixedPrefix,
         ...value.injectedMessages,
-        ...rendered.slice(value.startIndex),
+        ...rendered
+          .slice(value.startIndex)
+          .flatMap((message, index) => retainedHistory.get(index + value.startIndex) ?? [message]),
         ...finalTail(),
       ]);
     return {
@@ -1005,6 +1045,7 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
           decision: { ...decision, estimatedInputTokens: rejectedEstimate },
           messages: history,
           renderedMessages: rendered,
+          renderedMessageGroups: historyGroups,
           fixedPrefix,
           trailingMessages: finalTail(),
           calibrationFactor: 1,

@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEditorPage } from "./agent-editor-page.tsx";
-import { deleteAgent } from "../server/functions.ts";
+import { deleteAgent, updateAgent } from "../server/functions.ts";
 import type { AgentDetail } from "../schema.ts";
+import { listKnowledgeCollections } from "~/modules/knowledge/server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -79,11 +81,14 @@ const detail = (overrides: Partial<AgentDetail> = {}): AgentDetail => ({
   ...overrides,
 });
 
-const renderEditor = (agent: AgentDetail = detail()) => {
+const renderEditor = (
+  agent: AgentDetail = detail(),
+  collections: Array<Record<string, unknown>> | null = [],
+) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["agents", "detail", agent.id], agent);
   client.setQueryData(["chat-models"], []);
-  client.setQueryData(["knowledge", "collections"], []);
+  if (collections !== null) client.setQueryData(["knowledge", "collections"], collections);
   return render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -98,6 +103,97 @@ beforeEach(() => {
 });
 
 describe("AgentEditorPage", () => {
+  it("shows every setting at once and saves what is on screen", async () => {
+    renderEditor(detail({ searchEnabled: true, planEnabled: true, starters: ["Review this"] }));
+    expect(screen.getByRole("switch", { name: "Working checklist" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Starter 1" })).toHaveValue("Review this");
+    fireEvent.change(screen.getByRole("textbox", { name: "Starter 1" }), {
+      target: { value: "Review carefully" },
+    });
+    expect(screen.getByText("Changes apply to new chats")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenCalledWith({
+        data: {
+          agentId: "a1",
+          expectedRevision: 1,
+          name: "Reviewer",
+          description: "Checks contracts",
+          instructions: "Be careful.",
+          icon: "book",
+          modelId: null,
+          searchEnabled: true,
+          planEnabled: true,
+          starters: ["Review carefully"],
+          collectionIds: [],
+        },
+      }),
+    );
+  });
+
+  it("focuses an invalid starter without discarding what was typed", async () => {
+    renderEditor(detail({ starters: ["Valid"] }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Starter 1" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Starter 1" })).toHaveFocus());
+    expect(screen.getByRole("textbox", { name: "Starter 1" })).toHaveValue("");
+    expect(screen.getByText("Check the highlighted fields before saving.")).toBeVisible();
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps unavailable collections visible and retains their IDs when saving", async () => {
+    renderEditor(
+      detail({ icon: "robot", collections: [{ id: "missing", name: null, available: false }] }),
+    );
+    expect(screen.getByText("A collection you can no longer read")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenCalledWith({
+        data: expect.objectContaining({ collectionIds: ["missing"] }),
+      }),
+    );
+  });
+
+  it("does not report lost collection access while loading", async () => {
+    let resolveCollections!: (value: []) => void;
+    vi.mocked(listKnowledgeCollections).mockReturnValueOnce(
+      new Promise<[]>((resolve) => {
+        resolveCollections = resolve;
+      }),
+    );
+    renderEditor(detail({ collections: [{ id: "missing", name: null, available: false }] }), null);
+    expect(screen.getByText("Loading collections…")).toBeVisible();
+    expect(screen.queryByText("A collection you can no longer read")).not.toBeInTheDocument();
+    resolveCollections([]);
+    expect(await screen.findByText("A collection you can no longer read")).toBeVisible();
+  });
+
+  it("shows a collection load error rather than claiming access was lost", async () => {
+    vi.mocked(listKnowledgeCollections).mockRejectedValueOnce(new Error("Offline"));
+    renderEditor(detail({ collections: [{ id: "missing", name: null, available: false }] }), null);
+    expect(await screen.findByText("Could not load collections")).toBeVisible();
+    expect(screen.queryByText("A collection you can no longer read")).not.toBeInTheDocument();
+  });
+
+  it("attaches a collection from a searchable picker rather than a row of switches", async () => {
+    const user = userEvent.setup();
+    renderEditor(detail(), [
+      { id: "c1", name: "Contracts", documentCount: 3, ownerName: null },
+      { id: "c2", name: "Policies", documentCount: 1, ownerName: null },
+    ]);
+    expect(screen.queryByRole("switch", { name: /Contracts/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Add collection" }));
+    await user.type(await screen.findByPlaceholderText("Search collections…"), "cont");
+    await user.click(await screen.findByRole("option", { name: /Contracts/ }));
+    expect(screen.getByRole("button", { name: "Remove Contracts" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenCalledWith({
+        data: expect.objectContaining({ collectionIds: ["c1"] }),
+      }),
+    );
+  });
+
   it("deletes from the header menu after confirmation, not from the form footer", async () => {
     renderEditor();
     // The destructive action lives in the header menu, like a collection's.
@@ -113,10 +209,12 @@ describe("AgentEditorPage", () => {
     );
   });
 
-  it("keeps Start chat and Share beside the menu", () => {
+  it("keeps Start chat and Access beside the menu", () => {
     renderEditor();
     expect(screen.getByRole("link", { name: "Start chat" })).toHaveAttribute("data-agent-id", "a1");
-    expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
+    expect(screen.getByRole("dialog", { name: "Access" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
   });
 
   it("refuses the editor to a recipient", () => {

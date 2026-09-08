@@ -36,6 +36,7 @@ const EmbeddingPricingSchema = Schema.Struct({
 });
 
 const ChatCapabilitiesSchema = Schema.Struct({
+  imageOutput: Schema.optionalKey(Schema.Boolean),
   reasoning: Schema.Boolean,
   tools: Schema.Boolean,
   vision: Schema.Boolean,
@@ -43,6 +44,7 @@ const ChatCapabilitiesSchema = Schema.Struct({
 });
 
 const EmbeddingCapabilitiesSchema = Schema.Struct({
+  imageOutput: Schema.optionalKey(Schema.Literal(false)),
   reasoning: Schema.Literal(false),
   tools: Schema.Literal(false),
   vision: Schema.Boolean,

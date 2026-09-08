@@ -1,7 +1,6 @@
 import { DocumentSourcePanel } from "./document-source-panel.tsx";
 import { useDetailPanel } from "~/ui/detail-panel.tsx";
 import {
-  Alert02Icon,
   Delete02Icon,
   Download04Icon,
   File01Icon,
@@ -10,7 +9,7 @@ import {
   NoteIcon,
   PencilEdit02Icon,
   RefreshIcon,
-  Share01Icon,
+  UserGroupIcon,
   Upload04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -32,7 +31,7 @@ import {
   uploadKnowledgeDocument,
 } from "../server/functions.ts";
 import { CollectionDialog } from "./knowledge-page.tsx";
-import { ShareDialog } from "~/modules/sharing/ui/share-dialog.tsx";
+import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -76,21 +75,26 @@ const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 
 const statusBadge = (document: KnowledgeDocument) => {
-  if (document.status === "failed") return <Badge variant="destructive">Failed</Badge>;
-  if (document.status !== "ready") return <Badge variant="secondary">Indexing</Badge>;
+  if (document.status === "failed")
+    return (
+      <Badge variant="destructive" className="max-w-full whitespace-normal">
+        Couldn’t prepare document
+      </Badge>
+    );
+  if (document.status !== "ready") return <Badge variant="secondary">Preparing</Badge>;
   if (document.replacement)
     return (
       <Badge variant={document.replacement.status === "failed" ? "destructive" : "secondary"}>
-        {document.replacement.status === "failed" ? "Replacement failed" : "Replacing"}
+        {document.replacement.status === "failed" ? "Update failed" : "Updating"}
       </Badge>
     );
-  if (document.semanticStatus === "failed") return <Badge variant="outline">Keyword only</Badge>;
+  if (document.semanticStatus === "failed") return <Badge variant="outline">Basic search</Badge>;
   if (
     document.semanticStatus === "needs_reindex" ||
     document.semanticStatus === "queued" ||
     document.semanticStatus === "running"
   )
-    return <Badge variant="outline">Embedding</Badge>;
+    return <Badge variant="outline">Preparing search</Badge>;
   return null;
 };
 
@@ -185,7 +189,7 @@ function NoteDialog({
           <DialogTitle>{editing === "new" ? "Add note" : "Replace note"}</DialogTitle>
           <DialogDescription>
             {editing === "new"
-              ? "Notes are indexed like uploaded documents."
+              ? "Add text to use in chats."
               : "The current text stays readable until the new version is ready. Existing citations keep pointing at the version they cited."}
           </DialogDescription>
         </DialogHeader>
@@ -369,8 +373,8 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
         canEdit ? (
           <>
             <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
-              <HugeiconsIcon icon={Share01Icon} strokeWidth={2} data-icon="inline-start" />
-              Share
+              <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
+              Access
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -385,7 +389,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
                   <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                  Rebuild index
+                  <span>
+                    Rebuild index
+                    <span className="text-muted-foreground block text-xs">
+                      Repair outdated document preparation and search.
+                    </span>
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -467,14 +476,14 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
               title="No documents yet"
               description={
                 canEdit
-                  ? "Upload PDF, text or Markdown files, or add a note. Indexing runs in the background."
+                  ? "Add documents or notes to use in chats."
                   : "The owner has not added anything yet."
               }
             />
           ) : (
             <ListCard>
               {documents.map((document) => (
-                <ListRow key={document.id}>
+                <ListRow key={document.id} className="flex-wrap">
                   <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
                     <HugeiconsIcon
                       icon={document.kind === "note" ? NoteIcon : File01Icon}
@@ -490,22 +499,35 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         [
                           document.fileName,
                           document.pageCount ? `${document.pageCount} pages` : null,
-                          document.charCount
-                            ? `${document.charCount.toLocaleString()} characters`
-                            : null,
                         ]
                           .filter(Boolean)
                           .join(" · ")}
                     </span>
+                    {document.replacement ? (
+                      <span className="text-muted-foreground text-xs">
+                        The current version remains available.
+                      </span>
+                    ) : document.status === "ready" && document.semanticStatus === "failed" ? (
+                      <span className="text-muted-foreground text-xs">
+                        This document is still usable with basic search.
+                      </span>
+                    ) : null}
                   </div>
                   {statusBadge(document)}
-                  {document.status === "failed" || document.replacement?.status === "failed" ? (
-                    <HugeiconsIcon
-                      icon={Alert02Icon}
-                      strokeWidth={2}
-                      className="text-warning size-4 shrink-0"
-                      aria-hidden
-                    />
+                  {canEdit &&
+                  (document.status === "failed" || document.replacement?.status === "failed") ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => retry.mutate(document.id)}
+                      disabled={retry.isPending}
+                      aria-busy={(retry.isPending && retry.variables === document.id) || undefined}
+                    >
+                      {retry.isPending && retry.variables === document.id ? (
+                        <Spinner data-icon="inline-start" aria-hidden />
+                      ) : null}
+                      Try again
+                    </Button>
                   ) : null}
                   {document.versionId && document.kind === "file" ? (
                     <a
@@ -566,16 +588,6 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {document.status === "failed" ||
-                        document.replacement?.status === "failed" ? (
-                          <DropdownMenuItem
-                            onClick={() => retry.mutate(document.id)}
-                            disabled={retry.isPending}
-                          >
-                            <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                            Retry indexing
-                          </DropdownMenuItem>
-                        ) : null}
                         {document.kind === "note" ? (
                           <DropdownMenuItem onClick={() => setNote(document)}>
                             <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
@@ -632,12 +644,11 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       {canEdit ? (
         <>
           <CollectionDialog open={renaming} onOpenChange={setRenaming} collection={collection} />
-          <ShareDialog
+          <AccessDialog
             resource={{ kind: "collection", id: collectionId }}
             title={collection.name}
             open={sharing}
             onOpenChange={setSharing}
-            href={`/knowledge/${collectionId}`}
           />
           <NoteDialog
             key={note === null ? "closed" : note === "new" ? "new" : note.id}

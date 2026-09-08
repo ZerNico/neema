@@ -48,10 +48,7 @@ export const embeddingConfigurationQuery = queryOptions({
 // why they live here rather than under Tools.
 export function KnowledgeAdminPage() {
   return (
-    <Page
-      title="Documents"
-      description="How uploaded documents are read and made searchable for knowledge collections."
-    >
+    <Page title="Documents">
       <SemanticSearchSection />
       <DocumentParserSection />
     </Page>

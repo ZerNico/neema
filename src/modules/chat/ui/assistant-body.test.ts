@@ -189,3 +189,50 @@ describe("projectAssistantBody", () => {
     expect(result.parts.map((part) => part.kind)).toEqual(["web", "tool", "text"]);
   });
 });
+
+describe("generated image body ordering", () => {
+  const image = (id: string, callIndex: number, textOffset = 0) => ({
+    v: 1 as const,
+    attachment: {
+      id,
+      fileName: `${id}.png`,
+      size: 10,
+      mediaType: "image/png",
+      kind: "image" as const,
+    },
+    textOffset,
+    turnIndex: 0,
+    eventIndex: callIndex + 1,
+    callIndex,
+  });
+  it("keeps image/tool/image boundaries at the same text offset", () => {
+    const result = projectAssistantBody({
+      content: "",
+      streaming: false,
+      tools: [web("search", 0, 0)],
+      compactions: [],
+      images: [image("before", 0), image("after", 1)],
+    });
+    expect(result.parts.map((part) => part.kind)).toEqual(["image", "web", "image"]);
+  });
+  it("waits for smoothed UTF-16 text to reach the image anchor", () => {
+    expect(
+      projectAssistantBody({
+        content: "a",
+        streaming: true,
+        tools: [],
+        compactions: [],
+        images: [image("image", 0, 3)],
+      }).parts.map((part) => part.kind),
+    ).toEqual(["text"]);
+    expect(
+      projectAssistantBody({
+        content: "a😀",
+        streaming: true,
+        tools: [],
+        compactions: [],
+        images: [image("image", 0, 3)],
+      }).parts.map((part) => part.kind),
+    ).toEqual(["text", "image"]);
+  });
+});

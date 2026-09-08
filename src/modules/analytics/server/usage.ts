@@ -53,9 +53,12 @@ export const addFinishUsage = (
 export const resolveCost = (
   totals: UsageTotals,
   pricing: { input: number; output: number | null } | null | undefined,
+  output: "text" | "images" | "incomplete-images" = "text",
 ): { cost: number | null; costSource: "provider" | "pricing" | null } => {
+  if (output === "incomplete-images") return { cost: null, costSource: null };
   if (totals.providerCost !== null) return { cost: totals.providerCost, costSource: "provider" };
   if (
+    output === "text" &&
     pricing &&
     (totals.inputTokens > 0 || totals.outputTokens > 0) &&
     (totals.outputTokens === 0 || pricing.output !== null)

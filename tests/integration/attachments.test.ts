@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
+  messageChunks,
   attachmentBlobs,
   attachments,
   conversations,
@@ -27,6 +28,8 @@ import {
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { acceptGeneratedImage } from "~/modules/chat/server/generated-images.ts";
+import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
@@ -899,5 +902,134 @@ describe("attachment-related migration state", () => {
     });
     expect(result.parser).toMatchObject({ kind: "local", enabled: true });
     expect(result.parser?.config).toMatchObject({ maxChars: 120_000, maxPages: 200 });
+  });
+});
+
+describe("generated assistant image transactions", () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF1kAAAAASUVORK5CYII=",
+    "base64",
+  );
+  it("atomically links private bytes and ref-only chunks, then fences every stale retry write", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const other = yield* makeUser();
+        const repo = yield* ChatRepo;
+        const service = yield* AttachmentService;
+        const db = yield* Db;
+        const turn = yield* repo.createTurn({
+          userId,
+          conversationId: null,
+          modelId,
+          content: "draw",
+          attachmentIds: [],
+        });
+        const fence = {
+          userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          generationId: turn.assistant.generationId!,
+        };
+        const input = {
+          fence,
+          mediaType: "image/png",
+          data: png,
+          textOffset: 0,
+          turnIndex: 0,
+          eventIndex: 1,
+          callIndex: 0,
+          seq: 1,
+        };
+        const image = yield* acceptGeneratedImage(service, input);
+        const stored = yield* repo.getMessage(turn.assistant.id);
+        expect(stored?.assistantOutput?.images).toEqual([image]);
+        const chunks = yield* db
+          .select()
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, turn.assistant.id));
+        expect(chunks).toHaveLength(1);
+        expect(JSON.parse(chunks[0]!.delta)).toEqual(image);
+        expect(JSON.stringify(chunks)).not.toContain(png.toString("base64"));
+        expect(
+          Buffer.from(
+            (yield* service.read({ userId, attachmentId: image.attachment.id })).bytes,
+          ).equals(png),
+        ).toBe(true);
+        expect(
+          (yield* Effect.result(service.read({ userId: other, attachmentId: image.attachment.id })))
+            ._tag,
+        ).toBe("Failure");
+        yield* repo
+          .finalizeMessage({ messageId: turn.assistant.id, status: "aborted", content: "" })
+          .pipe(Effect.provideService(GenerationFence, fence));
+        const branch = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: turn.conversation.id,
+          throughMessageId: turn.assistant.id,
+        });
+        const cloned = (yield* repo.listMessages(branch.id)).find(
+          (message) => message.role === "assistant",
+        )!;
+        const clonedImage = cloned.assistantOutput!.images[0]!;
+        expect(cloned.generationId).toBeNull();
+        expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
+        expect(clonedImage).toMatchObject({
+          textOffset: image.textOffset,
+          turnIndex: image.turnIndex,
+        });
+        const retry = yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(turn.conversation.id),
+          userId,
+          messageId: turn.assistant.id,
+          modelId,
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+        expect(retry.generationId).not.toBe(fence.generationId);
+        const replay = { v: 1 as const, providerId: "synthetic", modelKey: "synthetic", turns: [] };
+        const writes = [
+          repo.appendChunks(turn.assistant.id, [{ seq: 1, kind: "text", delta: "stale" }]),
+          repo.saveProviderReplay(turn.assistant.id, replay),
+          repo.finalizeMessage({
+            messageId: turn.assistant.id,
+            status: "complete",
+            content: "stale",
+          }),
+          acceptGeneratedImage(service, input),
+        ];
+        for (const write of writes)
+          expect(
+            (yield* Effect.exit(write.pipe(Effect.provideService(GenerationFence, fence))))._tag,
+          ).toBe("Failure");
+        const current = yield* repo.getMessage(turn.assistant.id);
+        expect(current).toMatchObject({
+          status: "streaming",
+          content: "",
+          assistantOutput: null,
+          providerReplay: null,
+          generationId: retry.generationId,
+        });
+        expect(yield* attachmentCount(userId)).toBe(1);
+        expect(
+          yield* db
+            .select()
+            .from(messageChunks)
+            .where(eq(messageChunks.messageId, turn.assistant.id)),
+        ).toHaveLength(0);
+        yield* service.deleteBlobs(retry.orphanedKeys);
+        expect(
+          Buffer.from(
+            (yield* service.read({ userId, attachmentId: clonedImage.attachment.id })).bytes,
+          ).equals(png),
+        ).toBe(true);
+        yield* service.deleteBlobs(yield* repo.deleteConversation(userId, branch.id));
+        expect(yield* attachmentCount(userId)).toBe(0);
+        expect(
+          (yield* Effect.result(service.read({ userId, attachmentId: clonedImage.attachment.id })))
+            ._tag,
+        ).toBe("Failure");
+      }),
+    );
   });
 });

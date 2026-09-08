@@ -3852,6 +3852,24 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     },
   );
 
+  it("offers other accounts to the sharing picker, matched by name or email", async () => {
+    const actor = await createUser();
+    const id = uuidv7();
+    const email = `${id}@t.io`;
+    await exec(
+      `insert into "user" (id, name, email, role) values ('${id}', 'Marnie ${id}', '${email}', 'user')`,
+    );
+    const recipients = (q: string) =>
+      run(Effect.flatMap(SharingService, (service) => service.recipients(actor, q)));
+    expect(await recipients(`Marnie ${id}`)).toEqual([{ userId: id, name: `Marnie ${id}`, email }]);
+    expect(await recipients(email.toUpperCase())).toHaveLength(1);
+    expect(await recipients(`no-such-person-${id}`)).toEqual([]);
+    // The directory never offers the actor their own account, and a wildcard
+    // typed into the search box is matched literally, not expanded.
+    expect((await recipients("")).some((row) => row.userId === actor)).toBe(false);
+    expect(await recipients("%")).toEqual([]);
+  });
+
   it("allows owner-only exact-email grants, without recipient resharing or a private admin bypass", async () => {
     const owner = await createUser();
     const recipient = await createUser();

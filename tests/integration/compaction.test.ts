@@ -873,7 +873,13 @@ const generate = Effect.fn("test.generate")(function* (input: {
 }) {
   const engine = yield* StreamEngine;
   const { searchEnabled = false, ...generation } = input;
-  yield* engine.startGeneration({ ...generation, searchEnabled });
+  const repo = yield* ChatRepo;
+  const message = yield* repo.getMessage(input.messageId);
+  yield* engine.startGeneration({
+    ...generation,
+    searchEnabled,
+    generationId: message?.generationId ?? undefined,
+  });
   yield* engine.subscribe(input.messageId, 0).pipe(Stream.runDrain);
 });
 

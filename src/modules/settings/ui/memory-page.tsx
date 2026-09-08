@@ -163,30 +163,30 @@ export function MemoryPage() {
             ) : null}
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Reference saved memories</span>
+                <span className="text-sm font-medium">Use saved memories</span>
                 <span className="text-muted-foreground text-xs">
-                  Include saved memories as optional context in new responses.
+                  Use what you’ve saved to personalize replies.
                 </span>
               </div>
               <Switch
                 checked={settings.data.referenceEnabled}
                 onCheckedChange={(checked) => updateSetting("referenceEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
-                aria-label="Reference saved memories"
+                aria-label="Use saved memories"
               />
             </ListRow>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Automatically save useful memories</span>
+                <span className="text-sm font-medium">Save memories automatically</span>
                 <span className="text-muted-foreground text-xs">
-                  Let the model save durable facts and preferences during a response.
+                  Remember useful facts and preferences from your chats.
                 </span>
               </div>
               <Switch
                 checked={settings.data.autoSaveEnabled}
                 onCheckedChange={(checked) => updateSetting("autoSaveEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
-                aria-label="Automatically save useful memories"
+                aria-label="Save memories automatically"
               />
             </ListRow>
           </ListCard>

@@ -93,6 +93,9 @@
     },
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "patchedDependencies": {
+      "@effect/ai-openrouter@4.0.0-rc.111": "patches/@effect__ai-openrouter@4.0.0-rc.111.patch"
+    }
   }
 }

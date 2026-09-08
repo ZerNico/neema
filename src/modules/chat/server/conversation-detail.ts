@@ -45,14 +45,27 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
       {
         // For streaming messages the client resumes via SSE using the chunks
         // persisted so far; ship them inline so the first paint is complete.
-        pendingChunks: streaming ? repo.chunksAfter(streaming.id, 0) : Effect.succeed([]),
+        pendingChunks: !streaming
+          ? Effect.succeed([])
+          : repo.research
+            ? repo.research
+                .tail(streaming.id, 0)
+                .pipe(
+                  Effect.map((snapshot) =>
+                    snapshot?.message.generationId === streaming.generationId &&
+                    snapshot?.message.researchRunId === streaming.researchRunId
+                      ? snapshot.chunks
+                      : [],
+                  ),
+                )
+            : repo.chunksAfter(streaming.id, 0),
         // Durable generation activity for all assistant messages. Tool results
         // are summaries only; compaction events carry generated summaries and
         // safe ordering metadata, never the transcript they summarized.
         toolCalls: repo.listToolCalls(assistantIds),
         compactionEvents: repo.listCompactionEvents(assistantIds),
         // Flat, like tool calls — the view groups by messageId.
-        attachments: attachmentRepo.listForMessages(userIds),
+        attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
         // Only the installed agent persists between turns. Standalone knowledge
         // is message input, not a conversation default.
         defaults: repo.getConversationDefaults(conversation.id),
@@ -66,7 +79,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     );
   return {
     conversation,
-    messages,
+    messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
     pendingChunks,
     toolCalls,
     compactionEvents,

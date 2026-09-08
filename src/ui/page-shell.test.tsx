@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
-import { Page, SectionShell } from "./page-shell.tsx";
+import { Page, Section, SectionShell } from "./page-shell.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
@@ -23,6 +23,22 @@ const scrollerOf = (element: Element | null) => {
 // own scroll container, and Agents and Knowledge shipped without one once.
 // Page owns it now, so a page built from Page scrolls by construction.
 describe("Page", () => {
+  it("lets page and section action groups wrap without adding scrollers", () => {
+    render(
+      <Page title="A long page title" actions={<button>Page action</button>}>
+        <Section title="A long section title" actions={<button>Section action</button>}>
+          <p>Body</p>
+        </Section>
+      </Page>,
+    );
+    for (const name of ["Page action", "Section action"]) {
+      const group = screen.getByRole("button", { name }).parentElement!;
+      expect(group).toHaveClass("flex-wrap", "max-w-full");
+      expect(group.parentElement).toHaveClass("flex-wrap");
+    }
+    expect(scrollerOf(scrollerOf(screen.getByText("Body"))!.parentElement)).toBeNull();
+  });
+
   it("is the one scroll container for its content, wherever it is mounted", () => {
     render(
       <Page title="Usage" rootPath="/settings" rootLabel="Settings">

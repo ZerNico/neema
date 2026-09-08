@@ -273,3 +273,13 @@ describe("rewriteHermesPrompt", () => {
         expect(part.type === "tool-call" || part.type === "tool-result").toBe(false);
   });
 });
+
+for (const reason of ["content-filter", "error", "unknown", "other"] as const) {
+  it.effect(`never masks ${reason} after a parsed tool call`, () =>
+    Effect.gen(function* () {
+      const out = yield* run([text(call("web_search", { queries: ["test"] })), finish(reason)]);
+      expect(finishReason(out)).toBe(reason);
+      expect(out.find((part) => part.type === "finish")?.usage).toEqual(usage);
+    }),
+  );
+}

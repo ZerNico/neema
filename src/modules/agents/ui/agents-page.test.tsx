@@ -93,11 +93,11 @@ describe("AgentsPage", () => {
       "a1",
     );
     expect(screen.getByRole("link", { name: "Start chat with Analyst" })).toBeInTheDocument();
-    // A recipient gets no menu at all: no Edit, no Share, no Delete.
+    // A recipient gets no menu at all: no Edit, no Access, no Delete.
     expect(screen.queryByRole("button", { name: "Actions for Analyst" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Actions for Reviewer" }));
     expect(screen.getByRole("menuitem", { name: /Edit/ })).toHaveAttribute("data-agent-id", "a1");
-    expect(screen.getByRole("menuitem", { name: /Share/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Access/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Delete/ })).toBeInTheDocument();
     expect(screen.getByText(/Shared by Dana/)).toBeInTheDocument();
     expect(screen.getByText("Shared with you")).toBeInTheDocument();

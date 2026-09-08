@@ -5,7 +5,7 @@ import {
   PencilEdit02Icon,
   PlusSignIcon,
   Robot01Icon,
-  Share01Icon,
+  UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
 import { deleteAgent } from "../server/functions.ts";
 import { agentIcon } from "~/modules/chat/ui/context-picker.tsx";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
-import { ShareDialog } from "~/modules/sharing/ui/share-dialog.tsx";
+import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
@@ -100,8 +100,8 @@ export function AgentsPage() {
                   Edit
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setSharing(agent)}>
-                  <HugeiconsIcon icon={Share01Icon} strokeWidth={2} />
-                  Share
+                  <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
+                  Access
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -139,13 +139,7 @@ export function AgentsPage() {
     </Link>
   );
   return (
-    <Page
-      title="Agents"
-      description="Saved chat setups: instructions, a preferred model, tool defaults and attached knowledge."
-      rootPath="/"
-      rootLabel="Chat"
-      actions={atLimit ? undefined : newAgent}
-    >
+    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={atLimit ? undefined : newAgent}>
       {agents.isError ? (
         <ErrorState
           title="Could not load agents"
@@ -157,7 +151,7 @@ export function AgentsPage() {
         <EmptyState
           icon={Robot01Icon}
           title="No agents yet"
-          description="Create one with its own instructions and knowledge, then pick it from the composer."
+          description="Create an agent for tasks you return to often."
           action={newAgent}
         />
       ) : (
@@ -167,7 +161,7 @@ export function AgentsPage() {
         </>
       )}
       {sharing ? (
-        <ShareDialog
+        <AccessDialog
           key={sharing.id}
           resource={{ kind: "agent", id: sharing.id }}
           title={sharing.name}
@@ -175,7 +169,6 @@ export function AgentsPage() {
           onOpenChange={(open) => {
             if (!open) setSharing(null);
           }}
-          href={`/?agent=${encodeURIComponent(sharing.id)}`}
         />
       ) : null}
     </Page>

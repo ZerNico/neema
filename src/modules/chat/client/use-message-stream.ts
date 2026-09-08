@@ -1,3 +1,4 @@
+import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
 import {
   KnowledgeToolEnvelope,
   type KnowledgeActivitySummary,
@@ -5,7 +6,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { ResearchProgress } from "../research-schema.ts";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
 import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
@@ -109,6 +110,7 @@ export interface CompactionActivity {
 }
 
 export interface StreamState {
+  images: AssistantImage[];
   /** Visible answer text accumulated from chunks. */
   text: string;
   /** Reasoning/thinking text; stays empty for hidden-reasoning providers. */
@@ -125,6 +127,7 @@ export interface StreamState {
 type Action =
   | {
       kind: "reset";
+      images?: AssistantImage[];
       text: string;
       reasoning: string;
       reasoningSeen: boolean;
@@ -135,7 +138,7 @@ type Action =
   | {
       kind: "chunk";
       seq: number;
-      chunkKind: "text" | "reasoning" | "tool" | "compaction";
+      chunkKind: "text" | "reasoning" | "tool" | "compaction" | "image";
       delta: string;
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
@@ -531,10 +534,28 @@ export function applyCompactionChunk(
   );
 }
 
+export const applyImageChunk = (
+  images: ReadonlyArray<AssistantImage>,
+  delta: string,
+): AssistantImage[] => {
+  try {
+    const image = Schema.decodeUnknownSync(AssistantImage)(JSON.parse(delta));
+    if (
+      images.some((item) => item.attachment.id === image.attachment.id) ||
+      images.length >= IMAGE_OUTPUT_LIMITS.count
+    )
+      return [...images];
+    return [...images, image];
+  } catch {
+    return [...images];
+  }
+};
+
 function reducer(state: StreamState, action: Action): StreamState {
   switch (action.kind) {
     case "reset":
       return {
+        images: action.images ?? [],
         text: action.text,
         reasoning: action.reasoning,
         reasoningSeen: action.reasoningSeen,
@@ -545,6 +566,12 @@ function reducer(state: StreamState, action: Action): StreamState {
       };
     case "chunk": {
       if (action.seq <= state.lastSeq) return state;
+      if (action.chunkKind === "image")
+        return {
+          ...state,
+          images: applyImageChunk(state.images, action.delta),
+          lastSeq: action.seq,
+        };
       if (action.chunkKind === "reasoning") {
         return {
           ...state,
@@ -567,7 +594,11 @@ function reducer(state: StreamState, action: Action): StreamState {
           lastSeq: action.seq,
         };
       }
-      return { ...state, text: state.text + action.delta, lastSeq: action.seq };
+      return {
+        ...state,
+        text: state.text + (action.chunkKind === "text" ? action.delta : ""),
+        lastSeq: action.seq,
+      };
     }
     case "done":
       return { ...state, status: action.status };
@@ -575,6 +606,7 @@ function reducer(state: StreamState, action: Action): StreamState {
 }
 
 export interface InitialStream {
+  images?: AssistantImage[];
   text: string;
   reasoning: string;
   reasoningSeen: boolean;
@@ -599,6 +631,7 @@ export function useMessageStream(
 ) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
+    images: initial?.images ?? [],
     text: initial?.text ?? "",
     reasoning: initial?.reasoning ?? "",
     reasoningSeen: initial?.reasoningSeen ?? false,
@@ -609,6 +642,22 @@ export function useMessageStream(
   });
   // Reset when the target generation changes (navigation between chats, or a
   // retry of the same message).
+  const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
+  const [stateGeneration, setStateGeneration] = useState(generationKey);
+  // Reset before commit: a same-message retry must never paint the prior images.
+  if (messageId && stateGeneration !== generationKey) {
+    setStateGeneration(generationKey);
+    dispatch({
+      kind: "reset",
+      images: initial?.images ?? [],
+      text: initial?.text ?? "",
+      reasoning: initial?.reasoning ?? "",
+      reasoningSeen: initial?.reasoningSeen ?? false,
+      tools: initial?.tools ?? [],
+      compactions: initial?.compactions ?? [],
+      lastSeq: initial?.lastSeq ?? 0,
+    });
+  }
   const activeRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -616,19 +665,7 @@ export function useMessageStream(
       activeRef.current = null;
       return;
     }
-    const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
-    if (activeRef.current !== generationKey) {
-      activeRef.current = generationKey;
-      dispatch({
-        kind: "reset",
-        text: initial?.text ?? "",
-        reasoning: initial?.reasoning ?? "",
-        reasoningSeen: initial?.reasoningSeen ?? false,
-        tools: initial?.tools ?? [],
-        compactions: initial?.compactions ?? [],
-        lastSeq: initial?.lastSeq ?? 0,
-      });
-    }
+    activeRef.current = generationKey;
 
     const after = initial?.lastSeq ?? 0;
     const source = new EventSource(
@@ -648,7 +685,7 @@ export function useMessageStream(
     source.addEventListener("chunk", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         seq: number;
-        kind?: "text" | "reasoning" | "tool" | "compaction";
+        kind?: "text" | "reasoning" | "tool" | "compaction" | "image";
         delta: string;
         runId?: string;
       };
@@ -685,7 +722,7 @@ export function useMessageStream(
       source.close();
     };
     // initial is intentionally captured only when the generation changes
-  }, [messageId, epoch, runId, conversationId, queryClient]);
+  }, [messageId, epoch, runId, conversationId, queryClient, generationKey]);
 
   // The reducer accumulates raw deltas (lastSeq must track receipt exactly —
   // resume depends on it); only the strings the UI renders are word-paced.

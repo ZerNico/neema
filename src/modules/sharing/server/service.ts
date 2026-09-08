@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
   agents,
@@ -15,7 +15,11 @@ import { KnowledgeNotAvailable, SharingNotAllowed } from "~/modules/knowledge/er
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { SharingRateLimited } from "../errors.ts";
-import type { ResourceGrants, SharedResource } from "../schema.ts";
+import type { ResourceGrants, SharedResource, ShareRecipient } from "../schema.ts";
+
+const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
+/** One page of the picker; the query narrows it rather than paging. */
+const RECIPIENT_LIMIT = 20;
 
 type SharingError = KnowledgeNotAvailable | SharingNotAllowed;
 type Change =
@@ -38,6 +42,7 @@ export class SharingService extends Context.Service<
       resource: SharedResource,
       change: Change,
     ): Effect.Effect<void, SharingError | SharingRateLimited>;
+    recipients(userId: string, q: string): Effect.Effect<ReadonlyArray<ShareRecipient>>;
   }
 >()("chat/sharing/SharingService") {
   static readonly layer = Layer.effect(
@@ -45,8 +50,11 @@ export class SharingService extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const bus = yield* SyncBus;
-      // Per-runtime anti-enumeration throttle, bounded even for many accounts.
-      // Only exact-email grants use it; there is no public account directory.
+      // Per-runtime throttle on grant-by-email, bounded even for many accounts.
+      // `recipients` deliberately exposes an account directory to any signed-in
+      // user — this is a single-tenant, self-hosted app where colleagues pick
+      // each other by name — so the throttle is a cap on automated granting,
+      // not the enumeration defence it originally was.
       const lookups = new Map<string, { until: number; count: number }>();
       const admitLookup = (userId: string) =>
         Effect.suspend(() => {
@@ -130,6 +138,26 @@ export class SharingService extends Context.Service<
           if ((yield* owned(userId, resource).pipe(Effect.orDie)).length === 0)
             return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
           return { audience: owner.audience, canPublish, users, groups: granted, eligibleGroups };
+        }),
+        // Names and email addresses of other accounts, for the sharing picker.
+        // Every signed-in user may read this; nothing else about an account is
+        // exposed, and it never reveals who already has access to what.
+        recipients: Effect.fn("SharingService.recipients")(function* (userId, q) {
+          const needle = escapeLike(q.trim());
+          return yield* db
+            .select({ userId: user.id, name: user.name, email: user.email })
+            .from(user)
+            .where(
+              and(
+                ne(user.id, userId),
+                needle
+                  ? or(ilike(user.name, `%${needle}%`), ilike(user.email, `%${needle}%`))
+                  : undefined,
+              ),
+            )
+            .orderBy(asc(user.name))
+            .limit(RECIPIENT_LIMIT)
+            .pipe(Effect.orDie);
         }),
         change: Effect.fn("SharingService.change")(function* (userId, resource, change) {
           yield* db

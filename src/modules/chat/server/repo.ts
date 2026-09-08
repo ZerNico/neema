@@ -1,3 +1,4 @@
+import { GenerationFence, lockGeneration } from "./generation-fence.ts";
 import {
   and,
   asc,
@@ -135,7 +136,12 @@ export interface ConversationCursor {
   readonly activity: Date;
   readonly id: string;
 }
-export type MessageRow = typeof messages.$inferSelect;
+type StoredMessage = typeof messages.$inferSelect;
+export type MessageRow = Omit<
+  StoredMessage,
+  "generationId" | "assistantOutput" | "providerReplay"
+> &
+  Partial<Pick<StoredMessage, "generationId" | "assistantOutput" | "providerReplay">>;
 export type HistorySnapshot = ReadonlyArray<
   Pick<
     MessageRow,
@@ -147,6 +153,9 @@ export type HistorySnapshot = ReadonlyArray<
     | "completedAt"
     | "generationMode"
     | "researchRunId"
+    | "generationId"
+    | "assistantOutput"
+    | "providerReplay"
   >
 >;
 
@@ -159,13 +168,16 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
       message.status === previous.status &&
       message.generationMode === previous.generationMode &&
       message.researchRunId === previous.researchRunId &&
+      message.generationId === previous.generationId &&
+      JSON.stringify(message.assistantOutput) === JSON.stringify(previous.assistantOutput) &&
+      JSON.stringify(message.providerReplay) === JSON.stringify(previous.providerReplay) &&
       message.content === previous.content &&
       JSON.stringify(message.questionResponse) === JSON.stringify(previous.questionResponse) &&
       message.editedAt?.getTime() === previous.editedAt?.getTime() &&
       message.completedAt?.getTime() === previous.completedAt?.getTime()
     );
   });
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "image";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 // Durable tool-call projection safe for clients (summaries only, no page bodies).
 export type ToolCallRow = typeof messageToolCalls.$inferSelect;
@@ -359,6 +371,10 @@ export class ChatRepo extends Context.Service<
   ChatRepo,
   {
     research?: ResearchStore;
+    saveProviderReplay(
+      messageId: string,
+      replay: NonNullable<MessageRow["providerReplay"]>,
+    ): Effect.Effect<void>;
     /**
      * One page of a user's conversations, newest activity first. Ordered by
      * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the
@@ -527,7 +543,12 @@ export class ChatRepo extends Context.Service<
       /** What the regenerated answer actually runs with; recorded for the next retry. */
       searchEnabled?: boolean | undefined;
     }): Effect.Effect<
-      { claimed: boolean; orphanedKeys: ReadonlyArray<string> },
+      {
+        claimed: boolean;
+        orphanedKeys: ReadonlyArray<string>;
+        generationId?: string | undefined;
+        researchRunId?: string | undefined;
+      },
       AttachmentNotAvailable | InvalidMessage
     >;
     createAssistantForEdit(
@@ -579,9 +600,29 @@ export class ChatRepo extends Context.Service<
       const db = yield* Db;
       const attachments = yield* AttachmentRepo;
       const research = createResearchStore(db);
+      const generationWrite = <A, E, R>(run: (tx: DbTx) => Effect.Effect<A, E, R>) =>
+        Effect.gen(function* () {
+          const fence = yield* GenerationFence;
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                if (fence) yield* lockGeneration(tx, fence);
+                return yield* run(tx);
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        });
 
       return ChatRepo.of({
         research,
+        saveProviderReplay: (messageId, replay) =>
+          generationWrite((tx) =>
+            tx
+              .update(messages)
+              .set({ providerReplay: replay })
+              .where(eq(messages.id, messageId))
+              .pipe(Effect.orDie, Effect.asVoid),
+          ),
         listConversations: Effect.fn("ChatRepo.listConversations")(function* (input) {
           const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
           const title = input.query?.trim();
@@ -973,6 +1014,7 @@ export class ChatRepo extends Context.Service<
                       ...m,
                       id: clonedIds.get(m.id)!,
                       conversationId: branch.id,
+                      generationId: null,
                       // createdAt/completedAt/editedAt stay as they were: the
                       // branch shows the same history, day dividers included.
                     })),
@@ -1107,13 +1149,30 @@ export class ChatRepo extends Context.Service<
                     )
                     .pipe(Effect.orDie);
 
-                yield* attachments.cloneForMessages(tx, {
+                const attachmentIds = yield* attachments.cloneForMessages(tx, {
                   userId: input.userId,
                   messages: [...clonedIds].map(([sourceMessageId, targetMessageId]) => ({
                     sourceMessageId,
                     targetMessageId,
                   })),
                 });
+                for (const message of prefix) {
+                  if (!message.assistantOutput) continue;
+                  yield* tx
+                    .update(messages)
+                    .set({
+                      assistantOutput: {
+                        ...message.assistantOutput,
+                        images: message.assistantOutput.images.map((image) => {
+                          const id = attachmentIds.get(image.attachment.id);
+                          if (!id) throw new Error("Missing cloned assistant image");
+                          return { ...image, attachment: { ...image.attachment, id } };
+                        }),
+                      },
+                    })
+                    .where(eq(messages.id, clonedIds.get(message.id)!))
+                    .pipe(Effect.orDie);
+                }
 
                 // Compaction checkpoints follow the prefix they describe. Only
                 // those whose boundary is inside the copied range are eligible
@@ -1230,11 +1289,17 @@ export class ChatRepo extends Context.Service<
         }),
 
         appendChunks: Effect.fn("ChatRepo.appendChunks")(function* (messageId, chunks) {
-          if (chunks.length === 0) return;
-          yield* db
-            .insert(messageChunks)
-            .values(chunks.map((c) => ({ messageId, seq: c.seq, kind: c.kind, delta: c.delta })))
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              if (chunks.length === 0) return;
+              yield* db
+                .insert(messageChunks)
+                .values(
+                  chunks.map((c) => ({ messageId, seq: c.seq, kind: c.kind, delta: c.delta })),
+                )
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         chunksAfter: Effect.fn("ChatRepo.chunksAfter")(function* (messageId, afterSeq) {
@@ -1251,41 +1316,53 @@ export class ChatRepo extends Context.Service<
         }),
 
         insertToolCall: Effect.fn("ChatRepo.insertToolCall")(function* (input) {
-          yield* db
-            .insert(messageToolCalls)
-            .values({ ...input, status: "running" })
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              yield* db
+                .insert(messageToolCalls)
+                .values({ ...input, status: "running" })
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         completeToolCall: Effect.fn("ChatRepo.completeToolCall")(function* (input) {
-          yield* db
-            .update(messageToolCalls)
-            .set({
-              result: input.result,
-              status: input.status,
-              error: input.error,
-              completedAt: new Date(),
-            })
-            .where(eq(messageToolCalls.id, input.id))
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              yield* db
+                .update(messageToolCalls)
+                .set({
+                  result: input.result,
+                  status: input.status,
+                  error: input.error,
+                  completedAt: new Date(),
+                })
+                .where(eq(messageToolCalls.id, input.id))
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         failRunningToolCalls: Effect.fn("ChatRepo.failRunningToolCalls")(
           function* (messageId, message) {
-            yield* db
-              .update(messageToolCalls)
-              .set({
-                status: "error",
-                error: { code: "GenerationFailed", message },
-                completedAt: new Date(),
-              })
-              .where(
-                and(
-                  eq(messageToolCalls.messageId, messageId),
-                  eq(messageToolCalls.status, "running"),
-                ),
-              )
-              .pipe(Effect.orDie);
+            return yield* generationWrite((db) =>
+              Effect.gen(function* () {
+                yield* db
+                  .update(messageToolCalls)
+                  .set({
+                    status: "error",
+                    error: { code: "GenerationFailed", message },
+                    completedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(messageToolCalls.messageId, messageId),
+                      eq(messageToolCalls.status, "running"),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+              }),
+            );
           },
         ),
 
@@ -1304,43 +1381,55 @@ export class ChatRepo extends Context.Service<
         }),
 
         createCompactionEvent: Effect.fn("ChatRepo.createCompactionEvent")(function* (input) {
-          yield* db
-            .insert(messageCompactionEvents)
-            .values({ ...input, status: "running" })
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              yield* db
+                .insert(messageCompactionEvents)
+                .values({ ...input, status: "running" })
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         completeCompactionEvent: Effect.fn("ChatRepo.completeCompactionEvent")(function* (input) {
-          yield* db
-            .update(messageCompactionEvents)
-            .set({
-              status: input.status,
-              outcome: input.outcome,
-              checkpointId: input.checkpointId,
-              summary: input.summary,
-              error: input.error,
-              completedAt: new Date(),
-            })
-            .where(eq(messageCompactionEvents.id, input.id))
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              yield* db
+                .update(messageCompactionEvents)
+                .set({
+                  status: input.status,
+                  outcome: input.outcome,
+                  checkpointId: input.checkpointId,
+                  summary: input.summary,
+                  error: input.error,
+                  completedAt: new Date(),
+                })
+                .where(eq(messageCompactionEvents.id, input.id))
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         failRunningCompactionEvents: Effect.fn("ChatRepo.failRunningCompactionEvents")(
           function* (messageId, message) {
-            yield* db
-              .update(messageCompactionEvents)
-              .set({
-                status: "error",
-                error: { code: "GenerationFailed", message },
-                completedAt: new Date(),
-              })
-              .where(
-                and(
-                  eq(messageCompactionEvents.messageId, messageId),
-                  eq(messageCompactionEvents.status, "running"),
-                ),
-              )
-              .pipe(Effect.orDie);
+            return yield* generationWrite((db) =>
+              Effect.gen(function* () {
+                yield* db
+                  .update(messageCompactionEvents)
+                  .set({
+                    status: "error",
+                    error: { code: "GenerationFailed", message },
+                    completedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(messageCompactionEvents.messageId, messageId),
+                      eq(messageCompactionEvents.status, "running"),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+              }),
+            );
           },
         ),
 
@@ -1359,18 +1448,22 @@ export class ChatRepo extends Context.Service<
         }),
 
         finalizeMessage: Effect.fn("ChatRepo.finalizeMessage")(function* (input) {
-          yield* db
-            .update(messages)
-            .set({
-              status: input.status,
-              content: input.content,
-              reasoning: input.reasoning ?? "",
-              usage: input.usage,
-              error: input.error,
-              completedAt: new Date(),
-            })
-            .where(eq(messages.id, input.messageId))
-            .pipe(Effect.orDie);
+          return yield* generationWrite((db) =>
+            Effect.gen(function* () {
+              yield* db
+                .update(messages)
+                .set({
+                  status: input.status,
+                  content: input.content,
+                  reasoning: input.reasoning ?? "",
+                  usage: input.usage,
+                  error: input.error,
+                  completedAt: new Date(),
+                })
+                .where(eq(messages.id, input.messageId))
+                .pipe(Effect.orDie);
+            }),
+          );
         }),
 
         resetMessageForRetry: Effect.fn("ChatRepo.resetMessageForRetry")(function* (input) {
@@ -1430,10 +1523,14 @@ export class ChatRepo extends Context.Service<
                 const edited = input.edit
                   ? yield* editedContent(tx, current, input.edit.messageId, input.edit)
                   : null;
+                const generationId = uuidv7();
                 const claimed = yield* tx
                   .update(messages)
                   .set({
                     status: "streaming",
+                    generationId,
+                    assistantOutput: null,
+                    providerReplay: null,
                     content: "",
                     reasoning: "",
                     usage: null,
@@ -1456,7 +1553,9 @@ export class ChatRepo extends Context.Service<
                     modelId: input.modelId,
                   });
                 }
-                const orphanedKeys: string[] = [];
+                const orphanedKeys: string[] = [
+                  ...(yield* attachments.releaseForMessages(tx, [input.messageId])),
+                ];
 
                 if (input.edit) {
                   yield* tx
@@ -1519,7 +1618,17 @@ export class ChatRepo extends Context.Service<
                     .where(eq(messageGenerationConfig.messageId, input.messageId))
                     .pipe(Effect.orDie);
 
-                return { claimed: true, orphanedKeys: orphanedKeys as ReadonlyArray<string> };
+                const [restarted] = yield* tx
+                  .select({ researchRunId: messages.researchRunId })
+                  .from(messages)
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie);
+                return {
+                  claimed: true,
+                  generationId,
+                  researchRunId: restarted?.researchRunId ?? undefined,
+                  orphanedKeys: orphanedKeys as ReadonlyArray<string>,
+                };
               }),
             )
             .pipe(Effect.catchTag("SqlError", Effect.die));
@@ -1649,6 +1758,19 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                // Serialize deletion with late generated-image registration before releasing refs.
+                const owners = yield* tx
+                  .selectDistinct({ id: messages.conversationId })
+                  .from(messages)
+                  .where(inArray(messages.id, [...messageIds]));
+                const ids = owners.map((row) => row.id);
+                if (ids.length)
+                  yield* tx
+                    .select({ id: conversations.id })
+                    .from(conversations)
+                    .where(inArray(conversations.id, ids))
+                    .orderBy(asc(conversations.id))
+                    .for("update");
                 const keys = yield* attachments.releaseForMessages(tx, messageIds);
                 yield* tx.delete(messages).where(inArray(messages.id, [...messageIds]));
                 return keys;
@@ -1673,6 +1795,8 @@ export class ChatRepo extends Context.Service<
             return yield* db
               .transaction((tx) =>
                 Effect.gen(function* () {
+                  const fence = yield* GenerationFence;
+                  if (fence) yield* lockGeneration(tx, fence);
                   // Serializes against a branch clone reading the checkpoint set,
                   // and against a second generation summarizing the same range.
                   const locked = yield* tx

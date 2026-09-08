@@ -474,6 +474,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false) =>
       }
 
       yield* engine.startGeneration({
+        generationId: turn.assistant.generationId ?? undefined,
         userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
@@ -652,6 +653,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
           },
         });
         yield* engine.startGeneration({
+          generationId: turn.assistant.generationId ?? undefined,
           userId: result.userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,

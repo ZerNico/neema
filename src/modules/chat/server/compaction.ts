@@ -124,13 +124,14 @@ const fileBytes = (data: unknown): number => {
  * caller calibrates it against what the provider actually charged last time.
  */
 export const estimateMessageTokens = (message: Prompt.MessageEncoded): number => {
+  const metadataTokens = message.options ? textTokens(JSON.stringify(message.options)) : 0;
   const content: unknown = message.content;
   if (typeof content === "string") {
-    return textTokens(content) + COMPACTION_CONFIG.messageOverheadTokens;
+    return textTokens(content) + COMPACTION_CONFIG.messageOverheadTokens + metadataTokens;
   }
   if (!Array.isArray(content)) return COMPACTION_CONFIG.messageOverheadTokens;
 
-  let total = COMPACTION_CONFIG.messageOverheadTokens;
+  let total = COMPACTION_CONFIG.messageOverheadTokens + metadataTokens;
   for (const part of content as ReadonlyArray<Record<string, unknown>>) {
     if (typeof part?.text === "string") {
       total += textTokens(part.text);
@@ -589,6 +590,7 @@ export interface CompactionInput {
   readonly messages: ReadonlyArray<HistoryMessage>;
   /** The same messages rendered for the model, aligned one-to-one. */
   readonly renderedMessages: ReadonlyArray<Prompt.MessageEncoded>;
+  readonly renderedMessageGroups?: ReadonlyArray<ReadonlyArray<Prompt.MessageEncoded>>;
   /** Everything that precedes the history in the prompt (the web-tools hint). */
   readonly fixedPrefix: ReadonlyArray<Prompt.MessageEncoded>;
   /** Per-call text budgeted after history, but not injected into the base prompt. */
@@ -657,7 +659,13 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
   const factor = calibrationFactor(input.priorUsage);
   const scale = (value: number) => Math.ceil(value * factor);
 
-  const tokens = input.renderedMessages.map((message) => scale(estimateMessageTokens(message)));
+  const tokens = input.renderedMessages.map((message, index) =>
+    scale(
+      input.renderedMessageGroups?.[index]
+        ? estimatePromptTokens(input.renderedMessageGroups[index]!)
+        : estimateMessageTokens(message),
+    ),
+  );
   const prefixTokens = scale(
     estimatePromptTokens(input.fixedPrefix) + estimatePromptTokens(input.trailingMessages ?? []),
   );
@@ -716,7 +724,9 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     yield* startEvent(eventId);
     const summaryEventId = eventId;
     const summary = yield* summarizeRange(deps, input, {
-      aged: input.renderedMessages.slice(baseStart, boundary + 1),
+      aged: input.renderedMessages
+        .slice(baseStart, boundary + 1)
+        .flatMap((message, index) => input.renderedMessageGroups?.[baseStart + index] ?? [message]),
       previousSummary,
     });
 
@@ -1078,6 +1088,7 @@ export const shrinkForOverflow = (input: {
   decision: CompactionDecision;
   messages: ReadonlyArray<HistoryMessage>;
   renderedMessages: ReadonlyArray<Prompt.MessageEncoded>;
+  renderedMessageGroups?: ReadonlyArray<ReadonlyArray<Prompt.MessageEncoded>>;
   fixedPrefix: ReadonlyArray<Prompt.MessageEncoded>;
   trailingMessages?: ReadonlyArray<Prompt.MessageEncoded>;
   calibrationFactor: number;
@@ -1093,7 +1104,13 @@ export const shrinkForOverflow = (input: {
   const truncationInput = {
     maxStartIndex: input.maxStartIndex,
     messages: input.messages,
-    tokens: input.renderedMessages.map((message) => scale(estimateMessageTokens(message))),
+    tokens: input.renderedMessages.map((message, index) =>
+      scale(
+        input.renderedMessageGroups?.[index]
+          ? estimatePromptTokens(input.renderedMessageGroups[index]!)
+          : estimateMessageTokens(message),
+      ),
+    ),
     startIndex: input.decision.startIndex,
     fixedTokens: scale(
       estimatePromptTokens(input.fixedPrefix) +

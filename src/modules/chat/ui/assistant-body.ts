@@ -1,3 +1,4 @@
+import type { AssistantImage } from "../assistant-output.ts";
 import type {
   CompactionActivity,
   ToolActivity,
@@ -6,10 +7,12 @@ import type {
 } from "../client/use-message-stream.ts";
 
 type PositionedActivity =
+  | { kind: "image"; activity: AssistantImage }
   | { kind: "tool"; activity: ToolActivity }
   | { kind: "compaction"; activity: CompactionActivity };
 
 export type AssistantBodyPart =
+  | { kind: "image"; key: string; image: AssistantImage }
   | { kind: "text"; key: string; content: string; streaming: boolean }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
@@ -17,9 +20,9 @@ export type AssistantBodyPart =
   | { kind: "compaction"; key: string; activity: CompactionActivity };
 
 const turnOf = (item: PositionedActivity) =>
-  item.kind === "tool" ? (item.activity.turnIndex ?? 0) : item.activity.beforeTurnIndex;
+  item.kind !== "compaction" ? (item.activity.turnIndex ?? 0) : item.activity.beforeTurnIndex;
 const orderOf = (item: PositionedActivity) =>
-  item.kind === "tool" ? (item.activity.callIndex ?? 0) : item.activity.passIndex;
+  item.kind !== "compaction" ? (item.activity.callIndex ?? 0) : item.activity.passIndex;
 
 /** Original UTF-16 offsets, never rendered markdown lengths or clamped anchors. */
 export function projectAssistantBody({
@@ -28,12 +31,14 @@ export function projectAssistantBody({
   streaming,
   tools,
   compactions,
+  images = [],
 }: {
   content: string;
   rawTextLength?: number;
   streaming: boolean;
   tools: ToolActivity[];
   compactions: CompactionActivity[];
+  images?: ReadonlyArray<AssistantImage>;
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
   const researchRuns = new Set(
     tools.flatMap((activity) =>
@@ -41,6 +46,7 @@ export function projectAssistantBody({
     ),
   );
   const activities: PositionedActivity[] = [
+    ...images.map((activity): PositionedActivity => ({ kind: "image", activity })),
     ...tools
       .filter(
         (activity) =>
@@ -60,7 +66,13 @@ export function projectAssistantBody({
   activities.sort(
     (a, b) =>
       turnOf(a) - turnOf(b) ||
-      (a.kind === b.kind ? orderOf(a) - orderOf(b) : a.kind === "compaction" ? -1 : 1),
+      (a.kind === "compaction" || b.kind === "compaction"
+        ? a.kind === b.kind
+          ? orderOf(a) - orderOf(b)
+          : a.kind === "compaction"
+            ? -1
+            : 1
+        : orderOf(a) - orderOf(b) || (a.kind === b.kind ? 0 : a.kind === "image" ? -1 : 1)),
   );
   let previous = 0;
   const chronological = activities.every(({ activity }) => {
@@ -78,7 +90,13 @@ export function projectAssistantBody({
 
   const parts: AssistantBodyPart[] = [];
   const appendActivity = (item: PositionedActivity) => {
-    if (item.kind === "compaction") {
+    if (item.kind === "image") {
+      parts.push({
+        kind: "image",
+        key: `image-${item.activity.attachment.id}`,
+        image: item.activity,
+      });
+    } else if (item.kind === "compaction") {
       parts.push({ ...item, key: `compaction-${item.activity.eventId}` });
     } else if (item.activity.family === "web") {
       const last = parts.at(-1);

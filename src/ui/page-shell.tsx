@@ -143,9 +143,11 @@ export function Page({
             <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
             {back.label}
           </Link>
-          <div className="flex items-center justify-between gap-4">
-            <h1 className="text-lg font-medium">{title}</h1>
-            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h1 className="min-w-0 break-words text-lg font-medium">{title}</h1>
+            {actions ? (
+              <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>
+            ) : null}
           </div>
           {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
         </header>
@@ -172,14 +174,16 @@ export function Section({
 }) {
   return (
     <section className={cn("flex flex-col gap-3", className)}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0 flex flex-col gap-1 break-words">
           <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             {title}
           </h2>
           {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>
+        ) : null}
       </div>
       {children}
     </section>

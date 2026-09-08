@@ -8,6 +8,8 @@ import { useAttachmentUploads } from "~/modules/attachments/client/use-attachmen
 export interface ComposerHandle {
   /** Replaces the draft (a conversation starter) and focuses the textarea. */
   seedDraft: (text: string) => void;
+  /** Puts the caret in the textarea — opening a chat should be ready to type. */
+  focus: () => void;
 }
 
 interface ComposerProps {
@@ -57,6 +59,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setDraft(text);
         textareaRef.current?.focus();
       },
+      focus: () => textareaRef.current?.focus(),
     }),
     [],
   );

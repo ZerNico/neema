@@ -191,8 +191,7 @@ function WebSearchSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Web search</span>
             <span className="text-muted-foreground text-xs">
-              SearXNG-backed search returning titles and snippets. Models with tool support get a
-              search toggle in the composer.
+              SearXNG returns titles and snippets. Every chat model can use web search.
             </span>
           </div>
           <Switch

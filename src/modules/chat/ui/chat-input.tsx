@@ -41,6 +41,7 @@ import {
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Kbd } from "~/ui/primitives/kbd";
@@ -112,6 +113,7 @@ export const ChatInput = forwardRef<
     enabled: onResearchEnabledChange !== undefined || researchEnabled,
   });
   const researchHintId = useId();
+  const modeDisabled = controlsDisabled || !!attachments?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
   const action = onStop ? "stop" : attachments?.queued ? "upload" : "send";
   const actionLabel = onStop
@@ -119,7 +121,8 @@ export const ChatInput = forwardRef<
     : attachments?.queued
       ? "Sending after uploads finish"
       : submitLabel;
-  const menuLabel = onResearchEnabledChange || context ? "Add files or tools" : "Add attachment";
+  const menuLabel =
+    context || onResearchEnabledChange || researchEnabled ? "Add files or tools" : "Add attachment";
   // A context row closes the menu first and opens its popup once the menu is
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
@@ -297,7 +300,7 @@ export const ChatInput = forwardRef<
         autoFocus={autoFocus}
         disabled={noModels || textareaDisabled}
       />
-      <div className="flex items-center gap-1 p-2 pt-0">
+      <div className="flex flex-wrap items-center gap-1 p-2 pt-0">
         {attachments ? (
           <input
             ref={fileInputRef}
@@ -331,8 +334,9 @@ export const ChatInput = forwardRef<
                       ref={setMenuAnchor}
                       disabled={
                         controlsDisabled ||
-                        (!onResearchEnabledChange &&
-                          !context &&
+                        (!context &&
+                          !onResearchEnabledChange &&
+                          !researchEnabled &&
                           (!attachments || attachments.isFull))
                       }
                       className="text-muted-foreground"
@@ -347,30 +351,12 @@ export const ChatInput = forwardRef<
           </Tooltip>
           <DropdownMenuContent
             align="start"
-            className={cn((onResearchEnabledChange || context) && "w-64")}
+            className={cn((context || onResearchEnabledChange || researchEnabled) && "w-64")}
           >
             <DropdownMenuItem onClick={pickFiles} disabled={!attachments || attachments.isFull}>
               <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
               Attach files
             </DropdownMenuItem>
-            {onResearchEnabledChange ? (
-              <>
-                <DropdownMenuCheckboxItem
-                  checked={researchEnabled}
-                  onCheckedChange={onResearchEnabledChange}
-                  disabled={
-                    controlsDisabled ||
-                    attachments?.queued ||
-                    (!researchEnabled && researchUnavailableReason !== null)
-                  }
-                  aria-label="Deep research"
-                  aria-describedby={researchHintId}
-                >
-                  <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
-                  Deep research
-                </DropdownMenuCheckboxItem>
-              </>
-            ) : null}
             {context ? (
               <ContextMenuItems
                 selection={context.selection}
@@ -378,6 +364,27 @@ export const ChatInput = forwardRef<
                 onPick={setPendingPicker}
                 disabled={controlsDisabled}
               />
+            ) : null}
+            {onResearchEnabledChange || researchEnabled ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={researchEnabled}
+                  onCheckedChange={(checked) => onResearchEnabledChange?.(checked)}
+                  disabled={
+                    modeDisabled || (!researchEnabled && researchUnavailableReason !== null)
+                  }
+                  {...(researchUnavailableReason ? { "aria-describedby": researchHintId } : {})}
+                >
+                  <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
+                  Deep research
+                </DropdownMenuCheckboxItem>
+                {researchUnavailableReason ? (
+                  <p id={researchHintId} className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs">
+                    {researchUnavailableReason}
+                  </p>
+                ) : null}
+              </>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
@@ -400,36 +407,36 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
           />
         ) : null}
-        {researchEnabled || searchAvailable ? (
+        {researchEnabled ? (
+          // The only control the row still needs while research is on: the
+          // choice itself lives in the menu, this just leaves it again.
           <Button
             size="sm"
-            variant={researchEnabled || searchEnabled ? "default" : "ghost"}
-            aria-label={researchEnabled ? "Deep research" : "Search the web"}
-            aria-pressed={researchEnabled || searchEnabled}
-            onClick={() =>
-              researchEnabled
-                ? onResearchEnabledChange?.(false)
-                : onSearchEnabledChange(!searchEnabled)
-            }
-            disabled={
-              controlsDisabled ||
-              (researchEnabled && (!!attachments?.queued || !onResearchEnabledChange))
-            }
-            className={cn(
-              "min-w-0 shrink-0",
-              !researchEnabled && !searchEnabled && "text-muted-foreground",
-            )}
+            variant="default"
+            aria-label="Deep research"
+            aria-pressed
+            disabled={modeDisabled}
+            onClick={() => onResearchEnabledChange?.(false)}
+            className="shrink-0"
           >
             <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <MotionSwap value={researchEnabled ? "research" : "search"}>
-              {researchEnabled ? (
-                <span>
-                  <span className="max-[420px]:sr-only">Deep </span>research
-                </span>
-              ) : (
-                <span className="max-[420px]:sr-only">Search</span>
-              )}
-            </MotionSwap>
+            <span>
+              <span className="max-[420px]:sr-only">Deep </span>research
+            </span>
+          </Button>
+        ) : null}
+        {!researchEnabled && searchAvailable ? (
+          <Button
+            size="sm"
+            variant={searchEnabled ? "default" : "ghost"}
+            aria-label="Search the web"
+            aria-pressed={searchEnabled}
+            onClick={() => onSearchEnabledChange(!searchEnabled)}
+            disabled={controlsDisabled}
+            className={cn("shrink-0", !searchEnabled && "text-muted-foreground")}
+          >
+            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
+            <span className="max-[420px]:sr-only">Search</span>
           </Button>
         ) : null}
         <ModelPicker

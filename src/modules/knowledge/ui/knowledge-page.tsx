@@ -24,7 +24,7 @@ import {
 
 export const collectionStatusLabel = (collection: CollectionSummary): string => {
   const parts: string[] = [`${collection.documentCount} documents`];
-  if (collection.pendingCount > 0) parts.push(`${collection.pendingCount} indexing`);
+  if (collection.pendingCount > 0) parts.push(`${collection.pendingCount} preparing`);
   if (collection.failedCount > 0) parts.push(`${collection.failedCount} failed`);
   return parts.join(" · ");
 };
@@ -158,7 +158,7 @@ export function KnowledgePage() {
                 {collection.failedCount > 0 ? (
                   <Badge variant="destructive">{collection.failedCount} failed</Badge>
                 ) : collection.pendingCount > 0 ? (
-                  <Badge variant="secondary">{collection.pendingCount} indexing</Badge>
+                  <Badge variant="secondary">{collection.pendingCount} preparing</Badge>
                 ) : null}
               </span>
               <span className="text-muted-foreground truncate text-xs">
@@ -183,7 +183,6 @@ export function KnowledgePage() {
   return (
     <Page
       title="Knowledge"
-      description="Collections of documents and notes that chats and agents can search and read."
       rootPath="/"
       rootLabel="Chat"
       actions={
@@ -204,7 +203,7 @@ export function KnowledgePage() {
         <EmptyState
           icon={FolderLibraryIcon}
           title="No collections yet"
-          description="Create one, add documents or notes, and select it in a chat or attach it to an agent."
+          description="Keep documents together to use in chats and agents."
           action={
             <Button size="sm" onClick={() => setCreating(true)}>
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />

@@ -1,3 +1,6 @@
+import { uuidv7 } from "uuidv7";
+import type { AssistantOutput } from "~/modules/chat/assistant-output.ts";
+import type { ProviderReplay } from "~/modules/chat/server/provider-replay.ts";
 import { desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
@@ -72,6 +75,9 @@ export const messages = pgTable(
       .notNull()
       .default("chat"),
     researchRunId: text("research_run_id"),
+    generationId: text("generation_id").$defaultFn(uuidv7),
+    assistantOutput: jsonb("assistant_output").$type<AssistantOutput>(),
+    providerReplay: jsonb("provider_replay").$type<ProviderReplay>(),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
     // final assembled reasoning/thinking text; empty for non-reasoning models
     reasoning: text().notNull().default(""),
@@ -114,7 +120,7 @@ export const messageChunks = pgTable(
     // what the delta belongs to: the visible answer, the reasoning trace, or a
     // tool/compaction activity marker (JSON envelope in delta). Plain text
     // column, so a new marker kind is a TypeScript change only.
-    kind: text({ enum: ["text", "reasoning", "tool", "compaction"] })
+    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "image"] })
       .notNull()
       .default("text"),
     delta: text().notNull(),

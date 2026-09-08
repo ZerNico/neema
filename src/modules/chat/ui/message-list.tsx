@@ -1,3 +1,5 @@
+import { responseFailureCopy } from "../generation-failure.ts";
+import type { AssistantImage } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +38,7 @@ import type { AttachmentUploads } from "~/modules/attachments/client/use-attachm
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
+import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -131,6 +134,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
 });
 
 export interface DisplayMessage {
+  images?: ReadonlyArray<AssistantImage>;
   id: string;
   /** Durable attempt identity, used to fence live panel updates across retries. */
   researchRunId?: string | null;
@@ -366,6 +370,56 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
+function AssistantImageAttachment({ image }: { image: AssistantImage }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const url = attachmentUrl(image.attachment.id);
+  return (
+    <figure className="my-3 max-w-full space-y-2">
+      {state === "loading" && (
+        <p role="status" className="text-muted-foreground text-sm">
+          Loading image…
+        </p>
+      )}
+      {state === "error" ? (
+        <p role="alert" className="text-muted-foreground text-sm">
+          This image could not be loaded.
+        </p>
+      ) : (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Preview ${image.attachment.fileName}`}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            setPreviewOpen(true);
+          }}
+        >
+          <img
+            src={url}
+            alt="Generated image"
+            onLoad={() => setState("ready")}
+            onError={() => setState("error")}
+            className="max-h-[36rem] max-w-full rounded-2xl object-contain"
+          />
+        </a>
+      )}
+      <AttachmentPreviewDialog
+        target={{
+          fileName: image.attachment.fileName,
+          size: image.attachment.size,
+          kind: "image",
+          url,
+        }}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+      />
+    </figure>
+  );
+}
+
 const AssistantBody = memo(function AssistantBody({
   message,
   sources,
@@ -381,10 +435,13 @@ const AssistantBody = memo(function AssistantBody({
     content: message.content,
     rawTextLength: message.rawTextLength ?? message.content.length,
     streaming,
+    images: message.images ?? [],
     tools: message.toolActivities,
     compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
   });
   return parts.map((part) => {
+    if (part.kind === "image")
+      return <AssistantImageAttachment key={part.key} image={part.image} />;
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">
@@ -518,6 +575,8 @@ function retryDelay(error: string): string | null {
 }
 
 function generationFailureCopy(error: string | null | undefined) {
+  const terminalFailure = responseFailureCopy(error);
+  if (terminalFailure) return terminalFailure;
   if (error && RATE_LIMIT.test(error)) {
     const delay = retryDelay(error);
     return {
@@ -564,7 +623,7 @@ function GenerationFailure({
 }) {
   const copy = generationFailureCopy(error);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const details = error ? generationFailureDetails(error) : null;
+  const details = error && !responseFailureCopy(error) ? generationFailureDetails(error) : null;
 
   return (
     <div
@@ -646,7 +705,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   );
   // "Thinking" is the phase before any visible answer text arrives — but not
   // while a tool is running (the tool block carries the progress feedback).
-  const reasoningActive = streaming && message.content.length === 0 && !toolRunning;
+  const reasoningActive =
+    streaming && message.content.length === 0 && !message.images?.length && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
   const compactionActivities = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
@@ -686,6 +746,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         />
         {streaming &&
         message.content.length === 0 &&
+        !message.images?.length &&
         !showReasoning &&
         !toolRunning &&
         !compacting ? (
@@ -703,7 +764,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {/* A turn that only asked a question or only ran research has nothing to
             copy and no answer to branch from; the row would be chrome around
             an empty message. Its actions return with the text. */}
-        {streaming || message.content.length === 0 ? null : (
+        {streaming || (message.content.length === 0 && !message.images?.length) ? null : (
           <MessageActions
             onOpenSources={openSources}
             content={message.content}

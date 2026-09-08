@@ -122,10 +122,8 @@ describe("MemoryPage", () => {
     renderPage();
 
     expect(await screen.findByText("Nothing saved yet")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Reference saved memories" })).toBeChecked();
-    expect(
-      screen.getByRole("switch", { name: "Automatically save useful memories" }),
-    ).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Use saved memories" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Save memories automatically" })).toBeChecked();
     expect(screen.getByText("0 of 50")).toBeInTheDocument();
   });
 
@@ -141,17 +139,16 @@ describe("MemoryPage", () => {
     renderPage();
 
     expect(await screen.findByText("Memory is paused by an administrator")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Reference saved memories" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Reference saved memories" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "Use saved memories" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Use saved memories" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
-    expect(
-      screen.getByRole("switch", { name: "Automatically save useful memories" }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("switch", { name: "Automatically save useful memories" }),
-    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("switch", { name: "Save memories automatically" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Save memories automatically" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(screen.getAllByRole("button", { name: "Add memory" })[0]).toBeEnabled();
   });
 
@@ -159,9 +156,7 @@ describe("MemoryPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(
-      await screen.findByRole("switch", { name: "Automatically save useful memories" }),
-    );
+    await user.click(await screen.findByRole("switch", { name: "Save memories automatically" }));
 
     await waitFor(() =>
       expect(updateSettingsMock).toHaveBeenCalledWith({

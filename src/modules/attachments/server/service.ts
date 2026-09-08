@@ -5,7 +5,7 @@ import type { AttachmentKind } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
 import { canAccessAttachment } from "./policy.ts";
-import { AttachmentRepo } from "./repo.ts";
+import { AttachmentRepo, type AttachmentAssociation } from "./repo.ts";
 import { validateAttachment } from "./validation.ts";
 
 // Uploads that were never sent (tab closed, draft abandoned) are swept once a
@@ -37,6 +37,7 @@ export class AttachmentService extends Context.Service<
       declaredMediaType: string;
       bytes: Uint8Array;
       allowedKinds?: ReadonlyArray<AttachmentKind>;
+      association?: AttachmentAssociation;
     }): Effect.Effect<Attachment, AttachmentRejected>;
     /** Removes an upload the user has not sent yet. */
     remove(input: {
@@ -89,6 +90,7 @@ export class AttachmentService extends Context.Service<
         declaredMediaType: string;
         bytes: Uint8Array;
         allowedKinds?: ReadonlyArray<AttachmentKind>;
+        association?: AttachmentAssociation;
       }) {
         const validated = yield* validateAttachment({
           fileName: input.fileName,
@@ -113,6 +115,7 @@ export class AttachmentService extends Context.Service<
         yield* store.put(storageKey, input.bytes).pipe(Effect.orDie);
 
         const { attachment, unusedStorageKey } = yield* repo.create({
+          ...(input.association ? { association: input.association } : {}),
           userId: input.userId,
           sha256,
           storageKey,

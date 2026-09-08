@@ -7,6 +7,11 @@ settings:
 overrides:
   rolldown: 1.2.1
 
+patchedDependencies:
+  '@effect/ai-openrouter@4.0.0-rc.111':
+    hash: 19bd207465d9d3925a7722754c28a541d9b32fdfaee69275adfa3e2b058f2be3
+    path: patches/@effect__ai-openrouter@4.0.0-rc.111.patch
+
 importers:
 
   .:
@@ -16,7 +21,7 @@ importers:
         version: 1.7.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@effect/ai-openrouter':
         specifier: 4.0.0-rc.111
-        version: 4.0.0-rc.111(effect@4.0.0-rc.111)
+        version: 4.0.0-rc.111(patch_hash=19bd207465d9d3925a7722754c28a541d9b32fdfaee69275adfa3e2b058f2be3)(effect@4.0.0-rc.111)
       '@effect/sql-pg':
         specifier: 4.0.0-rc.111
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)
@@ -6098,7 +6103,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.12.0': {}
 
-  '@effect/ai-openrouter@4.0.0-rc.111(effect@4.0.0-rc.111)':
+  '@effect/ai-openrouter@4.0.0-rc.111(patch_hash=19bd207465d9d3925a7722754c28a541d9b32fdfaee69275adfa3e2b058f2be3)(effect@4.0.0-rc.111)':
     dependencies:
       effect: 4.0.0-rc.111
 

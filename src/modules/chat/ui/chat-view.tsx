@@ -1,3 +1,5 @@
+import { applyImageChunk } from "../client/use-message-stream.ts";
+import type { AssistantImage } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
@@ -48,6 +50,7 @@ import { mergeSource } from "~/modules/tools/sources.ts";
 import { Button } from "~/ui/primitives/button.tsx";
 import { Spinner } from "~/ui/primitives/spinner.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
@@ -203,6 +206,13 @@ function toCompactionActivity(row: {
 }
 
 export function ChatView({ conversationId }: { conversationId: string }) {
+  const composer = useRef<ComposerHandle>(null);
+  const isMobile = useIsMobile();
+  // Opening a chat should leave the caret ready to type. Not on a phone: that
+  // would raise the keyboard over the conversation the user came to read.
+  useEffect(() => {
+    if (!isMobile) composer.current?.focus();
+  }, [conversationId, isMobile]);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -271,6 +281,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         durableCompactions,
       );
     return {
+      images: data.pendingChunks
+        .filter((chunk) => chunk.kind === "image")
+        .reduce<AssistantImage[]>(
+          (images, chunk) => applyImageChunk(images, chunk.delta),
+          [...(streamingMessage.assistantOutput?.images ?? [])],
+        ),
       text,
       reasoning,
       reasoningSeen: reasoningChunks.length > 0,
@@ -278,7 +294,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       compactions,
       lastSeq,
     };
-  }, [streamingMessage?.id, streamingMessage?.researchRunId, retryEpoch]);
+  }, [
+    streamingMessage?.id,
+    streamingMessage?.researchRunId,
+    streamingMessage?.generationId,
+    retryEpoch,
+  ]);
   // oxlint-enable react/memo-dependencies
 
   // A sync refresh can see the terminal row before SSE has delivered its last
@@ -291,7 +312,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     initialStream,
     conversationId,
     retryEpoch,
-    subscribedMessage?.researchRunId ?? null,
+    subscribedMessage?.researchRunId ?? subscribedMessage?.generationId ?? null,
   );
 
   const questionResponses = useMemo(
@@ -409,7 +430,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const stopMutation = useMutation({
-    mutationFn: (input: { messageId: string; researchRunId?: string }) =>
+    mutationFn: (input: { messageId: string; researchRunId?: string; generationId?: string }) =>
       stopGeneration({ data: { conversationId, ...input } }),
     // No invalidation here: the generation finalizes itself and the `done`
     // event already carries the terminal status back through the stream hook.
@@ -762,6 +783,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
           : {}),
         reasoning,
+        images: message.assistantOutput?.images ?? [],
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
@@ -883,6 +905,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         // Overlay live stream state onto only the active assistant row.
         const live = {
           ...projected,
+          images: stream.images,
           rawTextLength: stream.rawTextLength,
           reasoning: stream.reasoning,
           reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
@@ -970,6 +993,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             </div>
           ) : null}
           <Composer
+            ref={composer}
             onSend={(content, attachmentIds, generationMode) =>
               sendMutation.mutateAsync({
                 content,
@@ -982,6 +1006,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                   onStop: () =>
                     stopMutation.mutate({
                       messageId: stoppableId,
+                      ...(streamingMessage?.generationId
+                        ? { generationId: streamingMessage.generationId }
+                        : {}),
                       ...(streamingMessage?.researchRunId
                         ? { researchRunId: streamingMessage.researchRunId }
                         : {}),
@@ -1047,6 +1074,10 @@ export function NewChatView({
   }, [selectedAgentId, selectedAgent.data, setSearchEnabled]);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
+  const isMobile = useIsMobile();
+  useEffect(() => {
+    if (!isMobile) composer.current?.focus();
+  }, [isMobile]);
   // Flipped the moment the first message actually leaves: the composer drops
   // into the position it occupies in ChatView, so the route swap that follows
   // lands on geometry that already matches.

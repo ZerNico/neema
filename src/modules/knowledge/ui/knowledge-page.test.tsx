@@ -143,7 +143,7 @@ describe("KnowledgePage", () => {
         <KnowledgePage />
       </QueryClientProvider>,
     );
-    expect(screen.getByText("1 indexing")).toBeInTheDocument();
+    expect(screen.getByText("1 preparing")).toBeInTheDocument();
     // One action per row: the collection page itself adapts to permissions,
     // so a separate Edit link would lead to the same place.
     expect(screen.getByRole("link", { name: "Open Contracts" })).toHaveAttribute(
@@ -208,20 +208,61 @@ describe("CollectionPage", () => {
       }),
     ]);
     expect(screen.getByText("no readable text could be extracted")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t prepare document")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Actions for Signed agreement" }));
     expect(screen.queryByRole("menuitem", { name: /Retry indexing/ })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Actions for Scanned contract" }));
-    expect(screen.getByRole("menuitem", { name: /Retry indexing/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Retry indexing/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
+
+  it.each([
+    ["queued", "ready", "Preparing"],
+    ["ready", "queued", "Preparing search"],
+    ["ready", "failed", "Basic search"],
+  ] as const)("explains document state %s / %s", (status, semanticStatus, label) => {
+    renderDetail([document({ id: "d1", title: "Policy", status, semanticStatus })]);
+    expect(screen.getByText(label)).toBeVisible();
+    expect(screen.queryByText(/4,200 characters/)).not.toBeInTheDocument();
+    if (semanticStatus === "failed")
+      expect(screen.getByText(/still usable with basic search/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it.each(["queued", "failed"] as const)(
+    "keeps the current version available during a %s update",
+    async (status) => {
+      renderDetail([
+        document({
+          id: "d1",
+          title: "Policy",
+          replacement: {
+            versionId: "v2",
+            title: "New policy",
+            status,
+            error: status === "failed" ? "Unreadable replacement" : null,
+          },
+        }),
+      ]);
+      expect(screen.getByText(status === "failed" ? "Update failed" : "Updating")).toBeVisible();
+      expect(screen.getByText("The current version remains available.")).toBeVisible();
+      expect(screen.getByRole("link", { name: "Download Policy" })).toBeVisible();
+      if (status === "failed") {
+        expect(screen.getByText("Unreadable replacement")).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        await waitFor(() =>
+          expect(retryKnowledgeDocument).toHaveBeenCalledWith({ data: { documentId: "d1" } }),
+        );
+      }
+    },
+  );
 
   it("retries a failed document through the server function", async () => {
     renderDetail([
       document({ id: "d2", title: "Scanned", status: "failed", versionId: null, error: "failed" }),
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Actions for Scanned" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Retry indexing/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() =>
       expect(vi.mocked(retryKnowledgeDocument)).toHaveBeenCalledWith({
         data: { documentId: "d2" },
@@ -252,7 +293,7 @@ describe("CollectionPage", () => {
     });
     expect(screen.getByText("Signed agreement")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Actions for/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Access" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
     expect(screen.getByText(/Shared by Dana/)).toBeInTheDocument();
     // Reading and downloading stay available.

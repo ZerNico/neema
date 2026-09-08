@@ -5,6 +5,7 @@ import type { KnowledgeNotAvailable, SharingNotAllowed } from "~/modules/knowled
 import { runtime } from "~/server/runtime.ts";
 import type { SharingRateLimited } from "../errors.ts";
 import {
+  RecipientSearchInput,
   SharedResource,
   ShareEmailInput,
   ShareGroupInput,
@@ -38,6 +39,16 @@ export const getResourceSharing = createServerFn({ method: "GET" })
     runtime.runPromise(
       publicResult(
         Effect.flatMap(SharingService, (service) => service.detail(context.session.user.id, data)),
+      ),
+    ),
+  );
+export const searchShareRecipients = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(RecipientSearchInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      Effect.flatMap(SharingService, (service) =>
+        service.recipients(context.session.user.id, data.q),
       ),
     ),
   );

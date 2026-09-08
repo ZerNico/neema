@@ -314,3 +314,283 @@ describe("buildHistoryMessages PDF delivery", () => {
     expect(parsePdf).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("assistant image replay", () => {
+  const imageRow = row({ messageId: "answer", mediaType: "image/png", fileName: "generated.png" });
+  const image = {
+    v: 1 as const,
+    attachment: {
+      id: imageRow.id,
+      fileName: imageRow.fileName,
+      mediaType: imageRow.mediaType,
+      size: imageRow.size,
+      kind: "image" as const,
+    },
+    textOffset: 2,
+    turnIndex: 1,
+    eventIndex: 3,
+    callIndex: 1,
+  };
+  const details = [
+    {
+      type: "reasoning.encrypted" as const,
+      data: "opaque",
+      format: "google-gemini-v1" as const,
+      index: 7,
+      id: "signed",
+    },
+  ];
+  const message: HistoryMessage = {
+    id: "answer",
+    role: "assistant",
+    content: "😀after",
+    assistantOutput: { v: 1, images: [image] },
+    providerReplay: {
+      v: 1,
+      providerId: "provider",
+      modelKey: "model",
+      turns: [{ turnIndex: 0, startOffset: 0, endOffset: 2, reasoningDetails: details }],
+    },
+  };
+  const input = {
+    messages: [message],
+    modelSupportsFiles: false,
+    modelSupportsVision: true,
+    webToolsEnabled: false,
+    expandAssistantTurns: true,
+    modelIdentity: { providerId: "provider", modelKey: "model" },
+  };
+  it.effect(
+    "keeps an unsigned trailing image after a completed signed round with UTF-16 offsets",
+    () =>
+      Effect.gen(function* () {
+        const { deps } = harness({ rows: [imageRow] });
+        const replay = yield* buildHistoryMessages(deps, input);
+        expect(replay).toHaveLength(2);
+        expect(replay[0]).toMatchObject({
+          role: "assistant",
+          content: [{ type: "text", text: "😀" }],
+          options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+        });
+        expect(replay[1]).toMatchObject({
+          role: "assistant",
+          content: [{ type: "file" }, { type: "text", text: "after" }],
+          options: { openrouter: { reasoningDetails: [] } },
+        });
+      }),
+  );
+  for (const webToolsEnabled of [false, true]) {
+    it.effect(`normalizes fileless empty-metadata replay with web tools ${webToolsEnabled}`, () =>
+      Effect.gen(function* () {
+        const { deps } = harness({ rows: [] });
+        const content = "Answer[^1]";
+        const completedAt = new Date("2026-09-08T12:00:00Z");
+        const history: HistoryMessage = {
+          ...message,
+          content,
+          assistantOutput: null,
+          completedAt,
+          createdAt: new Date("2026-09-01T00:00:00Z"),
+          providerReplay: {
+            ...message.providerReplay!,
+            turns: [
+              { turnIndex: 0, startOffset: 0, endOffset: content.length, reasoningDetails: [] },
+            ],
+          },
+        };
+        const rendered = yield* buildHistoryMessages(deps, {
+          ...input,
+          webToolsEnabled,
+          messages: [history],
+        });
+        expect(rendered).toEqual([
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
+              { type: "text", text: webToolsEnabled ? content : "Answer" },
+            ],
+            options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
+          },
+        ]);
+        expect(history.content).toBe(content);
+      }),
+    );
+  }
+  for (const mode of ["empty metadata", "incompatible model", "collapsed estimate"] as const) {
+    it.effect(`normalizes raw slices without moving images for ${mode}`, () =>
+      Effect.gen(function* () {
+        const { deps } = harness({ rows: [imageRow] });
+        const prefix = "😀before[^1]";
+        const content = prefix + "after[^2]";
+        const completedAt = new Date("2026-09-08T12:00:00Z");
+        const history: HistoryMessage = {
+          ...message,
+          content,
+          completedAt,
+          assistantOutput: {
+            v: 1,
+            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+          },
+          providerReplay: {
+            ...message.providerReplay!,
+            turns: [
+              {
+                turnIndex: 0,
+                startOffset: 0,
+                endOffset: content.length,
+                reasoningDetails: mode === "empty metadata" ? [] : details,
+              },
+            ],
+          },
+        };
+        const rendered = yield* buildHistoryMessages(deps, {
+          ...input,
+          messages: [history],
+          ...(mode === "incompatible model"
+            ? { modelIdentity: { providerId: "other", modelKey: "model" } }
+            : {}),
+          ...(mode === "collapsed estimate"
+            ? { expandAssistantTurns: false, deferAssistantBytes: true }
+            : {}),
+        });
+        expect(rendered).toHaveLength(1);
+        expect(rendered[0]?.content).toEqual([
+          { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
+          { type: "text", text: "😀before" },
+          expect.objectContaining({ type: "file", fileName: "generated.png" }),
+          { type: "text", text: "after" },
+        ]);
+        expect(JSON.stringify(rendered)).not.toContain("opaque");
+        expect(history.assistantOutput?.images[0]?.textOffset).toBe(prefix.length);
+        expect(history.content).toBe(content);
+      }),
+    );
+  }
+  it.effect(
+    "annotates outside signed text and tools while normalizing an unsigned trailing turn",
+    () =>
+      Effect.gen(function* () {
+        const { deps } = harness({ rows: [imageRow] });
+        const chat = {
+          listToolCalls: () =>
+            Effect.succeed([
+              {
+                turnIndex: 0,
+                toolName: "inspect",
+                providerCallId: "call",
+                arguments: { target: "image" },
+                status: "complete",
+                result: { ok: true },
+              },
+            ]),
+        } as unknown as NonNullable<PromptDeps["chat"]>;
+        const prefix = "😀before[^1]";
+        const signedText = prefix + "after[^2]";
+        const content = signedText + "tail[^3]";
+        const completedAt = new Date("2026-09-08T12:00:00Z");
+        const history: HistoryMessage = {
+          ...message,
+          content,
+          completedAt,
+          assistantOutput: {
+            v: 1,
+            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+          },
+          providerReplay: {
+            ...message.providerReplay!,
+            turns: [
+              {
+                turnIndex: 0,
+                startOffset: 0,
+                endOffset: signedText.length,
+                reasoningDetails: details,
+              },
+            ],
+          },
+        };
+        const original = structuredClone(history);
+        const rendered = yield* buildHistoryMessages(
+          { ...deps, chat },
+          { ...input, messages: [history] },
+        );
+        expect(rendered).toHaveLength(4);
+        expect(rendered[0]).toEqual({
+          role: "user",
+          content: `Historical assistant response metadata:\n[Completed: ${completedAt.toISOString()}]\nCitation markers in the following historical assistant response are retained for provider replay only. Do not reuse these markers in a new answer.\n`,
+        });
+        expect(rendered[1]).toEqual({
+          role: "assistant",
+          content: [
+            { type: "text", text: prefix },
+            expect.objectContaining({ type: "file", fileName: "generated.png" }),
+            { type: "text", text: "after[^2]" },
+            { type: "tool-call", id: "call", name: "inspect", params: { target: "image" } },
+          ],
+          options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+        });
+        expect(rendered[2]).toEqual({
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              id: "call",
+              name: "inspect",
+              isFailure: false,
+              result: { ok: true },
+            },
+          ],
+        });
+        expect(rendered[3]).toMatchObject({
+          role: "assistant",
+          content: [{ type: "text", text: "tail" }],
+        });
+        expect(history).toEqual(original);
+      }),
+  );
+  it.effect("fails closed when every referenced attachment is absent", () =>
+    Effect.gen(function* () {
+      const { deps } = harness({ rows: [] });
+      const result = yield* Effect.result(buildHistoryMessages(deps, input));
+      expect(result._tag).toBe("Failure");
+    }),
+  );
+  it.effect("estimates replay without blob reads and shares retained reads", () =>
+    Effect.gen(function* () {
+      const { deps, get } = harness({ rows: [imageRow] });
+      yield* buildHistoryMessages(deps, { ...input, deferAssistantBytes: true });
+      expect(get).not.toHaveBeenCalled();
+      const loadedBytes = new Map<string, Uint8Array>();
+      yield* buildHistoryMessages(deps, { ...input, loadedBytes });
+      yield* buildHistoryMessages(deps, { ...input, loadedBytes });
+      expect(get).toHaveBeenCalledTimes(1);
+    }),
+  );
+  it.effect("strips incompatible private metadata without dropping the authorized image", () =>
+    Effect.gen(function* () {
+      const { deps } = harness({ rows: [imageRow] });
+      const replay = yield* buildHistoryMessages(deps, {
+        ...input,
+        modelIdentity: { providerId: "other", modelKey: "model" },
+      });
+      expect(replay.every((part) => part.options === undefined)).toBe(true);
+      expect(replay[1]).toMatchObject({ content: [{ type: "file" }, { type: "text" }] });
+      expect(
+        (yield* Effect.result(buildHistoryMessages(deps, { ...input, modelSupportsVision: false })))
+          ._tag,
+      ).toBe("Failure");
+    }),
+  );
+  it.effect("preserves signed fileless replay even without attachment rows", () =>
+    Effect.gen(function* () {
+      const { deps } = harness({ rows: [] });
+      const replay = yield* buildHistoryMessages(deps, {
+        ...input,
+        messages: [{ ...message, content: "😀", assistantOutput: null }],
+      });
+      expect(replay[0]).toMatchObject({
+        options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+      });
+    }),
+  );
+});

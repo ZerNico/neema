@@ -65,6 +65,7 @@ export const ListConversationsInput = Schema.Struct({
 });
 
 export const MessageIdInput = Schema.Struct({
+  generationId: Schema.optionalKey(Schema.String),
   researchRunId: Schema.optionalKey(Schema.String),
   conversationId: Schema.String,
   messageId: Schema.String,
