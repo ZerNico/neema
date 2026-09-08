@@ -165,7 +165,7 @@ export class AgentRepo extends Context.Service<
           return rows.map(({ row, ownerName }) => summarizeAgent(row, ownerName, userId));
         }),
         get: Effect.fn("AgentRepo.get")(function* (userId, agentId, tx) {
-          // Serialize installation against edits and sharing changes, then read
+          // Serialize attempt resolution against edits and sharing changes, then read
           // the revision and its dependencies together from a fresh statement.
           if (tx)
             yield* tx

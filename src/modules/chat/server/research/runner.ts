@@ -828,11 +828,11 @@ export const runResearch = Effect.fn("research.run")(function* (deps: {
   }
   // Agent instructions are user-level configuration: a separate, lower-authority
   // message after the application policy, never merged into it.
-  const agentInstructions: Prompt.MessageEncoded[] = deps.config.snapshot?.instructions.trim()
+  const agentInstructions: Prompt.MessageEncoded[] = deps.config.resolvedAgent?.instructions.trim()
     ? [
         {
           role: "user",
-          content: `<agent-instructions name=${JSON.stringify(deps.config.snapshot.name)}>\n${deps.config.snapshot.instructions}\n</agent-instructions>`,
+          content: `<agent-instructions name=${JSON.stringify(deps.config.resolvedAgent.name)}>\n${deps.config.resolvedAgent.instructions}\n</agent-instructions>`,
         },
       ]
     : [];

@@ -3715,7 +3715,7 @@ describe("saved agent configurations", () => {
       `insert into messages (id,conversation_id,role) values ('${messageId}','${conversationId}','assistant')`,
     );
     await exec(
-      `insert into conversation_agents (conversation_id,agent_id,snapshot) values ('${conversationId}','${id}','${JSON.stringify({ agentId: id, configRevision: 1, name: "Agent", icon: "robot", instructions: "", collectionIds: [collectionId], searchEnabled: false, planEnabled: false })}')`,
+      `insert into conversation_agents (conversation_id,agent_id) values ('${conversationId}','${id}')`,
     );
     await exec(
       `insert into message_generation_config (message_id,collection_ids,knowledge_mode) values ('${messageId}','${JSON.stringify([collectionId])}','context')`,
@@ -3730,10 +3730,10 @@ describe("saved agent configurations", () => {
     expect(
       (
         await exec(
-          `select snapshot->'collectionIds' as collection_ids from conversation_agents where conversation_id = '${conversationId}'`,
+          `select agent_id from conversation_agents where conversation_id = '${conversationId}'`,
         )
       ).rows,
-    ).toEqual([{ collection_ids: [collectionId] }]);
+    ).toEqual([{ agent_id: id }]);
     expect(
       (
         await exec(

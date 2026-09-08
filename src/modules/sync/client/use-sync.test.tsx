@@ -133,6 +133,7 @@ describe("useSync", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "group-members"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["knowledge"] }, { cancelRefetch: false });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agents"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
     await Promise.resolve();
     await Promise.resolve();
     invalidate.mockClear();
@@ -144,6 +145,7 @@ describe("useSync", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "group-members"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["knowledge"] }, { cancelRefetch: false });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agents"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
   });
 
   it("still applies ordinary events after reconnecting", () => {

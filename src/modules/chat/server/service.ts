@@ -25,7 +25,7 @@ import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
-import { installAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
+import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import {
   ChatRepo,
   type ConversationDefaults,
@@ -40,7 +40,7 @@ import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./titl
 
 // Omit on the whole input would flatten the content/question-response union;
 // keep the discriminant intact by omitting from the plain fields only.
-type SendTurnInput = Omit<TurnFields, "installAgent" | "resolve"> &
+type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
     searchEnabled: boolean;
     timeZone?: string | undefined;
@@ -83,6 +83,8 @@ export class ChatService extends Context.Service<
       | MessageNotFound
       | ModelNotFound
       | RetryNotAllowed
+      | AgentNotAvailable
+      | KnowledgeRejected
       | InvalidMessage
       | AttachmentNotAvailable
       | AttachmentUnsupported
@@ -271,26 +273,50 @@ function makeChatService() {
         model: { contextLength: number | null | undefined };
         searchAvailable: boolean;
         collectionIds?: ReadonlyArray<string> | undefined;
+        attempt?: "send" | "retry" | "edit";
       }): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
-        continuation
-          ? knowledge
-              .authorizeManifest(
-                input.userId,
-                continuation.collectionIds,
-                continuation.manifest,
-                tx,
-              )
-              .pipe(Effect.as(continuation))
-          : resolveEffectiveGeneration({
+        Effect.gen(function* () {
+          if (!defaults.agent && continuation) {
+            yield* knowledge.authorizeManifest(
+              input.userId,
+              continuation.collectionIds,
+              continuation.manifest,
               tx,
-              userId: input.userId,
-              agent: defaults.agent,
-              collectionIds: input.collectionIds,
-              searchEnabled: input.searchEnabled,
-              model: input.model,
-              searchAvailable: input.searchAvailable,
-            }).pipe(Effect.provideService(KnowledgeRepo, knowledge));
+            );
+            return {
+              ...continuation,
+              searchEnabled:
+                input.attempt === "retry" || input.attempt === "edit"
+                  ? input.searchEnabled
+                  : continuation.searchEnabled,
+            };
+          }
+          const agent = defaults.agent
+            ? defaults.agent.agentId
+              ? yield* resolveAgentSelection({
+                  tx,
+                  userId: input.userId,
+                  agentId: defaults.agent.agentId,
+                })
+              : yield* new AgentNotAvailable({ agentId: "deleted" })
+            : null;
+          return yield* resolveEffectiveGeneration({
+            tx,
+            userId: input.userId,
+            agent,
+            collectionIds: continuation?.standaloneCollectionIds ?? input.collectionIds,
+            searchEnabled:
+              input.attempt !== "edit" && continuation
+                ? continuation.searchEnabled
+                : input.searchEnabled,
+            model: input.model,
+            searchAvailable: input.searchAvailable,
+          });
+        }).pipe(
+          Effect.provideService(KnowledgeRepo, knowledge),
+          Effect.provideService(AgentRepo, agents),
+        );
 
     const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
       if (
@@ -314,10 +340,8 @@ function makeChatService() {
       });
       const searchAvailable = yield* searchToolEnabled;
 
-      // An agent is chosen when a chat starts and pinned from then on: the
-      // conversation keeps the installed revision, and neither a swap nor a
-      // removal is accepted later. This is what makes an "agent chat" a kind
-      // of chat rather than a setting that drifts message by message.
+      // The association is fixed at creation; its configuration is live for
+      // every subsequent attempt. Swapping or removal is not a chat setting.
       if (input.agentId !== undefined && input.conversationId && !input.questionResponse)
         return yield* new InvalidMessage({
           reason: "the agent is chosen when a chat starts and cannot change afterwards",
@@ -328,12 +352,7 @@ function makeChatService() {
       // empty conversation or a user message nobody will answer.
       const turn = yield* repo.createTurn({
         ...input,
-        installAgent: agentId
-          ? (tx) =>
-              installAgentSelection({ tx, userId: input.userId, agentId }).pipe(
-                Effect.provideService(AgentRepo, agents),
-              )
-          : undefined,
+        associateAgentId: agentId ?? undefined,
         resolve: resolver({
           userId: input.userId,
           searchEnabled: input.searchEnabled,
@@ -400,7 +419,10 @@ function makeChatService() {
         attachmentIds: ReadonlyArray<string>;
       };
     }) {
-      const { claimed, orphanedKeys, generationId, researchRunId } =
+      const model = yield* providers.getModel(input.modelId);
+      if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
+      const searchAvailable = yield* searchToolEnabled;
+      const { claimed, orphanedKeys, generationId, researchRunId, searchEnabled } =
         yield* repo.resetMessageForRetry({
           expectedMessages: input.expectedMessages,
           userId: input.userId,
@@ -409,6 +431,13 @@ function makeChatService() {
           deleteMessageIds: input.deleteMessageIds,
           invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
           searchEnabled: input.searchEnabled,
+          resolve: resolver({
+            userId: input.userId,
+            model,
+            searchEnabled: input.searchEnabled,
+            searchAvailable,
+            attempt: input.edit ? "edit" : "retry",
+          }),
           ...(input.edit
             ? {
                 edit: {
@@ -436,7 +465,7 @@ function makeChatService() {
         researchRunId,
         generationId,
         modelId: input.modelId,
-        searchEnabled: input.searchEnabled,
+        searchEnabled: searchEnabled!,
         timeZone: input.timeZone,
       });
 
@@ -525,9 +554,6 @@ function makeChatService() {
         );
       }
 
-      // Replay the saved snapshot and manifest, with fresh authorization.
-      const config = yield* repo.getGenerationConfig(message.id);
-      yield* knowledge.authorizeManifest(input.userId, config.collectionIds, config.manifest);
       const usedSearch = (yield* repo.listToolCalls([message.id])).some(
         (call) => call.toolName === "web_search",
       );
@@ -697,10 +723,9 @@ function makeChatService() {
         : { content: input.content };
 
       if (assistant) {
-        // The edited turn keeps its agent and knowledge context: the row
-        // survives with its configuration, re-authorized like a retry.
-        const config = yield* repo.getGenerationConfig(assistant.id);
-        yield* knowledge.authorizeManifest(input.userId, config.collectionIds, config.manifest);
+        // Preserve original standalone inputs, but resolve the current agent
+        // and current document versions atomically before rewinding.
+
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
           expectedMessages: all,

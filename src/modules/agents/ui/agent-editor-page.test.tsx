@@ -110,7 +110,9 @@ describe("AgentEditorPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Starter 1" }), {
       target: { value: "Review carefully" },
     });
-    expect(screen.getByText("Changes apply to new chats")).toBeVisible();
+    expect(
+      screen.getByText("Changes apply to future responses, including in existing chats."),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(updateAgent).toHaveBeenCalledWith({

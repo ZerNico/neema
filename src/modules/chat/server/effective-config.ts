@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { AgentConfigSnapshot } from "~/db/schema/agents.ts";
+import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -46,19 +46,19 @@ export const fitsDirectContext = (input: {
   );
 };
 
-/** The agent contribution for a turn: freshly installed, or inherited frozen. */
+/** One coherent live agent contribution, private to this attempt. */
 export interface AgentSelection {
   readonly agentId: string | null;
-  readonly snapshot: AgentConfigSnapshot;
+  readonly resolvedAgent: ResolvedAgentConfig;
 }
 
 /**
- * Installs an agent's current configuration. Reading inside the turn's
- * transaction is what makes the stored snapshot a configuration that actually
+ * Resolves an agent's current configuration. Reading inside the attempt's
+ * transaction is what makes the execution record a configuration that actually
  * existed: an edit bumps `configRevision`, and validating outside the write
  * would persist a revision number that never went with this text.
  */
-export const installAgentSelection = Effect.fn("chat.installAgentSelection")(function* (input: {
+export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(function* (input: {
   tx: DbTx;
   userId: string;
   agentId: string;
@@ -68,7 +68,7 @@ export const installAgentSelection = Effect.fn("chat.installAgentSelection")(fun
   if (!stored) return yield* new AgentNotAvailable({ agentId: input.agentId });
   return {
     agentId: stored.row.id,
-    snapshot: {
+    resolvedAgent: {
       agentId: stored.row.id,
       configRevision: stored.row.configRevision,
       name: stored.row.name,
@@ -82,8 +82,8 @@ export const installAgentSelection = Effect.fn("chat.installAgentSelection")(fun
 });
 
 /**
- * Resolves what a turn will actually run with, from an already-installed or
- * inherited agent selection plus the collections chosen in the composer.
+ * Resolves what an attempt will run with from its current agent contribution
+ * and the original standalone collections chosen in the composer.
  *
  * An agent grant is never a grant to its dependencies: the collections are
  * authorized here, separately, and losing any of them fails the whole
@@ -102,9 +102,9 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     searchAvailable: boolean;
   }) {
     const knowledge = yield* KnowledgeRepo;
-    const snapshot = input.agent?.snapshot ?? null;
+    const resolvedAgent = input.agent?.resolvedAgent ?? null;
     const collectionIds = [
-      ...new Set([...(snapshot?.collectionIds ?? []), ...(input.collectionIds ?? [])]),
+      ...new Set([...(resolvedAgent?.collectionIds ?? []), ...(input.collectionIds ?? [])]),
     ];
     if (collectionIds.length > KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
       return yield* new KnowledgeRejected({ reason: "select at most five knowledge collections" });
@@ -113,7 +113,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     // break on an instance that has none. Tool support itself is never a
     // question: models without native calling are polyfilled in the gateway.
     const searchEnabled = input.searchEnabled && input.searchAvailable;
-    const planEnabled = snapshot?.planEnabled ?? false;
+    const planEnabled = resolvedAgent?.planEnabled ?? false;
 
     const manifest =
       collectionIds.length === 0
@@ -128,7 +128,8 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
 
     return {
       agentId: input.agent?.agentId ?? null,
-      snapshot,
+      resolvedAgent,
+      standaloneCollectionIds: [...(input.collectionIds ?? [])],
       collectionIds,
       manifest,
       knowledgeMode,

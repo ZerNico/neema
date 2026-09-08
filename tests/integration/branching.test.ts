@@ -328,6 +328,31 @@ describe("branching a conversation", () => {
     expect(result.sourceContents).toEqual(["u1", "a1", "u2", "a2", "u3", "a3"]);
   });
 
+  it("copies a deleted agent association as a tombstone rather than making a plain chat", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u", assistant: "a" }]);
+        const db = yield* Db;
+        yield* db.execute(
+          `insert into conversation_agents (conversation_id,agent_id) values ('${source.conversation.id}',null)` as never,
+        );
+        const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
+        const repo = yield* ChatRepo;
+        expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
+          agent: { agentId: null },
+        });
+        expect(forked.messages.map((message) => message.content)).toEqual(["u", "a"]);
+        yield* db.execute(
+          `delete from conversations where id = '${source.conversation.id}'` as never,
+        );
+        expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
+          agent: { agentId: null },
+        });
+      }),
+    );
+  });
+
   it("reproduces every message field and timestamp under fresh ids", async () => {
     const result = await run(
       Effect.gen(function* () {

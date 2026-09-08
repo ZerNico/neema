@@ -42,19 +42,28 @@ const openPicker = async () => {
 };
 
 describe("ModelPicker", () => {
-  it("keeps specifications behind a keyboard-accessible control outside options", async () => {
-    const { user, onChange } = renderPicker();
+  it("keeps model rows compact without a details toggle", async () => {
+    renderPicker();
     await openPicker();
     expect(screen.queryByText("128k")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Native tool calling" })).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "Show model details" });
-    expect(toggle.closest('[role="option"]')).toBeNull();
-    toggle.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getAllByText("128k")).toHaveLength(3);
-    expect(screen.queryByRole("img", { name: "Native tool calling" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: /GPT-5/ }));
-    expect(onChange).toHaveBeenCalledWith("gpt");
+    expect(screen.queryByRole("button", { name: "Show model details" })).not.toBeInTheDocument();
+  });
+
+  it("keeps capability tooltips inside selectable model rows", async () => {
+    const { user, onChange } = renderPicker({
+      models: [{ ...MODELS[0]!, capabilities: { ...MODELS[0]!.capabilities!, imageOutput: true } }],
+    });
+    await openPicker();
+    const icon = screen.getByRole("img", { name: "Image generation" });
+    await user.hover(icon);
+    expect(await screen.findByText("Image generation")).toHaveAttribute(
+      "data-slot",
+      "tooltip-content",
+    );
+    expect(icon.closest('[role="option"]')).not.toBeNull();
+    await user.click(icon);
+    expect(onChange).toHaveBeenCalledWith("sonnet");
   });
 
   it("groups the models under their provider", async () => {

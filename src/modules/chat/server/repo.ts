@@ -41,7 +41,7 @@ import {
   messages,
   messageToolCalls,
 } from "~/db/schema/index.ts";
-import type { AgentConfigSnapshot } from "~/db/schema/agents.ts";
+import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
@@ -68,20 +68,21 @@ export type EditContent =
 /**
  * What one assistant generation ran with. Resolved by the service inside the
  * turn's transaction (`resolve` receives the same handle), stored beside the
- * assistant row, and replayed by retry rather than re-resolved.
+ * assistant row. New agent attempts re-resolve; plain-chat retries replay.
  */
 export interface GenerationConfig {
   readonly agentId: string | null;
-  readonly snapshot: AgentConfigSnapshot | null;
+  readonly resolvedAgent: ResolvedAgentConfig | null;
+  readonly standaloneCollectionIds: ReadonlyArray<string>;
   readonly collectionIds: ReadonlyArray<string>;
   readonly manifest: ReadonlyArray<ManifestEntry>;
   readonly knowledgeMode: "none" | "context" | "retrieval";
   readonly searchEnabled: boolean;
   readonly planEnabled: boolean;
 }
-/** The immutable agent installed when the conversation was created. */
+/** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
-  readonly agent: { agentId: string | null; snapshot: AgentConfigSnapshot } | null;
+  readonly agent: { agentId: string | null } | null;
 }
 export type ResolveError =
   | AgentNotAvailable
@@ -96,7 +97,8 @@ export type ResolveGeneration = (
 /** An ordinary generation: no agent, no knowledge, no plan. */
 export const PLAIN_GENERATION: GenerationConfig = {
   agentId: null,
-  snapshot: null,
+  resolvedAgent: null,
+  standaloneCollectionIds: [],
   collectionIds: [],
   manifest: [],
   knowledgeMode: "none",
@@ -111,16 +113,8 @@ export type TurnFields = {
   conversationId: string | null;
   modelId: string;
   attachmentIds: ReadonlyArray<string>;
-  /** Resolves the initial agent inside the turn transaction; never replaces one. */
-  installAgent?:
-    | ((tx: DbTx) => Effect.Effect<
-        {
-          agentId: string | null;
-          snapshot: AgentConfigSnapshot;
-        },
-        AgentNotAvailable
-      >)
-    | undefined;
+  /** Installs only the association on a new conversation, after live resolution. */
+  associateAgentId?: string | undefined;
   /** Standalone collections selected for this message only. */
   collectionIds?: ReadonlyArray<string> | undefined;
   /** Absent means a plain generation; the service always supplies one. */
@@ -280,7 +274,8 @@ const toConfig = (
   manifest: ReadonlyArray<typeof messageKnowledgeVersions.$inferSelect>,
 ): GenerationConfig => ({
   agentId: row.agentId,
-  snapshot: row.snapshot,
+  resolvedAgent: row.resolvedAgent,
+  standaloneCollectionIds: row.standaloneCollectionIds,
   collectionIds: row.collectionIds,
   manifest: manifest.map((entry) => ({
     collectionId: entry.collectionId,
@@ -306,9 +301,22 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationAgents.conversationId, conversationId))
     .pipe(Effect.orDie);
   return {
-    agent: agent ? { agentId: agent.agentId, snapshot: agent.snapshot } : null,
+    agent: agent ? { agentId: agent.agentId } : null,
   } satisfies ConversationDefaults;
 });
+
+/** Internal plain-chat helpers may omit a resolver; agent attempts never may. */
+const resolveAttempt = (
+  tx: DbTx,
+  defaults: ConversationDefaults,
+  resolve: ResolveGeneration | undefined,
+  previous?: GenerationConfig,
+): Effect.Effect<GenerationConfig, ResolveError> => {
+  if (resolve) return resolve(tx, defaults, previous);
+  if (defaults.agent)
+    return Effect.die(new Error("Agent attempts require live configuration resolution"));
+  return Effect.succeed(previous ?? PLAIN_GENERATION);
+};
 
 const readConfig = Effect.fn("chat.readGenerationConfig")(function* (
   tx: Pick<DbTx, "select">,
@@ -341,7 +349,8 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
     .values({
       messageId,
       agentId: config.agentId,
-      snapshot: config.snapshot,
+      resolvedAgent: config.resolvedAgent,
+      standaloneCollectionIds: [...config.standaloneCollectionIds],
       knowledgeMode: config.knowledgeMode,
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
@@ -416,11 +425,11 @@ export class ChatRepo extends Context.Service<
       | AttachmentNotAvailable
       | QuestionUnavailable
     >;
-    /** The installed agent and selected collections; empty for an ordinary chat. */
+    /** The fixed agent association; absent for an ordinary chat. */
     getConversationDefaults(conversationId: string): Effect.Effect<ConversationDefaults>;
     /**
-     * The configuration a generation ran with. Pre-feature rows have none and
-     * behave exactly as before — nothing is inferred from old tool calls.
+     * Private attempt execution record. Missing rows are an invariant violation;
+     * no configuration is inferred from history or old tool calls.
      */
     getGenerationConfig(messageId: string): Effect.Effect<GenerationConfig>;
     listGenerationDisplay(messageIds: ReadonlyArray<string>): Effect.Effect<
@@ -542,14 +551,16 @@ export class ChatRepo extends Context.Service<
       };
       /** What the regenerated answer actually runs with; recorded for the next retry. */
       searchEnabled?: boolean | undefined;
+      resolve?: ResolveGeneration | undefined;
     }): Effect.Effect<
       {
         claimed: boolean;
         orphanedKeys: ReadonlyArray<string>;
         generationId?: string | undefined;
         researchRunId?: string | undefined;
+        searchEnabled?: boolean | undefined;
       },
-      AttachmentNotAvailable | InvalidMessage
+      AttachmentNotAvailable | ResolveError
     >;
     createAssistantForEdit(
       input: EditContent & {
@@ -793,23 +804,22 @@ export class ChatRepo extends Context.Service<
                   attachmentIds: input.attachmentIds,
                 });
 
-                if (input.installAgent) {
-                  if (!conversationCreated)
-                    return yield* new InvalidMessage({
-                      reason: "the agent cannot change after chat creation",
-                    });
-                  const installed = yield* input.installAgent(tx);
+                if (input.associateAgentId && !conversationCreated)
+                  return yield* new InvalidMessage({
+                    reason: "the agent cannot change after chat creation",
+                  });
+                const association = input.associateAgentId
+                  ? { agentId: input.associateAgentId }
+                  : null;
+                const defaults = association
+                  ? { agent: association }
+                  : yield* readDefaults(tx, conversation.id);
+                const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
+                if (association)
                   yield* tx
                     .insert(conversationAgents)
-                    .values({
-                      conversationId: conversation.id,
-                      ...installed,
-                    })
+                    .values({ conversationId: conversation.id, ...association })
                     .pipe(Effect.orDie);
-                }
-                const config = input.resolve
-                  ? yield* input.resolve(tx, yield* readDefaults(tx, conversation.id), continuation)
-                  : (continuation ?? PLAIN_GENERATION);
 
                 const assistantRows = yield* tx
                   .insert(messages)
@@ -864,7 +874,7 @@ export class ChatRepo extends Context.Service<
               agent: sql<{
                 name: string;
                 icon: string;
-              } | null>`case when ${messageGenerationConfig.snapshot} is null then null else jsonb_build_object('name', ${messageGenerationConfig.snapshot}->>'name', 'icon', ${messageGenerationConfig.snapshot}->>'icon') end`,
+              } | null>`case when ${messageGenerationConfig.resolvedAgent} is null then null else jsonb_build_object('name', ${messageGenerationConfig.resolvedAgent}->>'name', 'icon', ${messageGenerationConfig.resolvedAgent}->>'icon') end`,
               collectionIds: messageGenerationConfig.collectionIds,
             })
             .from(messageGenerationConfig)
@@ -1110,7 +1120,7 @@ export class ChatRepo extends Context.Service<
 
                 // Agent/knowledge configuration is copied verbatim, never
                 // re-resolved: the branch shows the same answers the same way,
-                // and its next turn resolves against the same defaults.
+                // and its next turn resolves the associated agent live.
                 const [installedAgent] = yield* tx
                   .select()
                   .from(conversationAgents)
@@ -1523,6 +1533,16 @@ export class ChatRepo extends Context.Service<
                 const edited = input.edit
                   ? yield* editedContent(tx, current, input.edit.messageId, input.edit)
                   : null;
+                const previous = yield* readConfig(tx, input.messageId);
+                const resolved = yield* resolveAttempt(
+                  tx,
+                  yield* readDefaults(tx, target.conversationId),
+                  input.resolve,
+                  previous,
+                );
+                const config = input.resolve
+                  ? resolved
+                  : { ...resolved, searchEnabled: input.searchEnabled ?? resolved.searchEnabled };
                 const generationId = uuidv7();
                 const claimed = yield* tx
                   .update(messages)
@@ -1608,15 +1628,15 @@ export class ChatRepo extends Context.Service<
                   .delete(messageCompactionEvents)
                   .where(eq(messageCompactionEvents.messageId, input.messageId))
                   .pipe(Effect.orDie);
-                // The agent snapshot and the manifest stay: a retry answers the
-                // same question with the same material, even when the model or
-                // the search toggle differs.
-                if (input.searchEnabled !== undefined)
-                  yield* tx
-                    .update(messageGenerationConfig)
-                    .set({ searchEnabled: input.searchEnabled })
-                    .where(eq(messageGenerationConfig.messageId, input.messageId))
-                    .pipe(Effect.orDie);
+                yield* tx
+                  .delete(messageKnowledgeVersions)
+                  .where(eq(messageKnowledgeVersions.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .delete(messageGenerationConfig)
+                  .where(eq(messageGenerationConfig.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* writeConfig(tx, input.messageId, config);
 
                 const [restarted] = yield* tx
                   .select({ researchRunId: messages.researchRunId })
@@ -1627,6 +1647,7 @@ export class ChatRepo extends Context.Service<
                   claimed: true,
                   generationId,
                   researchRunId: restarted?.researchRunId ?? undefined,
+                  searchEnabled: config.searchEnabled,
                   orphanedKeys: orphanedKeys as ReadonlyArray<string>,
                 };
               }),
@@ -1669,6 +1690,11 @@ export class ChatRepo extends Context.Service<
                 )
                   return null;
                 const edited = yield* editedContent(tx, current, input.userMessageId, input);
+                const config = yield* resolveAttempt(
+                  tx,
+                  yield* readDefaults(tx, input.conversationId),
+                  input.resolve,
+                );
                 const claimed = yield* tx
                   .update(messages)
                   .set({ ...edited, editedAt: new Date() })
@@ -1720,9 +1746,6 @@ export class ChatRepo extends Context.Service<
                   .where(eq(conversations.id, input.conversationId))
                   .pipe(Effect.orDie);
 
-                const config = input.resolve
-                  ? yield* input.resolve(tx, yield* readDefaults(tx, input.conversationId))
-                  : PLAIN_GENERATION;
                 const created = yield* tx
                   .insert(messages)
                   .values({

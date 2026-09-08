@@ -51,8 +51,8 @@ export const agentIcon = (icon: string): IconSvgElement =>
  */
 export interface ContextSelection {
   /**
-   * Installed agent. A null `id` is a deleted agent whose frozen snapshot still
-   * answers; a null `name` is a live id that resolved to nothing readable.
+   * Fixed association. A null `id` is a deletion tombstone; a null `name`
+   * is an unavailable agent. Both block new attempts, never historical reading.
    */
   agent: { id: string | null; name: string | null; icon?: string } | null;
   /** Agent-attached collections (fixed by the agent) then standalone ones. */
@@ -64,7 +64,10 @@ export interface ComposerContext {
   agentCollectionIds: ReadonlySet<string>;
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
-  onCollectionsChange: (collectionIds: ReadonlyArray<string>) => void;
+  onCollectionsChange: (
+    collectionIds: ReadonlyArray<string>,
+    additions?: ReadonlyArray<string>,
+  ) => void;
 }
 
 export const MAX_SELECTED_COLLECTIONS = KNOWLEDGE_LIMITS.maxCollectionsPerSelection;
@@ -80,7 +83,7 @@ export type ContextPickerKind = "agent" | "collections";
 /**
  * Rows for the composer's "+" menu. Each opens the matching searchable popup
  * after the menu has closed, so the list scales past a submenu's height and
- * the two overlays never fight over focus. A pinned agent has no row.
+ * the two overlays never fight over focus. An associated agent has no row.
  */
 export function ContextMenuItems({
   selection,
@@ -211,17 +214,23 @@ export function CollectionPicker({
 }: PickerPopupProps & {
   selection: ContextSelection;
   agentCollectionIds: ReadonlySet<string>;
-  onCollectionsChange: (collectionIds: ReadonlyArray<string>) => void;
+  onCollectionsChange: (
+    collectionIds: ReadonlyArray<string>,
+    additions?: ReadonlyArray<string>,
+  ) => void;
 }) {
   const collections = useQuery(knowledgeCollectionsQuery);
   const items = collections.data ?? [];
-  // The draft starts from the current selection each time the popup opens.
-  const [draft, setDraft] = useState<ReadonlyArray<string> | null>(null);
-  const draftIds = draft ?? selection.collectionIds;
+  // Keep user edits as deltas, not a copied effective union: a live agent
+  // refresh must not turn a removed dependency into a standalone selection.
+  const [draft, setDraft] = useState<{ added: string[]; removed: string[] } | null>(null);
+  const draftIds = [...new Set([...selection.collectionIds, ...(draft?.added ?? [])])].filter(
+    (id) => agentCollectionIds.has(id) || !draft?.removed.includes(id),
+  );
   const draftSet = new Set(draftIds);
   const selected = items.filter((collection) => draftSet.has(collection.id));
   const full = draftSet.size >= MAX_SELECTED_COLLECTIONS;
-  const changed = !sameIds(draftIds, selection.collectionIds);
+  const changed = (draft?.added.length ?? 0) > 0 || !sameIds(draftIds, selection.collectionIds);
   const close = () => {
     setDraft(null);
     onOpenChange(false);
@@ -236,9 +245,17 @@ export function CollectionPicker({
       }}
       items={items}
       value={selected}
-      onValueChange={(next: CollectionSummary[]) =>
-        setDraft(next.map((collection) => collection.id))
-      }
+      onValueChange={(next: CollectionSummary[]) => {
+        const ids = next.map((collection) => collection.id);
+        setDraft({
+          added: ids.filter(
+            (id) => !selection.collectionIds.includes(id) || draft?.added.includes(id),
+          ),
+          removed: selection.collectionIds.filter(
+            (id) => !ids.includes(id) && !agentCollectionIds.has(id),
+          ),
+        });
+      }}
       itemToStringLabel={(collection: CollectionSummary) => collection.name}
       isItemEqualToValue={(a: CollectionSummary, b: CollectionSummary) => a.id === b.id}
       filter={(collection: CollectionSummary, query: string) =>
@@ -290,7 +307,7 @@ export function CollectionPicker({
             size="sm"
             disabled={!changed}
             onClick={() => {
-              onCollectionsChange(draftIds);
+              onCollectionsChange(draftIds, draft?.added);
               close();
             }}
           >
@@ -351,7 +368,7 @@ export function contextChipItems(
 
 /**
  * Chips beside the file chips. Agent-attached collections leave with the
- * agent. A pinned agent (an existing conversation) is not a chip: the
+ * agent. An associated agent (an existing conversation) is not a chip: the
  * composer's agent bar names it, and nothing here can remove it.
  */
 export function ContextChips({
@@ -366,7 +383,10 @@ export function ContextChips({
   agentCollectionIds: ReadonlySet<string>;
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
-  onCollectionsChange: (collectionIds: ReadonlyArray<string>) => void;
+  onCollectionsChange: (
+    collectionIds: ReadonlyArray<string>,
+    additions?: ReadonlyArray<string>,
+  ) => void;
   disabled: boolean;
 }) {
   const collections = useQuery(knowledgeCollectionsQuery);
@@ -480,7 +500,7 @@ export function CollectionChip({ collectionId }: { collectionId: string }) {
 }
 
 /**
- * The pinned agent of an existing conversation, as a header row inside the
+ * The associated agent of an existing conversation, as a header row inside the
  * composer: an agent chat reads differently from a plain one, and the agent
  * cannot be swapped or removed once the chat exists.
  */

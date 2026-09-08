@@ -8,7 +8,7 @@ type ContextInput =
   | { mode: "draft"; agent: AgentIdentity | null }
   | { mode: "installed"; agent: (AgentIdentity & { collectionIds: ReadonlyArray<string> }) | null };
 
-/** Agent dependencies are pinned; standalone knowledge belongs to the next message. */
+/** Association is fixed; identity/dependencies refresh and standalone inputs stay local. */
 export function useContextSelection(initial: ContextInput) {
   const agentLocked = initial.mode === "installed";
   const [draftAgent, setDraftAgent] = useState(initial.agent);
@@ -42,12 +42,16 @@ export function useContextSelection(initial: ContextInput) {
       if (agentLocked) return;
       setDraftAgent(agentId ? { id: agentId, name: null } : null);
     },
-    onCollectionsChange: (next: ReadonlyArray<string>) => {
-      setStandalone(next.filter((id) => !agentCollectionIds.has(id)));
+    onCollectionsChange: (next: ReadonlyArray<string>, additions: ReadonlyArray<string> = []) => {
+      setStandalone(
+        next.filter(
+          (id) => !agentCollectionIds.has(id) || standalone.includes(id) || additions.includes(id),
+        ),
+      );
     },
     sendFields: {
       ...(!agentLocked && agent?.id ? { agentId: agent.id } : {}),
-      collectionIds: standalone.filter((id) => !agentCollectionIds.has(id)),
+      collectionIds: standalone,
     },
     settle: () => setStandalone([]),
   };

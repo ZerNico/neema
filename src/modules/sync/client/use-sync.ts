@@ -120,6 +120,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           queueKnowledge();
           break;
         case "resources.changed":
+          void queryClient.invalidateQueries({ queryKey: ["conversation"] });
           clearKnowledgeTimer();
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });

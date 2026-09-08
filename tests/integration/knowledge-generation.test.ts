@@ -132,6 +132,7 @@ type Services =
   | ChatService
   | StreamEngine
   | AgentService
+  | AgentRepo
   | KnowledgeRepo
   | KnowledgeIndexer
   | KnowledgeService
@@ -225,9 +226,37 @@ const toolCalls = async (messageId: string) =>
 const configRow = async (messageId: string) =>
   (
     await exec(
-      `select agent_id, snapshot, knowledge_mode, search_enabled, collection_ids, plan_enabled from message_generation_config where message_id = '${messageId}'`,
+      `select agent_id, resolved_agent, standalone_collection_ids, knowledge_mode, search_enabled, collection_ids, plan_enabled from message_generation_config where message_id = '${messageId}'`,
     )
   ).rows[0];
+
+const agentSettings = (collectionIds: string[] = [], revision = 1) => ({
+  name: `Agent ${revision}`,
+  description: "",
+  icon: "book" as const,
+  instructions: `Private instructions revision ${revision}.`,
+  modelId: null,
+  searchEnabled: false,
+  planEnabled: revision > 1,
+  starters: [],
+  collectionIds,
+});
+const makeAgent = (owner: string, collectionIds: string[] = []) =>
+  run(
+    Effect.flatMap(AgentService, (service) => service.create(owner, agentSettings(collectionIds))),
+  );
+const editAgent = (owner: string, agentId: string, collectionIds: string[] = [], revision = 2) =>
+  run(
+    Effect.flatMap(AgentService, (service) =>
+      service.update(owner, {
+        ...agentSettings(collectionIds, revision),
+        agentId,
+        expectedRevision: revision - 1,
+      }),
+    ),
+  );
+const retry = (userId: string, conversationId: string, messageId: string) =>
+  Effect.flatMap(ChatService, (chat) => chat.retryMessage({ userId, conversationId, messageId }));
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
@@ -433,7 +462,7 @@ describe("knowledge-backed generations", () => {
     });
   });
 
-  it("installs an agent snapshot, honors explicit search off, and freezes it across later edits", async () => {
+  it("resolves current agent configuration on later sends while honoring explicit search off", async () => {
     const owner = await createUser();
     const { collectionId } = await collectionWith(owner, [["Note", "Agent evidence here."]]);
     const agentId = await run(
@@ -462,7 +491,7 @@ describe("knowledge-backed generations", () => {
       search_enabled: false,
       collection_ids: [collectionId],
     });
-    expect(stored!.snapshot).toMatchObject({
+    expect(stored!.resolved_agent).toMatchObject({
       configRevision: 1,
       instructions: "Always answer in bullet points.",
     });
@@ -494,7 +523,7 @@ describe("knowledge-backed generations", () => {
     expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
     expect(await configRow(first.assistantMessageId)).toMatchObject({ search_enabled: false });
 
-    // Editing the agent cannot change this conversation's revision or dependencies.
+    // Editing the agent applies to the next attempt, not historical execution records.
     await run(
       Effect.flatMap(AgentService, (agents) =>
         agents.update(owner, {
@@ -522,11 +551,13 @@ describe("knowledge-backed generations", () => {
     expect(await configRow(second.assistantMessageId)).toMatchObject({
       collection_ids: [collectionId],
       knowledge_mode: "context",
-      snapshot: { configRevision: 1, collectionIds: [collectionId] },
+      resolved_agent: { configRevision: 2, collectionIds: [collectionId] },
     });
-    expect(promptText(requests.at(-1)!.prompt)).toContain("Always answer in bullet points.");
-    // The agent is pinned at the first message: a later swap, reselection or
-    // removal is refused before any row is written, so the revision never moves.
+    expect(promptText(requests.at(-1)!.prompt)).toContain("Always answer in prose.");
+    expect((await configRow(first.assistantMessageId))!.resolved_agent).toMatchObject({
+      configRevision: 1,
+    });
+    // Only the association is fixed: swap, reselection and removal are refused.
     for (const later of [agentId, null]) {
       expect(
         await run(
@@ -553,6 +584,476 @@ describe("knowledge-backed generations", () => {
         )
       ).rows[0],
     ).toEqual({ n: 4 });
+  });
+
+  it.each(["send", "retry", "edit", "edit-without-answer"] as const)(
+    "resolves current instructions and dependencies for %s, preserving standalone overlap and current versions",
+    async (action) => {
+      const owner = await createUser();
+      const old = await collectionWith(owner, [["Old", "Old dependency."]]);
+      const overlap = await collectionWith(owner, [["Overlap", "Old version."]]);
+      const added = await collectionWith(owner, [["New", "New dependency."]]);
+      const agentId = await makeAgent(owner, [old.collectionId, overlap.collectionId]);
+      const first = await send({ userId: owner, agentId, collectionIds: [overlap.collectionId] });
+      await settle(first.assistantMessageId);
+      const previous = await configRow(first.assistantMessageId);
+      expect(previous!.standalone_collection_ids).toEqual([overlap.collectionId]);
+      await editAgent(owner, agentId, [added.collectionId]);
+      const replacement = await run(
+        Effect.flatMap(KnowledgeService, (service) =>
+          service.replaceNote(owner, {
+            collectionId: overlap.collectionId,
+            documentId: overlap.documents[0]!.documentId,
+            title: "Overlap",
+            content: "Current replacement version.",
+          }),
+        ),
+      );
+      await drainIndexer();
+      let messageId = first.assistantMessageId;
+      if (action === "send") {
+        const next = await send({
+          userId: owner,
+          conversationId: first.conversationId,
+          collectionIds: [overlap.collectionId],
+        });
+        messageId = next.assistantMessageId;
+      } else if (action === "retry") await run(retry(owner, first.conversationId, messageId));
+      else {
+        const userMessage = (
+          await exec(
+            `select id from messages where conversation_id = '${first.conversationId}' and role = 'user'`,
+          )
+        ).rows[0]!;
+        if (action === "edit-without-answer")
+          await exec(`delete from messages where id = '${messageId}'`);
+        const edited = await run(
+          Effect.flatMap(ChatService, (chat) =>
+            chat.editMessage({
+              userId: owner,
+              conversationId: first.conversationId,
+              messageId: String(userMessage.id),
+              modelId: noToolModelId,
+              content: "Edited question",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+        messageId = edited.assistantMessageId;
+      }
+      expect(await settle(messageId)).toMatchObject({ status: "complete" });
+      const config = await configRow(messageId);
+      expect(config).toMatchObject({
+        resolved_agent: { configRevision: 2, instructions: "Private instructions revision 2." },
+        plan_enabled: true,
+        search_enabled: false,
+        collection_ids:
+          action === "edit-without-answer"
+            ? [added.collectionId]
+            : [added.collectionId, overlap.collectionId],
+        standalone_collection_ids: action === "edit-without-answer" ? [] : [overlap.collectionId],
+      });
+      const versions = (
+        await exec(
+          `select version_id from message_knowledge_versions where message_id = '${messageId}'`,
+        )
+      ).rows;
+      if (action !== "edit-without-answer")
+        expect(versions).toContainEqual({ version_id: replacement.versionId });
+      expect(versions).not.toContainEqual({ version_id: old.documents[0]!.versionId });
+      expect(promptText(requests.at(-1)!.prompt)).toContain("Private instructions revision 2.");
+      if (action === "send") expect(await configRow(first.assistantMessageId)).toEqual(previous);
+    },
+  );
+
+  it.each([1, 2, 3, 4])(
+    "captures one coherent revision when a send races an owner edit (race %s)",
+    async () => {
+      const owner = await createUser();
+      const before = await collectionWith(owner, [["Before", "Before."]]);
+      const after = await collectionWith(owner, [["After", "After."]]);
+      const agentId = await makeAgent(owner, [before.collectionId]);
+      const [sent] = await Promise.all([
+        send({ userId: owner, agentId }),
+        editAgent(owner, agentId, [after.collectionId]),
+      ]);
+      await settle(sent.assistantMessageId);
+      const config = await configRow(sent.assistantMessageId);
+      const revision = (config!.resolved_agent as { configRevision: number }).configRevision;
+      expect([1, 2]).toContain(revision);
+      expect(config).toMatchObject({
+        resolved_agent: {
+          configRevision: revision,
+          instructions: `Private instructions revision ${revision}.`,
+        },
+        collection_ids: [revision === 1 ? before.collectionId : after.collectionId],
+        plan_enabled: revision === 2,
+      });
+    },
+  );
+
+  it("keeps explicit model/search choices across agent default edits and retries", async () => {
+    const owner = await createUser();
+    const agentId = await makeAgent(owner);
+    const first = await send({
+      userId: owner,
+      agentId,
+      modelId: noToolModelId,
+      searchEnabled: true,
+    });
+    await settle(first.assistantMessageId);
+    await run(
+      Effect.flatMap(AgentService, (service) =>
+        service.update(owner, {
+          ...agentSettings([], 2),
+          agentId,
+          expectedRevision: 1,
+          modelId: researchModelId,
+          searchEnabled: false,
+        }),
+      ),
+    );
+    await run(retry(owner, first.conversationId, first.assistantMessageId));
+    await settle(first.assistantMessageId);
+    expect(await configRow(first.assistantMessageId)).toMatchObject({
+      search_enabled: true,
+      resolved_agent: { configRevision: 2 },
+    });
+    expect(
+      (await exec(`select model_id from messages where id = '${first.assistantMessageId}'`)).rows,
+    ).toEqual([{ model_id: noToolModelId }]);
+    const userMessage = (
+      await exec(
+        `select id from messages where conversation_id = '${first.conversationId}' and role = 'user'`,
+      )
+    ).rows[0]!;
+    await run(
+      Effect.flatMap(ChatService, (chat) =>
+        chat.editMessage({
+          userId: owner,
+          conversationId: first.conversationId,
+          messageId: String(userMessage.id),
+          modelId: smallModelId,
+          searchEnabled: false,
+          content: "Explicit edit",
+          attachmentIds: [],
+        }),
+      ),
+    );
+    await settle(first.assistantMessageId);
+    expect(await configRow(first.assistantMessageId)).toMatchObject({ search_enabled: false });
+    expect(
+      (await exec(`select model_id from messages where id = '${first.assistantMessageId}'`)).rows,
+    ).toEqual([{ model_id: smallModelId }]);
+  });
+
+  it("keeps a running attempt coherent while an edit changes the next attempt", async () => {
+    const owner = await createUser();
+    const firstCollection = await collectionWith(owner, [["Before", "Original evidence."]]);
+    const secondCollection = await collectionWith(owner, [["After", "Updated evidence."]]);
+    const agentId = await makeAgent(owner, [firstCollection.collectionId]);
+    hold = { reached: await run(Deferred.make<void>()), release: await run(Deferred.make<void>()) };
+    const first = await send({ userId: owner, agentId });
+    await run(Deferred.await(hold.reached));
+    await editAgent(owner, agentId, [secondCollection.collectionId]);
+    expect(await configRow(first.assistantMessageId)).toMatchObject({
+      resolved_agent: { configRevision: 1, collectionIds: [firstCollection.collectionId] },
+    });
+    await run(Deferred.succeed(hold.release, undefined));
+    hold = null;
+    expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(promptText(requests[0]!.prompt)).toContain("Private instructions revision 1.");
+    const next = await send({ userId: owner, conversationId: first.conversationId });
+    await settle(next.assistantMessageId);
+    expect(await configRow(next.assistantMessageId)).toMatchObject({
+      resolved_agent: { configRevision: 2, collectionIds: [secondCollection.collectionId] },
+    });
+  });
+
+  it.each(
+    (["delete", "unshare", "dependency"] as const).flatMap((change) =>
+      (["chat", "research"] as const).map((generationMode) => ({ change, generationMode })),
+    ),
+  )(
+    "fails closed on $change before a $generationMode answer, attachments, descendants or run state can be destroyed",
+    async ({ change, generationMode }) => {
+      const owner = await createUser();
+      const recipient = await createUser();
+      const agentId = await makeAgent(owner);
+      await exec(
+        `insert into agent_user_grants (agent_id,user_id) values ('${agentId}','${recipient}')`,
+      );
+      if (generationMode === "research")
+        script = (input) =>
+          tool(input, "ask_user", {
+            questions: [{ question: "Focus?", options: [], multiSelect: false }],
+          });
+      const first = await send({
+        userId: recipient,
+        agentId,
+        generationMode,
+        modelId: researchModelId,
+      });
+      await settle(first.assistantMessageId);
+      const later = await send({ userId: recipient, conversationId: first.conversationId });
+      await settle(later.assistantMessageId);
+      if (change === "delete")
+        await run(Effect.flatMap(AgentRepo, (repo) => repo.remove(owner, agentId)));
+      else if (change === "unshare")
+        await exec(`delete from agent_user_grants where agent_id = '${agentId}'`);
+      else {
+        const hidden = await collectionWith(owner, [["Hidden", "Private dependency."]]);
+        await editAgent(owner, agentId, [hidden.collectionId]);
+      }
+      const before = (
+        await exec(
+          `select * from messages where conversation_id = '${first.conversationId}' order by id`,
+        )
+      ).rows;
+      const blobId = uuidv7();
+      const attachmentId = uuidv7();
+      blobs.set(blobId, new Uint8Array([1, 2, 3]));
+      await exec(
+        `insert into attachment_blobs (id,user_id,sha256,storage_key,size,media_type) values ('${blobId}','${recipient}','${blobId}','${blobId}',3,'image/png')`,
+      );
+      await exec(
+        `insert into attachments (id,user_id,blob_id,file_name) values ('${attachmentId}','${recipient}','${blobId}','answer.png')`,
+      );
+      await exec(
+        `insert into message_attachments (message_id,attachment_id,position) values ('${first.assistantMessageId}','${attachmentId}',0)`,
+      );
+      const readRuns = async () =>
+        (
+          await exec(
+            `select * from research_runs where conversation_id = '${first.conversationId}' order by id`,
+          )
+        ).rows;
+      const runs = await readRuns();
+      const config = await configRow(first.assistantMessageId);
+      const userMessage = before.find((message) => message.role === "user")!;
+      const expected = {
+        _tag: change === "dependency" ? "KnowledgeNotAvailable" : "AgentNotAvailable",
+      };
+      expect(
+        await run(Effect.flip(retry(recipient, first.conversationId, first.assistantMessageId))),
+      ).toMatchObject(expected);
+      expect(
+        await run(
+          Effect.flip(
+            Effect.flatMap(ChatService, (chat) =>
+              chat.editMessage({
+                userId: recipient,
+                conversationId: first.conversationId,
+                messageId: String(userMessage.id),
+                modelId: researchModelId,
+                content: "Should not replace",
+                searchEnabled: false,
+                attachmentIds: [],
+              }),
+            ),
+          ),
+        ),
+      ).toMatchObject(expected);
+      expect(
+        await run(
+          Effect.flip(
+            Effect.flatMap(ChatService, (chat) =>
+              chat.sendMessage({
+                userId: recipient,
+                conversationId: first.conversationId,
+                modelId: smallModelId,
+                content: "Should not append",
+                searchEnabled: false,
+                attachmentIds: [],
+              }),
+            ),
+          ),
+        ),
+      ).toMatchObject(expected);
+      expect(
+        (
+          await exec(
+            `select * from messages where conversation_id = '${first.conversationId}' order by id`,
+          )
+        ).rows,
+      ).toEqual(before);
+      expect(await readRuns()).toEqual(runs);
+      expect(await configRow(first.assistantMessageId)).toEqual(config);
+      expect(
+        (
+          await exec(
+            `select attachment_id from message_attachments where message_id = '${first.assistantMessageId}'`,
+          )
+        ).rows,
+      ).toEqual([{ attachment_id: attachmentId }]);
+      expect(blobs.get(blobId)).toEqual(new Uint8Array([1, 2, 3]));
+      if (change === "delete")
+        expect(
+          (
+            await exec(
+              `select agent_id from conversation_agents where conversation_id = '${first.conversationId}'`,
+            )
+          ).rows,
+        ).toEqual([{ agent_id: null }]);
+    },
+  );
+
+  it.each(["retry", "edit"] as const)(
+    "refreshes research %s configuration with a fresh run and generation fence",
+    async (action) => {
+      const owner = await createUser();
+      const agentId = await makeAgent(owner);
+      script = (input) =>
+        tool(input, "ask_user", {
+          questions: [{ question: "Focus?", options: [], multiSelect: false }],
+        });
+      const first = await send({
+        userId: owner,
+        agentId,
+        modelId: researchModelId,
+        generationMode: "research",
+      });
+      await settle(first.assistantMessageId);
+      const fence = async () =>
+        (
+          await exec(
+            `select research_run_id, generation_id from messages where id = '${first.assistantMessageId}'`,
+          )
+        ).rows[0]!;
+      const original = await fence();
+      await editAgent(owner, agentId);
+      if (action === "retry")
+        await run(retry(owner, first.conversationId, first.assistantMessageId));
+      else {
+        const question = (
+          await exec(
+            `select id from messages where conversation_id = '${first.conversationId}' and role = 'user'`,
+          )
+        ).rows[0]!;
+        await run(
+          Effect.flatMap(ChatService, (chat) =>
+            chat.editMessage({
+              userId: owner,
+              conversationId: first.conversationId,
+              messageId: String(question.id),
+              modelId: researchModelId,
+              content: "Edited research",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+      }
+      expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+      expect(await configRow(first.assistantMessageId)).toMatchObject({
+        resolved_agent: { configRevision: 2 },
+      });
+      const current = await fence();
+      expect(current.research_run_id).not.toBe(original.research_run_id);
+      expect(current.generation_id).not.toBe(original.generation_id);
+    },
+  );
+
+  it.each(["chat", "research"] as const)(
+    "resolves live configuration for a validated %s continuation",
+    async (generationMode) => {
+      const owner = await createUser();
+      const old = await collectionWith(owner, [["Old", "Old evidence."]]);
+      const current = await collectionWith(owner, [["Current", "Current evidence."]]);
+      const agentId = await makeAgent(owner, [old.collectionId]);
+      script = (input) =>
+        tool(input, "ask_user", {
+          questions: [{ question: "Which focus?", options: [], multiSelect: false }],
+        });
+      const first = await send({
+        userId: owner,
+        agentId,
+        generationMode,
+        modelId: researchModelId,
+      });
+      expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
+      const calls = await toolCalls(first.assistantMessageId);
+      const call = calls.find((candidate) => candidate.tool_name === "ask_user")!;
+      expect(call).toBeDefined();
+      await editAgent(owner, agentId, [current.collectionId]);
+      script = () => Stream.make(text("continued"), finish());
+      const next = await run(
+        Effect.flatMap(ChatService, (chat) =>
+          chat.sendMessage({
+            userId: owner,
+            conversationId: first.conversationId,
+            modelId: researchModelId,
+            searchEnabled: false,
+            attachmentIds: [],
+            questionResponse: { callId: String(call.id), response: { kind: "skip" } },
+          }),
+        ),
+      );
+      await settle(next.assistantMessageId);
+      expect(await configRow(next.assistantMessageId)).toMatchObject({
+        resolved_agent: { configRevision: 2 },
+        collection_ids: [current.collectionId],
+        standalone_collection_ids: [],
+      });
+      expect(
+        (await exec(`select generation_mode from messages where id = '${next.assistantMessageId}'`))
+          .rows,
+      ).toEqual([{ generation_mode: generationMode }]);
+    },
+  );
+
+  it("branches historical records but resolves future attempts live, including deletion tombstones", async () => {
+    const owner = await createUser();
+    const agentId = await makeAgent(owner);
+    const first = await send({ userId: owner, agentId });
+    await settle(first.assistantMessageId);
+    await editAgent(owner, agentId);
+    const branch = await run(
+      Effect.flatMap(ChatService, (chat) =>
+        chat.branchConversation({
+          userId: owner,
+          conversationId: first.conversationId,
+          messageId: first.assistantMessageId,
+        }),
+      ),
+    );
+    const cloned = (
+      await exec(
+        `select id from messages where conversation_id = '${branch.conversationId}' and role = 'assistant'`,
+      )
+    ).rows[0]!;
+    expect(await configRow(String(cloned.id))).toEqual(await configRow(first.assistantMessageId));
+    const next = await send({ userId: owner, conversationId: branch.conversationId });
+    await settle(next.assistantMessageId);
+    expect(await configRow(next.assistantMessageId)).toMatchObject({
+      resolved_agent: { configRevision: 2 },
+    });
+    await run(Effect.flatMap(AgentRepo, (repo) => repo.remove(owner, agentId)));
+    const tombstone = await run(
+      Effect.flatMap(ChatService, (chat) =>
+        chat.branchConversation({
+          userId: owner,
+          conversationId: first.conversationId,
+          messageId: first.assistantMessageId,
+        }),
+      ),
+    );
+    expect(
+      (
+        await exec(
+          `select agent_id from conversation_agents where conversation_id = '${tombstone.conversationId}'`,
+        )
+      ).rows,
+    ).toEqual([{ agent_id: null }]);
+    const tombstoneAnswer = (
+      await exec(
+        `select id from messages where conversation_id = '${tombstone.conversationId}' and role = 'assistant'`,
+      )
+    ).rows[0]!;
+    expect(
+      await run(Effect.flip(retry(owner, tombstone.conversationId, String(tombstoneAnswer.id)))),
+    ).toMatchObject({ _tag: "AgentNotAvailable" });
   });
 
   it.each(["none", "read_url", "web_search"] as const)(

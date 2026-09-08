@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ChatRepo } from "./repo.ts";
 
 /**
@@ -77,6 +78,10 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
       },
       { concurrency: "unbounded" },
     );
+  const agentRepo = yield* AgentRepo;
+  const liveAgent = defaults.agent?.agentId
+    ? yield* agentRepo.get(userId, defaults.agent.agentId)
+    : null;
   return {
     conversation,
     messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
@@ -88,9 +93,10 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     agent: defaults.agent
       ? {
           id: defaults.agent.agentId,
-          name: defaults.agent.snapshot.name,
-          icon: defaults.agent.snapshot.icon,
-          collectionIds: defaults.agent.snapshot.collectionIds,
+          name: liveAgent?.row.name ?? null,
+          icon: liveAgent?.row.icon ?? "robot",
+          collectionIds: liveAgent?.collectionIds ?? [],
+          available: liveAgent !== null,
         }
       : null,
     generations,

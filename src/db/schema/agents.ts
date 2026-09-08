@@ -39,7 +39,7 @@ export const agents = pgTable(
     audience: text({ enum: ["private", "instance"] })
       .notNull()
       .default("private"),
-    /** Bumped on edits; existing conversations keep their installed revision. */
+    /** Optimistic save concurrency and execution provenance. */
     configRevision: integer("config_revision").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -99,8 +99,8 @@ export const agentGroupGrants = pgTable(
   ],
 );
 
-/** What the agent contributed, frozen at selection time. */
-export type AgentConfigSnapshot = {
+/** Private agent contribution captured once for an execution attempt. */
+export type ResolvedAgentConfig = {
   agentId: string;
   configRevision: number;
   name: string;
@@ -111,28 +111,31 @@ export type AgentConfigSnapshot = {
   planEnabled: boolean;
 };
 
-// Conversation defaults: which agent is installed and what it contributed.
-// Absent for an ordinary chat, which behaves exactly as before.
+// Fixed live association. No row means plain chat; a null FK is a deletion
+// tombstone that blocks new attempts without hiding historical messages.
 export const conversationAgents = pgTable("conversation_agents", {
   conversationId: text("conversation_id")
     .primaryKey()
     .references(() => conversations.id, { onDelete: "cascade" }),
   agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
-  snapshot: jsonb().$type<AgentConfigSnapshot>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**
- * The effective configuration one assistant generation ran with. Retry reuses
- * this row rather than re-resolving, so a reply cannot change character because
- * the agent was edited in between; branching copies it.
+ * Private execution record for one attempt, never a source of future agent
+ * settings. Retries replace it atomically; branches copy historical records.
  */
 export const messageGenerationConfig = pgTable("message_generation_config", {
   messageId: text("message_id")
     .primaryKey()
     .references(() => messages.id, { onDelete: "cascade" }),
   agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
-  snapshot: jsonb().$type<AgentConfigSnapshot>(),
+  resolvedAgent: jsonb("resolved_agent").$type<ResolvedAgentConfig>(),
+  /** Original standalone inputs, including overlaps with agent dependencies. */
+  standaloneCollectionIds: jsonb("standalone_collection_ids")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   /** How this generation was allowed to reach its knowledge. */
   knowledgeMode: text("knowledge_mode", { enum: ["none", "context", "retrieval"] })
     .notNull()
@@ -142,11 +145,11 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    * The effective settings this generation ran with, not the agent's
    * preferences: an agent that asks for search cannot enable it for a model or
    * an instance that does not allow it, and the composer can override either
-   * way. Retry reuses what actually ran.
+   * way. A retry preserves the explicit choice, not new agent defaults.
    */
   searchEnabled: boolean("search_enabled").notNull().default(false),
   /**
-   * The collections that were selected, in order. Kept beside the resolved
+   * The effective union of agent dependencies and standalone inputs, in order. Kept beside the resolved
    * document manifest because an empty or fully-pending collection resolves to
    * no version rows at all, and "nothing selected" must not be confused with
    * "a selection that happens to be empty" — authorization checks the

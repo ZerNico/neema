@@ -56,12 +56,6 @@ export function AppSidebar({
         </Link>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
-              <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
-              Chats
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
             <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
               <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
               Agents
@@ -73,9 +67,17 @@ export function AppSidebar({
               Knowledge
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
+              <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
+              Chats
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      {/* Match the chat scroller's soft edge; padding keeps the first and last
+          items outside the fade when the list is scrolled to either end. */}
+      <SidebarContent className="py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
         {/* The route loader prefetches the first page, so this only shows on
             a cold cache (e.g. right after sign-out emptied it). */}
         <Suspense fallback={<ConversationListSkeleton />}>

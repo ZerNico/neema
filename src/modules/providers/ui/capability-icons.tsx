@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ModelCapabilities } from "../model-config.ts";
 import { cn } from "~/ui/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 
 export type Capabilities = ModelCapabilities;
 
@@ -60,9 +61,12 @@ export function CapabilityIcons({
               }
             : meta;
         return (
-          <span key={c.key} role="img" title={c.label} aria-label={c.label}>
-            <HugeiconsIcon icon={c.icon} strokeWidth={2} className="size-3.5" />
-          </span>
+          <Tooltip key={c.key}>
+            <TooltipTrigger render={<span role="img" aria-label={c.label} />} tabIndex={-1}>
+              <HugeiconsIcon icon={c.icon} strokeWidth={2} className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>{c.label}</TooltipContent>
+          </Tooltip>
         );
       })}
     </span>

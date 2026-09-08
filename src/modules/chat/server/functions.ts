@@ -124,6 +124,8 @@ export const answerQuestion = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AgentNotAvailable: () =>
+            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
           KnowledgeNotAvailable: () =>
             Effect.die(
               new Response("Knowledge this answer used is no longer available", { status: 409 }),
@@ -174,6 +176,9 @@ export const retryMessage = createServerFn({ method: "POST" })
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
           AttachmentUnsupported: (e) =>
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          AgentNotAvailable: () =>
+            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           KnowledgeNotAvailable: () =>
             Effect.die(
               new Response("Knowledge this answer used is no longer available", { status: 409 }),
@@ -237,6 +242,8 @@ export const editMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AgentNotAvailable: () =>
+            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
           KnowledgeNotAvailable: () =>
             Effect.die(
               new Response("Knowledge this answer used is no longer available", { status: 409 }),

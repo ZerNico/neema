@@ -168,7 +168,9 @@ function AgentForm({
             data: { agentId: agent.id, expectedRevision: agent.configRevision, ...settings },
           });
           await onSaved(agent.id);
-          toast.success("Agent saved. Changes apply to new chats.");
+          toast.success(
+            "Agent saved. Changes apply to future responses, including in existing chats.",
+          );
         } else {
           const id = await createAgent({ data: settings });
           await onSaved(id);
@@ -615,7 +617,9 @@ function AgentForm({
           <div className="flex flex-wrap items-center gap-3">
             <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
             {agent ? (
-              <span className="text-muted-foreground text-xs">Changes apply to new chats</span>
+              <span className="text-muted-foreground text-xs">
+                Changes apply to future responses, including in existing chats.
+              </span>
             ) : null}
           </div>
         </form.AppForm>

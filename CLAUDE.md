@@ -198,30 +198,35 @@ See README.md for architecture; this file records the sharp edges.
 
 ## Agents and knowledge
 
-- An agent is a saved chat configuration, never a permission. It is chosen on the new-chat
-  screen only: the first message installs its current revision into `conversation_agents`
-  (the turn transaction re-reads it so the stored snapshot matches the write), and from then
-  on the conversation is an agent chat. `sendMessage` refuses `agentId` for an existing
-  conversation (`InvalidMessage`), so there is no swap, reselect or removal and the revision
-  never moves. The composer shows the pinned agent as a header bar (`AgentBar`) instead of a
-  removable chip, and the new-chat screen replaces the greeting with the agent's identity.
-  The "+" menu's Agent and Knowledge rows open searchable Base UI combobox popups
-  (`AgentPicker`, `CollectionPicker`) anchored to the "+" button, not submenus, so a long
-  list scales. The row queues the popup and the menu's `onOpenChangeComplete` opens it, so
-  the closing menu never steals the popup's focus. Knowledge ticks are a draft committed by
-  its Add button; Escape or an outside click discards them. Each assistant row records what it actually ran with in
-  `message_generation_config` + `message_knowledge_versions` (`src/modules/chat/server/
-effective-config.ts`, resolved inside `createTurn`/`createAssistantForEdit`). Retry and edit
-  reuse that row and re-authorize the manifest; validated structured continuations inherit
-  it and branches copy it verbatim. Every assistant must have a saved config; there is no
-  inference for missing rows. The installed snapshot carries its dependency collection IDs,
-  unioned with request-local selections even when the next request sends `collectionIds: []`.
-- The agent editor is owner-only; a recipient never sees a detail page, only Start chat on the
-  list. Rendering a read-only view would turn the page into a way to read instructions the owner
-  did not choose to display. New-chat selection uses `getAgentSelection`, a separate safe
-  projection without instructions. Installed chats use their pinned identity/dependencies
-  and never fetch the live agent. Preferred models apply once per draft selection, never
-  over a later explicit model choice.
+- An agent is a saved chat configuration, never a permission. The first message installs a
+  fixed association in `conversation_agents`, not a configuration snapshot. There is no
+  swap, reselect or removal in an existing conversation. No association row means plain
+  chat; a null agent FK is a deletion tombstone. Deleted or inaccessible agents block new
+  attempts with `AgentNotAvailable`, while history stays readable.
+- Every new agent attempt (send, retry, edit, validated structured answer and research
+  continuation, including in branches) resolves the current revision and dependencies
+  through ACL-aware `AgentRepo.get` inside the attempt transaction. Its share lock captures
+  coherent instructions/dependencies against edits. Resolve before destructive resets;
+  failure must preserve answers, attachments, descendants and research state. An active
+  attempt consumes only its captured private execution record, never live settings.
+- `message_generation_config` stores private `resolvedAgent` provenance and separate original
+  `standaloneCollectionIds`, including overlaps with agent dependencies. Future attempts use
+  those inputs, not previous effective dependencies or instructions, and resolve current
+  document versions. Plain-chat retry manifests retain their existing semantics. Branches
+  copy association/tombstones and historical records, not future configuration defaults.
+  Every assistant has a saved config; there is no missing-row inference or snapshot fallback.
+  Model/search preferences are selection defaults, never overrides of explicit user choices.
+  `configRevision` remains optimistic editor concurrency and execution provenance.
+- The composer keeps the fixed agent header (`AgentBar`) but refreshes safe live identity and
+  dependencies from conversation detail on resource changes, preserving standalone drafts
+  and model/search choices. The editor stays owner-only; recipient projections never expose
+  instructions or private execution records. Agent access never grants dependency access.
+  Preferred models/search apply once per draft selection, not again on an agent refresh.
+- The "+" menu's Agent and Knowledge rows open searchable Base UI combobox popups
+  (`AgentPicker`, `CollectionPicker`) anchored to the "+" button. The row queues the popup
+  until the menu's `onOpenChangeComplete` so closing focus never steals it. Knowledge ticks
+  commit only on Add; Escape/outside clicks discard them. The new-chat screen shows the
+  selected agent's identity instead of the greeting.
 - OpenRouter's default `GET /models` is text-generation only: embedding models are **absent**
   from it and appear only under `?output_modalities=embeddings`, with
   `output_modalities: ["embeddings"]` and no `text`. `fetchCatalog` fetches both views for
@@ -246,7 +251,7 @@ effective-config.ts`, resolved inside `createTurn`/`createAssistantForEdit`). Re
   any selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
   Agent instructions enter the prompt as a user-role block after the application policies.
 - Collections are selected **per message**, like attached files: the composer sends the
-  current standalone list with every message and clears it on submit, while the pinned
+  current standalone list with every message and clears it on submit, while the associated
   agent (and its own attached collections) stays for the conversation. The server still
   stores what each generation ran with, so retry/edit never depend on composer state. In the
   transcript a collection shows on the **question** that added it, by name only, beside that
@@ -465,13 +470,13 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   Mode changes only `researchEnabled`; normal chat's independent web-search preference
   stays intact while its toggle is hidden in research. Opening a conversation or the
   new-chat screen focuses the composer, except on a phone (`useIsMobile`), where it would
-  raise the keyboard over what the user came to read. Model picker details are opt-in;
+  raise the keyboard over what the user came to read. Model pickers keep compact rows without a details toggle;
   native tool metadata stays admin-only, never a user suitability distinction.
 - Agent creation leads with name, instructions and Knowledge, then shows every remaining
   setting on the same page — no More settings disclosure. Invalid fields receive focus on
   submit. Collections are attached through a searchable picker with removable rows, not a
   switch per collection, so the control does not grow with the account.
-  Editing shows “Changes apply to new chats” beside Save; installed snapshots never change.
+  Editing shows “Changes apply to future responses, including in existing chats.” beside Save.
 - Resource owners manage **Access** through `sharing/ui/access-dialog.tsx`, not link copying.
   One panel: a searchable picker (groups first, then a directory of accounts fetched on
   open and on each debounced query — never preloaded), the list of who can use it, then

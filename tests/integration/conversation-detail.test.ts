@@ -8,12 +8,13 @@ import { uuidv7 } from "uuidv7";
 import { conversations, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
-type Services = ChatRepo | AttachmentRepo | Db;
+type Services = ChatRepo | AttachmentRepo | AgentRepo | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** conversations.model_id / messages.model_id are real FKs. */
 let modelId: string;
@@ -33,7 +34,10 @@ beforeAll(async () => {
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
   runtime = ManagedRuntime.make(
-    ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer)),
+    Layer.mergeAll(
+      ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer)),
+      AgentRepo.layer,
+    ).pipe(Layer.provideMerge(InfraLayer)),
   );
 
   modelId = uuidv7();
@@ -207,6 +211,65 @@ describe("loadConversationDetail", () => {
           }),
         );
         expect(batches).toBe(1);
+      }),
+    );
+  });
+
+  it("projects live safe agent metadata and unavailable tombstones without exposing private execution records", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const ownerId = yield* makeUser();
+        const thread = yield* seedThread(userId, "Agent chat");
+        const db = yield* Db;
+        const agentId = uuidv7();
+        yield* db.execute(
+          `insert into agents (id,user_id,name,instructions) values ('${agentId}','${ownerId}','Original','SECRET INSTRUCTIONS')` as never,
+        );
+        yield* db.execute(
+          `insert into agent_user_grants (agent_id,user_id) values ('${agentId}','${userId}')` as never,
+        );
+        yield* db.execute(
+          `insert into conversation_agents (conversation_id,agent_id) values ('${thread.conversationId}','${agentId}')` as never,
+        );
+        const first = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(first.agent).toMatchObject({ id: agentId, name: "Original", available: true });
+        yield* db.execute(
+          `update agents set name = 'Renamed', icon = 'code', instructions = 'NEW SECRET', config_revision = 2 where id = '${agentId}'` as never,
+        );
+        yield* db.execute(
+          `insert into agent_collections (agent_id,collection_id,position) values ('${agentId}','unavailable-dependency',0)` as never,
+        );
+        const renamed = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(renamed.agent).toEqual({
+          id: agentId,
+          name: "Renamed",
+          icon: "code",
+          collectionIds: ["unavailable-dependency"],
+          available: true,
+        });
+        expect(JSON.stringify(renamed)).not.toContain("SECRET");
+        expect(JSON.stringify(renamed)).not.toContain("resolvedAgent");
+        yield* db.execute(`delete from agent_user_grants where agent_id = '${agentId}'` as never);
+        const revoked = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(revoked.agent).toEqual({
+          id: agentId,
+          name: null,
+          icon: "robot",
+          collectionIds: [],
+          available: false,
+        });
+        expect(revoked.messages).toEqual(first.messages);
+        yield* db.execute(`delete from agents where id = '${agentId}'` as never);
+        const deleted = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(deleted.agent).toEqual({
+          id: null,
+          name: null,
+          icon: "robot",
+          collectionIds: [],
+          available: false,
+        });
+        expect(deleted.messages).toEqual(first.messages);
       }),
     );
   });

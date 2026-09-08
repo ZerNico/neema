@@ -53,7 +53,14 @@ const FakeKnowledge = Layer.mergeAll(
 
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
-  ChatRepo | ChatService | StreamEngine | SyncBus | Db | AttachmentRepo | AttachmentService,
+  | AgentRepo
+  | ChatRepo
+  | ChatService
+  | StreamEngine
+  | SyncBus
+  | Db
+  | AttachmentRepo
+  | AttachmentService,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */

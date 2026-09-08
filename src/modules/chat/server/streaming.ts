@@ -774,11 +774,11 @@ export class StreamEngine extends Context.Service<
               : []),
             // Agent instructions are user-level configuration: they shape the
             // answer but cannot override application policy above them.
-            ...(config.snapshot?.instructions.trim()
+            ...(config.resolvedAgent?.instructions.trim()
               ? [
                   {
                     role: "user" as const,
-                    content: `<agent-instructions name=${JSON.stringify(config.snapshot.name)}>\n${config.snapshot.instructions}\n</agent-instructions>`,
+                    content: `<agent-instructions name=${JSON.stringify(config.resolvedAgent.name)}>\n${config.resolvedAgent.instructions}\n</agent-instructions>`,
                   },
                 ]
               : []),

@@ -154,17 +154,22 @@ const setup = (
     ["knowledge", "collections"],
     [collection("collection-1", "Contracts"), collection("collection-2", "Policies")],
   );
-  return render(
+  const tree = (contextInput: Parameters<typeof useContextSelection>[0]) => (
     <QueryClientProvider client={client}>
       <AppMotionProvider>
-        <Harness initial={initial} />
+        <Harness initial={contextInput} />
       </AppMotionProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(tree(initial));
+  return {
+    ...view,
+    updateInitial: (next: Parameters<typeof useContextSelection>[0]) => view.rerender(tree(next)),
+  };
 };
 
 describe("composer context selection", () => {
-  it("keeps the installed agent pinned and sends no standalone agent selection", () => {
+  it("keeps the association fixed and sends no standalone agent selection", () => {
     setup({
       mode: "installed",
       agent: { id: AGENT.id, name: "Reviewer", collectionIds: ["collection-1"] },
@@ -179,14 +184,39 @@ describe("composer context selection", () => {
     expect(latest.selection.collectionIds).toEqual(["collection-1"]);
   });
 
-  it("keeps the installed name and icon instead of the live agent identity", () => {
-    setup({
+  it("refreshes live identity and dependencies without dropping overlapping standalone selections", () => {
+    const view = setup({
       mode: "installed",
-      agent: { id: AGENT.id, name: "Pinned name", icon: "code", collectionIds: [] },
+      agent: { id: AGENT.id, name: "Before", icon: "code", collectionIds: ["collection-1"] },
     });
-    expect(latest.selection.agent).toEqual({ id: AGENT.id, name: "Pinned name", icon: "code" });
-    expect(screen.getByRole("status", { name: "Agent: Pinned name" })).toBeInTheDocument();
-    expect(screen.queryByText(AGENT.name)).toBeNull();
+    act(() => latest.onCollectionsChange(["collection-1", "collection-2"]));
+    expect(latest.sendFields.collectionIds).toEqual(["collection-2"]);
+    view.updateInitial({
+      mode: "installed",
+      agent: { id: AGENT.id, name: "After", icon: "book", collectionIds: ["collection-2"] },
+    });
+    expect(latest.selection.agent).toEqual({ id: AGENT.id, name: "After", icon: "book" });
+    expect(screen.getByRole("status", { name: "Agent: After" })).toBeInTheDocument();
+    expect(latest.selection.collectionIds).toEqual(["collection-2"]);
+    expect(latest.sendFields.collectionIds).toEqual(["collection-2"]);
+    act(() => latest.onCollectionsChange(["collection-2"]));
+    expect(latest.sendFields.collectionIds).toEqual(["collection-2"]);
+    view.updateInitial({
+      mode: "installed",
+      agent: { id: AGENT.id, name: "After", icon: "book", collectionIds: [] },
+    });
+    expect(latest.selection.collectionIds).toEqual(["collection-2"]);
+    act(() => latest.onAgentChange(null));
+    expect(latest.selection.agent?.id).toBe(AGENT.id);
+  });
+
+  it("preserves a standalone choice when a draft agent adds the same dependency", () => {
+    setup({ mode: "draft", agent: null });
+    act(() => latest.onCollectionsChange(["collection-1"]));
+    act(() => latest.onAgentChange(AGENT.id));
+    expect(latest.sendFields).toEqual({ agentId: AGENT.id, collectionIds: ["collection-1"] });
+    act(() => latest.onAgentChange(null));
+    expect(latest.selection.collectionIds).toEqual(["collection-1"]);
   });
 
   it("removes a draft agent and its attached collections before chat creation", () => {
@@ -224,6 +254,32 @@ describe("composer context selection", () => {
     expect(latest.sendFields).toEqual({ collectionIds: [] });
     expect(latest.selection.agent).toMatchObject({ id: AGENT.id });
     expect(latest.selection.collectionIds).toEqual(["collection-1"]);
+  });
+
+  it("preserves popup ticks through a live dependency refresh without adopting removed dependencies", async () => {
+    const view = setup({
+      mode: "installed",
+      agent: { id: AGENT.id, name: "Reviewer", collectionIds: ["collection-1"] },
+    });
+    await openPicker(/Knowledge/, "Search collections…");
+    fireEvent.click(screen.getByRole("option", { name: /Policies/ }));
+    view.updateInitial({
+      mode: "installed",
+      agent: { id: AGENT.id, name: "Renamed", collectionIds: ["collection-2"] },
+    });
+    expect(screen.getByRole("option", { name: /Contracts/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    // The effective union now matches, but this tick is still a standalone
+    // request and must be committed even though it also became a dependency.
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(latest.sendFields.collectionIds).toEqual(["collection-2"]);
+    view.updateInitial({
+      mode: "installed",
+      agent: { id: AGENT.id, name: "Renamed", collectionIds: [] },
+    });
+    expect(latest.selection.collectionIds).toEqual(["collection-2"]);
   });
 
   it("drops a standalone collection from its chip", async () => {
@@ -272,7 +328,7 @@ describe("composer context selection", () => {
     );
   });
 
-  it("pins the agent of an existing conversation but still takes extra knowledge per message", async () => {
+  it("locks the association of an existing conversation but still takes extra knowledge per message", async () => {
     setup(
       {
         mode: "installed",

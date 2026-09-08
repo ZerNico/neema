@@ -1,6 +1,5 @@
-import { Button } from "~/ui/primitives/button";
 import { useMemo, useState } from "react";
-import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
+import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
 import type { Capabilities } from "~/modules/providers/ui/capability-icons.tsx";
 import type { ReactNode } from "react";
 import {
@@ -96,7 +95,6 @@ export function ModelPicker({
   // Controlled only so the header's actions can close the popup; model
   // selection still closes it through the primitive's own change event.
   const [open, setOpen] = useState(false);
-  const [details, setDetails] = useState(false);
 
   return (
     <Combobox
@@ -130,26 +128,13 @@ export function ModelPicker({
                 {(model: PickableModel) => (
                   <ComboboxItem key={model.id} value={model}>
                     <span className="min-w-0 flex-1 truncate">{model.displayName}</span>
-                    <CapabilityIcons
-                      capabilities={model.capabilities}
-                      audience="user"
-                      details={details}
-                    />
-                    {details ? <ContextBadge contextLength={model.contextLength} /> : null}
+                    <CapabilityIcons capabilities={model.capabilities} audience="user" />
                   </ComboboxItem>
                 )}
               </ComboboxCollection>
             </ComboboxGroup>
           )}
         </ComboboxList>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-pressed={details}
-          onClick={() => setDetails(!details)}
-        >
-          Show model details
-        </Button>
       </ComboboxContent>
     </Combobox>
   );
