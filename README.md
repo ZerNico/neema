@@ -68,6 +68,12 @@ PubSub, and fanned out per user over `GET /api/sync` SSE. The client applies the
 TanStack Query invalidations, so the sidebar and open chats stay in sync across tabs,
 browsers, and instances.
 
+## Working on it
+
+`AGENTS.md` is the entry point for anyone (or any agent) changing the code: glossary,
+the ways to hurt yourself, what to check before finishing, and how to verify.
+`docs/internals/` holds the decisions and traps per area; `AGENTS.md` links them.
+
 ## Commands
 
 ```sh

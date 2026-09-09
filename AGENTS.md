@@ -1,0 +1,276 @@
+# AGENTS.md
+
+A self-hosted chat app for talking to LLMs: conversations, resumable streaming, web
+search, deep research, knowledge collections, saved agents, skills and memory. Single
+tenant, one Node process, Postgres. Stack: TanStack Start, React 19, Effect 4 (rc),
+Drizzle 1 (rc), Better Auth, Base UI/shadcn, Vitest. `README.md` has the layout and
+the commands; this file has what you need before you touch anything.
+
+## Glossary
+
+Several ordinary words mean something specific here. Get these wrong and you will
+edit the wrong thing.
+
+- **agent**: a saved chat configuration (instructions, model, collections, skills) a
+  user picks for a conversation. Never a permission, never the coding agent editing
+  this repo. Installed once per conversation in `conversation_agents`; no swap.
+- **message / attempt / generation**: one assistant message row can be generated
+  more than once (retry, edit). Each run is an attempt with its own `generationId`;
+  research attempts also carry a `researchRunId`. Client stream identity is
+  message + run, so a stale run's chunks are dropped, not merged.
+- **turn**: one user message plus the assistant message answering it, created
+  together (`createTurn`).
+- **run**: a deep-research execution: one `research_runs` row, one budget, one
+  lease/fence, one deadline, through to the final answer.
+- **task / worker / coordinator**: inside a run, the coordinator dispatches tasks;
+  each task is investigated by a worker with web tools. Neither sees the
+  conversation or memory; they get a brief.
+- **fence**: the tuple that proves a writer still owns a message (`GenerationFence`,
+  `ResearchFence`). Every durable write checks it; Stop, retry and lease expiry
+  invalidate it.
+- **source / citation**: a source is a numbered web page or document excerpt
+  registered during a generation; a citation is a `[^N]` marker in model text that
+  resolves to one. Numbers are conversation-scoped and never shown to the reader.
+- **collection / document / version**: knowledge is collections of documents; each
+  document has immutable versions; search runs over the current version's chunks.
+- **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
+  permission. `ambient` skills are offered automatically; explicit ones are pinned.
+- **memory**: a saved user fact the model may reference or write. One save attempt
+  per generation.
+- **structured answer**: a user message that answers an `ask_user` clarification.
+  It inherits research mode; ordinary text does not.
+- **branch**: a copy of a conversation prefix into a new conversation. Copies
+  messages, tool rows and display snapshots with fresh ids; never copies chunks,
+  calls or ledger rows.
+
+## The ways to hurt yourself
+
+1. **`.env` points at a real database.** `pnpm dev` and any script that loads
+   `.env` writes to `DATABASE_URL`, which on a dev machine is the developer's
+   actual instance with their conversations and provider keys. Read is fine.
+   Never run migrations, `db:push`, or destructive SQL against it to test something.
+   Integration tests get their own throwaway Postgres from Testcontainers.
+2. **Integration tests need the pinned image.** `tests/integration/postgres-image.ts`
+   pins a pgvector image. `postgres:17-alpine` fails migrations with a bare
+   "drizzle-kit migrate" error that names no cause. Docker must be running.
+3. **Vitest projects are by extension.** `--project unit` is `src/**/*.test.ts`,
+   `--project ui` is `src/**/*.test.tsx`, `--project integration` is
+   `tests/integration/**`. Running a `.test.tsx` under `unit` prints "No test
+   files found" and exits green. That is not a pass.
+4. **pnpm settings live in `pnpm-workspace.yaml`.** A `pnpm` block left in
+   `package.json` is silently ignored, and a patched dependency then simply does
+   not apply while the build stays green. Verify a patch by grepping
+   `node_modules`, not by a clean install. See Workflow.
+5. **Effect 4 rc versions must match exactly** across `effect` and every
+   `@effect/*` package. `latest` on those is still Effect 3. See Version pins.
+6. **Never kill by pattern.** `pkill -f vite` takes out your own harness and any
+   other dev server. Kill the PID you started, or the port owner after checking it.
+
+## Hit every surface
+
+A change to chat behaviour has more entry points than the one you were asked about.
+Before finishing, decide for each of these whether it applies, and say so if you
+skipped one on purpose.
+
+- **How the message got there**: send, retry, edit, structured answer to a
+  clarification, research continuation, branch. Retry and edit re-resolve the
+  agent, collections and skills inside the attempt transaction, before any reset.
+- **Mode**: plain chat, agent conversation, deep research. Research has a main
+  assistant stage and an investigation stage; they see different context.
+- **Display path**: the live SSE stream, the conversation-detail loader on reload,
+  and a branch. All three project the same rows; a leak fixed in one is still open
+  in the other two.
+- **Tool families**: web, knowledge, skill, memory, ask, plan, research. Each has
+  its own envelope with a required `family`; there is no inference from shape.
+- **Model kinds**: native tool calling and the Hermes polyfill for models without
+  it. The toolkit loop never learns the difference.
+- **Reverse states**: every way in needs a way out. Stop, lease expiry, owner change
+  and a stale run all have to leave the row terminal and the client consistent.
+- **Docs**: if you changed a rule recorded in `docs/internals/`, rewrite the
+  passage. Do not append.
+
+## Running and verifying
+
+- `docker compose up -d` for Postgres, `pnpm dev` on `:3000`. Server module edits
+  hot-swap the Effect runtime; no restart. Sign in at `/login`; the first
+  registered user is admin.
+- Smallest proof first: the one test file you touched, with the right `--project`.
+  Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
+  has pre-existing warnings; zero errors is the bar. Report the counts you saw,
+  not the ones you expected.
+- Integration suites run in tens of seconds; run them in the background and read
+  the result. Never `sleep` in a loop to wait.
+- A test that only passes with a timeout or a sleep is wrong. Wait on the thing:
+  a Deferred, a query, `pg_blocking_pids`.
+- Tests assert real behaviour against real components. A fake gateway is fine; a
+  test that mocks the unit under test is not. When a fixture would make the
+  assertion vacuous (a hook that fires before the code path it claims to test),
+  move it until it proves something.
+- Browser checks against the running app are welcome for UI work, but they cost
+  real provider calls when they send a message. Inspect state; do not generate.
+- Every claim of "verified" in a report must rest on output you saw this session.
+
+## Workflow
+
+- Schema change: `pnpm db:generate`, commit `drizzle/`, `pnpm db:migrate`.
+- Commits: imperative title under ~70 characters, body says problem then fix. One
+  concern per commit; "and also" means split. Do not commit unless asked.
+- `pnpm-workspace.yaml` holds `patchedDependencies`, `allowBuilds` (only `esbuild`
+  true; an unlisted package that wants a script is a hard error) and
+  `minimumReleaseAge` (24h cooldown). `minimumReleaseAgeExclude` lists the pins
+  deliberately tracked same-day; extend it rather than lowering the cooldown.
+- UI primitives in `src/ui/primitives` are shadcn-generated. Regenerate with
+  `pnpm dlx shadcn@latest add <component>`; answer no to overwriting `button.tsx`;
+  remove the `next-themes` it adds and wire `~/ui/theme.tsx` instead.
+
+## Documentation
+
+- `docs/internals/` holds architectural decisions, cross-component constraints and
+  hidden traps. Not features, not field lists, not control flow, not changelogs.
+- A local reason goes in a code comment beside the code. A reason that crosses a
+  module boundary goes in `docs/internals/`. Link, do not copy.
+- When a decision changes, rewrite the passage. Never append a correction below
+  the old text.
+- This file is read every turn. Keep it to orientation, dangers and verification.
+  Depth goes behind a link.
+
+## Where the depth is
+
+- `docs/internals/research.md`: deep research. Main assistant owns context and the
+  answer; the runner investigates a brief; one budget and fence through the end.
+- `docs/internals/knowledge-and-agents.md`: agents, sharing, collections, retrieval
+  versus direct context, embedding widths, indexing and repair.
+- `docs/internals/skills.md`: skill packages, revisions, ambient versus pinned,
+  import safety.
+- `docs/internals/memory.md`: snapshot semantics, one save per generation, the
+  transactional guard under research.
+- `docs/internals/citations.md`: footnote-based citations, streamdown pins,
+  markdown plugins.
+- `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
+  anatomy.
+
+## Version pins
+
+All release candidates. Pin exactly; never float to `latest`.
+
+- `effect@4.0.0-rc.x` and every `@effect/*` package share the same rc
+  (`@effect/vitest`, `@effect/sql-pg`, `@effect/ai-openrouter` are on the `rc`
+  dist-tag). `latest` is Effect 3.
+- `drizzle-orm` / `drizzle-kit` are `1.0.0-rc.5-*` builds, kept as a matched pair.
+  rc.4 crashes at import with effect >= 4.0.0-beta.104.
+- `vitest` is v4 (peer of `@effect/vitest` rc). `katex` stays on 0.16 because
+  `@streamdown/math` pins `rehype-katex@7`.
+- `@effect/ai-openrouter` is patched (`patches/`) and cannot be un-patched: image
+  replay, the `imageReplay` prompt option, `refusal` deltas as text, ordered
+  `reasoningDetails`, and an image-delta normalizer, all inside code a wrapper
+  cannot reach. On a bump, diff the new `src/` first; rc.111 to rc.112 was
+  byte-identical, so the upgrade was renaming the patch and its workspace key.
+  Nine tests in `image-replay.test.ts` and `gateway.test.ts` run the real adapter
+  and fail if the patch stops applying.
+- `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
+  a bump.
+- `rolldown` needs no override since 1.2.7. Re-pin only if the production module
+  check fails again.
+
+## Effect 4 notes
+
+Differs from most Effect 3 material online.
+
+- Services: `class X extends Context.Service<X, Shape>()("id")`; layers are built
+  with `Layer.effect`. No `.Default`, no `dependencies` option.
+- `Schema.toStandardSchemaV1(schema)` for TanStack validators.
+- `Effect.forkDetach` (was forkDaemon), `Fiber.join`, `PubSub.subscribe` needs a
+  Scope, `Stream.fromEffectSchedule`, `Stream.toReadableStreamWith(stream, context)`.
+- `Effect.catch` (not `catchAll`); `Effect.timeout` takes a `Duration`.
+- `Effect.result` captures typed failures only; defects and interrupts pass through.
+- Drizzle Effect client: `makeWithDefaults({ relations })` from
+  `drizzle-orm/effect-postgres`, with `PgClient` provided at the composition root
+  (`src/server/runtime.ts`) so LISTEN/NOTIFY shares the pool.
+- A toolkit captures its handlers' context when merged. To give a handler a
+  service, provide it around the merge, not only around the later call.
+
+## Tool calling
+
+- `LanguageModel.streamText` is one model turn. The multi-turn loop is ours
+  (`src/modules/chat/server/streaming.ts`): re-run while `finish.reason` is
+  `"tool-calls"`, feeding parts back with `Prompt.fromResponseParts`.
+- The OpenRouter model only emits `finish` when a chunk carries `usage`. A mock
+  that omits usage hangs the loop.
+- Every model call streams, side generations included. `generateText` fails to
+  decode against plain OpenAI-compatible servers (`system_fingerprint` required);
+  `AiGateway.generateText` folds the stream instead.
+- `ctx.preliminary(result)` streams progress as `tool-result` parts marked
+  `preliminary: true`. UI only; keep them out of the continuation transcript.
+- No-argument tools use `Tool.EmptyParams`, not `Schema.Struct({})`.
+- `capabilities.tools` means native tool calling and gates nothing; a model
+  without it goes through the Hermes polyfill (`hermes-tools.ts`), which must stay
+  inside the provider boundary and return encoded parts. Malformed JSON and fenced
+  examples are re-emitted as text, never as calls.
+- Tool page bodies are never persisted; `message_tool_calls.result` holds the
+  summary and source list only.
+- Every web tool returns `WebToolResult`, so persistence, envelopes and the
+  citations UI are written once. `read_url` is the only path through
+  `PageExtractor`; `url-safety.ts` is the SSRF boundary and the SearXNG base URL
+  is exempt by design.
+- `web_search` caches per generation by query, time range and language; failures
+  are evicted. Research shares `RESEARCH_LIMITS.externalOps` (3) permits, and
+  SearXNG fans each query to every enabled engine, so that is the burst upstreams
+  see. `infra/searxng/settings.yml` enables only Bing and Yandex on purpose.
+- Search follows the composer toggle. The reader is armed with search, and also
+  when user text or prior sources seed URL authority; assistant prose never grants
+  authority. Retry uses the target's saved search setting capped by availability;
+  edit uses the submitted choice.
+
+## Invariants
+
+- One live `ManagedRuntime` per process (`src/server/runtime.ts`). Dev HMR disposes
+  the previous runtime itself because Vite never calls `import.meta.hot.dispose`
+  for server modules.
+- `message_chunks.seq` starts at 1 and is contiguous per message; resume relies on
+  it.
+- Better Auth owns its tables' columns; `src/db/schema/auth.ts` tracks the
+  installed version only (1.7.1 added `account.issuer`, 1.7.3 removed it). After
+  an upgrade, diff `@better-auth/core`'s `dist/db/get-tables.mjs` and verify a
+  fresh signup.
+- Provider API keys are AES-256-GCM at rest (`PROVIDER_KEY_SECRET`); ciphertext
+  never leaves the server.
+- First registered user becomes admin via the `user.create.before` hook. Do not
+  bypass Better Auth for user creation.
+- `IdentityBoundary` pins one identity per authenticated tree and replaces the
+  document on any change. A `401` from any query or mutation ends the session;
+  `requireSession` writes the fixed body `UNAUTHENTICATED_BODY` because the Start
+  client keeps only a failed response's text. The focus revalidation exists for
+  the case a `401` cannot catch (another tab switched account) and runs silently:
+  hiding the tree via `<Activity hidden>` detached host refs, which Motion treats
+  as a remount, so every entrance animation replayed on each tab return. Only the
+  BFCache `pagehide` snapshot hides synchronously.
+- `usage_events` is append-only, one row per attempt at finalize. Analytics reads
+  only the ledger, never `messages.usage`.
+- Physical bytes and rows cannot commit together, so `blob_cleanup_intents` records
+  the risky half first: a `candidate` before an upload stores bytes, an `orphan` in
+  the transaction that drops a blob's last reference. The reconciler settles them by
+  asking whether any row still owns the key, never by trusting the caller's error,
+  since registration may have committed anyway. Due-ness is judged by the database
+  clock (`not_before <= now()` in SQL), never a JS `Date`: the two drift, and a
+  reconciler that quietly sees nothing is the exact failure the ledger exists to
+  prevent. Attachments, skills and knowledge all sit on this.
+- Nitro's dev middleware guesses static assets from `sec-fetch-dest`;
+  `vite.config.ts` strips it for `/api/*` so `<img src="/api/files/:id">` works.
+- jsdom applies no stylesheet: match accessible names with `\s?` where a browser
+  would insert a space, and do not assert a gradient mask from the DOM.
+  `VirtualMessageList` opts out of React Compiler memoization on purpose.
+
+## Taste
+
+- Find the real constraint and fight for the smallest model that makes the correct
+  behaviour unsurprising. Do not keep complexity because it is there; do not add
+  machinery that looks impressive.
+- Design decisions in this codebase are not sacred. Much of it was written by
+  agents. If something looks wrong, say so; do not defend it because a comment
+  or a test describes it.
+- Complexity at the adapter boundary; orchestration pure; UI dumb.
+- Inferred types over annotations; no `any`.
+- Comments say why, live beside the code, and move with it.
+- Semantic colour tokens only. Curly apostrophes in user-facing copy. Every
+  `HugeiconsIcon` carries `strokeWidth={2}`.
+- If a rule here conflicts with the task, say so and get a human decision.
