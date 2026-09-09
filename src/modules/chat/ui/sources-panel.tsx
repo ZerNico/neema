@@ -6,7 +6,6 @@ import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-p
 import { useCallback } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
-import { Badge } from "~/ui/primitives/badge";
 import { useDetailPanel } from "~/ui/detail-panel";
 
 function SourceRow({ source }: { source: ToolSource }) {
@@ -33,9 +32,6 @@ function SourceRow({ source }: { source: ToolSource }) {
             {source.snippet}
           </p>
         ) : null}
-        <Badge variant="secondary" className="mt-0.5 w-fit text-[0.65rem]">
-          {source.read ? "page extracted" : "snippet only"}
-        </Badge>
       </a>
     </li>
   );
@@ -63,9 +59,6 @@ function DocumentSourceRow({ source }: { source: DocumentSource }) {
             {source.snippet}
           </p>
         ) : null}
-        <Badge variant="secondary" className="mt-0.5 w-fit text-2xs">
-          {source.read ? "excerpt read" : "search excerpt"}
-        </Badge>
       </button>
     </li>
   );

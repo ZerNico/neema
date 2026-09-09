@@ -152,11 +152,21 @@ See README.md for architecture; this file records the sharp edges.
   Selection is message + run ID, independent of bubble mounts. Identity-checked refresh
   cannot reopen a closed panel or replace Sources; a retry closes the superseded run.
   There is no module-level message cache or render-time publication. The sources list
-  stays a separate panel reached from the message menu. The plan and
+  stays a separate panel reached from the message menu, and lists sources without
+  an extraction badge: whether a page was read or only snippeted is a model-facing
+  distinction (`evidenceManifest`), not a reader-facing one. The plan and
   worker reports never render, and a failed read is never a user-facing limitation:
-  the worker prompt tells the model to route around it. An `awaiting_answer` run
+  the worker prompt tells the model to route around it. `progress.limitations` is
+  likewise written for synthesis and the run record, never shown verbatim: the panel
+  reduces it to one plain coverage sentence (`coverageNote`) and says nothing for the
+  routine cases — a provider hiccup on one of thirty calls, a report at its output
+  cap, incomplete usage accounting. A task that failed reads "Incomplete", not "Failed". An `awaiting_answer` run
   renders nothing, because its question card follows and the answered run continues
   in the next message.
+- Synthesis is told to cite sparingly: one marker at the end of a claim worth
+  verifying, the strongest source, at most two per sentence, none on common knowledge
+  or summary lines. Without that the answer arrives with a chip on every clause and
+  reads as a bibliography; the chips are the same either way, the prompt is the lever.
 - Synthesis citations: `validateResearchCitations` accepts plain `[N]` for a
   registered source and normalises it to `[^N]`, because models write both and the
   chip renderer keys off the footnote form. Unregistered footnote handles become

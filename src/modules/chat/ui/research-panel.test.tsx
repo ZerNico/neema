@@ -8,6 +8,7 @@ import type {
 } from "../client/use-message-stream.ts";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
+import type { ResearchTaskProgress } from "../research-schema.ts";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 
@@ -268,13 +269,74 @@ describe("research panel", () => {
     );
     expect(within(panel).queryByText("In progress")).not.toBeInTheDocument();
     expect(within(panel).getByText("2 steps")).toBeInTheDocument();
-    expect(within(panel).getAllByText("Failed")).toHaveLength(2);
-    expect(within(panel).getAllByText("The model returned no report for this task.")).toHaveLength(
-      2,
-    );
+    expect(within(panel).getAllByText("Incomplete")).toHaveLength(2);
+    // Diagnostics are for the model and the run record, never the reader:
+    // the panel says what it means in one sentence and drops the rest.
+    expect(within(panel).queryByText(/returned no report/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/No usable research reports/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Limitations")).not.toBeInTheDocument();
     expect(
-      within(panel).getByText("No usable research reports were produced."),
+      within(panel).getByText("The investigation did not produce anything usable."),
     ).toBeInTheDocument();
+  });
+
+  it("summarises expected provider hiccups in plain words and stays quiet about accounting", () => {
+    const { rerender } = renderBubble();
+    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    const panel = screen.getByRole("complementary", { name: "Deep research" });
+    const finished = (tasks: ResearchTaskProgress[], limitations: string[]) =>
+      tree(
+        [
+          {
+            ...research,
+            status: "complete",
+            progress: {
+              ...research.progress!,
+              phase: "partial",
+              usageComplete: false,
+              limitations,
+              tasks,
+            },
+          },
+          search,
+          { ...read, status: "complete" },
+        ],
+        "complete",
+        "Final answer",
+        { visible: false },
+      );
+    rerender(
+      finished(
+        [
+          { id: "task-2", ordinal: 2, title: "Second topic", status: "error" },
+          { id: "task-1", ordinal: 1, title: "First topic", status: "complete" },
+        ],
+        [
+          "Task 2: A research provider request failed (InvalidOutputError). Some coverage is missing.",
+          "Task 1: report reached the model output limit; some findings may be incomplete.",
+          "Usage is incomplete: one or more provider calls ended without confirmed usage.",
+        ],
+      ),
+    );
+    expect(within(panel).getByText("Incomplete")).toBeInTheDocument();
+    expect(within(panel).getByText("Done")).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "One line of investigation could not be completed, so some coverage may be missing.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/InvalidOutputError/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/output limit/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/usage/i)).not.toBeInTheDocument();
+    // A truncated report on an otherwise finished task is the answer's job to
+    // disclose where it matters; the panel does not repeat it.
+    rerender(
+      finished(
+        [{ id: "task-1", ordinal: 1, title: "First topic", status: "complete" }],
+        ["Task 1: report reached the model output limit; some findings may be incomplete."],
+      ),
+    );
+    expect(within(panel).queryByText(/coverage/)).not.toBeInTheDocument();
   });
 
   it("settles at synthesis and keeps the final activity after completion without a bubble", () => {
@@ -315,7 +377,7 @@ describe("research panel", () => {
     );
     expect(screen.getByRole("complementary", { name: "Deep research" })).toBe(panel);
     expect(within(panel).getByText("2 steps")).toBeInTheDocument();
-    expect(within(panel).getByText(/Some provider usage was not reported/)).toBeInTheDocument();
+    expect(within(panel).queryByText(/usage/i)).not.toBeInTheDocument();
   });
 
   it.each(["stale overlay", "new activity"])("closes the old run on retry (%s)", (stage) => {

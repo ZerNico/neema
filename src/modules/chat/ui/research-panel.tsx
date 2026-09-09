@@ -28,8 +28,31 @@ const taskLabels: Record<ResearchTaskProgress["status"], string> = {
   queued: "Queued",
   running: "Investigating",
   complete: "Done",
-  error: "Failed",
+  error: "Incomplete",
   aborted: "Stopped",
+};
+
+// Limitations are written for the model that synthesises the answer (and for
+// the run's diagnostics), not for the reader: "InvalidOutputError", output
+// limits and usage accounting mean nothing to them. Provider hiccups are also
+// expected — a run of 30 calls will lose one — and the answer already says
+// where coverage is thin. So the panel shows one plain sentence when coverage
+// actually fell short, and nothing for the routine cases.
+const coverageNote = (progress: ResearchProgress | undefined): string | null => {
+  const limitations = progress?.limitations ?? [];
+  if (progress?.phase === "aborted") return null;
+  if (limitations.some((limitation) => /search was unavailable/i.test(limitation)))
+    return "Web search was unavailable for this run, so most of the investigation could not happen.";
+  if (limitations.some((limitation) => /No usable research reports/i.test(limitation)))
+    return "The investigation did not produce anything usable.";
+  const incomplete = (progress?.tasks ?? []).filter((task) => task.status === "error").length;
+  if (incomplete > 0)
+    return incomplete === 1
+      ? "One line of investigation could not be completed, so some coverage may be missing."
+      : `${incomplete} lines of investigation could not be completed, so some coverage may be missing.`;
+  if (limitations.some((limitation) => /time limit|cut short|abridged/i.test(limitation)))
+    return "The investigation ran out of room, so some coverage may be missing.";
+  return null;
 };
 
 interface ActivityItem {
@@ -198,7 +221,6 @@ function TaskGroup({
           </span>
         </header>
       ) : null}
-      {task?.error ? <p className="text-warning mt-1 text-xs">{task.error}</p> : null}
       {activities.length > 0 ? (
         <ol className="mt-1 flex flex-col">
           {activities.map((activity) => (
@@ -233,7 +255,7 @@ export function ResearchActivityBody({
       else byTask.set(activity.taskId, [activity]);
     } else unassigned.push(activity);
   }
-  const limitations = [...new Set(progress?.limitations ?? [])];
+  const note = coverageNote(progress);
   const empty = tasks.length === 0 && unassigned.length === 0;
 
   return (
@@ -247,23 +269,7 @@ export function ResearchActivityBody({
         <TaskGroup key={task.id} task={task} activities={byTask.get(task.id) ?? []} />
       ))}
       {unassigned.length > 0 ? <TaskGroup task={null} activities={unassigned} /> : null}
-      {limitations.length > 0 ? (
-        <section>
-          <h3 className="text-muted-foreground mb-1 text-2xs font-medium tracking-wider uppercase">
-            Limitations
-          </h3>
-          <ul className="text-warning list-disc space-y-1 pl-4 text-xs">
-            {limitations.map((limitation) => (
-              <li key={limitation}>{limitation}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {progress && !progress.usageComplete && !running ? (
-        <p className="text-muted-foreground text-xs">
-          Some provider usage was not reported; recorded usage may be incomplete.
-        </p>
-      ) : null}
+      {note && !running ? <p className="text-muted-foreground text-xs">{note}</p> : null}
     </div>
   );
 }
