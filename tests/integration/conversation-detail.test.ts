@@ -182,6 +182,34 @@ describe("loadConversationDetail", () => {
     expect(detail.pendingChunks).toEqual([]);
   });
 
+  it("keeps ordinary chat compaction summaries displayable", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedThread(userId, "Compacted thread"));
+    await run(
+      ChatRepo.use((repo) =>
+        Effect.gen(function* () {
+          const id = uuidv7();
+          yield* repo.createCompactionEvent({
+            id,
+            messageId: thread.assistantId,
+            beforeTurnIndex: 0,
+            passIndex: 0,
+            scope: "history",
+          });
+          yield* repo.completeCompactionEvent({
+            id,
+            status: "complete",
+            outcome: "summary",
+            summary: "The conversation concerned gardening.",
+          });
+        }),
+      ),
+    );
+    const detail = await run(loadConversationDetail(userId, thread.conversationId));
+    expect(detail.compactionEvents).toHaveLength(1);
+    expect(detail.compactionEvents[0]?.summary).toBe("The conversation concerned gardening.");
+  });
+
   it("loads assistant display metadata in one batch without full generation configs", async () => {
     const owner = await run(makeUser());
     const thread = await run(seedThread(owner, "Batched metadata"));

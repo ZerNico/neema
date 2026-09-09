@@ -19,7 +19,15 @@ import { agentIcon } from "~/modules/chat/ui/context-picker.tsx";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
-import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
@@ -128,18 +136,22 @@ export function AgentsPage() {
       ))}
     </ListCard>
   );
-  const newAgent = (
-    <Link
-      to="/agents/new"
-      className={buttonVariants({ size: "sm" })}
-      aria-disabled={atLimit || undefined}
-    >
+  // At the limit the control stays put and disabled, the way Knowledge does it:
+  // a button that vanishes reads as a missing feature, not a ceiling. A Link
+  // cannot be disabled, so the limit renders the Button form instead.
+  const newAgent = atLimit ? (
+    <Button size="sm" disabled>
+      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+      New agent
+    </Button>
+  ) : (
+    <Link to="/agents/new" className={buttonVariants({ size: "sm" })}>
       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
       New agent
     </Link>
   );
   return (
-    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={atLimit ? undefined : newAgent}>
+    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={newAgent}>
       {agents.isError ? (
         <ErrorState
           title="Could not load agents"
@@ -147,7 +159,9 @@ export function AgentsPage() {
             void agents.refetch();
           }}
         />
-      ) : agents.data === undefined ? null : rows.length === 0 ? (
+      ) : agents.data === undefined ? (
+        <ListSkeleton label="Loading agents" />
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={Robot01Icon}
           title="No agents yet"

@@ -10,13 +10,14 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { activityRowClassName } from "./activity-row.ts";
 
 export type CompactionStatus = "running" | "complete" | "failed";
 
 const LABELS: Record<CompactionStatus, string> = {
   running: "Summarizing earlier context…",
   complete: "Earlier context summarized",
-  failed: "Couldn't summarize earlier context",
+  failed: "Couldn’t summarize earlier context",
 };
 
 /**
@@ -48,8 +49,8 @@ export function CompactionBlock({
 
   if (!summary) {
     return (
-      <div className={cn("text-muted-foreground flex items-center gap-1.5 text-sm", className)}>
-        <HugeiconsIcon icon={ArrowShrink02Icon} className="size-4" aria-hidden />
+      <div className={cn(activityRowClassName, className)}>
+        <HugeiconsIcon icon={ArrowShrink02Icon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(running && "text-shimmer")}>{label}</span>
       </div>
     );
@@ -58,10 +59,11 @@ export function CompactionBlock({
   return (
     <Disclosure open={expanded} onOpenChange={setExpanded} className={className}>
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={ArrowShrink02Icon} className="size-4" />
+        <HugeiconsIcon icon={ArrowShrink02Icon} strokeWidth={2} className="size-4" />
         <span>{label}</span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
+          strokeWidth={2}
           className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
         />
       </DisclosureTrigger>

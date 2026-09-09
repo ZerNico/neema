@@ -60,9 +60,8 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
                   ),
                 )
             : repo.chunksAfter(streaming.id, 0),
-        // Durable generation activity for all assistant messages. Tool results
-        // are summaries only; compaction events carry generated summaries and
-        // safe ordering metadata, never the transcript they summarized.
+        // Durable generation activity for all assistant messages. Research
+        // compaction bodies stay private; ordinary chat summaries are displayable.
         toolCalls: repo.listToolCalls(assistantIds),
         compactionEvents: repo.listCompactionEvents(assistantIds),
         // Flat, like tool calls — the view groups by messageId.
@@ -87,7 +86,9 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
     pendingChunks,
     toolCalls,
-    compactionEvents,
+    compactionEvents: compactionEvents.map((event) =>
+      event.researchRunId ? { ...event, summary: null } : event,
+    ),
     attachments,
     branchedFrom,
     agent: defaults.agent

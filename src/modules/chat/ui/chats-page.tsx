@@ -12,7 +12,7 @@ import { groupConversationsByDate } from "./conversation-groups.ts";
 import { activityStamp, describeActivity } from "./timestamps.ts";
 import { EmptyState, Page, Section } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
-import { Input } from "~/ui/primitives/input";
+import { SearchInput } from "~/ui/search-input.tsx";
 import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
 
@@ -60,12 +60,11 @@ export function ChatsPage() {
   return (
     <Page
       title="Chats"
-      description="Every conversation you've had, newest first."
+      description="Every conversation you’ve had, newest first."
       rootPath="/"
       rootLabel="Back to chat"
     >
-      <Input
-        type="search"
+      <SearchInput
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Search chats…"
@@ -77,7 +76,7 @@ export function ChatsPage() {
           <EmptyState
             icon={Search01Icon}
             title="No chats match"
-            description={`Nothing found for “${query}”. Titles only — message text isn't searched.`}
+            description={`Nothing found for “${query}”. Titles only — message text isn’t searched.`}
           />
         ) : (
           <EmptyState

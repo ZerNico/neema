@@ -30,11 +30,11 @@ import {
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 
 export const embeddingConfigurationQuery = queryOptions({
@@ -223,29 +223,28 @@ function SemanticSearchSection() {
           </Field>
           {selected && !selected.dimensions ? (
             <p className="text-warning text-xs" role="alert">
-              Set the model&apos;s dimensions on its provider page before enabling it.
+              Set the model’s dimensions on its provider page before enabling it.
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
+          <FormActions>
+            <PendingButton
               size="sm"
+              pending={apply.isPending}
               disabled={pending || !selected || !dimensions || !changed}
-              aria-busy={apply.isPending || undefined}
               onClick={() => void save()}
             >
-              {apply.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
               {data.enabled ? "Apply" : "Enable"}
-            </Button>
+            </PendingButton>
             {data.status === "ready" ? (
-              <Button
+              <PendingButton
                 variant="outline"
                 size="sm"
+                pending={rebuildAll.isPending}
                 disabled={pending}
-                aria-busy={rebuildAll.isPending || undefined}
                 onClick={() => {
                   void confirm({
                     destructive: false,
-                    title: "Rebuild every collection's index?",
+                    title: "Rebuild every collection’s index?",
                     description:
                       "Every document not yet indexed for the current model is re-embedded, across all users' collections. Text is sent to the configured provider and billed. Documents that are already current are skipped, and keyword search keeps working throughout.",
                     confirmLabel: "Rebuild all",
@@ -254,9 +253,8 @@ function SemanticSearchSection() {
                   });
                 }}
               >
-                {rebuildAll.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
                 Rebuild all
-              </Button>
+              </PendingButton>
             ) : null}
             {data.enabled ? (
               <Button
@@ -278,7 +276,7 @@ function SemanticSearchSection() {
                 Disable
               </Button>
             ) : null}
-          </div>
+          </FormActions>
         </ListRow>
       </ListCard>
     </Section>
@@ -322,7 +320,7 @@ function DocumentParserSection() {
       <Section title="Document parsing">
         <EmptyState
           icon={FileValidationIcon}
-          title="This tool isn't set up yet."
+          title="This tool isn’t set up yet"
           description="Document parsing will appear here once it is available on this instance."
         />
       </Section>

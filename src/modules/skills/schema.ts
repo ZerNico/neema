@@ -33,7 +33,10 @@ export interface SkillManifestEntry {
   name: string;
   description: string;
   manualOnly: boolean;
+  /** Chosen in the composer for this message: its root loads before the first call. */
   explicit: boolean;
+  /** Attached to the conversation's agent: offered on demand, and preferred. */
+  fromAgent?: boolean;
   /** Offered from the library rather than selected: never fails an attempt. */
   ambient?: boolean;
 }

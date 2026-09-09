@@ -26,7 +26,16 @@ import {
 import { groupsQuery, isConflict } from "./groups-page.tsx";
 import { usersQuery } from "./users-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
-import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -55,7 +64,6 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { Skeleton } from "~/ui/primitives/skeleton";
 import { Switch } from "~/ui/primitives/switch";
 import { Spinner } from "~/ui/primitives/spinner";
 
@@ -159,7 +167,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
               onClick={async () => {
                 if (
                   await confirm({
-                    title: `Delete ${group.name}?`,
+                    title: `Delete “${group.name}”?`,
                     description:
                       "Members lose access to any model shared only with this group. The users themselves are untouched.",
                     confirmLabel: "Delete group",
@@ -191,14 +199,19 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
           Disabling it leaves existing shares intact.
         </p>
         {members.isLoading ? (
-          <ListSkeleton />
+          <ListSkeleton media="avatar" label="Loading members" />
         ) : members.isError ? (
-          <ErrorState title="Could not load members" onRetry={() => members.refetch()} />
+          <ErrorState
+            title="Could not load members"
+            onRetry={() => {
+              void members.refetch();
+            }}
+          />
         ) : (members.data ?? []).length === 0 ? (
           <EmptyState
             icon={UserGroupIcon}
             title="No members yet"
-            description="Add users to give them this group's model access."
+            description="Add users to give them this group’s model access."
           />
         ) : (
           <ListCard>
@@ -267,22 +280,6 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         onOpenChange={setRenaming}
       />
     </Page>
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <ListCard>
-      {[0, 1, 2].map((i) => (
-        <ListRow key={i}>
-          <Skeleton className="size-9 rounded-full" />
-          <div className="flex flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-3 w-48" />
-          </div>
-        </ListRow>
-      ))}
-    </ListCard>
   );
 }
 
@@ -408,14 +405,9 @@ function RenameGroupDialog({
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <Button
-              type="submit"
-              disabled={!name.trim() || save.isPending}
-              aria-busy={save.isPending || undefined}
-            >
-              {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
               Rename
-            </Button>
+            </PendingButton>
           </DialogFooter>
         </form>
       </DialogContent>

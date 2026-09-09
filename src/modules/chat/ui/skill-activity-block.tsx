@@ -2,6 +2,7 @@ import { Book02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SkillToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { activityRowClassName } from "./activity-row.ts";
 
 // One summary row, like memory: the disclosure only ever repeated the skill
 // name back at the reader. Which supporting files were read is not something
@@ -20,8 +21,8 @@ export function SkillActivityBlock({ activities }: { activities: SkillToolActivi
     ? `${running ? "Using" : "Used"} ${names.join(", ")}${running ? "…" : ""}`
     : "Skill unavailable";
   return (
-    <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-sm">
-      <HugeiconsIcon icon={Book02Icon} className="size-4" aria-hidden />
+    <div className={cn(activityRowClassName, "mb-2")}>
+      <HugeiconsIcon icon={Book02Icon} strokeWidth={2} className="size-4" aria-hidden />
       <span className={cn(running && "text-shimmer")}>{label}</span>
     </div>
   );

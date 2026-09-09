@@ -30,6 +30,7 @@ import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability
 import { modelsQuery, PROVIDER_PRESETS, providersQuery } from "./providers-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -49,7 +50,6 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
@@ -137,7 +137,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                 onClick={async () => {
                   if (
                     await confirm({
-                      title: `Delete ${provider.name}?`,
+                      title: `Delete “${provider.name}”?`,
                       description:
                         "This removes the provider and all its models. Conversations that used them keep their history but can no longer generate with these models.",
                       confirmLabel: "Delete provider",
@@ -185,7 +185,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           <EmptyState
             icon={AiBrain01Icon}
             title="No models yet"
-            description="Add a model from this provider's catalog to make it selectable in chat."
+            description="Add a model from this provider’s catalog to make it selectable in chat."
             action={
               <Button size="sm" onClick={() => setAddingModel(true)}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
@@ -229,7 +229,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: `Delete ${model.displayName}?`,
+                        title: `Delete “${model.displayName}”?`,
                         description:
                           "The model disappears from the chat picker. Existing conversations keep their history.",
                         confirmLabel: "Delete model",
@@ -327,7 +327,7 @@ export function AddModelDialog({
         <DialogHeader>
           <DialogTitle>Add model</DialogTitle>
           <DialogDescription>
-            Search the provider's live catalog, or type a model ID if the catalog is unavailable.
+            Search the provider’s live catalog, or type a model ID if the catalog is unavailable.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -401,14 +401,13 @@ export function AddModelDialog({
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
               Cancel
             </DialogClose>
-            <Button
+            <PendingButton
               type="submit"
-              disabled={effective === null || settings === null || add.isPending}
-              aria-busy={add.isPending || undefined}
+              pending={add.isPending}
+              disabled={effective === null || settings === null}
             >
-              {add.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
               Add model
-            </Button>
+            </PendingButton>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -518,14 +517,9 @@ function EditProviderDialog({
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <Button
-              type="submit"
-              disabled={!complete || save.isPending}
-              aria-busy={save.isPending || undefined}
-            >
-              {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+            <PendingButton type="submit" pending={save.isPending} disabled={!complete}>
               Save changes
-            </Button>
+            </PendingButton>
           </DialogFooter>
         </form>
       </DialogContent>

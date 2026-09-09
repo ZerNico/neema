@@ -2,6 +2,7 @@ import { Brain02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { MemoryToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { activityRowClassName } from "./activity-row.ts";
 
 export function memoryActivityLabel(activity: MemoryToolActivity): string {
   if (activity.status === "running") return "Saving to memory…";
@@ -19,8 +20,8 @@ export function memoryActivityLabel(activity: MemoryToolActivity): string {
 export function MemoryActivityBlock({ activity }: { activity: MemoryToolActivity }) {
   const running = activity.status === "running";
   return (
-    <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-sm">
-      <HugeiconsIcon icon={Brain02Icon} className="size-4" aria-hidden />
+    <div className={cn(activityRowClassName, "mb-2")}>
+      <HugeiconsIcon icon={Brain02Icon} strokeWidth={2} className="size-4" aria-hidden />
       <span className={cn(running && "text-shimmer")}>{memoryActivityLabel(activity)}</span>
     </div>
   );

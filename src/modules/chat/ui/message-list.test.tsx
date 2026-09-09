@@ -1337,7 +1337,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getByText("Couldn't summarize earlier context")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t summarize earlier context")).toBeInTheDocument();
   });
 });
 

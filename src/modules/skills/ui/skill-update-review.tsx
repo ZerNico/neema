@@ -1,9 +1,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ErrorState, Page, Section } from "~/ui/page-shell.tsx";
+import { ErrorState, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Spinner } from "~/ui/primitives/spinner";
 import { applySkillUpdate, reviewSkillUpdate } from "../server/import-functions.ts";
 import { resolveSkillUpdate } from "../update.ts";
 import { SkillPackageError, validateSkillPackage, type SkillFile } from "../package.ts";
@@ -46,7 +46,7 @@ export function SkillUpdateReview({
           onRetry={() => void review.refetch()}
         />
       ) : (
-        <p className="text-muted-foreground text-sm">Reading the latest version…</p>
+        <ListSkeleton rows={2} media="none" label="Reading the latest version" />
       )}
     </Page>
   );
@@ -102,14 +102,14 @@ function ReviewFiles({
       onBack={onBack}
       backLabel="Editor"
       actions={
-        <Button
+        <PendingButton
           size="sm"
-          disabled={!valid || apply.isPending}
-          aria-busy={apply.isPending}
+          pending={apply.isPending}
+          disabled={!valid}
           onClick={() => apply.mutate()}
         >
-          {apply.isPending ? <Spinner aria-hidden data-icon="inline-start" /> : null}Update skill
-        </Button>
+          Update skill
+        </PendingButton>
       }
     >
       <p className="text-muted-foreground text-xs break-all">
@@ -161,7 +161,7 @@ function ReviewFiles({
       </Section>
       <Section
         title="The skill after updating"
-        description="Check it over before applying. Files you keep won't be raised again until they change again."
+        description="Check it over before applying. Files you keep won’t be raised again until they change again."
       >
         <PackageWorkspace files={files} findings={findings} />
       </Section>

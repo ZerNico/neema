@@ -1,11 +1,19 @@
-import { ArrowRight01Icon, BookOpen01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, Book02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
-import { Input } from "~/ui/primitives/input";
+import { SearchInput } from "~/ui/search-input.tsx";
 import { skillsQuery } from "../client/queries.ts";
 import type { SkillSummary } from "../schema.ts";
 
@@ -19,7 +27,8 @@ export function SkillsPage() {
   );
   const create = (
     <Link to="/skills/new" className={buttonVariants({ size: "sm" })}>
-      Create skill
+      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+      New skill
     </Link>
   );
   const list = (items: SkillSummary[]) => (
@@ -28,7 +37,7 @@ export function SkillsPage() {
         <Link key={skill.id} to="/skills/$skillId" params={{ skillId: skill.id }} className="block">
           <ListRow interactive>
             <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-              <HugeiconsIcon icon={BookOpen01Icon} className="size-4" />
+              <HugeiconsIcon icon={Book02Icon} strokeWidth={2} className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{skill.name}</p>
@@ -37,7 +46,11 @@ export function SkillsPage() {
                 {skill.ownerName ? ` · ${skill.ownerName}` : ""}
               </p>
             </div>
-            <HugeiconsIcon icon={ArrowRight01Icon} className="text-muted-foreground size-4" />
+            <HugeiconsIcon
+              strokeWidth={2}
+              icon={ArrowRight01Icon}
+              className="text-muted-foreground size-4 shrink-0"
+            />
           </ListRow>
         </Link>
       ))}
@@ -60,21 +73,12 @@ export function SkillsPage() {
     >
       {/* Searching an empty library is noise; the empty state says more. */}
       {query.data?.length ? (
-        <div className="relative">
-          <HugeiconsIcon
-            icon={Search01Icon}
-            strokeWidth={2}
-            aria-hidden
-            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
-          />
-          <Input
-            aria-label="Search your skills"
-            placeholder="Search your skills…"
-            className="pl-9"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </div>
+        <SearchInput
+          aria-label="Search your skills"
+          placeholder="Search your skills…"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
       ) : null}
       {query.isError ? (
         <ErrorState
@@ -84,18 +88,10 @@ export function SkillsPage() {
           }}
         />
       ) : null}
-      {query.isPending ? (
-        <ListCard>
-          {[0, 1, 2].map((key) => (
-            <ListRow key={key}>
-              <div className="bg-muted h-10 w-full animate-pulse rounded-2xl" />
-            </ListRow>
-          ))}
-        </ListCard>
-      ) : null}
+      {query.isPending ? <ListSkeleton label="Loading skills" /> : null}
       {query.data?.length === 0 ? (
         <EmptyState
-          icon={BookOpen01Icon}
+          icon={Book02Icon}
           title="No skills yet"
           description="Create a skill or import an editable copy."
           action={create}
@@ -103,7 +99,7 @@ export function SkillsPage() {
       ) : null}
       {query.data?.length && rows.length === 0 ? (
         <EmptyState
-          icon={BookOpen01Icon}
+          icon={Book02Icon}
           title="No matching skills"
           description="Try another name or description."
           action={

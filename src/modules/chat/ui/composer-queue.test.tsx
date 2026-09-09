@@ -1,0 +1,213 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
+import { Composer } from "./composer.tsx";
+import type { Attachment } from "~/modules/attachments/schema.ts";
+import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
+import type { SkillSummary } from "~/modules/skills/schema.ts";
+
+vi.mock("../server/functions.ts", () => ({
+  listChatModels: vi.fn(),
+  listConversations: vi.fn(),
+  getConversationWithMessages: vi.fn(),
+}));
+vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: vi.fn() }));
+vi.mock("~/modules/tools/server/functions.ts", () => ({
+  getWebSearchAvailability: vi.fn(),
+  getResearchAvailability: vi.fn(),
+}));
+vi.mock("~/modules/attachments/server/functions.ts", () => ({
+  getDocumentParsingAvailability: vi.fn(),
+  uploadAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
+}));
+vi.mock("textarea-caret", () => ({ default: () => ({ top: 20, left: 80, height: 24 }) }));
+
+const skills: SkillSummary[] = ["review", "rewrite"].map((name) => ({
+  id: name,
+  name,
+  description: `${name} carefully`,
+  manualOnly: false,
+  audience: "private",
+  canEdit: true,
+  ownerName: null,
+  revision: 1,
+  updatedAt: "2026-09-09",
+}));
+const attachment: Attachment = {
+  id: "attachment-1",
+  fileName: "notes.txt",
+  size: 5,
+  mediaType: "text/plain",
+  kind: "text",
+};
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  URL.createObjectURL = vi.fn(() => "blob:test");
+  URL.revokeObjectURL = vi.fn();
+});
+
+function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
+  const upload = deferred<Attachment>();
+  vi.mocked(uploadAttachment).mockReturnValue(upload.promise);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(
+    ["chat-models"],
+    [
+      {
+        id: "model-1",
+        providerId: "provider-1",
+        providerName: "Provider",
+        modelKey: "model",
+        displayName: "Model",
+        type: "chat",
+        enabled: true,
+        contextLength: 128_000,
+        capabilities: { tools: true, reasoning: false, files: false, vision: false },
+      },
+    ],
+  );
+  client.setQueryData(["skills"], skills);
+  client.setQueryData(["tools", "web-search", "availability"], { configured: true, enabled: true });
+  client.setQueryData(["tools", "research", "availability"], { configured: true, enabled: true });
+  client.setQueryData(["tools", "document-parsing", "availability"], {
+    configured: false,
+    enabled: false,
+  });
+  const view = (send: ComponentProps<typeof Composer>["onSend"]) => (
+    <QueryClientProvider client={client}>
+      <Composer
+        initialSkillId="review"
+        onSend={send}
+        disabled={false}
+        modelId="model-1"
+        onModelChange={vi.fn()}
+        searchEnabled={false}
+        onSearchEnabledChange={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  const rendered = render(view(onSend));
+  const textbox = screen.getByRole("textbox");
+  fireEvent.change(textbox, { target: { value: "Original draft" } });
+  fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+  expect(screen.getByRole("button", { name: "Sending after uploads finish" })).toBeInTheDocument();
+  expect(onSend).not.toHaveBeenCalled();
+  return {
+    upload,
+    onSend,
+    textbox,
+    rerender: (send: ComponentProps<typeof Composer>["onSend"]) => rendered.rerender(view(send)),
+  };
+}
+
+async function replaceSkill(textbox: HTMLElement) {
+  fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
+  fireEvent.change(textbox, { target: { value: "/rewrite" } });
+  const textarea = textbox as HTMLTextAreaElement;
+  textarea.focus();
+  textarea.setSelectionRange(8, 8);
+  fireEvent.select(textarea);
+  await screen.findByRole("listbox", { name: "Local skills" });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+  fireEvent.change(textarea, { target: { value: "Updated draft" } });
+}
+
+describe("upload-queued composer requests", () => {
+  it("sends the current text and replacement skill exactly once", async () => {
+    const { upload, onSend, textbox } = setup();
+    await replaceSkill(textbox);
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], undefined, [
+        "rewrite",
+      ]),
+    );
+    expect(textbox).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Remove rewrite" })).not.toBeInTheDocument();
+    expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
+  });
+
+  it("does not send a removed skill when nothing replaces it", async () => {
+    const { upload, onSend } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(
+        "Original draft",
+        [attachment.id],
+        undefined,
+        [],
+      ),
+    );
+  });
+
+  it("uses the current parent callback after a rerender", async () => {
+    const { upload, onSend, rerender } = setup();
+    const currentSend = vi.fn().mockResolvedValue(undefined);
+    rerender(currentSend);
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() =>
+      expect(currentSend).toHaveBeenCalledExactlyOnceWith(
+        "Original draft",
+        [attachment.id],
+        undefined,
+        ["review"],
+      ),
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("retains the current draft, skills and attachment when sending fails", async () => {
+    const { upload, onSend, textbox } = setup(vi.fn().mockRejectedValue(new Error("offline")));
+    await replaceSkill(textbox);
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], undefined, [
+        "rewrite",
+      ]),
+    );
+    expect(textbox).toHaveValue("Updated draft");
+    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("cancels a failed upload without losing the current draft or skills", async () => {
+    const { upload, onSend, textbox } = setup();
+    await replaceSkill(textbox);
+    await act(async () => upload.reject(new Error("offline")));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Sending after uploads finish" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue("Updated draft");
+    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+  });
+});

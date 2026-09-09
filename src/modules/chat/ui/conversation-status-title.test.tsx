@@ -46,9 +46,11 @@ describe("conversation status in sidebar and chats list", () => {
     const { slot, update } = setup(true);
     expect(slot.style.width).toBe("24px");
     update(true);
-    expect(screen.getByRole("link")).toHaveAccessibleName("Generating Example chat");
+    // jsdom applies no stylesheet, so the icon slot stays inline and the
+    // accessible name loses the space a browser gets from blockifying it.
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Generating\s?Example chat$/);
     update(false);
-    expect(screen.getByRole("link")).toHaveAccessibleName("Branched conversation Example chat");
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Branched conversation\s?Example chat$/);
     await waitFor(() => expect(slot.querySelector("[inert]")).toBeNull());
     expect(slot.style.width).toBe("24px");
   });

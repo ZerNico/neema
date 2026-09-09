@@ -15,7 +15,7 @@ import {
   useDetailPanelSelectedId,
   type DetailPanelRequest,
 } from "~/ui/detail-panel";
-import { Spinner } from "~/ui/primitives/spinner.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
 
@@ -111,18 +111,30 @@ function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
               className="text-muted-foreground size-3.5 motion-reduce:animate-none"
             />
           ) : failed ? (
-            <HugeiconsIcon icon={Alert02Icon} className="text-warning size-3.5" aria-hidden />
+            <HugeiconsIcon
+              icon={Alert02Icon}
+              strokeWidth={2}
+              className="text-warning size-3.5"
+              aria-hidden
+            />
           ) : activity.family === "knowledge" || activity.family === "skill" ? (
             <HugeiconsIcon
               icon={File01Icon}
+              strokeWidth={2}
               className="text-muted-foreground size-3.5"
               aria-hidden
             />
           ) : activity.name === "read_url" ? (
-            <HugeiconsIcon icon={Tick02Icon} className="text-success size-3.5" aria-hidden />
+            <HugeiconsIcon
+              icon={Tick02Icon}
+              strokeWidth={2}
+              className="text-success size-3.5"
+              aria-hidden
+            />
           ) : (
             <HugeiconsIcon
               icon={Search01Icon}
+              strokeWidth={2}
               className="text-muted-foreground size-3.5"
               aria-hidden
             />

@@ -53,6 +53,44 @@ describe("useMessageStream ask replay", () => {
 });
 
 describe("research attempt identity", () => {
+  it("uses the outer run identity for memory replay and clears it on retry", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      { wrapper, initialProps: { runId: "run-1" } },
+    );
+    const delta = JSON.stringify({
+      v: 1,
+      family: "memory",
+      phase: "result",
+      callId: "memory-1",
+      name: "save_memory",
+      ok: true,
+      outcome: "created",
+    });
+    const old = FakeEventSource.instances.at(-1)!;
+    act(() => old.emit("chunk", { runId: "run-1", seq: 1, kind: "tool", delta }));
+    expect(result.current.tools).toHaveLength(1);
+    expect(result.current.tools[0]).toMatchObject({
+      family: "memory",
+      status: "complete",
+      outcome: "created",
+    });
+    rerender({ runId: "run-2" });
+    expect(result.current.tools).toEqual([]);
+    const current = FakeEventSource.instances.at(-1)!;
+    act(() => old.emit("chunk", { runId: "run-1", seq: 2, kind: "tool", delta }));
+    expect(result.current.tools).toEqual([]);
+    act(() => current.emit("chunk", { runId: "run-2", seq: 1, kind: "tool", delta }));
+    expect(result.current.tools).toHaveLength(1);
+    act(() => current.emit("chunk", { runId: "run-1", seq: 2, kind: "tool", delta }));
+    expect(result.current.lastSeq).toBe(1);
+    expect(current.close).toHaveBeenCalled();
+  });
+
   it("resets the reused message cursor across tabs and ignores callbacks from the old subscription", () => {
     const client = new QueryClient();
     const wrapper = ({ children }: { children: ReactNode }) => (

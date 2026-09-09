@@ -6,6 +6,7 @@ import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
 import { DefaultModelOrder } from "./default-model-order.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -26,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
-import { Spinner } from "~/ui/primitives/spinner";
 
 export const providersQuery = queryOptions({
   queryKey: ["admin", "providers"],
@@ -267,14 +267,9 @@ function AddProviderDialog({
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
               Cancel
             </DialogClose>
-            <Button
-              type="submit"
-              disabled={!complete || add.isPending}
-              aria-busy={add.isPending || undefined}
-            >
-              {add.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+            <PendingButton type="submit" pending={add.isPending} disabled={!complete}>
               Add provider
-            </Button>
+            </PendingButton>
           </DialogFooter>
         </form>
       </DialogContent>

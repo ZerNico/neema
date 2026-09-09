@@ -13,7 +13,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
-import { ErrorState, Page } from "~/ui/page-shell.tsx";
+import { ErrorState, ListSkeleton, Page } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -21,7 +22,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Spinner } from "~/ui/primitives/spinner";
 import { skillDetailQuery, skillQuery } from "../client/queries.ts";
 import { exportSkillArchive } from "../archive.ts";
 import {
@@ -57,7 +57,7 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
     return (
       <Page title="Skill" backTo="/skills" backLabel="Skills">
         <ErrorState
-          title="Skill not available"
+          title="Could not load this skill"
           onRetry={() => {
             void metadata.refetch();
             if (metadata.data?.canEdit) void detail.refetch();
@@ -68,7 +68,7 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
   if (!metadata.data)
     return (
       <Page title="Skill" backTo="/skills" backLabel="Skills">
-        <p className="text-muted-foreground text-sm">Loading skill…</p>
+        <ListSkeleton rows={1} media="none" label="Loading skill" />
       </Page>
     );
   if (!metadata.data.canEdit)
@@ -88,7 +88,7 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
     <OwnerEditor key={skillId} initial={detail.data} />
   ) : (
     <Page title={metadata.data.name} backTo="/skills" backLabel="Skills">
-      <p className="text-muted-foreground text-sm">Loading files…</p>
+      <ListSkeleton rows={3} media="none" label="Loading files" />
     </Page>
   );
 }
@@ -176,7 +176,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
     );
   return (
     <Page
-      title={validation.value?.metadata.name ?? initial?.name ?? "Create skill"}
+      title={validation.value?.metadata.name ?? initial?.name ?? "New skill"}
       backTo="/skills"
       backLabel="Skills"
       actions={
@@ -252,14 +252,14 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
+          <PendingButton
             size="sm"
-            disabled={!validation.value || save.isPending || (!!initial && !dirty)}
-            aria-busy={save.isPending}
+            pending={save.isPending}
+            disabled={!validation.value || (!!initial && !dirty)}
             onClick={() => save.mutate(files.map((file) => ({ ...file })))}
           >
-            {save.isPending ? <Spinner aria-hidden data-icon="inline-start" /> : null}Save
-          </Button>
+            Save
+          </PendingButton>
         </>
       }
     >

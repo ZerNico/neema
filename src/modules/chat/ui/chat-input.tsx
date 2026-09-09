@@ -3,13 +3,14 @@ import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import {
   ArrowUp02Icon,
   Attachment01Icon,
+  Book02Icon,
   GlobalSearchIcon,
   PlusSignIcon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { forwardRef, useEffect, useId, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   chatModelsQuery,
   researchAvailabilityQuery,
@@ -25,9 +26,12 @@ import {
   ContextChips,
   ContextChip,
   ContextMenuItems,
+  MAX_SELECTED_COLLECTIONS,
+  collectionStatus,
   type ContextPickerKind,
   type ComposerContext,
 } from "./context-picker.tsx";
+import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { ATTACHMENT_ACCEPT } from "~/modules/attachments/constants.ts";
 import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
@@ -132,8 +136,36 @@ export const ChatInput = forwardRef<
     : attachments?.queued
       ? "Sending after uploads finish"
       : submitLabel;
-  const menuLabel =
-    context || onResearchEnabledChange || researchEnabled ? "Add files or tools" : "Add attachment";
+  // Everything the "+" menu can offer besides attaching files. Three things key
+  // off this — the trigger's label, whether it is enabled at all, and the menu
+  // width — and they drifted apart when Skills was added to the menu without
+  // being added to any of them, so they read it from one place now.
+  const hasTools = !!context || !!skills || !!onResearchEnabledChange || researchEnabled;
+  const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
+  // "#" offers the same collections the Knowledge popup does, minus the ones
+  // already on this message and the agent's own — those are not the user's to
+  // add or remove. Selecting one commits immediately, so it passes the full
+  // list plus the single addition, exactly as the popup's Add button does.
+  const knowledge = useQuery({ ...knowledgeCollectionsQuery, enabled: !!context });
+  const mentionableCollections = useMemo(() => {
+    if (!context || controlsDisabled) return undefined;
+    const selected = new Set(context.selection.collectionIds);
+    if (selected.size >= MAX_SELECTED_COLLECTIONS) return undefined;
+    return {
+      items: (knowledge.data ?? [])
+        .filter(
+          (collection) =>
+            !selected.has(collection.id) && !context.agentCollectionIds.has(collection.id),
+        )
+        .map((collection) => ({
+          id: collection.id,
+          label: collection.name,
+          description: collection.description || collectionStatus(collection),
+        })),
+      onSelect: (id: string) =>
+        context.onCollectionsChange([...context.selection.collectionIds, id], [id]),
+    };
+  }, [context, controlsDisabled, knowledge.data]);
   // A context row closes the menu first and opens its popup once the menu is
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
@@ -336,13 +368,22 @@ export const ChatInput = forwardRef<
         skills={
           skills && !controlsDisabled
             ? {
-                items: skills.items.filter(
-                  (item) => !skills.selectedIds.includes(item.id) && skills.selectedIds.length < 5,
-                ),
+                items: skills.items
+                  .filter(
+                    (item) =>
+                      !skills.selectedIds.includes(item.id) && skills.selectedIds.length < 5,
+                  )
+                  .map((item) => ({
+                    id: item.id,
+                    label: item.name,
+                    ...(item.ownerName ? { meta: item.ownerName } : {}),
+                    description: item.description,
+                  })),
                 onSelect: (id) => skills.onChange([...new Set([...skills.selectedIds, id])]),
               }
             : undefined
         }
+        collections={mentionableCollections}
         value={value}
         onValueChange={onValueChange}
         onSubmit={submit}
@@ -359,7 +400,8 @@ export const ChatInput = forwardRef<
             type="file"
             multiple
             accept={ATTACHMENT_ACCEPT}
-            className="hidden"
+            className="sr-only"
+            aria-label="Attach files"
             // Selecting the same file twice in a row must re-fire `change`.
             onChange={(event) => {
               attachments.addFiles(event.target.files ?? []);
@@ -385,11 +427,7 @@ export const ChatInput = forwardRef<
                       aria-label={menuLabel}
                       ref={setMenuAnchor}
                       disabled={
-                        controlsDisabled ||
-                        (!context &&
-                          !onResearchEnabledChange &&
-                          !researchEnabled &&
-                          (!attachments || attachments.isFull))
+                        controlsDisabled || (!hasTools && (!attachments || attachments.isFull))
                       }
                       className="text-muted-foreground"
                     />
@@ -401,10 +439,7 @@ export const ChatInput = forwardRef<
             </DropdownMenuTrigger>
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent
-            align="start"
-            className={cn((context || onResearchEnabledChange || researchEnabled) && "w-64")}
-          >
+          <DropdownMenuContent align="start" className={cn(hasTools && "w-64")}>
             <DropdownMenuItem onClick={pickFiles} disabled={!attachments || attachments.isFull}>
               <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
               Attach files
@@ -422,7 +457,13 @@ export const ChatInput = forwardRef<
                 disabled={controlsDisabled}
                 onClick={() => setPendingPicker("skills")}
               >
+                <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
                 Skills
+                {skills.selectedIds.length > 0 ? (
+                  <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">
+                    {skills.selectedIds.length}
+                  </span>
+                ) : null}
               </DropdownMenuItem>
             ) : null}
             {onResearchEnabledChange || researchEnabled ? (

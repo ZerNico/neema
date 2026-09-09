@@ -1,4 +1,4 @@
-import { Effect, Predicate, Schema } from "effect";
+import { Cause, Effect, Predicate, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import {
@@ -7,6 +7,7 @@ import {
   type SaveModelMemoryOutcome,
 } from "../schema.ts";
 import type { MemoryService } from "./service.ts";
+import { isMemorySaveGuardFailure } from "./save-guard.ts";
 
 // The transport shape accepts anything the model emits. A tool call that omits
 // `content`, sends the wrong type, overruns the length cap or invents a
@@ -183,7 +184,11 @@ export function prepareMemoryTool(input: {
       })
       .pipe(
         Effect.map(resultFor),
-        Effect.catchCause(() => Effect.succeed(rejected("Memory could not be saved."))),
+        Effect.catchCause((cause) =>
+          isMemorySaveGuardFailure(cause) || Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.succeed(rejected("Memory could not be saved.")),
+        ),
       );
   });
 

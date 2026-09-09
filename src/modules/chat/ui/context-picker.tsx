@@ -189,7 +189,7 @@ export function AgentPicker({
   );
 }
 
-const collectionStatus = (collection: CollectionSummary) =>
+export const collectionStatus = (collection: CollectionSummary) =>
   collection.pendingCount > 0
     ? `${collection.pendingCount} indexing`
     : collection.failedCount > 0

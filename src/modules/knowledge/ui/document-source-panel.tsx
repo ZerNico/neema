@@ -34,7 +34,7 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
     refetchOnMount: "always",
   });
   // Hide prior bodies during access revalidation and after a failed refetch.
-  if (query.isFetching || query.isPending) return <Spinner />;
+  if (query.isFetching || query.isPending) return <Spinner aria-label="Loading source" />;
   if (query.isError || query.data.totalChars < source.endOffset)
     return <p className="text-muted-foreground text-sm">Source unavailable.</p>;
   const data = query.data;

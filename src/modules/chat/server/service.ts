@@ -278,17 +278,28 @@ function makeChatService() {
     // stored is exactly what was read. Preferences degrade; access failures
     // fail the whole turn before any row is written.
     const resolver =
-      (input: {
-        userId: string;
-        searchEnabled: boolean;
-        model: { contextLength: number | null | undefined };
-        searchAvailable: boolean;
-        collectionIds?: ReadonlyArray<string> | undefined;
-        skillIds?: ReadonlyArray<string> | undefined;
-        attempt?: "send" | "retry" | "edit";
-      }): ResolveGeneration =>
+      (
+        input: {
+          userId: string;
+          model: { contextLength: number | null | undefined };
+          searchAvailable: boolean;
+          collectionIds?: ReadonlyArray<string> | undefined;
+          skillIds?: ReadonlyArray<string> | undefined;
+        } & (
+          | { attempt: "retry"; searchEnabled?: never }
+          | { attempt: "send" | "edit"; searchEnabled: boolean }
+        ),
+      ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
         Effect.gen(function* () {
+          const searchEnabled =
+            input.attempt === "retry"
+              ? continuation
+                ? continuation.searchEnabled && input.searchAvailable
+                : yield* Effect.die("Retry requires a saved generation configuration")
+              : input.attempt === "edit"
+                ? input.searchEnabled && input.searchAvailable
+                : (continuation?.searchEnabled ?? input.searchEnabled);
           if (!defaults.agent && continuation) {
             yield* knowledge.authorizeManifest(
               input.userId,
@@ -305,10 +316,7 @@ function makeChatService() {
                 continuation.standaloneSkillIds ?? [],
                 [],
               ),
-              searchEnabled:
-                input.attempt === "retry" || input.attempt === "edit"
-                  ? input.searchEnabled
-                  : continuation.searchEnabled,
+              searchEnabled,
             };
           }
           const agent = defaults.agent
@@ -326,10 +334,7 @@ function makeChatService() {
             agent,
             collectionIds: continuation?.standaloneCollectionIds ?? input.collectionIds,
             skillIds: continuation?.standaloneSkillIds ?? input.skillIds,
-            searchEnabled:
-              input.attempt !== "edit" && continuation
-                ? continuation.searchEnabled
-                : input.searchEnabled,
+            searchEnabled,
             model: input.model,
             searchAvailable: input.searchAvailable,
           });
@@ -374,6 +379,7 @@ function makeChatService() {
         ...input,
         associateAgentId: agentId ?? undefined,
         resolve: resolver({
+          attempt: "send",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
           model,
@@ -431,13 +437,13 @@ function makeChatService() {
       conversationId: string;
       assistantMessageId: string;
       modelId: string;
-      searchEnabled: boolean;
       timeZone?: string | undefined;
       deleteMessageIds: ReadonlyArray<string>;
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: EditContent & {
         messageId: string;
         attachmentIds: ReadonlyArray<string>;
+        searchEnabled: boolean;
       };
     }) {
       const model = yield* providers.getModel(input.modelId);
@@ -451,13 +457,13 @@ function makeChatService() {
           modelId: input.modelId,
           deleteMessageIds: input.deleteMessageIds,
           invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
-          searchEnabled: input.searchEnabled,
           resolve: resolver({
             userId: input.userId,
             model,
-            searchEnabled: input.searchEnabled,
             searchAvailable,
-            attempt: input.edit ? "edit" : "retry",
+            ...(input.edit
+              ? { attempt: "edit", searchEnabled: input.edit.searchEnabled }
+              : { attempt: "retry" }),
           }),
           ...(input.edit
             ? {
@@ -575,11 +581,6 @@ function makeChatService() {
         );
       }
 
-      const usedSearch = (yield* repo.listToolCalls([message.id])).some(
-        (call) => call.toolName === "web_search",
-      );
-      const searchEnabled =
-        message.generationMode === "research" || (usedSearch && (yield* searchToolEnabled));
       if (message.generationMode === "research")
         yield* validateGenerationOptions({
           userId: input.userId,
@@ -599,7 +600,6 @@ function makeChatService() {
         conversationId: input.conversationId,
         assistantMessageId: message.id,
         modelId,
-        searchEnabled,
         timeZone: input.timeZone,
         deleteMessageIds: after.map((m) => m.id),
         // From the retried answer onward: a summary that ends at this message
@@ -754,7 +754,6 @@ function makeChatService() {
           conversationId: input.conversationId,
           assistantMessageId: assistant.id,
           modelId: input.modelId,
-          searchEnabled: input.searchEnabled && searchAvailable,
           timeZone: input.timeZone,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
           // From the edited user message onward — its text changes while the
@@ -764,6 +763,7 @@ function makeChatService() {
             messageId: message.id,
             ...edit,
             attachmentIds: input.attachmentIds,
+            searchEnabled: input.searchEnabled,
           },
         });
         if (!restarted) {
@@ -787,6 +787,7 @@ function makeChatService() {
         deleteMessageIds: after.map((candidate) => candidate.id),
         invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
         resolve: resolver({
+          attempt: "edit",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
           model,

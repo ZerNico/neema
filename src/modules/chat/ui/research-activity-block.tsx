@@ -4,7 +4,7 @@ import type { ResearchToolActivity } from "../client/use-message-stream.ts";
 import type { ResearchStepActivity } from "./research-panel.tsx";
 import type { ResearchPhase } from "../research-schema.ts";
 import { hostOf } from "./favicon.tsx";
-import { Spinner } from "~/ui/primitives/spinner.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
 
@@ -107,7 +107,7 @@ export function ResearchActivityBlock({
         {running ? (
           <Spinner aria-hidden className="size-4 motion-reduce:animate-none" />
         ) : (
-          <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" aria-hidden />
+          <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />
         )}
       </MotionSwap>
       <MotionSwap

@@ -52,7 +52,7 @@ function DocumentSourceRow({ source }: { source: DocumentSource }) {
         aria-label={`Source: ${source.title || "Document"}`}
       >
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
-          <HugeiconsIcon icon={File01Icon} className="size-4" aria-hidden />
+          <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
           <span className="min-w-0 truncate">{documentLocationLabel(source)}</span>
         </div>
         <p className="group-hover:text-primary text-sm leading-snug font-medium transition-colors">

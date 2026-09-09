@@ -28,6 +28,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
+import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -43,7 +44,8 @@ import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend, SearchBackendError } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { FakeBlobStore, FakeDocumentParser } from "./unused-services.ts";
-import { FakeMemoryService } from "./fake-memory.ts";
+import { MemoryRepo } from "~/modules/memory/server/repo.ts";
+import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -60,7 +62,14 @@ const FakeKnowledge = Layer.mergeAll(
 
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
-  ChatRepo | ChatService | StreamEngine | Db | ToolsRepo,
+  | ChatRepo
+  | ChatService
+  | StreamEngine
+  | Db
+  | ToolsRepo
+  | MemoryService
+  | AgentRepo
+  | AttachmentRepo,
   unknown
 >;
 let remote: typeof runtime;
@@ -70,7 +79,8 @@ const requests: GatewayInput[] = [];
 let clarify = false;
 let clarificationProse = "";
 let coordinatorFailure: "provider" | "context" | "defect" | null = null;
-let synthesisCutShort = false;
+let coordinatorFirstResponse: "finish" | "text" | "empty" | null = null;
+let synthesisCutShort: "provider" | "context" | null = null;
 let evidenceUrl = "https://evidence.example/source";
 let overflowPhase: string | null = null;
 let dispatchWaves = 1;
@@ -79,6 +89,9 @@ let queriesPerSearch = 1;
 let searchDown = false;
 let finishWorkersEarly = false;
 let planningFragments = 1;
+let planningText = "Compare independent sources and investigate gaps.";
+let memoryParams: unknown = null;
+let beforeMemorySave: (() => Promise<void>) | null = null;
 let reportRepeats = 1;
 let reportSuffix = "";
 let reportFinishReason: "stop" | "length" = "stop";
@@ -100,9 +113,10 @@ const phaseOf = (input: GatewayInput) => {
   if (input.toolkit?.tools["ask_user"]) return "clarification";
   if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
   if (input.toolkit?.tools["web_search"]) return "worker";
-  if (content.includes("Write a concise research plan")) return "planning";
+  if (content.includes("Prepare a self-contained research brief")) return "planning";
   if (content.includes("Write a concise, evidence-dense report")) return "report";
-  return "synthesis";
+  if (content.includes("Write the final useful answer")) return "synthesis";
+  throw new Error("Unrecognized research stage in fake gateway");
 };
 const finish = (reason = "stop") =>
   Response.makePart("finish", {
@@ -116,7 +130,14 @@ const text = (delta: string) =>
   Response.makePart("text-delta", { id: "text", delta }) as ChatStreamPart;
 const tool = (input: GatewayInput, name: string, params: unknown) => {
   const id = "same-provider-id"; // deliberately repeated in concurrent workers and all invocations
-  const result = Stream.unwrap(input.toolkit!.handle(name, params, id).pipe(Effect.orDie)).pipe(
+  const handle = input.toolkit!.handle(name, params, id);
+  // Pause after the call is published, immediately before handler execution.
+  const result = Stream.unwrap(
+    (name === "save_memory" && beforeMemorySave
+      ? Effect.promise(beforeMemorySave).pipe(Effect.andThen(handle))
+      : handle
+    ).pipe(Effect.orDie),
+  ).pipe(
     Stream.orDie,
     Stream.map(
       (value) =>
@@ -170,12 +191,13 @@ const FakeGateway = Layer.succeed(AiGateway, {
               ),
             )
           : Stream.make(text(clarificationProse), finish());
-      if (phase === "planning")
+      if (phase === "planning") {
+        if (memoryParams !== null && input.toolkit?.tools["save_memory"])
+          return tool(input, "save_memory", memoryParams);
         return Stream.fromIterable(
-          Array.from({ length: planningFragments }, () =>
-            text("Compare independent sources and investigate gaps."),
-          ),
+          Array.from({ length: planningFragments }, () => text(planningText)),
         ).pipe(Stream.concat(Stream.make(finish())));
+      }
       if (phase === "compaction")
         return compactionFails
           ? Stream.fail(
@@ -200,6 +222,13 @@ const FakeGateway = Layer.succeed(AiGateway, {
         if (coordinatorFailure === "context")
           return Stream.fail(new ProviderContextOverflow({ providerId: "fake", message }));
         if (coordinatorFailure === "defect") return Stream.die(new Error(message));
+        if (coordinatorTurns === 0 && coordinatorFirstResponse) {
+          coordinatorTurns++;
+          if (coordinatorFirstResponse === "finish") return tool(input, "finish_research", {});
+          if (coordinatorFirstResponse === "text")
+            return Stream.make(text("No investigation is needed for this question."), finish());
+          return Stream.make(finish());
+        }
         return ++coordinatorTurns <= dispatchWaves
           ? tool(input, "dispatch_research", {
               tasks: [
@@ -239,7 +268,14 @@ const FakeGateway = Layer.succeed(AiGateway, {
       if (synthesisCutShort)
         return Stream.make(text("# Findings\nSupported conclusion[^1].\n")).pipe(
           Stream.concat(
-            Stream.fail(new ProviderUnreachable({ providerId: "fake", message: "stream lost" })),
+            Stream.fail(
+              synthesisCutShort === "context"
+                ? new ProviderContextOverflow({
+                    providerId: "fake",
+                    message: "late context rejection",
+                  })
+                : new ProviderUnreachable({ providerId: "fake", message: "stream lost" }),
+            ),
           ),
         );
       return Stream.make(
@@ -297,6 +333,7 @@ beforeAll(async () => {
     AgentRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
+    MemoryRepo.layer,
     ProviderRepo.layer,
     ToolsRepo.layer,
   ).pipe(
@@ -312,7 +349,7 @@ beforeAll(async () => {
         FakeReader,
         FakeBlobStore,
         FakeDocumentParser,
-        FakeMemoryService,
+        MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
         SyncBus.layer,
       ).pipe(Layer.provideMerge(repos)),
     ),
@@ -357,12 +394,19 @@ beforeEach(async () => {
       }),
     ),
   );
+  await runtime.runPromise(
+    ToolsRepo.use((repo) => repo.updateTool("memory", { enabled: false, config: {} })),
+  );
   requests.length = 0;
+  planningText = "Compare independent sources and investigate gaps.";
+  memoryParams = null;
+  beforeMemorySave = null;
   evidenceUrl = "https://evidence.example/source";
   clarify = false;
   clarificationProse = "";
   coordinatorFailure = null;
-  synthesisCutShort = false;
+  coordinatorFirstResponse = null;
+  synthesisCutShort = null;
   overflowPhase = null;
   dispatchWaves = 1;
   coordinatorTurns = 0;
@@ -391,13 +435,13 @@ const seed = Effect.gen(function* () {
   const conversation = yield* repo.createConversation({ userId, modelId });
   return { userId, conversationId: conversation.id };
 });
-const send = (userId: string, conversationId: string) =>
+const send = (userId: string, conversationId: string, content = "Investigate the evidence.") =>
   Effect.flatMap(ChatService, (service) =>
     service.sendMessage({
       userId,
       conversationId,
       modelId,
-      content: "Investigate the evidence.",
+      content,
       generationMode: "research",
       searchEnabled: false,
       attachmentIds: [],
@@ -409,6 +453,337 @@ const collect = (messageId: string, runId?: string) =>
       Effect.timeout(Duration.seconds(20)),
     ),
   );
+
+const enableMemory = (userId: string, referenceEnabled = true, autoSaveEnabled = true) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      yield* ToolsRepo.use((repo) => repo.updateTool("memory", { enabled: true, config: {} }));
+      yield* MemoryService.use((service) =>
+        service.updateSettings(userId, { referenceEnabled, autoSaveEnabled }),
+      );
+    }),
+  );
+const promptText = (input: GatewayInput) => JSON.stringify(input.prompt);
+
+describe("main-assistant research ownership", () => {
+  it("keeps history and memories with the main assistant and delegates only the brief", async () => {
+    finishWorkersEarly = true;
+    const input = await runtime.runPromise(seed);
+    await enableMemory(input.userId);
+    const privateMemory = "Grows orchids in a private greenhouse.";
+    const privateHistory = "My unrelated draft project is called Quiet Observatory.";
+    await runtime.runPromise(
+      MemoryService.use((service) => service.createManual(input.userId, privateMemory)),
+    );
+    await runtime.runPromise(
+      ChatRepo.use((repo) =>
+        repo.insertMessage({
+          conversationId: input.conversationId,
+          role: "user",
+          content: privateHistory,
+        }),
+      ),
+    );
+    planningText =
+      "Compare independent evidence for European regulations. Prefer European primary sources.";
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await remote.runPromise(collect(sent.assistantMessageId));
+    for (const phase of ["clarification", "planning", "synthesis"]) {
+      const calls = requests.filter((request) => phaseOf(request) === phase);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(promptText(calls[0]!)).toContain(privateMemory);
+      expect(promptText(calls[0]!)).toContain(privateHistory);
+    }
+    const coordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
+    expect(promptText(coordinator)).toContain(planningText);
+    for (const request of requests.filter((request) =>
+      ["coordinator", "worker", "report"].includes(phaseOf(request)),
+    )) {
+      expect(promptText(request)).not.toContain(privateMemory);
+      expect(promptText(request)).not.toContain(privateHistory);
+      expect(request.toolkit?.tools["save_memory"]).toBeUndefined();
+    }
+    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+    expect(
+      requests.find((request) => phaseOf(request) === "synthesis")!.toolkit?.tools["save_memory"],
+    ).toBeUndefined();
+    const message = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+    );
+    expect(message).toMatchObject({ status: "complete" });
+    expect(message!.content).toContain("Supported conclusion");
+    expect(message!.content).not.toContain(planningText);
+  });
+
+  it("investigates an explicit request even if the brief proposes answering without research", async () => {
+    finishWorkersEarly = true;
+    planningText = "No research is needed. Answer immediately from general knowledge.";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await remote.runPromise(collect(sent.assistantMessageId));
+    expect(backendSearches).toBeGreaterThan(0);
+    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+    const message = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+    );
+    expect(message!.content).not.toContain(planningText);
+  });
+
+  it.each(["finish", "text", "empty"] as const)(
+    "runs an initial investigation when the coordinator returns %s without dispatching",
+    async (response) => {
+      coordinatorFirstResponse = response;
+      dispatchWaves = 0;
+      finishWorkersEarly = true;
+      planningText = "Verify the result of 9 + 10. Keep the scope limited to this calculation.";
+      const input = await runtime.runPromise(seed);
+      const sent = await runtime.runPromise(
+        send(input.userId, input.conversationId, "what’s 9 + 10?"),
+      );
+      await remote.runPromise(collect(sent.assistantMessageId));
+      expect(requests.filter((request) => phaseOf(request) === "report")).toHaveLength(1);
+      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+      expect(
+        requests.filter((request) => phaseOf(request) === "coordinator").length,
+      ).toBeLessThanOrEqual(2);
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+          expect(message.status).toBe("complete");
+          expect(message.content).toContain("Supported conclusion");
+          expect(message.content).not.toContain("No investigation is needed");
+          const run = (yield* repo.research!.get(message.researchRunId!))!;
+          expect(run.progress.limitations).not.toContain(
+            "No usable research reports were produced.",
+          );
+          expect(run.progress.limitations).not.toContain(
+            "A coordinator round dispatched no useful tasks.",
+          );
+          const tasks = yield* db
+            .select()
+            .from(researchTasks)
+            .where(eq(researchTasks.runId, run.id));
+          expect(tasks).toHaveLength(1);
+          expect(tasks[0]).toMatchObject({
+            assignment: planningText,
+            status: "complete",
+            ordinal: 1,
+          });
+          const calls = yield* db
+            .select()
+            .from(researchCalls)
+            .where(eq(researchCalls.runId, run.id));
+          expect(calls).toHaveLength(requests.length);
+          const ledger = yield* db
+            .select()
+            .from(usageEvents)
+            .where(eq(usageEvents.messageId, message.id));
+          expect(ledger).toHaveLength(1);
+          expect(ledger[0]?.inputTokens).toBe(requests.length * 100);
+        }),
+      );
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((referenceEnabled) =>
+      [false, true].map((autoSaveEnabled) => ({ referenceEnabled, autoSaveEnabled })),
+    ),
+  )(
+    "honors separate reference=$referenceEnabled and auto-save=$autoSaveEnabled settings",
+    async ({ referenceEnabled, autoSaveEnabled }) => {
+      finishWorkersEarly = true;
+      const input = await runtime.runPromise(seed);
+      await enableMemory(input.userId, referenceEnabled, autoSaveEnabled);
+      const remembered = "Prefers measurements in kilograms.";
+      await runtime.runPromise(
+        MemoryService.use((service) => service.createManual(input.userId, remembered)),
+      );
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await remote.runPromise(collect(sent.assistantMessageId));
+      for (const request of requests) {
+        const phase = phaseOf(request);
+        expect(Boolean(request.toolkit?.tools["save_memory"])).toBe(
+          phase === "planning" && autoSaveEnabled,
+        );
+        expect(promptText(request).includes(remembered)).toBe(
+          referenceEnabled && ["clarification", "planning", "synthesis"].includes(phase),
+        );
+      }
+    },
+  );
+
+  it("saves once during preparation, keeps its snapshot stable and accounts for the continuation", async () => {
+    finishWorkersEarly = true;
+    const input = await runtime.runPromise(seed);
+    await enableMemory(input.userId);
+    const remembered = "Prefers measurements in kilograms.";
+    const saved = "Prefers comparisons shown in tables.";
+    await runtime.runPromise(
+      MemoryService.use((service) => service.createManual(input.userId, remembered)),
+    );
+    memoryParams = { content: saved };
+    const sent = await runtime.runPromise(
+      send(
+        input.userId,
+        input.conversationId,
+        "I prefer tables for comparisons; investigate the evidence.",
+      ),
+    );
+    await remote.runPromise(collect(sent.assistantMessageId));
+    const stored = await runtime.runPromise(
+      MemoryService.use((service) => service.list(input.userId)),
+    );
+    expect(stored.filter((memory) => memory.content === saved)).toHaveLength(1);
+    const planning = requests.filter((request) => phaseOf(request) === "planning");
+    expect(planning).toHaveLength(2);
+    expect(planning[0]!.toolkit?.tools["save_memory"]).toBeDefined();
+    expect(planning[1]!.toolkit?.tools["save_memory"]).toBeUndefined();
+    const synthesis = requests.filter((request) => phaseOf(request) === "synthesis");
+    expect(synthesis).toHaveLength(1);
+    expect(promptText(synthesis[0]!)).toContain(remembered);
+    expect(promptText(synthesis[0]!)).not.toContain(saved);
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+        expect(message.status).toBe("complete");
+        const calls = yield* db
+          .select()
+          .from(researchCalls)
+          .where(eq(researchCalls.runId, message.researchRunId!));
+        expect(calls).toHaveLength(requests.length);
+        expect(calls.filter((call) => call.phase === "planning")).toHaveLength(2);
+        const ledger = yield* db
+          .select()
+          .from(usageEvents)
+          .where(eq(usageEvents.messageId, message.id));
+        expect(ledger).toHaveLength(1);
+        expect(ledger[0]!.inputTokens).toBe(requests.length * 100);
+        const activities = yield* repo.listToolCalls([message.id]);
+        expect(activities.filter((activity) => activity.toolName === "save_memory")).toHaveLength(
+          1,
+        );
+        expect(JSON.stringify(activities)).not.toContain(saved);
+        const chunks = yield* db
+          .select()
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, message.id));
+        expect(JSON.stringify(chunks)).not.toContain(saved);
+      }),
+    );
+  });
+
+  it.each(["malformed", "protected"] as const)(
+    "does not retry a %s memory save attempt",
+    async (kind) => {
+      finishWorkersEarly = true;
+      const input = await runtime.runPromise(seed);
+      await enableMemory(input.userId);
+      const remembered = "Prefers comparisons shown in tables.";
+      await runtime.runPromise(
+        MemoryService.use((service) => service.createManual(input.userId, remembered)),
+      );
+      memoryParams =
+        kind === "malformed"
+          ? { unexpected: true }
+          : { content: "Prefers prose instead of tables.", replaces: 1 };
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await remote.runPromise(collect(sent.assistantMessageId));
+      const stored = await runtime.runPromise(
+        MemoryService.use((service) => service.list(input.userId)),
+      );
+      expect(stored.map((memory) => memory.content)).toEqual([remembered]);
+      const planning = requests.filter((request) => phaseOf(request) === "planning");
+      expect(planning).toHaveLength(2);
+      expect(planning[0]!.toolkit?.tools["save_memory"]).toBeDefined();
+      expect(planning[1]!.toolkit?.tools["save_memory"]).toBeUndefined();
+      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+    },
+  );
+
+  it("carries the transactional guard into the actual preparation toolkit handler", async () => {
+    finishWorkersEarly = true;
+    const input = await runtime.runPromise(seed);
+    await enableMemory(input.userId);
+    memoryParams = { content: "Prefers comparisons shown in tables." };
+    let reachedHandler = false;
+    beforeMemorySave = () =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          // The model's tool-call is already published; the next operation is the save handler.
+          reachedHandler = true;
+          yield* Db.use((db) =>
+            db
+              .update(researchRuns)
+              .set({ leaseUntil: new Date(0) })
+              .where(eq(researchRuns.conversationId, input.conversationId)),
+          );
+        }),
+      );
+    const sent = await runtime.runPromise(
+      send(
+        input.userId,
+        input.conversationId,
+        "I prefer tables for comparisons; investigate the evidence.",
+      ),
+    );
+    await remote.runPromise(collect(sent.assistantMessageId));
+    expect(reachedHandler).toBe(true);
+    expect(
+      await runtime.runPromise(MemoryService.use((service) => service.list(input.userId))),
+    ).toEqual([]);
+    expect(requests.some((request) => phaseOf(request) === "synthesis")).toBe(false);
+  });
+
+  it.each(["settings", "source"] as const)(
+    "rechecks %s before a preparation memory write",
+    async (change) => {
+      finishWorkersEarly = true;
+      const input = await runtime.runPromise(seed);
+      await enableMemory(input.userId);
+      memoryParams = { content: "Prefers comparisons shown in tables." };
+      beforeMemorySave = () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            if (change === "settings") {
+              yield* MemoryService.use((service) =>
+                service.updateSettings(input.userId, { autoSaveEnabled: false }),
+              );
+            } else {
+              yield* Db.use((db) =>
+                db
+                  .update(messages)
+                  .set({ content: "Changed request." })
+                  .where(
+                    and(
+                      eq(messages.conversationId, input.conversationId),
+                      eq(messages.role, "user"),
+                    ),
+                  ),
+              );
+            }
+          }),
+        );
+      const sent = await runtime.runPromise(
+        send(
+          input.userId,
+          input.conversationId,
+          "I prefer tables for comparisons; investigate the evidence.",
+        ),
+      );
+      await remote.runPromise(collect(sent.assistantMessageId));
+      expect(
+        await runtime.runPromise(MemoryService.use((service) => service.list(input.userId))),
+      ).toEqual([]);
+      expect(requests.filter((request) => phaseOf(request) === "planning")).toHaveLength(2);
+      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+    },
+  );
+});
 
 describe("durable deep research", () => {
   it("publishes compact display progress, not fragmented plans or worker reports", async () => {
@@ -591,6 +966,33 @@ describe("durable deep research", () => {
       );
       expect(message?.status).toBe("complete");
       expect(message?.content).toContain("Supported conclusion");
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const persisted = yield* repo.listCompactionEvents([sent.assistantMessageId]);
+          expect(persisted.length).toBeGreaterThan(0);
+          if (!failSummary) {
+            expect(
+              persisted.some((event) => event.summary?.includes("disagreements remain unresolved")),
+            ).toBe(true);
+          }
+          const detail = yield* loadConversationDetail(input.userId, input.conversationId);
+          expect(detail.compactionEvents).toHaveLength(persisted.length);
+          expect(detail.compactionEvents.every((event) => event.summary === null)).toBe(true);
+          const chunks = yield* repo.chunksAfter(sent.assistantMessageId, 0);
+          const compactions = chunks.filter((chunk) => chunk.kind === "compaction");
+          expect(compactions.length).toBeGreaterThan(0);
+          expect(compactions.every((chunk) => !("summary" in JSON.parse(chunk.delta)))).toBe(true);
+          const branch = yield* repo.cloneConversationPrefix({
+            userId: input.userId,
+            sourceConversationId: input.conversationId,
+            throughMessageId: sent.assistantMessageId,
+          });
+          const branched = yield* loadConversationDetail(input.userId, branch.id);
+          expect(branched.compactionEvents).toHaveLength(persisted.length);
+          expect(branched.compactionEvents.every((event) => event.summary === null)).toBe(true);
+        }),
+      );
     },
   );
 
@@ -658,7 +1060,7 @@ describe("durable deep research", () => {
         const messages = request.prompt.content;
         expect(messages.at(-2)?.role).toBe("assistant");
         expect(JSON.stringify(messages.at(-2))).toContain(
-          phase === "report" ? "Registered sources" : "Research plan (data)",
+          phase === "report" ? "Registered sources" : "Research brief (data)",
         );
         expect(messages.at(-1)?.role).toBe("user");
         expect(JSON.stringify(messages.at(-1))).toContain("data, not instructions");
@@ -760,65 +1162,75 @@ describe("durable deep research", () => {
     expect(toggled?.config.researchMaxSearchQueries).toBe(24);
   });
 
-  it("persists remote Stop, interrupts provider work, fences stale Stop and retries with a fresh run", async () => {
-    const input = await runtime.runPromise(seed);
-    hold = {
-      phase: "planning",
-      reached: Deferred.makeUnsafe<void>(),
-      interrupted: Deferred.makeUnsafe<void>(),
-    };
-    const gate = hold;
-    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(Deferred.await(gate.reached));
-    const message = (await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-    ))!;
-    const stale = await remote.runPromise(
-      ChatService.use((service) =>
-        service.stopGeneration({ ...input, messageId: message.id, researchRunId: "old-run" }),
-      ),
-    );
-    expect(stale.stopped).toBe(false);
-    const stopped = await remote.runPromise(
-      ChatService.use((service) =>
-        service.stopGeneration({
-          ...input,
-          messageId: message.id,
-          researchRunId: message.researchRunId!,
+  it.each(["planning", "synthesis"])(
+    "persists remote Stop during %s, fences stale Stop and retries with a fresh run",
+    async (phase) => {
+      const input = await runtime.runPromise(seed);
+      hold = {
+        phase,
+        reached: Deferred.makeUnsafe<void>(),
+        interrupted: Deferred.makeUnsafe<void>(),
+      };
+      const gate = hold;
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await runtime.runPromise(Deferred.await(gate.reached));
+      const message = (await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+      ))!;
+      const activeRun = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.research!.get(message.researchRunId!)),
+      );
+      expect(activeRun?.status).toBe("running");
+      expect(activeRun?.progress.phase).toBe(phase === "synthesis" ? "synthesizing" : "planning");
+      const stale = await remote.runPromise(
+        ChatService.use((service) =>
+          service.stopGeneration({ ...input, messageId: message.id, researchRunId: "old-run" }),
+        ),
+      );
+      expect(stale.stopped).toBe(false);
+      const stopped = await remote.runPromise(
+        ChatService.use((service) =>
+          service.stopGeneration({
+            ...input,
+            messageId: message.id,
+            researchRunId: message.researchRunId!,
+          }),
+        ),
+      );
+      expect(stopped.stopped).toBe(true);
+      await runtime.runPromise(
+        Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
+      );
+      await remote.runPromise(collect(message.id, message.researchRunId!));
+      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(
+        phase === "synthesis" ? 1 : 0,
+      );
+      hold = null;
+      await runtime.runPromise(
+        ChatService.use((service) => service.retryMessage({ ...input, messageId: message.id })),
+      );
+      await remote.runPromise(collect(message.id));
+      const retried = (await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getMessage(message.id)),
+      ))!;
+      expect(retried.researchRunId).not.toBe(message.researchRunId);
+      expect(retried.generationMode).toBe("research");
+      const oldStream = await remote.runPromise(collect(message.id, message.researchRunId!));
+      expect(oldStream).toHaveLength(1);
+      expect(oldStream[0]).toMatchObject({ kind: "done", runId: retried.researchRunId });
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const ledger = yield* db
+            .select()
+            .from(usageEvents)
+            .where(eq(usageEvents.messageId, message.id));
+          expect(ledger).toHaveLength(2);
+          expect(ledger.some((row) => !row.usageComplete && row.cost === null)).toBe(true);
         }),
-      ),
-    );
-    expect(stopped.stopped).toBe(true);
-    await runtime.runPromise(
-      Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
-    );
-    await remote.runPromise(collect(message.id, message.researchRunId!));
-    expect(requests.some((request) => phaseOf(request) === "synthesis")).toBe(false);
-    hold = null;
-    await runtime.runPromise(
-      ChatService.use((service) => service.retryMessage({ ...input, messageId: message.id })),
-    );
-    await remote.runPromise(collect(message.id));
-    const retried = (await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(message.id)),
-    ))!;
-    expect(retried.researchRunId).not.toBe(message.researchRunId);
-    expect(retried.generationMode).toBe("research");
-    const oldStream = await remote.runPromise(collect(message.id, message.researchRunId!));
-    expect(oldStream).toHaveLength(1);
-    expect(oldStream[0]).toMatchObject({ kind: "done", runId: retried.researchRunId });
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const ledger = yield* db
-          .select()
-          .from(usageEvents)
-          .where(eq(usageEvents.messageId, message.id));
-        expect(ledger).toHaveLength(2);
-        expect(ledger.some((row) => !row.usageComplete && row.cost === null)).toBe(true);
-      }),
-    );
-  });
+      );
+    },
+  );
 
   it("enforces one active attempt per user without blocking ordinary chats", async () => {
     const input = await runtime.runPromise(seed);
@@ -1055,23 +1467,27 @@ describe("durable deep research", () => {
       }),
     );
   });
-  it("keeps a report that was cut short instead of failing the whole run", async () => {
-    synthesisCutShort = true;
-    const input = await runtime.runPromise(seed);
-    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-        expect(message.status).toBe("complete");
-        expect(message.content).toContain("Supported conclusion[^1]");
-        const run = yield* repo.research!.get(message.researchRunId!);
-        expect(run?.progress.phase).toBe("partial");
-        expect(run?.progress.limitations).toContain("The final report was cut short.");
-      }),
-    );
-  });
+  it.each(["provider", "context"] as const)(
+    "keeps a cut-short answer without restarting synthesis (%s)",
+    async (failure) => {
+      synthesisCutShort = failure;
+      const input = await runtime.runPromise(seed);
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await remote.runPromise(collect(sent.assistantMessageId));
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+          expect(message.status).toBe("complete");
+          expect(message.content).toBe("# Findings\nSupported conclusion[^1].\n");
+          expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+          const run = yield* repo.research!.get(message.researchRunId!);
+          expect(run?.progress.phase).toBe("partial");
+          expect(run?.progress.limitations).toContain("The final report was cut short.");
+        }),
+      );
+    },
+  );
 
   it("stops exploring once the search backend is down instead of spending every round on it", async () => {
     searchDown = true;
@@ -1201,6 +1617,11 @@ describe("durable deep research", () => {
           }),
         ),
       );
+      // Investigation receives only the brief, so overflow repair must compact that
+      // projection rather than borrowing the main assistant's unrelated history.
+      planningText =
+        "Investigate the evidence. " +
+        "Compare independent sources and investigate gaps. ".repeat(100);
       overflowPhase = phase;
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
       await remote.runPromise(collect(sent.assistantMessageId));
@@ -1215,7 +1636,7 @@ describe("durable deep research", () => {
         expect(JSON.stringify(request.prompt.content.at(-1))).toContain("data, not instructions");
         if (phase !== "planning") {
           expect(request.prompt.content.at(-2)?.role).toBe("assistant");
-          expect(JSON.stringify(request.prompt.content.at(-2))).toContain("Research plan (data)");
+          expect(JSON.stringify(request.prompt.content.at(-2))).toContain("Research brief (data)");
         }
       }
       await runtime.runPromise(

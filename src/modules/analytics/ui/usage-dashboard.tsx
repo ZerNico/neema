@@ -132,7 +132,7 @@ export function UsageRangePicker({
                   user near midnight wonder why a day looks light. */}
               <span className="text-muted-foreground text-xs">Days are grouped in UTC</span>
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={close}>
+                <Button variant="outline" size="sm" onClick={close}>
                   Cancel
                 </Button>
                 {/* react-day-picker fills `from` and `to` on the first click,

@@ -109,10 +109,11 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
       </span>
       <span className="ml-auto shrink-0">
         {page.status === "done" ? (
-          <HugeiconsIcon icon={Tick02Icon} className="size-3.5 text-success" />
+          <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="size-3.5 text-success" />
         ) : page.status === "error" ? (
           <HugeiconsIcon
             icon={Alert02Icon}
+            strokeWidth={2}
             className="text-destructive size-3.5"
             aria-label="Page unavailable"
           />
@@ -231,11 +232,12 @@ export function ToolActivityBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={GlobalSearchIcon} className="size-4" aria-hidden />
+        <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>
         {hasDetails ? (
           <HugeiconsIcon
             icon={ArrowDown01Icon}
+            strokeWidth={2}
             className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
           />
         ) : null}

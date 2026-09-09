@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { FieldError } from "~/ui/primitives/field";
@@ -118,7 +118,7 @@ function ProfileForms({
                 {(field) => <field.TextField label="Display name" autoComplete="name" />}
               </nameForm.AppField>
               <nameForm.AppForm>
-                <div>
+                <FormActions>
                   <nameForm.Subscribe selector={(s) => s.isDefaultValue}>
                     {(unchanged) => (
                       <nameForm.SubmitButton size="sm" disabled={unchanged}>
@@ -126,7 +126,7 @@ function ProfileForms({
                       </nameForm.SubmitButton>
                     )}
                   </nameForm.Subscribe>
-                </div>
+                </FormActions>
               </nameForm.AppForm>
             </form>
           </ListRow>
@@ -171,9 +171,9 @@ function ProfileForms({
                 </p>
               ) : null}
               <passwordForm.AppForm>
-                <div>
+                <FormActions>
                   <passwordForm.SubmitButton size="sm">Update password</passwordForm.SubmitButton>
-                </div>
+                </FormActions>
               </passwordForm.AppForm>
             </form>
           </ListRow>

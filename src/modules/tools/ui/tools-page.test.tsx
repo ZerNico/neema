@@ -290,7 +290,7 @@ describe("ToolsPage", () => {
 
   it("shows an empty state when the tool row is missing", () => {
     renderPage({ webSearch: null });
-    expect(screen.getByText("This tool isn't set up yet.")).toBeInTheDocument();
+    expect(screen.getByText("This tool isn’t set up yet")).toBeInTheDocument();
     expect(screen.queryByText(/migrations/)).not.toBeInTheDocument();
   });
 });

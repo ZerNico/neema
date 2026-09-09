@@ -9,7 +9,15 @@ import { knowledgeCollectionsQuery } from "../client/queries.ts";
 import { CollectionIdentityInput, KNOWLEDGE_LIMITS, type CollectionSummary } from "../schema.ts";
 import { createKnowledgeCollection, updateKnowledgeCollection } from "../server/functions.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -199,7 +207,9 @@ export function KnowledgePage() {
             void collections.refetch();
           }}
         />
-      ) : collections.data === undefined ? null : rows.length === 0 ? (
+      ) : collections.data === undefined ? (
+        <ListSkeleton label="Loading collections" />
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={FolderLibraryIcon}
           title="No collections yet"

@@ -479,6 +479,63 @@ describe("ChatInput search toggle", () => {
   });
 });
 
+describe("ChatInput plus menu", () => {
+  it("gives every row an icon, and Skills its selected count like Knowledge", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["chat-models"], MODELS);
+    client.setQueryData(["tools", "web-search", "availability"], {
+      configured: false,
+      enabled: false,
+    });
+    render(
+      <AppMotionProvider>
+        <QueryClientProvider client={client}>
+          <ChatInput
+            value=""
+            onValueChange={() => {}}
+            onSubmit={() => {}}
+            disabled={false}
+            modelId="text-only"
+            onModelChange={() => {}}
+            searchEnabled={false}
+            onSearchEnabledChange={() => {}}
+            skills={{
+              items: [
+                {
+                  id: "s1",
+                  name: "Changelog",
+                  description: "Writes release notes",
+                  manualOnly: false,
+                  audience: "private",
+                  canEdit: true,
+                  ownerName: null,
+                  revision: 1,
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                },
+              ],
+              selectedIds: ["s1"],
+              onChange: () => {},
+            }}
+          />
+        </QueryClientProvider>
+      </AppMotionProvider>,
+    );
+
+    // Offering skills makes the menu more than an attachment picker, so the
+    // trigger takes the broader label.
+    fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+    const skills = await screen.findByRole("menuitem", { name: /Skills/ });
+    expect(skills).toHaveTextContent("1");
+    // The Skills row shipped without one while every sibling had one, so this
+    // asserts the whole menu rather than just the row that was missing it.
+    for (const item of screen.getAllByRole("menuitem")) {
+      expect(item.querySelector("svg")).not.toBeNull();
+    }
+  });
+});
+
 describe("ChatInput attachment picking", () => {
   it("opens the hidden file input from the plus menu", async () => {
     const harness = setup();

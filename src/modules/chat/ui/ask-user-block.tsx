@@ -4,11 +4,11 @@ import type { MessageTime } from "./timestamps.ts";
 import type { ResolvedQuestionResponse } from "./question-responses.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { Card, CardContent } from "~/ui/card.tsx";
-import { Button } from "~/ui/primitives/button.tsx";
-import { Label } from "~/ui/primitives/label.tsx";
-import { Spinner } from "~/ui/primitives/spinner.tsx";
-import { Textarea } from "~/ui/primitives/textarea.tsx";
-import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { Button } from "~/ui/primitives/button";
+import { Label } from "~/ui/primitives/label";
+import { Textarea } from "~/ui/primitives/textarea";
+import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 
 export interface ResolvedQuestionView extends ResolvedQuestionResponse {
   time?: MessageTime;
@@ -100,7 +100,7 @@ export function AskUserBlock({
     <Card
       className="mb-3 gap-4 py-4"
       aria-label="Clarification questions"
-      aria-busy={pending !== null}
+      aria-busy={pending !== null || undefined}
       data-answer-message-id={resolution?.messageId}
     >
       {preparing || activity.status === "error" || questions.length === 0 ? (
@@ -251,26 +251,23 @@ export function AskUserBlock({
             })}
             {actionable || preparing ? (
               <div className="flex flex-wrap gap-2">
-                <Button
+                <PendingButton
                   type="submit"
                   size="sm"
+                  pending={pending === "answers"}
                   disabled={locked || !valid}
-                  aria-busy={pending === "answers"}
                 >
-                  {pending === "answers" ? <Spinner data-icon="inline-start" aria-hidden /> : null}
                   {editing ? "Save answers" : "Send answers"}
-                </Button>
-                <Button
-                  type="button"
+                </PendingButton>
+                <PendingButton
                   size="sm"
                   variant="ghost"
+                  pending={pending === "skip"}
                   disabled={locked}
-                  aria-busy={pending === "skip"}
                   onClick={() => void submit({ kind: "skip" })}
                 >
-                  {pending === "skip" ? <Spinner data-icon="inline-start" aria-hidden /> : null}
                   {editing ? "Skip and regenerate" : "Skip and continue"}
-                </Button>
+                </PendingButton>
                 {editState ? (
                   <Button
                     type="button"

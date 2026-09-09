@@ -56,13 +56,17 @@ beforeEach(() => {
   vi.mocked(listGroupMembers).mockResolvedValue(members);
 });
 
+// jsdom applies no stylesheet, so the sr-only span that names each switch stays
+// inline and its accessible name loses the word space a browser derives from
+// blockifying an absolutely positioned element. Match either spelling.
+const shareSwitch = (member: string) =>
+  screen.getByRole("switch", { name: new RegExp(`^Can share into this group\\s?for ${member}$`) });
+
 describe("GroupDetailPage sharing permissions", () => {
   it("renders saved per-member permissions and an admin override without a switch", () => {
     renderPage();
-    expect(
-      screen.getByRole("switch", { name: "Can share into this group for Alice" }),
-    ).not.toBeChecked();
-    expect(screen.getByRole("switch", { name: "Can share into this group for Bob" })).toBeChecked();
+    expect(shareSwitch("Alice")).not.toBeChecked();
+    expect(shareSwitch("Bob")).toBeChecked();
     expect(screen.getAllByRole("switch")).toHaveLength(2);
     expect(screen.getByText("Always allowed — admin")).toBeInTheDocument();
     expect(screen.getByText(/Disabling it leaves existing shares intact/)).toBeInTheDocument();
@@ -75,18 +79,14 @@ describe("GroupDetailPage sharing permissions", () => {
     });
     vi.mocked(updateGroupMemberSharing).mockReturnValue(pending);
     const { invalidate } = renderPage();
-    fireEvent.click(screen.getByRole("switch", { name: "Can share into this group for Alice" }));
+    fireEvent.click(shareSwitch("Alice"));
     await waitFor(() =>
       expect(updateGroupMemberSharing).toHaveBeenCalledWith({
         data: { groupId: "g1", userId: "u1", canShare: true },
       }),
     );
-    expect(
-      screen.getByRole("switch", { name: "Can share into this group for Alice" }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByRole("switch", { name: "Can share into this group for Alice" }),
-    ).toHaveAttribute("aria-busy", "true");
+    expect(shareSwitch("Alice")).not.toBeChecked();
+    expect(shareSwitch("Alice")).toHaveAttribute("aria-busy", "true");
     for (const control of screen.getAllByRole("switch"))
       expect(control).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "Remove Alice" })).toBeDisabled();
@@ -95,11 +95,7 @@ describe("GroupDetailPage sharing permissions", () => {
       members.map((m) => (m.userId === "u1" ? Object.assign({}, m, { canShare: true }) : m)),
     );
     await act(async () => resolve());
-    await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "Can share into this group for Alice" }),
-      ).toBeChecked(),
-    );
+    await waitFor(() => expect(shareSwitch("Alice")).toBeChecked());
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
   });
@@ -107,17 +103,15 @@ describe("GroupDetailPage sharing permissions", () => {
   it("preserves the saved value and reports failed updates", async () => {
     vi.mocked(updateGroupMemberSharing).mockRejectedValue(new Error("failed"));
     const { invalidate } = renderPage();
-    fireEvent.click(screen.getByRole("switch", { name: "Can share into this group for Bob" }));
+    fireEvent.click(shareSwitch("Bob"));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Could not update sharing permission."),
     );
     expect(updateGroupMemberSharing).toHaveBeenCalledWith({
       data: { groupId: "g1", userId: "u2", canShare: false },
     });
-    expect(screen.getByRole("switch", { name: "Can share into this group for Bob" })).toBeChecked();
-    expect(
-      screen.getByRole("switch", { name: "Can share into this group for Bob" }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(shareSwitch("Bob")).toBeChecked();
+    expect(shareSwitch("Bob")).not.toHaveAttribute("aria-disabled", "true");
     expect(invalidate).not.toHaveBeenCalled();
   });
 });

@@ -92,11 +92,12 @@ export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeTo
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={File01Icon} className="size-4" aria-hidden />
+        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>
         {hasDetails ? (
           <HugeiconsIcon
             icon={ArrowDown01Icon}
+            strokeWidth={2}
             className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
           />
         ) : null}

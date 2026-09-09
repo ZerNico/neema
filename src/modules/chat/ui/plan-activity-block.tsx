@@ -11,6 +11,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { activityRowClassName } from "./activity-row.ts";
 
 /**
  * The model's working checklist: one collapsed row carrying the latest list.
@@ -33,8 +34,8 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
 
   if (steps.length === 0)
     return (
-      <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-sm">
-        <HugeiconsIcon icon={CheckListIcon} className="size-4" aria-hidden />
+      <div className={cn(activityRowClassName, "mb-2")}>
+        <HugeiconsIcon icon={CheckListIcon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(running && "text-shimmer")}>{label}</span>
       </div>
     );
@@ -42,7 +43,12 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
   return (
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={CheckListIcon} className="size-4 shrink-0" aria-hidden />
+        <HugeiconsIcon
+          icon={CheckListIcon}
+          strokeWidth={2}
+          className="size-4 shrink-0"
+          aria-hidden
+        />
         <span className="min-w-0 truncate">{label}</span>
         {current ? (
           <span className="text-muted-foreground/70 shrink-0 text-xs">
@@ -51,6 +57,7 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
         ) : null}
         <HugeiconsIcon
           icon={ArrowDown01Icon}
+          strokeWidth={2}
           className={cn(
             "size-3.5 shrink-0",
             disclosureChevronMotionClassName,
@@ -65,7 +72,12 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
             <li key={step.step} className="flex items-start gap-2 py-0.5 text-xs">
               <span className="flex h-lh shrink-0 items-center">
                 {step.status === "completed" ? (
-                  <HugeiconsIcon icon={Tick02Icon} className="text-success size-3.5" aria-hidden />
+                  <HugeiconsIcon
+                    icon={Tick02Icon}
+                    strokeWidth={2}
+                    className="text-success size-3.5"
+                    aria-hidden
+                  />
                 ) : (
                   <span
                     className={cn(

@@ -33,7 +33,7 @@ function renderPage(props: { source?: string; path?: string } = {}) {
     </QueryClientProvider>,
   );
 }
-const field = () => screen.getByRole("textbox", { name: "Search skills or paste a link" });
+const field = () => screen.getByRole("searchbox", { name: "Search skills or paste a link" });
 
 afterEach(() => {
   vi.clearAllMocks();

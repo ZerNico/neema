@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { cardSurfaceClassName } from "~/ui/card.tsx";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { Button } from "~/ui/primitives/button";
+import { FieldError } from "~/ui/primitives/field";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -153,11 +154,7 @@ function DraftRow({
           }}
         />
       </div>
-      {error ? (
-        <p role="alert" className="text-destructive px-2 pt-1 pb-0.5 text-2xs">
-          {error}
-        </p>
-      ) : null}
+      {error ? <FieldError className="text-2xs px-2 pt-1 pb-0.5">{error}</FieldError> : null}
     </div>
   );
 }
@@ -448,7 +445,7 @@ export function PackageWorkspace({
     if (
       affected.some((entry) => entry.content.length > 0) &&
       !(await confirm({
-        title: `Delete ${selected}?`,
+        title: `Delete “${selected}”?`,
         description: "This removes the selected files from your draft. Save to publish the change.",
         confirmLabel: "Delete",
       }))

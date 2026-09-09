@@ -14,7 +14,8 @@ type MermaidConfig = Parameters<MermaidInstance["initialize"]>[0];
 // hand it a stand-in that fetches the real plugin on the first diagram —
 // conversations without one never pay for it.
 let pending: Promise<DiagramPlugin> | null = null;
-const loadMermaid = () => (pending ??= import("@streamdown/mermaid").then((m) => m.mermaid));
+const loadMermaid = (): Promise<DiagramPlugin> =>
+  (pending ??= import("@streamdown/mermaid").then((m) => m.mermaid));
 
 let config: MermaidConfig | undefined;
 let applied = false;

@@ -1,11 +1,17 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { cn } from "~/ui/utils";
-import { useSkillSlash, type TextareaSkills } from "~/modules/skills/ui/use-skill-slash.tsx";
+import { useTextareaMentions, type MentionItem } from "~/ui/textarea-mention.tsx";
 
 export const CHAT_INPUT_SHELL_CLASS = cn(
   "border-border bg-background w-full rounded-[1.375rem] border shadow-sm transition-shadow",
   "focus-within:border-ring/40 focus-within:shadow-md",
 );
+
+/** Offerable rows plus what to do with the one that is picked. */
+export interface TextareaMentions {
+  items: readonly MentionItem[];
+  onSelect: (id: string) => void;
+}
 
 export const ChatTextarea = forwardRef<
   HTMLTextAreaElement,
@@ -19,7 +25,10 @@ export const ChatTextarea = forwardRef<
     autoFocus?: boolean;
     disabled?: boolean;
     className?: string;
-    skills?: TextareaSkills | undefined;
+    /** Typed as `/name`. */
+    skills?: TextareaMentions | undefined;
+    /** Typed as `#name`. */
+    collections?: TextareaMentions | undefined;
   }
 >(function ChatTextarea(
   {
@@ -33,12 +42,18 @@ export const ChatTextarea = forwardRef<
     disabled = false,
     className,
     skills,
+    collections,
   },
   forwardedRef,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(forwardedRef, () => textareaRef.current!);
-  const slash = useSkillSlash(textareaRef, value, onValueChange, skills);
+  // Rebuilt each render on purpose: the hook only reads this during render, and
+  // memoising it would imply a stability the inline props do not have anyway.
+  const mentions = useTextareaMentions(textareaRef, value, onValueChange, [
+    ...(skills ? [{ trigger: "/", label: "Local skills", ...skills }] : []),
+    ...(collections ? [{ trigger: "#", label: "Knowledge collections", ...collections }] : []),
+  ]);
 
   // The controlled value is the resize trigger, not a value read by the effect.
   // Layout effect: the textarea must reach its grown height before ancestors
@@ -58,15 +73,15 @@ export const ChatTextarea = forwardRef<
         ref={textareaRef}
         rows={1}
         value={value}
-        {...slash.aria}
-        onSelect={slash.onSelectionChange}
+        {...mentions.aria}
+        onSelect={mentions.onSelectionChange}
         onChange={(event) => {
           onValueChange(event.target.value);
-          slash.onSelectionChange();
+          mentions.onSelectionChange();
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-          if (slash.onKeyDown(event)) return;
+          if (mentions.onKeyDown(event)) return;
           if (event.key === "Escape" && onCancel) {
             event.preventDefault();
             onCancel();
@@ -87,7 +102,7 @@ export const ChatTextarea = forwardRef<
           className,
         )}
       />
-      {slash.popup}
+      {mentions.popup}
     </>
   );
 });

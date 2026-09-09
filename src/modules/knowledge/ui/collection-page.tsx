@@ -34,9 +34,19 @@ import { CollectionDialog } from "./knowledge-page.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button, buttonVariants } from "~/ui/primitives/button";
+import { FieldError } from "~/ui/primitives/field";
 import {
   Dialog,
   DialogClose,
@@ -53,7 +63,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Spinner } from "~/ui/primitives/spinner";
 import { useAppReducedMotion } from "~/ui/motion.tsx";
 import * as m from "motion/react-m";
 import { cn } from "~/ui/utils";
@@ -204,9 +213,7 @@ function NoteDialog({
             {(field) => <field.TextField label="Title" placeholder="Refund policy" />}
           </form.AppField>
           {current.isError ? (
-            <p className="text-destructive text-sm" role="alert">
-              Could not load the current text. Close and try again.
-            </p>
+            <FieldError>Could not load the current text. Close and try again.</FieldError>
           ) : null}
           <form.AppField name="content">
             {(field) => (
@@ -322,7 +329,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
         />
       </Page>
     );
-  if (!detail.data) return null;
+  if (!detail.data)
+    return (
+      <Page title="Collection" backTo="/knowledge" backLabel="Knowledge">
+        <ListSkeleton label="Loading collection" />
+      </Page>
+    );
   const { collection, documents } = detail.data;
   const canEdit = collection.canEdit;
   const full = documents.length >= KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
@@ -437,7 +449,8 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   type="file"
                   multiple
                   accept=".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf"
-                  className="hidden"
+                  className="sr-only"
+                  aria-label="Upload documents"
                   onChange={(event) => {
                     const files = event.target.files;
                     if (files && files.length > 0) {
@@ -453,19 +466,19 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   <HugeiconsIcon icon={NoteIcon} strokeWidth={2} data-icon="inline-start" />
                   Add note
                 </Button>
-                <Button
+                <PendingButton
                   size="sm"
+                  pending={upload.isPending}
+                  disabled={full}
                   onClick={() => pickFile(null)}
-                  disabled={full || upload.isPending}
-                  aria-busy={upload.isPending || undefined}
                 >
-                  {upload.isPending ? (
-                    <Spinner data-icon="inline-start" aria-hidden />
-                  ) : (
+                  {/* The spinner takes the icon's place rather than sitting
+                      beside it, so the button keeps its width. */}
+                  {upload.isPending ? null : (
                     <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} data-icon="inline-start" />
                   )}
                   Upload
-                </Button>
+                </PendingButton>
               </>
             ) : undefined
           }
@@ -516,18 +529,15 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   {statusBadge(document)}
                   {canEdit &&
                   (document.status === "failed" || document.replacement?.status === "failed") ? (
-                    <Button
+                    <PendingButton
                       size="sm"
                       variant="outline"
-                      onClick={() => retry.mutate(document.id)}
+                      pending={retry.isPending && retry.variables === document.id}
                       disabled={retry.isPending}
-                      aria-busy={(retry.isPending && retry.variables === document.id) || undefined}
+                      onClick={() => retry.mutate(document.id)}
                     >
-                      {retry.isPending && retry.variables === document.id ? (
-                        <Spinner data-icon="inline-start" aria-hidden />
-                      ) : null}
                       Try again
-                    </Button>
+                    </PendingButton>
                   ) : null}
                   {document.versionId && document.kind === "file" ? (
                     <a

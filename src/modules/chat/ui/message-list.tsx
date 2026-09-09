@@ -691,7 +691,12 @@ function GenerationFailure({
             disabled={retryDisabled}
             className="ml-11 self-start sm:ml-0"
           >
-            <HugeiconsIcon icon={RefreshIcon} data-icon="inline-start" aria-hidden />
+            <HugeiconsIcon
+              icon={RefreshIcon}
+              strokeWidth={2}
+              data-icon="inline-start"
+              aria-hidden
+            />
             Try again
           </Button>
         ) : null}
@@ -742,7 +747,12 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
       <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
         {message.agent ? (
           <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-xs">
-            <HugeiconsIcon icon={agentIcon(message.agent.icon)} className="size-3.5" aria-hidden />
+            <HugeiconsIcon
+              icon={agentIcon(message.agent.icon)}
+              strokeWidth={2}
+              className="size-3.5"
+              aria-hidden
+            />
             <span className="truncate">{message.agent.name}</span>
           </div>
         ) : null}

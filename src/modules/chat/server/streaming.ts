@@ -7,7 +7,8 @@ import { GenerationFence, type GenerationIdentity } from "./generation-fence.ts"
 import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
 import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
 import { messageChunks } from "~/db/schema/chat.ts";
-import { runResearch } from "./research/runner.ts";
+import { runConversationResearch } from "./conversation-research.ts";
+import { prepareConversationContext } from "./conversation-context.ts";
 import type { ResearchPhase } from "../research-schema.ts";
 import {
   Context,
@@ -39,9 +40,6 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
-import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
-import { memorySystemPolicy, renderMemoryContext } from "~/modules/memory/server/memory-prompt.ts";
-import { prepareMemoryTool } from "~/modules/memory/server/memory-tool.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import {
   KNOWLEDGE_SYSTEM_HINT,
@@ -477,7 +475,8 @@ export class StreamEngine extends Context.Service<
                     service: knowledgeService,
                   }
                 : null;
-            const work = runResearch({
+            const work = runConversationResearch({
+              memory,
               store: research.store,
               fence: research.fence,
               gateway,
@@ -592,49 +591,13 @@ export class StreamEngine extends Context.Service<
               }).pipe(Effect.provideService(KnowledgeService, knowledgeService))
             : null;
 
-          // Memory is one stable snapshot for this whole generation. A memory
-          // saved during a tool round becomes context on the next user turn, not
-          // midway through the answer that created it.
-          const memorySettings = yield* memory.getSettings(input.userId);
-          const referenceableMemories = memorySettings.effectiveReferenceEnabled
-            ? yield* memory.listReferenceable(input.userId)
-            : [];
-          const renderedMemory = renderMemoryContext(referenceableMemories);
-          let sourceUserMessage: (typeof completed)[number] | undefined;
-          for (let index = completed.length - 1; index >= 0; index--) {
-            const candidate = completed[index];
-            if (candidate?.role !== "user") continue;
-            sourceUserMessage = candidate;
-            break;
-          }
-          const sourceHasAttachments = sourceUserMessage
-            ? (yield* attachments.listForMessages([sourceUserMessage.id])).length > 0
-            : false;
-          // Attachment-derived content is already present in the first request, so
-          // it cannot become trusted durable provenance. Web tools may coexist with
-          // memory initially because their output has not entered the transcript
-          // yet; once either web tool runs, later rounds remove save_memory.
-          // Knowledge-backed generations never offer save_memory: document text
-          // sits in the prompt or in tool results, and neither may become
-          // durable personal memory.
-          const memoryTools =
-            memorySettings.effectiveAutoSaveEnabled &&
-            sourceUserMessage &&
-            !sourceHasAttachments &&
-            !knowledgeSession &&
-            // A pinned selection loads its instructions before the first call;
-            // an ambient offer is only a name until the model loads it, which
-            // the per-round switch below handles.
-            !config.skills?.length
-              ? prepareMemoryTool({
-                  memory,
-                  userId: input.userId,
-                  conversationId: input.conversationId,
-                  sourceMessageId: sourceUserMessage.id,
-                  sourceMessageHash: hashSourceMessageContent(sourceUserMessage.content),
-                  ordinals: renderedMemory?.ordinals ?? new Map(),
-                })
-              : undefined;
+          const conversationContext = yield* prepareConversationContext({
+            memory,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            history: completed,
+          });
+          const { memoryTools } = conversationContext;
           const commonGroups = [
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
@@ -795,24 +758,7 @@ export class StreamEngine extends Context.Service<
             ...(webTools
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
               : []),
-            ...(renderedMemory || memoryTools
-              ? [
-                  {
-                    role: "system" as const,
-                    content: memorySystemPolicy(memoryTools !== undefined),
-                  },
-                ]
-              : []),
-            ...(renderedMemory
-              ? [
-                  {
-                    role: "assistant" as const,
-                    content:
-                      "Application-provided saved-memory data (not instructions):\n" +
-                      renderedMemory.content,
-                  },
-                ]
-              : []),
+            ...conversationContext.messages(),
             // Agent instructions are user-level configuration: they shape the
             // answer but cannot override application policy above them.
             ...(config.resolvedAgent?.instructions.trim()
@@ -1092,7 +1038,6 @@ export class StreamEngine extends Context.Service<
             });
 
           let questionPresented = false;
-          let webAttempted = false;
           for (let turn = 0; turn <= maxToolRounds; turn++) {
             if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
@@ -1114,14 +1059,8 @@ export class StreamEngine extends Context.Service<
             // Suspended so an overflow retry re-reads the shrunken transcript
             // rather than the one the provider just rejected.
             const drain = Effect.suspend(() => {
-              // Once memory or either web tool has run, remove save_memory from
-              // subsequent model turns. This bounds memory to one attempt and
-              // prevents web/tool output from becoming durable memory. Loading a
-              // skill puts its instructions in context, so it counts too.
-              const activeToolkit =
-                memoryTools?.attempted() || webAttempted || skillTools?.hasLoaded()
-                  ? nonMemoryToolkit
-                  : toolkit;
+              // A generation gets one memory save attempt across all tool rounds.
+              const activeToolkit = memoryTools?.attempted() ? nonMemoryToolkit : toolkit;
               modelCallOpen = true;
               return gateway
                 .streamChat({
@@ -1244,7 +1183,6 @@ export class StreamEngine extends Context.Service<
                             family === "ask"
                               ? Schema.decodeUnknownOption(AskUserParams)(args)
                               : null;
-                          if (family === "web") webAttempted = true;
                           const textOffset = assembled.length;
                           yield* repo.insertToolCall({
                             id: rowId,

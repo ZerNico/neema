@@ -11,6 +11,9 @@ import {
   attachments,
   messageAttachments,
   models,
+  skillFiles,
+  skillRevisions,
+  skills,
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -18,10 +21,11 @@ import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
-import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
+import { resolveAttemptSkills } from "~/modules/chat/server/effective-config.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import type {
   Memory,
@@ -68,6 +72,7 @@ const gatewayState = {
   duplicateQuestion: false,
   saveMemoryOnFirstCall: false,
   webSearchOnFirstCall: false,
+  saveMemoryAfterWebSearch: false,
   memoryParams: { content: MEMORY_CONTENT } as { content: string; replaces?: number },
   calls: [] as GatewayCall[],
   reset() {
@@ -77,6 +82,7 @@ const gatewayState = {
     gatewayState.duplicateQuestion = false;
     gatewayState.saveMemoryOnFirstCall = false;
     gatewayState.webSearchOnFirstCall = false;
+    gatewayState.saveMemoryAfterWebSearch = false;
     gatewayState.memoryParams = { content: MEMORY_CONTENT };
     gatewayState.calls = [];
   },
@@ -275,6 +281,8 @@ const FakeGateway = Layer.succeed(AiGateway, {
         if (gatewayState.saveMemoryOnFirstCall) return memoryToolRound(input);
         if (gatewayState.webSearchOnFirstCall) return webSearchRound(input);
       }
+      if (gatewayState.calls.length === 2 && gatewayState.saveMemoryAfterWebSearch)
+        return memoryToolRound(input);
       return finalAnswer();
     }),
 });
@@ -432,7 +440,11 @@ afterAll(async () => {
   await container?.stop();
 });
 
-const runGeneration = (searchEnabled: boolean, withAttachment = false) =>
+/** sha256 and length of the bytes FakeBlobStore hands back for every key. */
+const SKILL_BLOB_SHA = "3f82ec854f554e1e5a7fed249f8a258289bca7ea378c737c55df5d04fa777196";
+const SKILL_BLOB_BYTES = 18;
+
+const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill = false) =>
   runtime.runPromise(
     Effect.gen(function* () {
       const db = yield* Db;
@@ -442,12 +454,64 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false) =>
       yield* db.execute(
         `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
       );
+      // Rows rather than SkillService: this suite only needs a resolvable
+      // revision so the attempt carries a real skill selection.
+      const skillId = uuidv7();
+      if (withSkill) {
+        const revisionId = uuidv7();
+        const skillBlobId = uuidv7();
+        yield* db.insert(skills).values({
+          id: skillId,
+          userId,
+          name: "review",
+          description: "Review carefully",
+          revision: 1,
+        });
+        yield* db.insert(skillRevisions).values({
+          id: revisionId,
+          skillId,
+          revision: 1,
+          name: "review",
+          description: "Review carefully",
+          manualOnly: false,
+          contentHash: "b".repeat(64),
+        });
+        // The fake store answers every key with the same bytes; stored files
+        // are integrity-checked on read, so the digest has to be theirs.
+        yield* db.insert(attachmentBlobs).values({
+          id: skillBlobId,
+          userId,
+          sha256: SKILL_BLOB_SHA,
+          storageKey: `blobs/${userId}/3f/82/${SKILL_BLOB_SHA}`,
+          size: SKILL_BLOB_BYTES,
+          mediaType: "text/markdown",
+        });
+        yield* db.insert(skillFiles).values({
+          revisionId,
+          path: "SKILL.md",
+          blobId: skillBlobId,
+          byteSize: SKILL_BLOB_BYTES,
+          sha256: SKILL_BLOB_SHA,
+        });
+      }
       const turn = yield* repo.createTurn({
         userId,
         conversationId: null,
         modelId,
         content: "Please remember that I prefer concise answers.",
         attachmentIds: [],
+        // The selection has to reach the persisted generation config; passing
+        // skillIds alone leaves `config.skills` empty and the attempt would
+        // only ever see the skill as an ambient library offer.
+        ...(withSkill
+          ? {
+              skillIds: [skillId],
+              resolve: (tx: DbTx) =>
+                resolveAttemptSkills(tx, userId, [skillId], []).pipe(
+                  Effect.map((skills) => ({ ...PLAIN_GENERATION, skills })),
+                ),
+            }
+          : {}),
       });
       if (withAttachment) {
         const blobId = uuidv7();
@@ -827,7 +891,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     ]);
   }, 60_000);
 
-  it("offers memory alongside web search before any web output enters the prompt", async () => {
+  it("offers memory alongside web search", async () => {
     const result = await runGeneration(true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
@@ -838,27 +902,38 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
 
-  it("removes save_memory after a web tool runs", async () => {
+  it("saves memory after a web search and withdraws it only after its own attempt", async () => {
     gatewayState.webSearchOnFirstCall = true;
+    gatewayState.saveMemoryAfterWebSearch = true;
 
     const result = await runGeneration(true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
-    expect(memoryState.calls).toHaveLength(0);
+    expect(memoryState.calls).toHaveLength(1);
+    expect(memoryState.calls[0]?.input.content).toBe(MEMORY_CONTENT);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
+      ["web_search", "ask_user", "save_memory"],
       ["web_search", "ask_user", "save_memory"],
       ["web_search", "ask_user"],
     ]);
   }, 60_000);
 
-  it("does not offer automatic memory when the source message has attachments", async () => {
+  it("keeps memory available when the attempt selects a skill", async () => {
+    const result = await runGeneration(false, false, true);
+
+    expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
+    expect(gatewayState.calls[0]?.tools).toContain("save_memory");
+    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
+    // The skill is a real pinned selection, not merely an ambient offer: an
+    // explicit entry has its root loaded into the prompt up front.
+    expect(gatewayState.calls[0]?.prompt).toContain("<skill-guidance");
+  }, 60_000);
+
+  it("keeps memory available when the source message has attachments", async () => {
     const result = await runGeneration(false, true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
-    expect(memoryState.calls).toHaveLength(0);
-    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["ask_user"]]);
-    expect(gatewayState.calls[0]?.prompt).not.toContain(
-      "save_memory once before your final answer",
-    );
+    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["ask_user", "save_memory"]]);
+    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
 });

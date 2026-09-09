@@ -73,6 +73,41 @@ export const queueResearch = Effect.fn("research.queue")(function* (
   return id;
 });
 
+/** Reuse inside an existing write transaction; never wrap another repository transaction in locked. */
+export const lockResearchFence = Effect.fn("research.lockFence")(function* (
+  tx: DbTx,
+  fence: ResearchFence,
+  allowCancelled = false,
+) {
+  const conversation = yield* tx
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.id, fence.conversationId))
+    .for("update")
+    .pipe(Effect.orDie);
+  const valid = yield* tx
+    .select({ id: researchRuns.id })
+    .from(researchRuns)
+    .innerJoin(messages, eq(messages.id, researchRuns.messageId))
+    .where(
+      and(
+        eq(researchRuns.id, fence.runId),
+        eq(researchRuns.conversationId, fence.conversationId),
+        eq(researchRuns.messageId, fence.messageId),
+        eq(researchRuns.owner, fence.owner),
+        eq(researchRuns.status, "running"),
+        eq(messages.conversationId, fence.conversationId),
+        eq(messages.researchRunId, fence.runId),
+        eq(messages.status, "streaming"),
+        sql`${researchRuns.leaseUntil} > clock_timestamp()`,
+        ...(allowCancelled ? [] : [eq(researchRuns.cancelRequested, false)]),
+      ),
+    )
+    .pipe(Effect.orDie);
+  if (!conversation.length || !valid.length)
+    return yield* Effect.die(new Error("Research ownership lost or cancelled"));
+});
+
 export const createResearchStore = (db: Db["Service"]) => {
   const locked = <A, E>(
     fence: ResearchFence,
@@ -82,30 +117,7 @@ export const createResearchStore = (db: Db["Service"]) => {
     db
       .transaction((tx) =>
         Effect.gen(function* () {
-          yield* tx
-            .select({ id: conversations.id })
-            .from(conversations)
-            .where(eq(conversations.id, fence.conversationId))
-            .for("update")
-            .pipe(Effect.orDie);
-          const valid = yield* tx
-            .select({ id: researchRuns.id })
-            .from(researchRuns)
-            .innerJoin(messages, eq(messages.id, researchRuns.messageId))
-            .where(
-              and(
-                eq(researchRuns.id, fence.runId),
-                eq(researchRuns.owner, fence.owner),
-                eq(researchRuns.status, "running"),
-                eq(messages.researchRunId, fence.runId),
-                eq(messages.status, "streaming"),
-                sql`${researchRuns.leaseUntil} > clock_timestamp()`,
-                ...(allowCancelled ? [] : [eq(researchRuns.cancelRequested, false)]),
-              ),
-            )
-            .pipe(Effect.orDie);
-          if (!valid.length)
-            return yield* Effect.die(new Error("Research ownership lost or cancelled"));
+          yield* lockResearchFence(tx, fence, allowCancelled);
           return yield* work(tx);
         }),
       )

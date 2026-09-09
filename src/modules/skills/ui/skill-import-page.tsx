@@ -1,14 +1,17 @@
-import { ArrowRight01Icon, Search01Icon, Upload04Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, Upload04Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cardSurfaceClassName } from "~/ui/card.tsx";
-import { ErrorState, Page, Section, ListCard, ListRow } from "~/ui/page-shell.tsx";
+import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Input } from "~/ui/primitives/input";
+import { FieldError } from "~/ui/primitives/field";
+import { Skeleton } from "~/ui/primitives/skeleton";
 import { Spinner } from "~/ui/primitives/spinner";
+import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils.ts";
 import { readSkillArchive, selectSkillPackage, skillPackageRoots } from "../archive.ts";
 import {
@@ -31,17 +34,6 @@ const MIN_SEARCH = 2;
 /** A link is anything that names a host we can actually fetch a package from. */
 const isSkillLink = (value: string) =>
   /^(https?:\/\/|(www\.)?(github\.com|skills\.sh)\/)/iu.test(value.trim());
-
-function ResultSkeletons({ count }: { count: number }) {
-  return Array.from({ length: count }, (_, key) => (
-    <ListRow key={key}>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="bg-muted h-3.5 w-40 animate-pulse rounded-full" />
-        <div className="bg-muted h-3 w-56 animate-pulse rounded-full" />
-      </div>
-    </ListRow>
-  ));
-}
 
 const message = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
@@ -200,24 +192,19 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
       }
       actions={
         review ? (
-          <Button
+          <PendingButton
             size="sm"
-            disabled={importing}
-            aria-busy={importing}
+            pending={importing}
             onClick={() => {
               void importSkill();
             }}
           >
-            {importing ? <Spinner aria-hidden data-icon="inline-start" /> : null}Import skill
-          </Button>
+            Import skill
+          </PendingButton>
         ) : null
       }
     >
-      {failure ? (
-        <p role="alert" className="text-destructive text-sm whitespace-pre-wrap">
-          {failure}
-        </p>
-      ) : null}
+      {failure ? <FieldError className="whitespace-pre-wrap">{failure}</FieldError> : null}
       {waiting ? (
         <div
           role="status"
@@ -226,7 +213,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         >
           <div className="flex flex-col gap-2 border-b p-3 md:border-r md:border-b-0">
             {[0, 1, 2].map((key) => (
-              <div key={key} className="bg-muted h-7 animate-pulse rounded-lg" />
+              <Skeleton key={key} className="h-7" />
             ))}
           </div>
           <div className="text-muted-foreground flex min-h-64 items-center justify-center gap-2 text-sm">
@@ -299,23 +286,15 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                   if (link) open(query.trim());
                 }}
               >
-                <div className="relative min-w-56 flex-1">
-                  <HugeiconsIcon
-                    icon={Search01Icon}
-                    strokeWidth={2}
-                    aria-hidden
-                    className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
-                  />
-                  <Input
-                    aria-label="Search skills or paste a link"
-                    placeholder="Search skills, or paste a GitHub link"
-                    className="pl-9"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                </div>
+                <SearchInput
+                  className="min-w-56 flex-1"
+                  aria-label="Search skills or paste a link"
+                  placeholder="Search skills, or paste a GitHub link"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
                 {link ? <Button type="submit">Review package</Button> : null}
-                <Button type="button" variant="outline" onClick={() => upload.current?.click()}>
+                <Button variant="outline" onClick={() => upload.current?.click()}>
                   <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} data-icon="inline-start" />
                   Upload
                 </Button>
@@ -342,11 +321,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                 />
               ) : null}
               {searchable && discovery.isPending ? (
-                <div role="status" aria-label="Searching skills.sh">
-                  <ListCard>
-                    <ResultSkeletons count={4} />
-                  </ListCard>
-                </div>
+                <ListSkeleton rows={4} media="none" label="Searching skills.sh" />
               ) : null}
               {searchable && !discovery.isPending && discovery.data?.skills.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No skills match “{search}”.</p>
@@ -377,7 +352,16 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                     </button>
                   ))}
                   {/* The next rows land where these sit. */}
-                  {discovery.isFetching ? <ResultSkeletons count={3} /> : null}
+                  {discovery.isFetching
+                    ? [0, 1, 2].map((key) => (
+                        <ListRow key={key}>
+                          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                            <Skeleton className="h-3.5 w-40 max-w-full" />
+                            <Skeleton className="h-3 w-56 max-w-full" />
+                          </div>
+                        </ListRow>
+                      ))
+                    : null}
                 </ListCard>
               ) : null}
               {/* skills.sh ignores an offset, so more results means a larger

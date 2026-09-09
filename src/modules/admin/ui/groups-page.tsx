@@ -5,6 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { createGroup, listGroupMemberships, listGroups } from "../server/functions.ts";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
@@ -17,7 +18,6 @@ import {
 } from "~/ui/primitives/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 
 export const groupsQuery = queryOptions({
   queryKey: ["admin", "groups"],
@@ -171,14 +171,9 @@ function AddGroupDialog({
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <Button
-              type="submit"
-              disabled={!name.trim() || save.isPending}
-              aria-busy={save.isPending || undefined}
-            >
-              {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
               Create group
-            </Button>
+            </PendingButton>
           </DialogFooter>
         </form>
       </DialogContent>

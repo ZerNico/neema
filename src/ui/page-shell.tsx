@@ -13,6 +13,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "~/ui/primitives/empty";
+import { Skeleton } from "~/ui/primitives/skeleton";
 import { cn } from "~/ui/utils";
 
 export interface SectionNavItem {
@@ -196,6 +197,16 @@ export function Section({
   );
 }
 
+// The row a section acts from: Save/Apply/Reset, or a control paired with the
+// button that consumes it. Left-aligned and below the fields, because a Save
+// button sitting above the field it saves reads backwards — which is the whole
+// difference from `Section`'s `actions` slot, whose job is "add one of these"
+// beside the heading. It also stops a submit button stretching to full width,
+// which is what a bare button as a direct child of a `flex-col` form does.
+export function FormActions({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
+}
+
 // Shared list-row primitives so providers, models, users and settings read the
 // same. Radius sits on the app's 2xl/3xl/4xl scale like every other surface.
 export function ListCard({ children, className }: { children: ReactNode; className?: string }) {
@@ -225,6 +236,39 @@ export function ListRow({
       )}
     >
       {children}
+    </div>
+  );
+}
+
+// The one loading shape for a list-shaped page. Routes preload through their
+// loader wherever they can, so this is for the windows a loader cannot cover
+// (no-preload routes, a query that only starts once the page is interactive) —
+// but it has to be the same shape everywhere, or each module invents its own.
+export function ListSkeleton({
+  rows = 3,
+  media = "tile",
+  label = "Loading",
+}: {
+  rows?: number;
+  /** Matches the row anatomy being stood in for: icon tile, avatar, or neither. */
+  media?: "tile" | "avatar" | "none";
+  label?: string;
+}) {
+  return (
+    <div role="status" aria-label={label}>
+      <ListCard>
+        {Array.from({ length: rows }, (_, key) => (
+          <ListRow key={key}>
+            {media === "none" ? null : (
+              <Skeleton className={cn("size-9 shrink-0", media === "avatar" && "rounded-full")} />
+            )}
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-32 max-w-full" />
+              <Skeleton className="h-3 w-48 max-w-full" />
+            </div>
+          </ListRow>
+        ))}
+      </ListCard>
     </div>
   );
 }

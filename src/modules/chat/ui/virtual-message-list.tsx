@@ -132,7 +132,7 @@ export function VirtualMessageList({
           atBottom ? "pointer-events-none opacity-0" : "opacity-100",
         )}
       >
-        <HugeiconsIcon icon={ArrowDown01Icon} className="size-4" />
+        <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
       </Button>
     </div>
   );

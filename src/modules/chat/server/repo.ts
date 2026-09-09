@@ -575,8 +575,6 @@ export class ChatRepo extends Context.Service<
         conversationId: string;
         attachmentIds: ReadonlyArray<string>;
       };
-      /** What the regenerated answer actually runs with; recorded for the next retry. */
-      searchEnabled?: boolean | undefined;
       resolve?: ResolveGeneration | undefined;
     }): Effect.Effect<
       {
@@ -1580,15 +1578,12 @@ export class ChatRepo extends Context.Service<
                   ? yield* editedContent(tx, current, input.edit.messageId, input.edit)
                   : null;
                 const previous = yield* readConfig(tx, input.messageId);
-                const resolved = yield* resolveAttempt(
+                const config = yield* resolveAttempt(
                   tx,
                   yield* readDefaults(tx, target.conversationId),
                   input.resolve,
                   previous,
                 );
-                const config = input.resolve
-                  ? resolved
-                  : { ...resolved, searchEnabled: input.searchEnabled ?? resolved.searchEnabled };
                 const generationId = uuidv7();
                 const claimed = yield* tx
                   .update(messages)

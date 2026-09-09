@@ -108,7 +108,9 @@ describe("research activity", () => {
     expect(screen.getByText("Searching “First”")).toBe(label);
     rerender(tree("Second"));
     rerender(tree("Latest"));
-    expect(screen.getByRole("button", { name: "Researching Searching “Latest”" })).toBe(row);
+    // The phase and the rolling target are separate spans; jsdom keeps them
+    // inline, so the space a browser derives from the grid is absent.
+    expect(screen.getByRole("button", { name: /^Researching\s?Searching “Latest”$/ })).toBe(row);
     expect(screen.queryByText("Searching “First”")).toBeNull();
     expect(row.querySelectorAll("[inert]")).toHaveLength(1);
     const latest = screen.getByText("Searching “Latest”");

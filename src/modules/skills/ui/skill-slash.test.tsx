@@ -41,7 +41,10 @@ function Harness({
       onSubmit={submit}
       onCancel={cancel}
       ariaLabel="Message"
-      skills={{ items: [item], onSelect: select }}
+      skills={{
+        items: [{ id: item.id, label: item.name, description: item.description }],
+        onSelect: select,
+      }}
     />
   );
 }

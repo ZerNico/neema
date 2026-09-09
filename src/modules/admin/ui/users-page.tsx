@@ -6,7 +6,7 @@ import { authClient } from "~/modules/auth/client.ts";
 import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { membershipsQuery } from "./groups-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
-import { ErrorState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
+import { ErrorState, ListCard, ListRow, ListSkeleton, Page } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -16,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Skeleton } from "~/ui/primitives/skeleton";
 
 // Group badges shown per row before collapsing into a "+N more" badge.
 const MAX_GROUP_BADGES = 2;
@@ -88,19 +87,14 @@ export function UsersPage() {
   return (
     <Page title="Users" description="Everyone with an account on this instance.">
       {users.isLoading ? (
-        <ListCard>
-          {[0, 1, 2].map((i) => (
-            <ListRow key={i}>
-              <Skeleton className="size-9 rounded-full" />
-              <div className="flex flex-1 flex-col gap-1.5">
-                <Skeleton className="h-3.5 w-32" />
-                <Skeleton className="h-3 w-48" />
-              </div>
-            </ListRow>
-          ))}
-        </ListCard>
+        <ListSkeleton media="avatar" label="Loading users" />
       ) : users.isError ? (
-        <ErrorState title="Could not load users" onRetry={() => users.refetch()} />
+        <ErrorState
+          title="Could not load users"
+          onRetry={() => {
+            void users.refetch();
+          }}
+        />
       ) : (
         <ListCard>
           {users.data?.map((user) => {
@@ -160,7 +154,7 @@ export function UsersPage() {
                             if (
                               await confirm({
                                 title: `Impersonate ${user.name}?`,
-                                description: `You will have access to ${user.name}'s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
+                                description: `You will have access to ${user.name}’s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
                                 confirmLabel: "Impersonate user",
                                 destructive: false,
                               })

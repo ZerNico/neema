@@ -240,7 +240,7 @@ describe("KnowledgeAdminPage", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Set the model's dimensions");
+    expect(screen.getByRole("alert")).toHaveTextContent("Set the model’s dimensions");
   });
 
   it("submits the document parser form on Enter and flags a non-integer page count", async () => {

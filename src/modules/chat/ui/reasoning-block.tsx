@@ -12,6 +12,7 @@ import {
 } from "~/ui/disclosure.tsx";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
+import { activityRowClassName } from "./activity-row.ts";
 
 // ChatGPT-style thinking section above an assistant answer.
 //
@@ -50,8 +51,8 @@ export const ReasoningBlock = memo(function ReasoningBlock({
   if (!hasContent) {
     if (!active) return null;
     return (
-      <div className="text-muted-foreground mb-2 flex items-center gap-2 text-sm">
-        <HugeiconsIcon icon={AiBrain01Icon} className="size-4" aria-hidden />
+      <div className={cn(activityRowClassName, "mb-2 gap-2")}>
+        <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} className="size-4" aria-hidden />
         <span className="text-shimmer">Thinking…</span>
       </div>
     );
@@ -64,12 +65,13 @@ export const ReasoningBlock = memo(function ReasoningBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={AiBrain01Icon} className="size-4" aria-hidden />
+        <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(active && "text-shimmer")}>
           {active ? "Thinking…" : "Thought process"}
         </span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
+          strokeWidth={2}
           className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
         />
       </DisclosureTrigger>

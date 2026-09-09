@@ -1,9 +1,8 @@
 import { createFormHook, createFormHookContexts } from "@tanstack/react-form";
 import type { ComponentProps } from "react";
-import { Button } from "~/ui/primitives/button";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Textarea } from "~/ui/primitives/textarea";
 
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
@@ -91,27 +90,26 @@ function TextareaField({
   );
 }
 
-// Submit button wired to the form's canSubmit/isSubmitting. Keeps its label
-// while pending (a spinner slides in ahead of it) so the button never
-// reflows — the shadcn "Button with Spinner" pattern.
+// Submit button wired to the form's canSubmit/isSubmitting. The pending
+// presentation itself lives in PendingButton, shared with the mutations that
+// have no form to subscribe to.
 function SubmitButton({
   children,
   disabled,
   ...props
-}: Omit<ComponentProps<typeof Button>, "type">) {
+}: Omit<ComponentProps<typeof PendingButton>, "type" | "pending">) {
   const form = useFormContext();
   return (
     <form.Subscribe selector={(s) => [s.canSubmit, s.isSubmitting] as const}>
       {([canSubmit, isSubmitting]) => (
-        <Button
+        <PendingButton
           type="submit"
-          disabled={disabled || !canSubmit || isSubmitting}
-          aria-busy={isSubmitting || undefined}
+          pending={isSubmitting}
+          disabled={disabled || !canSubmit}
           {...props}
         >
-          {isSubmitting ? <Spinner data-icon="inline-start" aria-hidden /> : null}
           {children}
-        </Button>
+        </PendingButton>
       )}
     </form.Subscribe>
   );

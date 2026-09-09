@@ -6,12 +6,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
-import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 import { cn } from "~/ui/utils";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
@@ -83,7 +82,7 @@ function MemorySection() {
       <Section title="Memory">
         <EmptyState
           icon={Brain02Icon}
-          title="This tool isn't set up yet."
+          title="This tool isn’t set up yet"
           description="Memory will appear here once it is available on this instance."
         />
       </Section>
@@ -177,7 +176,7 @@ function WebSearchSection() {
       <Section title="Web search">
         <EmptyState
           icon={GlobalSearchIcon}
-          title="This tool isn't set up yet."
+          title="This tool isn’t set up yet"
           description="Web search will appear here once it is available on this instance."
         />
       </Section>
@@ -236,12 +235,10 @@ function WebSearchSection() {
                       className="flex-1"
                     />
                     {tool.secretConfigured ? (
-                      <Button
-                        type="button"
+                      <PendingButton
                         size="sm"
                         variant="destructive"
-                        disabled={clearSecret.isPending}
-                        aria-busy={clearSecret.isPending || undefined}
+                        pending={clearSecret.isPending}
                         onClick={async () => {
                           const confirmed = await confirm({
                             title: "Clear the stored secret?",
@@ -252,11 +249,8 @@ function WebSearchSection() {
                           if (confirmed) clearSecret.mutate();
                         }}
                       >
-                        {clearSecret.isPending ? (
-                          <Spinner data-icon="inline-start" aria-hidden />
-                        ) : null}
                         Clear
-                      </Button>
+                      </PendingButton>
                     ) : null}
                   </div>
                   <FieldDescription>
@@ -308,29 +302,27 @@ function WebSearchSection() {
                   : `Could not connect: ${testResult.error}`}
               </p>
             ) : null}
-            <div className="flex gap-2">
+            <FormActions>
               <form.AppForm>
                 <form.SubmitButton size="sm">Save</form.SubmitButton>
               </form.AppForm>
               <form.Subscribe selector={(s) => [s.values.baseUrl, s.values.secret] as const}>
                 {([baseUrl, secret]) => (
-                  <Button
-                    type="button"
+                  <PendingButton
                     size="sm"
                     variant="outline"
-                    disabled={!baseUrl.trim() || test.isPending}
-                    aria-busy={test.isPending || undefined}
+                    pending={test.isPending}
+                    disabled={!baseUrl.trim()}
                     onClick={() => {
                       setTestResult(null);
                       test.mutate({ baseUrl, secret });
                     }}
                   >
-                    {test.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
                     Test connection
-                  </Button>
+                  </PendingButton>
                 )}
               </form.Subscribe>
-            </div>
+            </FormActions>
           </form>
         </ListRow>
       </ListCard>
@@ -373,7 +365,7 @@ function UrlReaderSection() {
       <Section title="URL reader">
         <EmptyState
           icon={Link01Icon}
-          title="This tool isn't set up yet."
+          title="This tool isn’t set up yet"
           description="The URL reader will appear here once it is available on this instance."
         />
       </Section>
@@ -425,11 +417,11 @@ function UrlReaderSection() {
                 )}
               </form.Field>
             </div>
-            <div className="flex gap-2">
+            <FormActions>
               <form.AppForm>
                 <form.SubmitButton size="sm">Save</form.SubmitButton>
               </form.AppForm>
-            </div>
+            </FormActions>
           </form>
         </ListRow>
       </ListCard>

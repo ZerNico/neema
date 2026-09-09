@@ -78,19 +78,21 @@ export function TokensPerDayChart({
           inset: 1,
         }),
       ],
-      x: {
-        scale: () => scaleBand<string>().padding(0.25),
-        axis: {
-          line: false,
-          ticks: { format: (day) => formatDay(String(day)) },
-          tickLabels: { thin: true },
+      scales: {
+        x: {
+          scale: () => scaleBand<string>().padding(0.25),
+          axis: {
+            line: false,
+            ticks: { format: (day) => formatDay(String(day)) },
+            tickLabels: { thin: true },
+          },
         },
-      },
-      y: {
-        scale: scaleLinear,
-        nice: true,
-        grid: true,
-        axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
+        y: {
+          scale: scaleLinear,
+          nice: true,
+          grid: true,
+          axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
+        },
       },
       // The legend is HTML in the card header — the built-in one spreads its
       // items across the full chart width (itemWidth = width / columns).
@@ -125,19 +127,21 @@ export function MessagesPerDayChart({
     const rows = densify(daily, window);
     return defineChart({
       marks: [lineY(rows, { x: "day", y: "messages", stroke: "var(--chart-1)", strokeWidth: 2 })],
-      x: {
-        scale: () => scaleBand<string>().padding(0.25),
-        axis: {
-          line: false,
-          ticks: { format: (day) => formatDay(String(day)) },
-          tickLabels: { thin: true },
+      scales: {
+        x: {
+          scale: () => scaleBand<string>().padding(0.25),
+          axis: {
+            line: false,
+            ticks: { format: (day) => formatDay(String(day)) },
+            tickLabels: { thin: true },
+          },
         },
-      },
-      y: {
-        scale: scaleLinear,
-        nice: true,
-        grid: true,
-        axis: { line: false },
+        y: {
+          scale: scaleLinear,
+          nice: true,
+          grid: true,
+          axis: { line: false },
+        },
       },
       tooltip,
     });
@@ -173,15 +177,17 @@ export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel
     }
     return defineChart({
       marks: [barX(shown, { x: "tokens", y: "model", fill: "var(--chart-1)", radius: 2 })],
-      x: {
-        scale: scaleLinear,
-        nice: true,
-        grid: true,
-        axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
-      },
-      y: {
-        scale: () => scaleBand<string>().padding(0.3),
-        axis: { line: false },
+      scales: {
+        x: {
+          scale: scaleLinear,
+          nice: true,
+          grid: true,
+          axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
+        },
+        y: {
+          scale: () => scaleBand<string>().padding(0.3),
+          axis: { line: false },
+        },
       },
       tooltip,
     });
@@ -217,8 +223,10 @@ export function UsageSparkline({ values }: { values: readonly number[] }) {
           strokeWidth: 1.5,
         }),
       ],
-      x: { scale: scaleLinear, axis: false },
-      y: { scale: scaleLinear, axis: false, nice: false },
+      scales: {
+        x: { scale: scaleLinear, axis: false },
+        y: { scale: scaleLinear, axis: false, nice: false },
+      },
       guides: false,
       margin: 0,
     });

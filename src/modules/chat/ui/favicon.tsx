@@ -20,6 +20,7 @@ export function Favicon({ url, className }: { url: string; className?: string })
     return (
       <HugeiconsIcon
         icon={GlobalSearchIcon}
+        strokeWidth={2}
         className={cn("text-muted-foreground size-4 shrink-0", className)}
       />
     );

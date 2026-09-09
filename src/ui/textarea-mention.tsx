@@ -1,4 +1,3 @@
-import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import {
   useEffect,
   useId,
@@ -9,23 +8,54 @@ import {
   type RefObject,
 } from "react";
 import getCaretCoordinates from "textarea-caret";
-import { cn } from "~/ui/utils.ts";
-import type { SkillSummary } from "../schema.ts";
-import { matchSkillSlash } from "./slash-token.ts";
+import { matchMentionToken } from "~/ui/mention-token.ts";
+import { Popover, PopoverContent } from "~/ui/primitives/popover";
+import { cn } from "~/ui/utils";
 
-export interface TextareaSkills {
-  items: readonly SkillSummary[];
+/** One row of a mention list. Both lines are optional; only `label` shows always. */
+export interface MentionItem {
+  id: string;
+  label: string;
+  /** Muted suffix on the label line — an owner, a count. */
+  meta?: string | undefined;
+  /** Second line. */
+  description?: string | undefined;
+  /** What the typed query filters against; defaults to label plus description. */
+  search?: string | undefined;
+}
+
+export interface MentionSource {
+  /** The character that opens this list at the start of a word. */
+  trigger: string;
+  /** Accessible name for the listbox. */
+  label: string;
+  items: readonly MentionItem[];
   onSelect: (id: string) => void;
 }
-export function useSkillSlash(
+
+const MAX_RESULTS = 8;
+
+/**
+ * Type-ahead lists anchored to the caret of a textarea, one per trigger
+ * character ("/" for skills, "#" for knowledge). Triggers are distinct, so at
+ * most one list can be open: the sources are tried in order and the first whose
+ * token matches at the caret wins.
+ *
+ * The whole thing is presentation over a caret position — it never owns the
+ * textarea's value. Accepting a row deletes the token and hands the id back, so
+ * what a selection *means* stays with the caller.
+ */
+export function useTextareaMentions(
   ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
   onChange: (value: string) => void,
-  skills?: TextareaSkills,
+  sources: readonly MentionSource[] = [],
 ) {
   const id = useId();
   const [selection, setSelection] = useState({ start: 0, end: 0, focused: false });
-  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<{ signature: string | null; value: string } | null>(
+    null,
+  );
   const [active, setActive] = useState<{ signature: string | null; index: number }>({
     signature: null,
     index: 0,
@@ -36,19 +66,44 @@ export function useSkillSlash(
     height: number;
     element: HTMLTextAreaElement | null;
   }>({ x: 0, y: 0, height: 24, element: null });
-  const token =
-    skills && selection.focused ? matchSkillSlash(value, selection.start, selection.end) : null;
-  const signature = token ? `${token.start}:${token.end}:${token.query}` : null;
-  const results = token
-    ? skills!.items
-        .filter((skill) =>
-          `${skill.name} ${skill.description}`.toLowerCase().includes(token.query.toLowerCase()),
-        )
-        .slice(0, 8)
-    : [];
-  const open = !!token && signature !== dismissed && results.length > 0;
+
+  const enabled = sources.length > 0;
+  const hit = selection.focused
+    ? sources.reduce<{ source: MentionSource; token: ReturnType<typeof matchMentionToken> } | null>(
+        (found, source) => {
+          if (found) return found;
+          const token = matchMentionToken(value, selection.start, selection.end, source.trigger);
+          return token ? { source, token } : null;
+        },
+        null,
+      )
+    : null;
+  const token = hit?.token ?? null;
+  const source = hit?.source ?? null;
+  const signature =
+    token && source ? `${source.trigger}${token.start}:${token.end}:${token.query}` : null;
+  const results =
+    token && source
+      ? source.items
+          .filter((item) =>
+            (item.search ?? `${item.label} ${item.description ?? ""}`)
+              .toLowerCase()
+              .includes(token.query.toLowerCase()),
+          )
+          .slice(0, MAX_RESULTS)
+      : [];
+  // A dismissal outlives caret movement but not editing. Keying it on the token
+  // signature alone was not enough: accepting a row deletes the token and puts
+  // the caret back where it started, so typing the trigger again rebuilt a
+  // byte-identical signature and the list stayed suppressed — which is exactly
+  // the re-add-what-you-just-removed sequence. Adjusting the state during
+  // render (React's documented pattern) settles it before paint, where an
+  // effect would cost an extra commit.
+  if (dismissed && dismissed.value !== value) setDismissed(null);
+  const open = !!token && dismissed?.signature !== signature && results.length > 0;
   const selectedIndex =
     active.signature === signature ? Math.min(active.index, Math.max(0, results.length - 1)) : 0;
+
   const syncSelection = () => {
     const textarea = ref.current;
     if (!textarea) return;
@@ -60,7 +115,7 @@ export function useSkillSlash(
   };
   useEffect(() => {
     const textarea = ref.current;
-    if (!textarea || !skills) return;
+    if (!textarea || !enabled) return;
     document.addEventListener("selectionchange", syncSelection);
     for (const event of ["focus", "blur", "select"])
       textarea.addEventListener(event, syncSelection);
@@ -70,7 +125,7 @@ export function useSkillSlash(
         textarea.removeEventListener(event, syncSelection);
     };
     // oxlint-disable-next-line exhaustive-deps -- syncSelection only reads refs and setState
-  }, [ref, skills]);
+  }, [ref, enabled]);
   useLayoutEffect(() => {
     const textarea = ref.current;
     if (!textarea || !open) return;
@@ -108,25 +163,37 @@ export function useSkillSlash(
     }),
     [rect],
   );
+
   const accept = (index: number) => {
     const textarea = ref.current;
     const item = results[index];
-    if (!textarea || !token || !item) return;
+    if (!textarea || !token || !source || !item) return;
     textarea.focus();
     textarea.setSelectionRange(token.start, token.end);
     // Native editing command keeps the browser undo transaction where supported.
     const removed =
       typeof document.execCommand === "function" && document.execCommand("delete", false);
-    if (!removed) textarea.setRangeText("", token.start, token.end, "end");
+    if (!removed) {
+      textarea.setRangeText("", token.start, token.end, "end");
+      // setRangeText edits the DOM behind React's back, so React's value
+      // tracker still holds the pre-accept string. The next keystroke that
+      // recreates exactly that string would compare equal and be swallowed —
+      // typing "#" again right after accepting "#" is that case, and the
+      // character lands in the DOM while onChange never fires. A native input
+      // event resyncs the tracker. (execCommand dispatches one itself; a
+      // duplicate would dedupe, so this only runs on the fallback path.)
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     onChange(textarea.value);
-    skills!.onSelect(item.id);
-    setDismissed(signature);
+    source.onSelect(item.id);
+    setDismissed({ signature, value });
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(token.start, token.start);
       syncSelection();
     });
   };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (
       !open ||
@@ -154,11 +221,12 @@ export function useSkillSlash(
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setDismissed(signature);
+      setDismissed({ signature, value });
       return true;
     }
     return false;
   };
+
   return {
     onKeyDown,
     onSelectionChange: syncSelection,
@@ -174,7 +242,7 @@ export function useSkillSlash(
         open={open}
         modal={false}
         onOpenChange={(next) => {
-          if (!next) setDismissed(signature);
+          if (!next) setDismissed({ signature, value });
         }}
       >
         <PopoverContent
@@ -191,10 +259,10 @@ export function useSkillSlash(
           className="gap-0 p-1.5"
           onPointerDown={(event) => event.preventDefault()}
         >
-          <div id={`${id}-list`} role="listbox" aria-label="Local skills">
-            {results.map((skill, index) => (
+          <div id={`${id}-list`} role="listbox" aria-label={source?.label ?? ""}>
+            {results.map((item, index) => (
               <div
-                key={skill.id}
+                key={item.id}
                 id={`${id}-${index}`}
                 role="option"
                 aria-selected={index === selectedIndex}
@@ -206,12 +274,14 @@ export function useSkillSlash(
                 )}
               >
                 <p className="truncate text-sm font-medium">
-                  {skill.name}
-                  {skill.ownerName ? (
-                    <span className="text-muted-foreground ml-2 text-xs">{skill.ownerName}</span>
+                  {item.label}
+                  {item.meta ? (
+                    <span className="text-muted-foreground ml-2 text-xs">{item.meta}</span>
                   ) : null}
                 </p>
-                <p className="text-muted-foreground truncate text-xs">{skill.description}</p>
+                {item.description ? (
+                  <p className="text-muted-foreground truncate text-xs">{item.description}</p>
+                ) : null}
               </div>
             ))}
           </div>

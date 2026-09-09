@@ -48,8 +48,8 @@ import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { mergeSource } from "~/modules/tools/sources.ts";
-import { Button } from "~/ui/primitives/button.tsx";
-import { Spinner } from "~/ui/primitives/spinner.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
@@ -993,7 +993,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         // property of the conversation, not of its first message.
         <div className="[scrollbar-gutter:stable_both-edges]">
           <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
-            <HugeiconsIcon icon={GitBranchIcon} className="size-3.5 shrink-0" />
+            <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
             <span className="shrink-0">Branched from</span>
             <Link
               to="/chat/$conversationId"
@@ -1018,18 +1018,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           {questionNeedsRefresh ? (
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
               <span>Refresh the chat to check whether your answers were sent.</span>
-              <Button
+              <PendingButton
                 size="sm"
                 variant="outline"
-                disabled={refreshQuestionMutation.isPending}
-                aria-busy={refreshQuestionMutation.isPending}
+                pending={refreshQuestionMutation.isPending}
                 onClick={() => refreshQuestionMutation.mutate()}
               >
-                {refreshQuestionMutation.isPending ? (
-                  <Spinner data-icon="inline-start" aria-hidden />
-                ) : null}
                 Refresh chat
-              </Button>
+              </PendingButton>
             </div>
           ) : null}
           <Composer

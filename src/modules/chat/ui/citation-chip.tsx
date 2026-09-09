@@ -27,7 +27,7 @@ function CitationPreview({ source, onClick }: { source: ToolSource; onClick?: ()
   const label = source.title?.trim() || (document ? "Document" : hostOf(source.url));
   const location = document ? documentLocationLabel(source) : hostOf(source.url);
   const icon = document ? (
-    <HugeiconsIcon icon={File01Icon} className="size-3" aria-hidden />
+    <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-3" aria-hidden />
   ) : (
     <Favicon url={source.url} className="size-3" />
   );

@@ -16,6 +16,7 @@ const entry: SkillManifestEntry = {
 };
 function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
   let revoked = false;
+  let readFailure: "unavailable" | "defect" | null = null;
   const documents = new Map([
     ["SKILL.md", "PRIVATE ROOT INSTRUCTIONS"],
     ["references/notes.md", `${"a".repeat(7999)}😀ending`],
@@ -25,9 +26,12 @@ function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
     authorize: (_userId, ids) =>
       revoked && ids.length ? Effect.fail(new SkillNotAvailable({ skillId: "one" })) : Effect.void,
     readPinned: (_userId, pinned, path) => {
-      expect(pinned.revisionId).toBe("revision-one");
-      return revoked
-        ? Effect.fail(new SkillNotAvailable({ skillId: "one" }))
+      expect(pinned.revisionId).toBe(
+        manifest.find((candidate) => candidate.skillId === pinned.skillId)?.revisionId,
+      );
+      if (readFailure === "defect") return Effect.die(new Error("Blob read failed"));
+      return revoked || readFailure === "unavailable"
+        ? Effect.fail(new SkillNotAvailable({ skillId: pinned.skillId }))
         : Effect.succeed(documents.get(path) ?? null);
     },
   });
@@ -38,11 +42,19 @@ function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
   );
   return {
     prepare,
+    documents,
     revoke: () => {
       revoked = true;
     },
+    denyReads: () => {
+      readFailure = "unavailable";
+    },
+    crashReads: () => {
+      readFailure = "defect";
+    },
     restore: () => {
       revoked = false;
+      readFailure = null;
     },
   };
 }
@@ -58,12 +70,15 @@ describe("private skill execution", () => {
     expect(read.ok).toBe(false);
     expect(read.content).toBe("");
   });
-  it("does not offer or automatically load manual-only attached skills", async () => {
-    const session = await setup([{ ...entry, explicit: false, manualOnly: true }]).prepare;
+  it("offers an attached manual-only skill without ever preloading it", async () => {
+    const session = await setup([{ ...entry, explicit: false, fromAgent: true, manualOnly: true }])
+      .prepare;
+    // Attaching is a preference, not a pin: the root stays out of the prompt
+    // until the model asks for it.
     expect(JSON.stringify(session.messages())).not.toContain("PRIVATE ROOT INSTRUCTIONS");
     expect(
       await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
-    ).toMatchObject({ ok: false });
+    ).toMatchObject({ ok: true });
   });
   it("rejects explicit roots rather than truncating required guidance", async () => {
     await expect(setup([entry], 2).prepare).rejects.toThrow();
@@ -133,6 +148,86 @@ describe("private skill execution", () => {
     control.revoke();
     await Effect.runPromise(session.authorize());
   });
+  it("recovers when an ambient skill is revoked before loading", async () => {
+    const control = setup([{ ...entry, explicit: false, ambient: true }]);
+    const session = await control.prepare;
+    control.revoke();
+    expect(
+      await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
+    ).toMatchObject({ ok: false, content: "", error: "Skill is no longer available." });
+    expect(JSON.stringify(session.messages())).not.toContain("PRIVATE ROOT INSTRUCTIONS");
+    await Effect.runPromise(session.authorize());
+    control.restore();
+    expect(
+      await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
+    ).toMatchObject({ ok: true });
+    expect(JSON.stringify(session.messages())).toContain("PRIVATE ROOT INSTRUCTIONS");
+  });
+  it("recovers when an ambient supporting-file read loses access", async () => {
+    const control = setup([{ ...entry, explicit: false, ambient: true }]);
+    const session = await control.prepare;
+    await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+    control.revoke();
+    const read = () =>
+      session.group.handlers.read_skill_file({
+        skillId: "one",
+        path: "references/notes.md",
+        offset: 7999,
+      });
+    expect(await Effect.runPromise(read())).toMatchObject({ ok: false, content: "" });
+    await Effect.runPromise(session.authorize());
+    control.restore();
+    expect(await Effect.runPromise(read())).toMatchObject({ ok: true, content: "😀ending" });
+  });
+  it("keeps agent root-read authorization failures sticky", async () => {
+    const control = setup([{ ...entry, explicit: false, fromAgent: true }]);
+    const session = await control.prepare;
+    control.denyReads();
+    await expect(
+      Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
+    ).rejects.toThrow();
+    control.restore();
+    await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+  });
+  it.each(["explicit", "agent"] as const)(
+    "keeps %s supporting-file authorization failures sticky",
+    async (selection) => {
+      const control = setup([
+        { ...entry, explicit: selection === "explicit", fromAgent: selection === "agent" },
+      ]);
+      const session = await control.prepare;
+      await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+      control.denyReads();
+      await expect(
+        Effect.runPromise(
+          session.group.handlers.read_skill_file({
+            skillId: "one",
+            path: "references/notes.md",
+            offset: 0,
+          }),
+        ),
+      ).rejects.toThrow();
+      control.restore();
+      await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+    },
+  );
+  it("distinguishes a missing ambient root from unavailability", async () => {
+    const control = setup([{ ...entry, explicit: false, ambient: true }]);
+    const session = await control.prepare;
+    control.documents.delete("SKILL.md");
+    expect(
+      await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
+    ).toMatchObject({ ok: false, error: "Required SKILL.md is missing." });
+    await Effect.runPromise(session.authorize());
+  });
+  it("does not turn ambient read defects into unavailable-skill results", async () => {
+    const control = setup([{ ...entry, explicit: false, ambient: true }]);
+    const session = await control.prepare;
+    control.crashReads();
+    await expect(
+      Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
+    ).rejects.toThrow("Blob read failed");
+  });
   it("projects only summary fields, never private content", async () => {
     const session = await setup().prepare;
     const result = await Effect.runPromise(
@@ -170,5 +265,49 @@ describe("private skill execution", () => {
       SKILL_ACTIVITY_LIMITS.error,
     ]);
     expect(JSON.stringify(activity)).not.toContain("private body");
+  });
+});
+
+describe("agent-attached skills", () => {
+  // The prompt text itself, not the JSON envelope, so an assertion about the
+  // catalogue is not written against escaped quotes.
+  const promptOf = (session: { messages: () => Array<{ content: unknown }> }) =>
+    String(session.messages()[0]!.content);
+
+  const agentSkill: SkillManifestEntry = {
+    skillId: "one",
+    revisionId: "revision-one",
+    name: "review",
+    description: "Review carefully",
+    manualOnly: false,
+    explicit: false,
+    fromAgent: true,
+  };
+
+  it("offers them on demand and marks them, rather than preloading them", async () => {
+    const session = await setup([agentSkill]).prepare;
+    const prompt = promptOf(session);
+    // Not preloaded: an agent attachment is a preference, not a pin.
+    expect(prompt).not.toMatch(/PRIVATE ROOT INSTRUCTIONS/);
+    expect(prompt).toMatch(/forThisAgent/);
+    expect(prompt).toMatch(/Prefer them when more than one skill fits/);
+    const loaded = await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+    expect(loaded.ok).toBe(true);
+    expect(promptOf(session)).toMatch(/PRIVATE ROOT INSTRUCTIONS/);
+  });
+
+  it("says nothing about agents when none of the entries came from one", async () => {
+    const session = await setup([{ ...agentSkill, fromAgent: false, ambient: true }]).prepare;
+    expect(promptOf(session)).not.toMatch(/forThisAgent|Prefer them/);
+  });
+
+  it("still hides a manual-only skill that is merely offered from the library", async () => {
+    const session = await setup([
+      { ...agentSkill, manualOnly: true, fromAgent: false, ambient: true },
+    ]).prepare;
+    expect(promptOf(session)).not.toMatch(/"skillId":"one"/);
+    const loaded = await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+    expect(loaded.ok).toBe(false);
+    expect(loaded.error).toMatch(/not in this attempt's automatic catalogue/);
   });
 });

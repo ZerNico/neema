@@ -1,0 +1,36 @@
+# pnpm >= 11 reads non-auth settings from here, not .npmrc.
+#
+# pnpm's default 24h cooldown blunts the window in which a compromised release
+# is live. It is kept on; the exclusions below are the packages this project
+# deliberately tracks at same-day builds, where waiting a day means pinning a
+# build we already know is superseded:
+#   - drizzle-orm / drizzle-kit: pre-release `1.0.0-rc.N-<sha>` builds that must
+#     stay a matched pair (see CLAUDE.md).
+#   - rolldown (and its platform bindings): pinned through Vite whenever a build
+#     regression forces a specific version.
+#   - @tanstack/charts: pre-alpha, pinned exact, API moves between releases.
+# Add a package here only when its pin is exact and deliberate.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - drizzle-orm
+  - drizzle-kit
+  - rolldown
+  - "@rolldown/*"
+  - "@tanstack/charts"
+
+# Install-time scripts, denied by default. esbuild has to fetch/link its
+# platform binary or the dev server and test transform cannot start. The rest
+# are optional native accelerations behind pure-JS fallbacks (msgpackr-extract
+# for msgpackr, cpu-features for ssh2) or generated code we do not import
+# (protobufjs) — they have been off since before pnpm required this list, and
+# the integration suites that pull them in pass without them.
+allowBuilds:
+  esbuild: true
+  cpu-features: false
+  msgpackr-extract: false
+  protobufjs: false
+  ssh2: false
+
+# Behaviour @effect/ai-openrouter does not have upstream; see CLAUDE.md.
+patchedDependencies:
+  "@effect/ai-openrouter@4.0.0-rc.112": patches/@effect__ai-openrouter@4.0.0-rc.112.patch

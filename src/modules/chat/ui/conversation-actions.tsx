@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
@@ -22,7 +23,6 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
-import { Spinner } from "~/ui/primitives/spinner";
 import { useConfirm } from "~/ui/confirm.tsx";
 import type { ReactElement, ReactNode } from "react";
 
@@ -81,7 +81,7 @@ export function useConversationActions(): ConversationActions {
     confirmDelete: async (conversation) => {
       if (
         await confirm({
-          title: `Delete "${conversation.title ?? "New chat"}"?`,
+          title: `Delete “${conversation.title ?? "New chat"}”?`,
           description: "The chat and all its messages are removed permanently.",
           confirmLabel: "Delete chat",
         })
@@ -124,14 +124,9 @@ export function useConversationActions(): ConversationActions {
               >
                 Cancel
               </DialogClose>
-              <Button
-                type="submit"
-                disabled={!title || renameMutation.isPending}
-                aria-busy={renameMutation.isPending || undefined}
-              >
-                {renameMutation.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+              <PendingButton type="submit" pending={renameMutation.isPending} disabled={!title}>
                 Save
-              </Button>
+              </PendingButton>
             </DialogFooter>
           </form>
         </DialogContent>

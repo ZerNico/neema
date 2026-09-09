@@ -31,7 +31,7 @@ import { SearchBackend } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
-import { FakeMemoryService } from "./fake-memory.ts";
+import { makeFakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 import { FakeDocumentParser } from "./unused-services.ts";
 
@@ -290,7 +290,7 @@ beforeAll(async () => {
     FakeReader,
     MemoryBlobStore,
     FakeDocumentParser,
-    FakeMemoryService,
+    makeFakeMemoryService({ autoSave: true }),
   ).pipe(Layer.provideMerge(ReposLayer));
   const KnowledgeLayer = Layer.mergeAll(
     SkillService.layer,
@@ -347,7 +347,7 @@ describe("knowledge-backed generations", () => {
     ]);
     script = (input) => {
       expect(input.toolkit?.tools["read_document"]).toBeUndefined();
-      expect(input.toolkit?.tools["save_memory"]).toBeUndefined();
+      expect(input.toolkit?.tools["save_memory"]).toBeDefined();
       return Stream.make(text("Invoices are due in thirty days [^1]."), finish());
     };
     const sent = await send({ userId: owner, collectionIds: [collectionId] });
@@ -388,7 +388,7 @@ describe("knowledge-backed generations", () => {
       expect(promptText(input.prompt)).toContain("Selected knowledge requires retrieval");
       expect(input.toolkit?.tools["search_knowledge"]).toBeDefined();
       expect(input.toolkit?.tools["read_document"]).toBeDefined();
-      expect(input.toolkit?.tools["save_memory"]).toBeUndefined();
+      expect(input.toolkit?.tools["save_memory"]).toBeDefined();
       return Stream.make(text("Retrieval is available."), finish());
     };
     const sent = await send({ userId: owner, collectionIds: [collectionId] });
@@ -1064,7 +1064,7 @@ describe("knowledge-backed generations", () => {
   });
 
   it.each(["none", "read_url", "web_search"] as const)(
-    "retries search only after actual web_search, not %s activity",
+    "preserves enabled search on retry after %s activity",
     async (activity) => {
       const owner = await createUser();
       script = (input, calls) =>
@@ -1089,7 +1089,7 @@ describe("knowledge-backed generations", () => {
           activity,
         );
       script = (input) => {
-        expect(Boolean(input.toolkit?.tools["web_search"])).toBe(activity === "web_search");
+        expect(input.toolkit?.tools["web_search"]).toBeDefined();
         return Stream.make(text("retried"), finish());
       };
       await run(
@@ -1104,6 +1104,158 @@ describe("knowledge-backed generations", () => {
       expect(await settle(sent.assistantMessageId)).toMatchObject({
         status: "complete",
         content: "retried",
+      });
+      expect(await configRow(sent.assistantMessageId)).toMatchObject({ search_enabled: true });
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((withAgent) =>
+      [false, true].flatMap((searchEnabled) =>
+        [false, true].map((available) => ({ withAgent, searchEnabled, available })),
+      ),
+    ),
+  )(
+    "retries with saved search=$searchEnabled and availability=$available (agent=$withAgent)",
+    async ({ withAgent, searchEnabled, available }) => {
+      const owner = await createUser();
+      const agentId = withAgent ? await makeAgent(owner) : null;
+      script = () => Stream.make(text("first"), finish());
+      const sent = await send({ userId: owner, agentId, searchEnabled });
+      expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+      expect(await configRow(sent.assistantMessageId)).toMatchObject({
+        search_enabled: searchEnabled,
+      });
+      if (agentId)
+        await run(
+          AgentService.use((service) =>
+            service.update(owner, {
+              ...agentSettings([], 2),
+              agentId,
+              expectedRevision: 1,
+              searchEnabled: !searchEnabled,
+            }),
+          ),
+        );
+      await run(
+        ToolsRepo.use((tools) =>
+          tools.updateTool("web_search", { enabled: available, config: {} }),
+        ),
+      );
+      try {
+        script = (input) => {
+          expect(Boolean(input.toolkit?.tools["web_search"])).toBe(searchEnabled && available);
+          return Stream.make(text("retried"), finish());
+        };
+        await run(
+          ChatService.use((chat) =>
+            chat.retryMessage({
+              userId: owner,
+              conversationId: sent.conversationId,
+              messageId: sent.assistantMessageId,
+              modelId: noToolModelId,
+            }),
+          ),
+        );
+        expect(await settle(sent.assistantMessageId)).toMatchObject({
+          status: "complete",
+          content: "retried",
+        });
+        expect(await configRow(sent.assistantMessageId)).toMatchObject({
+          search_enabled: searchEnabled && available,
+        });
+      } finally {
+        await run(
+          ToolsRepo.use((tools) => tools.updateTool("web_search", { enabled: true, config: {} })),
+        );
+      }
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((withAgent) =>
+      [false, true].map((searchEnabled) => ({ withAgent, searchEnabled })),
+    ),
+  )(
+    "applies edited search=$searchEnabled instead of the saved choice (agent=$withAgent)",
+    async ({ withAgent, searchEnabled }) => {
+      const owner = await createUser();
+      const agentId = withAgent ? await makeAgent(owner) : null;
+      script = () => Stream.make(text("first"), finish());
+      const sent = await send({ userId: owner, agentId, searchEnabled: !searchEnabled });
+      expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+      const userMessage = (
+        await exec(
+          `select id from messages where conversation_id = '${sent.conversationId}' and role = 'user'`,
+        )
+      ).rows[0]!;
+      script = (input) => {
+        expect(Boolean(input.toolkit?.tools["web_search"])).toBe(searchEnabled);
+        return Stream.make(text("edited"), finish());
+      };
+      const edited = await run(
+        ChatService.use((chat) =>
+          chat.editMessage({
+            userId: owner,
+            conversationId: sent.conversationId,
+            messageId: String(userMessage.id),
+            modelId: noToolModelId,
+            searchEnabled,
+            content: "Updated request",
+            attachmentIds: [],
+          }),
+        ),
+      );
+      expect(await settle(edited.assistantMessageId)).toMatchObject({
+        status: "complete",
+        content: "edited",
+      });
+      expect(await configRow(edited.assistantMessageId)).toMatchObject({
+        search_enabled: searchEnabled,
+      });
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((withAgent) =>
+      [false, true].map((searchEnabled) => ({ withAgent, searchEnabled })),
+    ),
+  )(
+    "inherits saved search=$searchEnabled for a structured answer (agent=$withAgent)",
+    async ({ withAgent, searchEnabled }) => {
+      const owner = await createUser();
+      const agentId = withAgent ? await makeAgent(owner) : null;
+      script = (input) =>
+        tool(input, "ask_user", {
+          questions: [{ question: "Which focus?", options: [], multiSelect: false }],
+        });
+      const sent = await send({ userId: owner, agentId, searchEnabled });
+      expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+      const call = (await toolCalls(sent.assistantMessageId)).find(
+        (activity) => activity.tool_name === "ask_user",
+      )!;
+      script = (input) => {
+        expect(Boolean(input.toolkit?.tools["web_search"])).toBe(searchEnabled);
+        return Stream.make(text("continued"), finish());
+      };
+      const continued = await run(
+        ChatService.use((chat) =>
+          chat.sendMessage({
+            userId: owner,
+            conversationId: sent.conversationId,
+            modelId: noToolModelId,
+            searchEnabled: !searchEnabled,
+            attachmentIds: [],
+            questionResponse: { callId: String(call.id), response: { kind: "skip" } },
+          }),
+        ),
+      );
+      expect(await settle(continued.assistantMessageId)).toMatchObject({
+        status: "complete",
+        content: "continued",
+      });
+      expect(await configRow(continued.assistantMessageId)).toMatchObject({
+        search_enabled: searchEnabled,
       });
     },
   );
@@ -1305,7 +1457,7 @@ describe("knowledge-backed generations", () => {
       if (input.toolkit?.tools["ask_user"]) return "clarification";
       if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
       if (input.toolkit?.tools["web_search"]) return "worker";
-      if (content.includes("Write a concise research plan")) return "planning";
+      if (content.includes("Prepare a self-contained research brief")) return "planning";
       if (content.includes("Write a concise, evidence-dense report")) return "report";
       return "synthesis";
     };
@@ -1408,7 +1560,7 @@ describe("knowledge-backed generations", () => {
       if (input.toolkit?.tools["ask_user"]) return "clarification";
       if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
       if (input.toolkit?.tools["web_search"]) return "worker";
-      if (content.includes("Write a concise research plan")) return "planning";
+      if (content.includes("Prepare a self-contained research brief")) return "planning";
       if (content.includes("Write a concise, evidence-dense report")) return "report";
       return "synthesis";
     };

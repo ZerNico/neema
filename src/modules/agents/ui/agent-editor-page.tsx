@@ -26,7 +26,15 @@ import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { ErrorState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import {
+  ErrorState,
+  FormActions,
+  ListCard,
+  ListRow,
+  ListSkeleton,
+  Page,
+  Section,
+} from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
@@ -92,7 +100,7 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
     return (
       <Page title="Agent" backTo="/agents" backLabel="Agents">
         <ErrorState
-          title="This agent isn't yours to edit"
+          title="This agent isn’t yours to edit"
           description="You can start a chat with it from the Agents list."
         />
       </Page>
@@ -289,7 +297,7 @@ function AgentForm({
               }}
             >
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              Create collection
+              New collection
             </Button>
           }
         >
@@ -303,11 +311,7 @@ function AgentForm({
                   />
                 );
               if (collections.data === undefined)
-                return (
-                  <p role="status" className="text-muted-foreground text-sm">
-                    Loading collections…
-                  </p>
-                );
+                return <ListSkeleton rows={2} media="none" label="Loading collections" />;
               const known = collections.data;
               const attached = field.state.value.flatMap((id) => {
                 const collection = known.find((candidate) => candidate.id === id);
@@ -686,12 +690,12 @@ function AgentForm({
           </form.Field>
         </Section>
         {invalidSubmit ? (
-          <p role="alert" className="text-destructive text-sm">
-            Check the highlighted fields before saving.
-          </p>
+          <FieldError>Check the highlighted fields before saving.</FieldError>
         ) : null}
         <form.AppForm>
-          <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
+          <FormActions>
+            <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
+          </FormActions>
         </form.AppForm>
       </form>
       {agent ? (

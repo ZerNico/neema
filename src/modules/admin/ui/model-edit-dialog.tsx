@@ -13,6 +13,7 @@ import type {
   ModelPricing,
   ModelType,
 } from "~/modules/providers/model-config.ts";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
@@ -24,7 +25,6 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { FieldError, FieldGroup } from "~/ui/primitives/field";
-import { Spinner } from "~/ui/primitives/spinner";
 
 export const modelAccessQuery = queryOptions({
   queryKey: ["admin", "model-access"],
@@ -168,14 +168,9 @@ function ModelEditForm({
           <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
             Cancel
           </DialogClose>
-          <Button
-            type="submit"
-            disabled={settings === null || save.isPending}
-            aria-busy={save.isPending || undefined}
-          >
-            {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+          <PendingButton type="submit" pending={save.isPending} disabled={settings === null}>
             Save changes
-          </Button>
+          </PendingButton>
         </DialogFooter>
       </form>
     </>

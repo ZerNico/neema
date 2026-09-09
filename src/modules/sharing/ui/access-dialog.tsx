@@ -16,6 +16,7 @@ import { useConfirm } from "~/ui/confirm.tsx";
 import { ErrorState } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
+import { FieldError } from "~/ui/primitives/field";
 import {
   Combobox,
   ComboboxCollection,
@@ -331,11 +332,7 @@ export function AccessDialog({
                   </ComboboxList>
                 </ComboboxContent>
               </Combobox>
-              {addError ? (
-                <p role="alert" className="text-destructive text-xs">
-                  {addError}
-                </p>
-              ) : null}
+              {addError ? <FieldError className="text-xs">{addError}</FieldError> : null}
             </div>
 
             <div className="flex min-h-0 flex-col gap-2">

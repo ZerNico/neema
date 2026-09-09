@@ -88,6 +88,7 @@ export const resolveSkillManifest = (
         description: revision.description,
         manualOnly: revision.manualOnly,
         explicit: standaloneIds.includes(skillId),
+        fromAgent: agentIds.includes(skillId),
       });
     }
     return ids.map((id) => result.find((entry) => entry.skillId === id)!);

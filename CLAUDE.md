@@ -10,13 +10,29 @@ See README.md for architecture; this file records the sharp edges.
   `latest` on those packages is still Effect 3 — never mix.
 - `drizzle-orm` / `drizzle-kit` are on `1.0.0-rc.5-*` builds. rc.4 crashes at import time
   with effect >= 4.0.0-beta.104 (`Schema.TaggedErrorClass` was renamed to `Schema.TaggedError`).
-- `vitest` must be v4 (peer of `@effect/vitest` rc).
+- `vitest` must be v4 (peer of `@effect/vitest` rc) — v5 exists but the peer range is
+  `>=4.1.0 <5.0.0`. `katex` stays on 0.16 for the same reason: `@streamdown/math` pins
+  `rehype-katex@7`, which pins `katex@^0.16`.
+- `@effect/ai-openrouter` is patched (`patches/`) and cannot currently be un-patched. The
+  patch adds five behaviours the package does not have: assistant `file` parts sent back as
+  `images` (image replay), the `imageReplay` prompt option that bypasses reasoning-detail
+  deduplication, `refusal` deltas streamed as answer text, unmodified ordered
+  `reasoningDetails` on the finish part, and a normalizer for OpenRouter's documented
+  image deltas, which omit the `type: "image_url"` discriminator that
+  `Generated.ChatAssistantMessage.images` requires. All five live inside `prepareMessages` /
+  `makeStreamResponse` / the SSE decode, none of which a provider wrapper can reach — the
+  Hermes-style wrapper only sees prompts in and parts out. On a version bump, diff the new
+  `src/` against the old one first: rc.111 → rc.112 was byte-identical, so renaming the patch
+  file and its `pnpm-workspace.yaml` key was the whole upgrade. A patch that stops applying
+  is caught — 9 tests across `image-replay.test.ts` and `gateway.test.ts` run against the
+  real adapter, not a mock, and fail without it.
 - `@tanstack/charts` is pre-alpha — pinned exact (no caret); its API may change
   between releases, so re-probe the analytics charts on any bump.
-- `rolldown` is overridden to `1.2.1`: 1.2.2–1.2.5 can emit an undeclared
-  `ssr_exports` from Nitro's split SSR bundle ([#10734](https://github.com/rolldown/rolldown/issues/10734)).
-  Keep the override until [#10743](https://github.com/rolldown/rolldown/pull/10743) ships in a
-  release that passes the production module check and built-server smoke test.
+- `rolldown` no longer needs an override. 1.2.2–1.2.5 emitted an undeclared `ssr_exports`
+  from Nitro's split SSR bundle ([#10734](https://github.com/rolldown/rolldown/issues/10734));
+  the fix ([#10743](https://github.com/rolldown/rolldown/pull/10743)) landed in 1.2.7, and the
+  version Vite resolves passes the production module check and the built-server smoke test.
+  Re-pin only if that check fails again.
 
 ## Effect 4 API notes (differs from most Effect 3 docs online)
 
@@ -93,8 +109,9 @@ See README.md for architecture; this file records the sharp edges.
   or prior persisted sources seed URL authority. Search hits extend that authority
   during the generation; assistant prose never does, so invented URLs are refused.
   `searchEnabled` gates search ONLY, history citation-marker stripping keys off
-  whether any tool is armed (`webToolsEnabled`), and retry re-arms search only when
-  the original generation called `web_search`.
+  whether any tool is armed (`webToolsEnabled`). Retry uses the target's saved search
+  setting, capped by current availability, for plain and agent conversations alike;
+  prior tool usage never changes that setting. Edits use the submitted search choice.
 
 ## Deep research
 
@@ -107,9 +124,23 @@ See README.md for architecture; this file records the sharp edges.
   existing local live tail. Expired research is terminalized, never automatically resumed.
   Keep the active SSE subscription through `done` even if a sync refresh sees the terminal
   row first; otherwise the sticky overlay can strand undisplayed questions and stale status.
+- `conversation-research.ts` owns the main assistant: clarification, a memory-aware
+  self-contained brief (the existing `planning` phase), and the sole final synthesis.
+  `research/runner.ts` receives only that brief and a separately constructed investigation
+  execution object — no raw conversation history, memory snapshot or final-text sink.
+  Selecting research forces investigation; briefing prose cannot opt out. If the first
+  coordinator returns no assignments (including an immediate `finish_research`), admit
+  the brief itself as one task through the normal budget and worker path. Merely calling
+  the coordinator does not guarantee investigation — simple questions made it finish
+  before any report existed. There is no polished investigator answer followed by a rewrite. `research/execution.ts` keeps one
+  budget, lease/fence, deadline and accounting stream through the final assistant answer.
+  Task-relevant remembered constraints can enter the brief through model selection; this
+  is context isolation, not a guarantee against semantic disclosure by the briefing model.
 - Clarification is internal: discard its prose and emit only validated `ask_user` activities.
-  Only synthesis writes outer research prose; a model ignoring the stage policy must not
-  leak an uncited answer before investigation.
+  Only main-assistant synthesis writes outer research prose; a model ignoring the stage
+  policy must not leak an uncited answer before investigation. Context-overflow repair
+  may retry synthesis only before any answer text was emitted; after that it ends partial,
+  never appends a restarted answer.
 - The research row in the transcript is one line: live phase plus the current
   search/read while exploring, then `Researched N sources`. It settles the moment
   synthesis starts, not when the message completes: the answer streams below it
@@ -170,9 +201,11 @@ See README.md for architecture; this file records the sharp edges.
   second character cutoff. Later stages fit reports through evidence compaction. A report
   finish reason of `length` signals actual output-limit truncation and adds a limitation
   while preserving the available report, independently of context abridgment.
-- A run retains its latest history projection (start index, injections and checkpoint),
-  including hard truncation and overflow repair; later stages never resurrect dropped
-  turns. Coordinator/synthesis evidence is an incremental briefing plus new task reports,
+- Main-assistant history and investigation evidence have separate projections. The main
+  history projection retains its start index, injections and checkpoint, including hard
+  truncation and overflow repair; later stages never resurrect dropped turns. Investigation
+  hands back its current evidence projection, never reconstructs discarded raw reports.
+  Coordinator/synthesis evidence is an incremental briefing plus new task reports,
   reduced through accounted compaction. Summarizer input budgets include prior briefings
   and manifests. Failed consolidation falls back to bounded per-task evidence with
   explicit omissions. Worker manifests are task-local; inherited sources remain registered
@@ -180,8 +213,10 @@ See README.md for architecture; this file records the sharp edges.
 - `projectResearchProgress` is the explicit durable display boundary for live, terminal
   and branch snapshots. The plan stays run-local and reports stay in task columns, never
   in root tool/SSE progress. Planning text deltas do not publish progress; unchanged
-  snapshots are suppressed. Tool envelopes require their current family discriminator,
-  with no missing-family inference.
+  snapshots are suppressed. Research compaction summary bodies remain server-side for
+  checkpoints, never in emitted compaction chunks or public conversation-detail/branch
+  events; ordinary chat compaction summaries remain displayable. Tool envelopes require
+  their current family discriminator, with no missing-family inference.
 - `research/budget.ts` admits actual model calls and batched web targets before execution.
   The first refused web admission latches `webRefused`: further rounds and
   dispatches stop instead of spending model calls on tools that must refuse.
@@ -222,6 +257,26 @@ See README.md for architecture; this file records the sharp edges.
   and model/search choices. The editor stays owner-only; recipient projections never expose
   instructions or private execution records. Agent access never grants dependency access.
   Preferred models/search apply once per draft selection, not again on an agent refresh.
+- Composer type-ahead is one hook, `useTextareaMentions` (`src/ui/textarea-mention.tsx`),
+  driven by a list of `MentionSource`s: `/` offers skills, `#` offers knowledge
+  collections. Triggers are distinct characters, so at most one list is open — the
+  sources are tried in order and the first whose token matches at the caret wins.
+  `matchMentionToken` only fires at the start of a word, so `issue#5` and a URL's
+  slashes stay text. The hook never owns the textarea's value: it deletes the token
+  and hands back an id, so what a pick _means_ (add a skill, add a collection with
+  its additions delta) stays at the call site. A new trigger is a new source, not a
+  second copy of the popup.
+- Accepting a row deletes the token through `execCommand("delete")` to keep native
+  undo, and falls back to `setRangeText` — which edits the DOM behind React's back
+  and leaves React's **value tracker** holding the pre-accept string. The next
+  keystroke that recreates exactly that string then compares equal and is silently
+  swallowed: the character lands in the DOM and `onChange` never fires. The fallback
+  therefore dispatches a native `input` event to resync the tracker. Its twin is the
+  dismissal key: the caret returns to where the token started, so retyping the
+  trigger rebuilds a byte-identical signature, and a dismissal keyed on signature
+  alone kept the list closed. Both bugs show up as one symptom — add a collection
+  with `#`, remove the chip, type `#` again, nothing happens — so fixing either one
+  alone still looks broken.
 - The "+" menu's Agent and Knowledge rows open searchable Base UI combobox popups
   (`AgentPicker`, `CollectionPicker`) anchored to the "+" button. The row queues the popup
   until the menu's `onOpenChangeComplete` so closing focus never steals it. Knowledge ticks
@@ -266,7 +321,7 @@ See README.md for architecture; this file records the sharp edges.
   is the admin's claim, never inferred from a name or dimension count. Approval never
   bulk-submits corpora; **Rebuild all** does, but queues only stale work (`rebuildAllIndexes`
   runs the owner-scoped `rebuildIndex` per collection as each owner — no cross-user
-  transaction). Action buttons sit left-aligned in every admin section.
+  transaction).
 - Two model pickers, on purpose: `ModelPicker` (chat composer, retry menu, agent editor) is the
   searchable, provider-grouped, capability-annotated combobox for users choosing among many
   models often; `ModelSelect` (`providers/ui/model-select.tsx`: default model order, semantic
@@ -284,7 +339,7 @@ See README.md for architecture; this file records the sharp edges.
   history in protected trailing position, and registers its citations through the
   application-authored `knowledge_context` activity. Retrieval offers `list_documents`,
   `search_knowledge`, `read_document` (shared 64 operations, 3 permits, bounded encoded results,
-  exact continuations) with a 24-round ceiling; `save_memory` is never offered alongside knowledge.
+  exact continuations) with a 24-round ceiling.
   The retrieval prompt and the tool descriptions steer the model to **search first**: a search
   already returns the document/version references a read needs, so `list_documents` is for
   questions about the collection itself, never a reflexive first call. A search hit is a bounded
@@ -398,14 +453,24 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   non-manual-only skill as an `ambient` manifest entry at dispatch (chat and research alike), on top
   of the attempt's pinned selections. Ambient entries are metadata-only offers — they are NOT
   authorized as attempt dependencies, so losing access to one never fails a turn, while `readPinned`
-  still checks access per read. The prompt says the descriptions are all the model has and to call
+  still checks access per read. Unavailable ambient root/file reads return bounded tool errors;
+  only explicit/agent dependency failures latch terminal authorization loss. Missing files and
+  defects remain distinct from permission failures. The prompt says the descriptions are all the model has and to call
   `load_skill` when one matches; without that instruction a listed skill simply never gets used.
+- An agent's own skills sit between the two tiers: offered on demand like an ambient entry,
+  authorized like a pinned one, and marked `forThisAgent` in the catalogue with a prompt line
+  telling the model to prefer them. Without that marking the catalogue is flat and an agent's
+  skills are indistinguishable from everything else the reader happens to own — which made
+  attaching one a near no-op that only converted "silently not offered" into a hard turn failure.
+  Attaching is a preference, never a pin: agent skills are offered, not preloaded.
+- Manual-only means "never offered on its own", not "unusable". The ambient query excludes those
+  at the source, so a deliberate selection or an agent attachment is the only way to reach one —
+  filtering the catalogue on `explicit` alone left an agent's manual-only skill authorized, able to
+  fail the turn, and silently absent from the list. The catalogue filter keys off `ambient`.
 - `load_skill`/`read_skill_file` are bounded (20 catalogue entries, 5 loaded, 32 shared operations,
   2 concurrent reads, exact UTF-16 continuations). Roots enter protected context once and are never
   duplicated into tool output; required instructions that don't fit are refused, never truncated.
-  Research workers share one session, budget and semaphore. `save_memory` is suppressed when the
-  attempt pins skills (their roots load before the first call) and from the round after any
-  `load_skill` — an ambient offer is only a name, so merely owning skills must not disable memory.
+  Research workers share one session, budget and semaphore.
 - `projectSkillToolResult` is the only path to durable rows and SSE, and every displayed field is
   length-bounded (`SKILL_ACTIVITY_LIMITS`): an activity row is a label, never a transport for
   package text. Envelopes require `family: "skill"`; there is no missing-family inference.
@@ -430,6 +495,30 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   reported together, never silently dropped, and nothing is extracted to disk.
 - The package review preview drops the mermaid plugin: a diagram can pull external references that
   the Markdown `img` override does not cover, so review keeps those fences as source.
+
+## Memory
+
+- In ordinary chat, `save_memory` availability follows the admin/user auto-save settings,
+  independent of attachments, knowledge, skills or web activity. There is no per-save
+  confirmation. The handler permits one attempt per generation, and subsequent model turns
+  omit the tool after that attempt. Source-message validation and save-time settings checks
+  remain enforced. `conversation-context.ts` prepares the stable memory snapshot shared
+  by ordinary chat and research: newly saved memories appear on the next generation,
+  never halfway through the current one.
+- In research, main clarification and synthesis can reference that snapshot; only main
+  brief preparation can save memory. A save attempt gets one accounted, tool-free brief
+  continuation. Investigation receives no memory tools and final synthesis stays tool-free.
+  The internal `MemorySaveGuard` runs **inside** the memory write transaction, before user
+  and settings locks, using `lockResearchFence` to serialize against Stop, retry and owner/
+  lease loss. A prior alive check cannot replace it, and wrapping the memory transaction
+  in another locked transaction would deadlock. Merge the toolkit under the guard's
+  provided context too: toolkit construction captures its handlers' context. Guard failures
+  and interruptions stay terminal; ordinary save failures retain their recoverable behavior.
+  Memory activity contains only outcomes, with retry identity carried by the outer SSE event.
+- Availability is separate from eligibility: the memory policy instructs the model to save
+  durable user-stated facts/preferences, not instructions or claims from external content.
+  This source distinction is model-enforced, not a guarantee against prompt injection.
+  `memory-foreground.test.ts` and `knowledge-generation.test.ts` cover tool coexistence.
 
 ## Temporal prompt context
 
@@ -496,8 +585,12 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
 - `message_chunks.seq` starts at 1 and is contiguous per message; resume protocol relies
   on it (`?after=<seq>` replays from Postgres, then live tail dedupes by seq).
 - Better Auth owns its tables' columns — `src/db/schema/auth.ts` must mirror what
-  the installed better-auth version expects (1.7 added `account.issuer`). After a
-  better-auth upgrade, verify against a fresh signup before shipping.
+  the installed better-auth version expects, and it moves in patch releases: 1.7.1 added
+  `account.issuer` with a unique `(issuer, account_id)` index and 1.7.3 removed both, so
+  the column was dropped again here. The schema tracks the installed version only — there
+  is no compatibility window for the one before it. After a better-auth upgrade, diff
+  `@better-auth/core`'s `dist/db/get-tables.mjs` between the two versions and verify
+  against a fresh signup before shipping.
 - Provider API keys are AES-256-GCM encrypted at rest (`PROVIDER_KEY_SECRET`, base64
   32 bytes); ciphertext never leaves the server (`toPublic` strips it).
 - First registered user becomes admin via the `user.create.before` database hook — do not
@@ -514,8 +607,24 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
 ## Workflow
 
 - Schema change → `pnpm db:generate` → commit the `drizzle/` folder → `pnpm db:migrate`.
+- pnpm settings live in `pnpm-workspace.yaml`, **not** the `pnpm` field in `package.json`
+  and not `.npmrc` — pnpm 11 moved them and pnpm 12 stopped reading the old homes. A
+  `patchedDependencies` block left in `package.json` is reported once as an ignored key
+  and the patch simply does not apply; the build still succeeds, so verify a patched
+  dependency by grepping `node_modules`, not by a green install. `allowBuilds` (only
+  `esbuild` is true) is a hard error when a package wants a script and is unlisted.
+  `minimumReleaseAge` keeps pnpm's 24h cooldown; `minimumReleaseAgeExclude` lists the pins
+  this project deliberately tracks same-day (drizzle rc builds, rolldown, `@tanstack/charts`)
+  — extend it when a new exact pin hits the gate, rather than lowering the cooldown.
 - `pnpm typecheck && pnpm lint && pnpm test` before considering work done.
-  Integration tests need Docker (Testcontainers). `VirtualMessageList` explicitly opts out of
+  Integration tests need Docker (Testcontainers). jsdom applies no stylesheet, and since
+  jsdom 27 `getComputedStyle` returns a real `display: inline` for unstyled spans instead of
+  `""`, so accessible names no longer get the word space a browser derives from blockifying
+  a flex/grid item or an `sr-only` absolute — match those names with `\s?` rather than
+  writing the browser-wrong spelling. jsdom 29+ also drops any `linear-gradient` carrying a
+  `calc()` stop from the CSSOM (plain `calc()` on a normal property is fine), so a
+  gradient mask cannot be asserted from the DOM at all.
+  `VirtualMessageList` explicitly opts out of
   React Compiler memoization because `useVirtualizer` exposes a mutable imperative instance;
   keep the targeted lint suppression beside that call until @tanstack/react-virtual is compatible.
 - UI primitives in `src/ui/primitives` are shadcn-generated (Base UI, style
@@ -534,6 +643,10 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   new-chat screen focuses the composer, except on a phone (`useIsMobile`), where it would
   raise the keyboard over what the user came to read. Model pickers keep compact rows without a details toggle;
   native tool metadata stays admin-only, never a user suitability distinction.
+- Upload-queued composer sends dispatch the current draft and selections together. `Composer`
+  keeps one effect-updated request ref, including `onSend`, so an upload cannot pair fresh
+  text with stale skills or a stale parent callback. Research mode stays locked while queued;
+  failed uploads/sends preserve the draft and selections.
 - Agent creation leads with name, instructions and Knowledge, then shows every remaining
   setting on the same page — no More settings disclosure. Invalid fields receive focus on
   submit. Collections are attached through a searchable picker with removable rows, not a
@@ -567,11 +680,55 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   Tailwind v4 dropped it.
 - `cn` is the `cn` package (shadcn's `twMerge(clsx())` replacement); `src/ui/utils.ts`
   only re-exports it. Primitives import from `"cn"` directly (what the CLI emits).
-- Pending buttons keep their label: `<Spinner data-icon="inline-start" aria-hidden />`
-  ahead of the text, `disabled`, `aria-busy`. Never swap the label for `"Saving…"` —
-  it reflows the button. `form.SubmitButton` in `src/ui/form/app-form.tsx` does this.
+- Pending buttons keep their label: a spinner slides in ahead of the text, never
+  replacing it (`"Saving…"` reflows the button). There are exactly two ways to write
+  one — `PendingButton` (`src/ui/pending-button.tsx`) for a plain mutation, and
+  `form.SubmitButton` for a TanStack form, which renders through `PendingButton` so
+  the two cannot drift. Do not hand-roll the spinner/`disabled`/`aria-busy` triple
+  again. `aria-busy` is always `x || undefined`: the attribute is absent when idle,
+  never `aria-busy="false"`.
+- A run of activity in a dropdown item is the exception: a menu item closes on
+  activation, so it cannot carry a spinner and `disabled` is the pending signal —
+  unless the item sets `closeOnClick={false}` to stay open (account menu), where the
+  spinner takes the icon's place.
 - `Spinner` is `role="status"` on its own; pass `aria-hidden` inside any control that
   already has a label or `aria-busy`, or assistive tech announces "Loading" twice.
+- Loading a page's data is the **route loader's** job (`ensureQueryData`, or
+  `prefetchQuery` + `retry: false` when the page renders its own error state), so a
+  page body is written against data that is already there. For the windows a loader
+  cannot cover, `ListSkeleton` in `page-shell.tsx` is the one pending shape — never a
+  bare `null`, a `"Loading…"` paragraph, or a hand-rolled `animate-pulse` div. The
+  skills module shipped without loaders and grew all three; that is what the shared
+  one replaced.
+- Inline errors are `FieldError` (already `role="alert"` + destructive text, and null
+  when empty); a size override like `className="text-xs"` is fine, re-deriving the
+  colour and role on a `<p>` is not. Non-inline mutation failures stay `toast.error`,
+  worded "Could not <verb> the <thing>."
+- List filters use `SearchInput` (`src/ui/search-input.tsx`), an `InputGroup` with the
+  magnifier as an addon. It is `type="search"`, so tests query `role="searchbox"`.
+- Every `HugeiconsIcon` carries `strokeWidth={2}`; the package default is 1.5, and the
+  same icon at both weights on one screen is what this rule exists to prevent. Inside a
+  `Button`, `DropdownMenuItem` or `Badge` the variant already sizes the svg
+  (`[&_svg:not([class*='size-'])]`), so do **not** add `className="size-4"` there — it
+  also defeats the `xs`/`icon-xs` sizes. Icons in a plain tile or span still need it.
+- "New X" is the control that opens a creation surface; "Create X" is the commit inside
+  it. In a confirm title a resource's own name is wrapped in curly quotes
+  (`Delete “${name}”?`) because it is user-authored; a person's name is not
+  (`Ban ${name}?`). User-facing copy uses curly apostrophes (`isn’t`, `Couldn’t`) —
+  a straight one next to a curly one in the same transcript is the bug this prevents.
+  Model-facing prompt strings on the server are exempt.
+- `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line
+  transcript summary row, sitting beside `disclosureTriggerClassName` — a message
+  stacks both, so they live together.
+- A section has exactly two places for buttons, and which one is decided by what
+  the button does, never by which module it is in. `Section`'s `actions` slot
+  (top-right, beside the heading) is for "add one of these" — New collection, Add
+  member, Add model. `FormActions` (`page-shell.tsx`) is the left-aligned row
+  _under_ the fields, for Save/Apply/Reset and for a control paired with the button
+  that consumes it; a Save button above the field it saves reads backwards. Use
+  `FormActions` rather than a bare `<div>`: a submit button that is a direct child
+  of a `flex-col` form stretches to full width, which is how the agent editor ended
+  up with a full-bleed Save while every other form had an auto-width one.
 - Icons inside a labelled `Button`/`Badge` carry `data-icon="inline-start|inline-end"`;
   the size variants key their optical padding off it. Never `<Button render={<Link/>}
 nativeButton={false}>` for navigation — Base UI forces `role="button"`; use

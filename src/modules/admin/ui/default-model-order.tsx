@@ -11,10 +11,10 @@ import { toast } from "sonner";
 import { MAX_DEFAULT_MODELS } from "~/modules/providers/default-models.ts";
 import type { ModelRow, PublicProvider } from "~/modules/providers/server/repo.ts";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
-import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
+import { FormActions, ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import { Spinner } from "~/ui/primitives/spinner";
 import { updateDefaultModelOrder } from "../server/functions.ts";
 
 type PriorityModel = Pick<
@@ -119,7 +119,7 @@ export function DefaultModelOrder({
                         disabled={save.isPending || index === 0}
                         onClick={() => move(index, -1)}
                       >
-                        <HugeiconsIcon icon={ArrowUp01Icon} className="size-4" />
+                        <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
                       </Button>
                       <Button
                         size="icon-sm"
@@ -128,7 +128,7 @@ export function DefaultModelOrder({
                         disabled={save.isPending || index === order.length - 1}
                         onClick={() => move(index, 1)}
                       >
-                        <HugeiconsIcon icon={ArrowDown01Icon} className="size-4" />
+                        <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
                       </Button>
                       <Button
                         size="icon-sm"
@@ -137,7 +137,7 @@ export function DefaultModelOrder({
                         disabled={save.isPending}
                         onClick={() => setDraft(order.filter((entry) => entry !== id))}
                       >
-                        <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                        <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
                       </Button>
                     </div>
                   </ListRow>
@@ -147,7 +147,7 @@ export function DefaultModelOrder({
           </ol>
         )}
       </ListCard>
-      <div className="flex flex-wrap items-center gap-2">
+      <FormActions>
         <ModelSelect
           models={options}
           value={selectedCandidate}
@@ -166,19 +166,19 @@ export function DefaultModelOrder({
             setCandidate(null);
           }}
         >
-          <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" />
+          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
           Add model
         </Button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
+      </FormActions>
+      <FormActions>
+        <PendingButton
           size="sm"
-          disabled={save.isPending || !dirty || !valid}
-          aria-busy={save.isPending}
+          pending={save.isPending}
+          disabled={!dirty || !valid}
           onClick={() => save.mutate([...order])}
         >
-          {save.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}Save
-        </Button>
+          Save
+        </PendingButton>
         <Button
           size="sm"
           variant="outline"
@@ -198,7 +198,7 @@ export function DefaultModelOrder({
         >
           Clear order
         </Button>
-      </div>
+      </FormActions>
     </Section>
   );
 }

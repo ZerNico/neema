@@ -108,7 +108,7 @@ export function AccountMenu({
         {impersonating && (
           <DropdownMenuItem
             disabled={pending}
-            aria-busy={stop.isPending}
+            aria-busy={stop.isPending || undefined}
             closeOnClick={false}
             onClick={() => stop.mutate()}
           >
@@ -122,7 +122,7 @@ export function AccountMenu({
         )}
         <DropdownMenuItem
           disabled={pending}
-          aria-busy={signOut.isPending}
+          aria-busy={signOut.isPending || undefined}
           closeOnClick={false}
           onClick={() => signOut.mutate()}
         >

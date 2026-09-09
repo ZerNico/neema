@@ -165,7 +165,7 @@ describe("AgentEditorPage", () => {
       }),
     );
     renderEditor(detail({ collections: [{ id: "missing", name: null, available: false }] }), null);
-    expect(screen.getByText("Loading collections…")).toBeVisible();
+    expect(screen.getByRole("status", { name: "Loading collections" })).toBeVisible();
     expect(screen.queryByText("A collection you can no longer read")).not.toBeInTheDocument();
     resolveCollections([]);
     expect(await screen.findByText("A collection you can no longer read")).toBeVisible();
@@ -222,7 +222,7 @@ describe("AgentEditorPage", () => {
 
   it("refuses the editor to a recipient", () => {
     renderEditor(detail({ canEdit: false, ownerName: "Dana" }));
-    expect(screen.getByText("This agent isn't yours to edit")).toBeInTheDocument();
+    expect(screen.getByText("This agent isn’t yours to edit")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Agent actions" })).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { Effect, Schema, Semaphore } from "effect";
+import { Effect, Result, Schema, Semaphore } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
 import { SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, validateSkillPath } from "../package.ts";
@@ -15,7 +15,7 @@ const ReadParams = Schema.Struct({
 });
 const loadSkillTool = Tool.make("load_skill", {
   description:
-    "Load a catalogue skill's pinned instructions into protected context. Use only when relevant. Manual-only skills cannot be loaded unless explicitly selected. Skills never grant tools or permission to execute scripts.",
+    "Load a catalogue skill's pinned instructions into protected context. Use only when relevant. Skills never grant tools or permission to execute scripts.",
   parameters: LoadParams,
   success: SkillToolResult,
   failure: SkillNotAvailable,
@@ -42,8 +42,9 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   let usedChars = 0;
   let accessFailure: SkillNotAvailable | null = null;
   const loaded = new Map<string, string>();
+  // Manual-only skills can be selected or attached to an agent, but not offered ambiently.
   const catalogue = input.manifest
-    .filter((entry) => !entry.manualOnly || entry.explicit)
+    .filter((entry) => !entry.manualOnly || !entry.ambient)
     .slice(0, SKILL_LIMITS.catalogue);
   const required = input.manifest.filter((entry) => !entry.ambient).map((entry) => entry.skillId);
   if (input.manifest.filter((entry) => !entry.ambient).length > SKILL_LIMITS.catalogue)
@@ -76,6 +77,21 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     remainingOps: remaining,
     ...(error ? { error } : {}),
   });
+  const readPinned = (
+    entry: SkillManifestEntry,
+    path: string,
+  ): Effect.Effect<Result.Result<string | null, SkillToolResult>, SkillNotAvailable> =>
+    Effect.gen(function* () {
+      const outcome = yield* Effect.result(service.readPinned(input.userId, entry, path));
+      if (Result.isFailure(outcome)) {
+        if (!entry.ambient) {
+          accessFailure = outcome.failure;
+          return yield* outcome.failure;
+        }
+        return Result.fail(result(entry, entry.skillId, path, "", "Skill is no longer available."));
+      }
+      return Result.succeed(outcome.success);
+    });
   const load = (skillId: string, explicit = false) =>
     loadGate.withPermits(1)(
       Effect.gen(function* () {
@@ -101,13 +117,9 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
             "",
             `${SKILL_LIMITS.loaded} skills are already loaded.`,
           );
-        const root = yield* service.readPinned(input.userId, entry, "SKILL.md").pipe(
-          Effect.tapError((error) =>
-            Effect.sync(() => {
-              accessFailure = error;
-            }),
-          ),
-        );
+        const outcome = yield* readPinned(entry, "SKILL.md");
+        if (Result.isFailure(outcome)) return outcome.failure;
+        const root = outcome.success;
         if (root === null)
           return result(entry, skillId, "SKILL.md", "", "Required SKILL.md is missing.");
         if (usedChars + root.length > input.maxRootChars)
@@ -159,15 +171,9 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
           "",
           "The root instructions are already present in protected context; read a supporting file instead.",
         );
-      const text = yield* gate
-        .withPermits(1)(service.readPinned(input.userId, entry, args.path))
-        .pipe(
-          Effect.tapError((error) =>
-            Effect.sync(() => {
-              accessFailure = error;
-            }),
-          ),
-        );
+      const outcome = yield* gate.withPermits(1)(readPinned(entry, args.path));
+      if (Result.isFailure(outcome)) return outcome.failure;
+      const text = outcome.success;
       if (text === null)
         return result(
           entry,
@@ -199,7 +205,21 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         // Only names and descriptions are here. Saying so, and saying what to
         // do about it, is what makes an available skill actually get used.
         "These skills are available but not loaded — you can see only their name and description. When one of them covers what is being asked, call load_skill with its skillId before answering, then follow its instructions. Do not guess at a skill's contents, and do not mention this list when nothing fits.",
-        `Available skills: ${JSON.stringify(catalogue.map(({ skillId, name, description }) => ({ skillId, name, description })))}`,
+        // Without this the catalogue is a flat list and an agent's own skills
+        // are indistinguishable from everything else the reader happens to own.
+        ...(catalogue.some((entry) => entry.fromAgent)
+          ? [
+              'Entries marked "forThisAgent" were attached to the agent handling this conversation. Prefer them when more than one skill fits; they are still loaded on demand, not automatically.',
+            ]
+          : []),
+        `Available skills: ${JSON.stringify(
+          catalogue.map(({ skillId, name, description, fromAgent }) => ({
+            skillId,
+            name,
+            description,
+            ...(fromAgent ? { forThisAgent: true } : {}),
+          })),
+        )}`,
         ...[...loaded].map(
           ([id, root]) => `<skill-guidance id=${JSON.stringify(id)}>\n${root}\n</skill-guidance>`,
         ),
@@ -217,7 +237,5 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     },
     authorize,
     messages,
-    /** True once a skill's instructions are in context, not merely offered. */
-    hasLoaded: () => loaded.size > 0,
   };
 });

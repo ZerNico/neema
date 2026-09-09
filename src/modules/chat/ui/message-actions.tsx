@@ -99,7 +99,7 @@ function RetryMenu({
                 onRetry();
               }}
             >
-              <HugeiconsIcon icon={ArrowReloadHorizontalIcon} />
+              <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
               Retry same
             </button>
             <div
@@ -128,7 +128,7 @@ function RetryMenu({
           />
         }
       >
-        <HugeiconsIcon icon={ArrowReloadHorizontalIcon} className="size-4" />
+        <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
       </ModelPicker>
       <TooltipContent>Retry</TooltipContent>
     </Tooltip>
@@ -163,7 +163,7 @@ function RetryControl({
             />
           }
         >
-          <HugeiconsIcon icon={ArrowReloadHorizontalIcon} className="size-4" />
+          <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
         </TooltipTrigger>
         <TooltipContent>Retry</TooltipContent>
       </Tooltip>
@@ -198,11 +198,11 @@ function SourcesMenu({
           />
         }
       >
-        <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
+        <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuItem onClick={onOpenSources}>
-          <HugeiconsIcon icon={BookOpen01Icon} className="size-4" />
+          <HugeiconsIcon icon={BookOpen01Icon} strokeWidth={2} />
           View sources ({sources.length})
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -305,6 +305,7 @@ export function MessageActions({
           <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
             <HugeiconsIcon
               icon={copied ? Tick02Icon : Copy01Icon}
+              strokeWidth={2}
               className={copied ? "size-4 text-success" : "size-4"}
               aria-hidden
             />
@@ -313,12 +314,12 @@ export function MessageActions({
       )}
       {onEdit ? (
         <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>
-          <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+          <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
         </ActionButton>
       ) : null}
       {onBranch ? (
         <ActionButton label="Branch off" onClick={onBranch} disabled={branchDisabled ?? false}>
-          <HugeiconsIcon icon={GitBranchIcon} className="size-4" />
+          <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} />
         </ActionButton>
       ) : null}
       {onRetry ? (

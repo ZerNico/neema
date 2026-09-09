@@ -73,21 +73,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [],
   );
 
-  // A queued send fires after the uploads settle, by which time the draft may
-  // have grown — read it then, not at the moment Enter was pressed.
-  const draftRef = useRef(draft);
+  // Text and selections stay editable while uploads settle; dispatch the current request.
+  const requestRef = useRef({ draft, researchEnabled, skillIds, onSend });
   useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
+    requestRef.current = { draft, researchEnabled, skillIds, onSend };
+  });
 
   const send = () => {
     if (disabled || !modelId) return;
     attachments.submit((attachmentIds) => {
-      const content = draftRef.current.trim();
+      const current = requestRef.current;
+      const content = current.draft.trim();
       if (!content && attachmentIds.length === 0) return;
-      const request = researchEnabled
-        ? onSend(content, attachmentIds, "research", skillIds)
-        : onSend(content, attachmentIds, undefined, skillIds);
+      const request = current.onSend(
+        content,
+        attachmentIds,
+        current.researchEnabled ? "research" : undefined,
+        current.skillIds,
+      );
       void request.then(
         () => {
           setDraft("");
