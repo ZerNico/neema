@@ -245,7 +245,9 @@ function useEditSwapHeight(editing: boolean) {
     const element = ref.current;
     if (!element) return;
 
-    const height = element.offsetHeight;
+    // Fractional, unlike offsetHeight: an integer end keyframe leaves the row a
+    // subpixel off its natural height, and removing the animation snaps it back.
+    const height = element.getBoundingClientRect().height;
     if (
       wasEditing.current !== editing &&
       lastHeight.current !== null &&
@@ -253,10 +255,19 @@ function useEditSwapHeight(editing: boolean) {
       typeof element.animate === "function" &&
       !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     ) {
+      // The fade lands early and holds, so the back half of the swap is visually
+      // still. Running it to the end kept the composer under 1 opacity — which
+      // both washed out its shadow and put the row on its own compositing layer
+      // — right up to the frame where that layer went away and the shadow
+      // repainted, and the pair read as a flicker just before the swap finished.
+      // (An `overflow: "hidden"` keyframe used to sit here. It never applied,
+      // overflow is not animatable, so the growing direction can still overlap
+      // the row below for the duration; clipping it would cut the shadow off.)
       element.animate(
         [
-          { height: `${lastHeight.current}px`, opacity: 0, overflow: "hidden" },
-          { height: `${height}px`, opacity: 1, overflow: "hidden" },
+          { height: `${lastHeight.current}px`, opacity: 0 },
+          { opacity: 1, offset: 0.45 },
+          { height: `${height}px`, opacity: 1 },
         ],
         { duration: 180, easing: "ease-in-out" },
       );
