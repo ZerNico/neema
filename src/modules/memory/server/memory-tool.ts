@@ -50,10 +50,30 @@ export interface SaveMemoryParams {
   readonly replaces?: unknown;
 }
 
+// Why a save was refused, as a closed set the activity row can persist. The
+// model's arguments never make it onto the row, so without this a rejection is
+// indistinguishable from a transport failure after the fact.
+export const SaveMemoryRejection = Schema.Literals([
+  "invalid_content",
+  "invalid_replaces",
+  "unknown_ordinal",
+  "empty",
+  "too_long",
+  "sensitive",
+  "limit_reached",
+  "protected",
+  "source_changed",
+  "disabled",
+  "repeated",
+  "failed",
+]);
+export type SaveMemoryRejection = typeof SaveMemoryRejection.Type;
+
 export const SaveMemoryResult = Schema.Struct({
   ok: Schema.Boolean,
   outcome: Schema.Literals(["created", "updated", "unchanged", "rejected"]),
   message: Schema.String,
+  reason: Schema.optionalKey(SaveMemoryRejection),
 });
 export type SaveMemoryResult = typeof SaveMemoryResult.Type;
 
@@ -83,10 +103,11 @@ const INVALID_REPLACES_MESSAGE =
   "saved_memory_context.";
 const UNKNOWN_ORDINAL_MESSAGE = "That memory ordinal is not available.";
 
-const rejected = (message: string): SaveMemoryResult => ({
+const rejected = (reason: SaveMemoryRejection, message: string): SaveMemoryResult => ({
   ok: false,
   outcome: "rejected",
   message,
+  reason,
 });
 
 const resultFor = (outcome: SaveModelMemoryOutcome): SaveMemoryResult => {
@@ -99,33 +120,42 @@ const resultFor = (outcome: SaveModelMemoryOutcome): SaveMemoryResult => {
       return { ok: true, outcome: "unchanged", message: "That memory was already saved." };
     case "limit_reached":
       return rejected(
+        "limit_reached",
         "Memory is full. The user can remove an item in Settings before saving another.",
       );
     case "protected":
-      return rejected("That memory is user-managed and cannot be replaced automatically.");
+      return rejected(
+        "protected",
+        "That memory is user-managed and cannot be replaced automatically.",
+      );
     case "not_found":
-      return rejected(UNKNOWN_ORDINAL_MESSAGE);
+      return rejected("unknown_ordinal", UNKNOWN_ORDINAL_MESSAGE);
     case "source_changed":
-      return rejected("The source message changed before the memory could be saved.");
+      return rejected(
+        "source_changed",
+        "The source message changed before the memory could be saved.",
+      );
     case "disabled":
-      return rejected("Automatic memory saving is disabled.");
+      return rejected("disabled", "Automatic memory saving is disabled.");
     case "rejected":
-      return rejected(REJECTION_MESSAGES[outcome.reason]);
+      return rejected(outcome.reason, REJECTION_MESSAGES[outcome.reason]);
   }
 };
 
 type Validated<A> =
   | { readonly ok: true; readonly value: A }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false; readonly reason: SaveMemoryRejection; readonly message: string };
 
 // Mirrors the service's own preparation so a malformed call is answered here
 // instead of walking untrusted data through storage.
 const readContent = (raw: unknown): Validated<string> => {
-  if (!Predicate.isString(raw)) return { ok: false, message: INVALID_CONTENT_MESSAGE };
+  if (!Predicate.isString(raw))
+    return { ok: false, reason: "invalid_content", message: INVALID_CONTENT_MESSAGE };
   const content = raw.trim();
-  if (content.length === 0) return { ok: false, message: REJECTION_MESSAGES.empty };
+  if (content.length === 0)
+    return { ok: false, reason: "empty", message: REJECTION_MESSAGES.empty };
   if (content.length > MAX_MEMORY_CONTENT_LENGTH) {
-    return { ok: false, message: REJECTION_MESSAGES.too_long };
+    return { ok: false, reason: "too_long", message: REJECTION_MESSAGES.too_long };
   }
   return { ok: true, value: content };
 };
@@ -136,7 +166,7 @@ const readContent = (raw: unknown): Validated<string> => {
 const readReplaces = (raw: unknown): Validated<number | undefined> => {
   if (raw === undefined || raw === null) return { ok: true, value: undefined };
   if (!Predicate.isNumber(raw) || !Number.isInteger(raw) || raw < 1) {
-    return { ok: false, message: INVALID_REPLACES_MESSAGE };
+    return { ok: false, reason: "invalid_replaces", message: INVALID_REPLACES_MESSAGE };
   }
   return { ok: true, value: raw };
 };
@@ -158,20 +188,20 @@ export function prepareMemoryTool(input: {
 
   const handler = Effect.fnUntraced(function* (params: SaveMemoryParams) {
     if (attempted) {
-      return rejected("Only one memory save attempt is allowed per response.");
+      return rejected("repeated", "Only one memory save attempt is allowed per response.");
     }
     // A malformed call still spends the single attempt: the model gets one
     // chance per response, however it spells the arguments.
     attempted = true;
 
     const content = readContent(params.content);
-    if (!content.ok) return rejected(content.message);
+    if (!content.ok) return rejected(content.reason, content.message);
     const replaces = readReplaces(params.replaces);
-    if (!replaces.ok) return rejected(replaces.message);
+    if (!replaces.ok) return rejected(replaces.reason, replaces.message);
 
     const memoryId = replaces.value === undefined ? undefined : input.ordinals.get(replaces.value);
     if (replaces.value !== undefined && memoryId === undefined) {
-      return rejected(UNKNOWN_ORDINAL_MESSAGE);
+      return rejected("unknown_ordinal", UNKNOWN_ORDINAL_MESSAGE);
     }
 
     return yield* input.memory
@@ -187,7 +217,7 @@ export function prepareMemoryTool(input: {
         Effect.catchCause((cause) =>
           isMemorySaveGuardFailure(cause) || Cause.hasInterrupts(cause)
             ? Effect.failCause(cause)
-            : Effect.succeed(rejected("Memory could not be saved.")),
+            : Effect.succeed(rejected("failed", "Memory could not be saved.")),
         ),
       );
   });

@@ -116,6 +116,23 @@ export const MemoryActivityOutcome = Schema.Literals([
   "rejected",
 ]);
 export type MemoryActivityOutcome = typeof MemoryActivityOutcome.Type;
+// Mirrors the handler's closed rejection set. It is the only thing a rejected
+// save leaves behind: the arguments are never persisted or streamed.
+export const MemoryActivityReason = Schema.Literals([
+  "invalid_content",
+  "invalid_replaces",
+  "unknown_ordinal",
+  "empty",
+  "too_long",
+  "sensitive",
+  "limit_reached",
+  "protected",
+  "source_changed",
+  "disabled",
+  "repeated",
+  "failed",
+]);
+export type MemoryActivityReason = typeof MemoryActivityReason.Type;
 
 // Envelope persisted in message_chunks.delta for kind:"tool" markers.
 // Every event carries an explicit family discriminator.
@@ -233,6 +250,7 @@ export const ToolChunkEnvelope = Schema.Union([
     name: Schema.String,
     ok: Schema.Boolean,
     outcome: Schema.optionalKey(MemoryActivityOutcome),
+    reason: Schema.optionalKey(MemoryActivityReason),
     error: Schema.optionalKey(Schema.String),
   }),
 ]);

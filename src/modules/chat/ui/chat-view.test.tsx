@@ -419,6 +419,34 @@ describe("toActivity", () => {
     });
   });
 
+  it("hydrates a refused save with its fixed reason and nothing else", () => {
+    expect(
+      toActivity({
+        ...row,
+        toolName: "save_memory",
+        status: "error",
+        result: { outcome: "rejected", reason: "sensitive", message: "private text" },
+      }),
+    ).toEqual({
+      family: "memory",
+      callId: "tool-1",
+      name: "save_memory",
+      turnIndex: 1,
+      callIndex: 2,
+      status: "error",
+      outcome: "rejected",
+      reason: "sensitive",
+    });
+    expect(
+      toActivity({
+        ...row,
+        toolName: "save_memory",
+        status: "error",
+        result: { outcome: "rejected", reason: "not a real reason" },
+      }),
+    ).not.toHaveProperty("reason");
+  });
+
   it("hydrates existing tool names as web activity", () => {
     expect(
       toActivity({

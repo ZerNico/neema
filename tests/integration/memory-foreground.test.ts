@@ -878,6 +878,28 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(JSON.stringify({ call, envelopes })).not.toContain("Saved for future conversations");
   }, 60_000);
 
+  it("persists and streams the fixed reason when a save is refused", async () => {
+    gatewayState.saveMemoryOnFirstCall = true;
+    memoryState.outcome = { outcome: "rejected", reason: "sensitive" };
+
+    const result = await runGeneration(false);
+    const [call] = result.toolCalls;
+    const envelopes = toolEnvelopes(result.events);
+
+    expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
+    expect(call).toMatchObject({ toolName: "save_memory", status: "error", arguments: {} });
+    expect(call?.result).toEqual({ outcome: "rejected", reason: "sensitive" });
+    expect(envelopes[1]).toMatchObject({
+      family: "memory",
+      phase: "result",
+      ok: false,
+      outcome: "rejected",
+      reason: "sensitive",
+    });
+    expect(JSON.stringify({ call, envelopes })).not.toContain(MEMORY_CONTENT);
+    expect(JSON.stringify({ call, envelopes })).not.toContain("not safe to store");
+  }, 60_000);
+
   it("removes save_memory after the real handler's first attempt", async () => {
     gatewayState.saveMemoryOnFirstCall = true;
 

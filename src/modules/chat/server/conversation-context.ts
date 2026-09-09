@@ -27,8 +27,11 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
       break;
     }
   }
+  // A clarification answer is a picked option, not something the user said
+  // about themselves. Offering the save there invited the model to store the
+  // research topic as a "fact" and spend its one attempt on a rejection.
   const memoryTools =
-    settings.effectiveAutoSaveEnabled && sourceUserMessage
+    settings.effectiveAutoSaveEnabled && sourceUserMessage && !sourceUserMessage.questionResponse
       ? prepareMemoryTool({
           memory: input.memory,
           userId: input.userId,

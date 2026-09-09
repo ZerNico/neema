@@ -16,6 +16,7 @@ import {
   applyCompactionChunk,
   applyToolChunk,
   toMemoryActivityOutcome,
+  toMemoryActivityReason,
   readTextOffset,
   readResearchProgress,
   useMessageStream,
@@ -155,8 +156,9 @@ export function toActivity(row: {
     };
   }
   if (row.toolName === "save_memory") {
-    const result = (row.result ?? {}) as { outcome?: unknown };
+    const result = (row.result ?? {}) as { outcome?: unknown; reason?: unknown };
     const outcome = toMemoryActivityOutcome(result.outcome);
+    const reason = toMemoryActivityReason(result.reason);
     return {
       family: "memory",
       ...position,
@@ -166,6 +168,7 @@ export function toActivity(row: {
       callIndex: row.callIndex,
       status: row.status,
       ...(outcome ? { outcome } : {}),
+      ...(reason ? { reason } : {}),
       ...(row.error ? { error: row.error.message } : {}),
     };
   }

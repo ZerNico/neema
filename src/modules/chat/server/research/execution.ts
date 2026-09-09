@@ -618,6 +618,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
               if (preliminary) return;
               const decoded = Schema.decodeUnknownOption(SaveMemoryResult)(part.result);
               const outcome = Option.isSome(decoded) ? decoded.value.outcome : "rejected";
+              const reason = Option.isSome(decoded) ? decoded.value.reason : undefined;
               const ok = !part.isFailure && Option.isSome(decoded) && decoded.value.ok;
               // Only the canonical memory record owns its body. Neither arguments,
               // provider errors nor tool response prose enter research persistence.
@@ -625,7 +626,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 tx
                   .update(messageToolCalls)
                   .set({
-                    result: json({ outcome }),
+                    result: json({ outcome, ...(reason ? { reason } : {}) }),
                     status: ok ? "complete" : "error",
                     completedAt: new Date(),
                   })
@@ -640,6 +641,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 name: part.name,
                 ok,
                 outcome,
+                ...(reason ? { reason } : {}),
                 ...(ok ? {} : { error: "memory was not saved" }),
               });
               return;

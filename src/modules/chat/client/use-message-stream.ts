@@ -9,7 +9,7 @@ import { Option, Schema } from "effect";
 import { ResearchProgress } from "../research-schema.ts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
-import type { MemoryActivityOutcome } from "~/modules/tools/schema.ts";
+import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
 
@@ -70,6 +70,8 @@ export interface WebToolActivity extends ToolActivityBase {
 export interface MemoryToolActivity extends ToolActivityBase {
   family: "memory";
   outcome?: MemoryActivityOutcome;
+  /** Why a save was refused; only ever one of the handler's fixed reasons. */
+  reason?: MemoryActivityReason;
 }
 
 export interface AskToolActivity extends ToolActivityBase {
@@ -159,6 +161,9 @@ const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
   "rejected",
 ]);
 
+export const toMemoryActivityReason = (value: unknown): MemoryActivityReason | undefined =>
+  Option.getOrUndefined(Schema.decodeUnknownOption(MemoryActivityReason)(value));
+
 export const toMemoryActivityOutcome = (value: unknown): MemoryActivityOutcome | undefined => {
   if (typeof value !== "string") return undefined;
   if (MEMORY_OUTCOMES.has(value as MemoryActivityOutcome)) return value as MemoryActivityOutcome;
@@ -208,6 +213,7 @@ export function applyToolChunk(
     args?: { targets?: string[] };
     ok?: boolean;
     outcome?: unknown;
+    reason?: unknown;
     summary?: {
       targets?: string[];
       resultCount?: number;
@@ -415,6 +421,7 @@ export function applyToolChunk(
     if (e.phase !== "result" || typeof e.ok !== "boolean") return tools;
 
     const outcome = toMemoryActivityOutcome(e.summary?.outcome ?? e.outcome);
+    const reason = toMemoryActivityReason(e.reason);
     const next: MemoryToolActivity = {
       family: "memory",
       ...position,
@@ -424,6 +431,7 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.ok ? "complete" : "error",
       ...(outcome ? { outcome } : {}),
+      ...(reason ? { reason } : {}),
       ...(typeof e.error === "string" ? { error: e.error } : {}),
     };
     return index === -1

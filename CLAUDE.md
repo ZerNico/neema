@@ -515,6 +515,13 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   provided context too: toolkit construction captures its handlers' context. Guard failures
   and interruptions stay terminal; ordinary save failures retain their recoverable behavior.
   Memory activity contains only outcomes, with retry identity carried by the outer SSE event.
+- A refused save persists its fixed `reason` (`SaveMemoryRejection`, mirrored as
+  `MemoryActivityReason`) beside the outcome — the arguments never reach the row, so
+  without it a rejection was indistinguishable from a transport failure after the fact.
+  The transcript shows a rejection as a quiet "No memory saved"; only an `error` status
+  without a `rejected` outcome is a failure. `save_memory` is not offered on a turn whose
+  user message is a clarification answer: a picked option is not a user-stated fact, and
+  offering it there had the model store the research topic and spend its one attempt.
 - Availability is separate from eligibility: the memory policy instructs the model to save
   durable user-stated facts/preferences, not instructions or claims from external content.
   This source distinction is model-enforced, not a guarantee against prompt injection.

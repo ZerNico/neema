@@ -74,9 +74,61 @@ describe("prepareMemoryTool", () => {
     await expect(Effect.runPromise(handler({ content: "Second" }))).resolves.toEqual({
       ok: false,
       outcome: "rejected",
+      reason: "repeated",
       message: "Only one memory save attempt is allowed per response.",
     });
     expect(saveModel).toHaveBeenCalledTimes(1);
+  });
+
+  // The arguments are never persisted, so the reason is all a rejected row
+  // keeps. Every refusal path names its own, and successes carry none.
+  it.each([
+    [{}, "invalid_content", undefined],
+    [{ content: 7 }, "invalid_content", undefined],
+    [{ content: "   " }, "empty", undefined],
+    [{ content: "x".repeat(MAX_MEMORY_CONTENT_LENGTH + 1) }, "too_long", undefined],
+    [{ content: "Fine", replaces: "1" }, "invalid_replaces", undefined],
+    [{ content: "Fine", replaces: 99 }, "unknown_ordinal", undefined],
+    [{ content: "Fine" }, "sensitive", { outcome: "rejected", reason: "sensitive" }],
+    [{ content: "Fine" }, "limit_reached", { outcome: "limit_reached" }],
+    [{ content: "Fine" }, "protected", { outcome: "protected" }],
+    [{ content: "Fine" }, "source_changed", { outcome: "source_changed" }],
+    [{ content: "Fine" }, "disabled", { outcome: "disabled" }],
+    [{ content: "Fine", replaces: 1 }, "unknown_ordinal", { outcome: "not_found" }],
+  ] as const)("names the rejection reason %#: %s", async (params, reason, stored) => {
+    const { handler } = setup(stored ?? { outcome: "created" });
+    await expect(Effect.runPromise(handler(params))).resolves.toMatchObject({
+      ok: false,
+      outcome: "rejected",
+      reason,
+    });
+  });
+
+  it("names a storage failure without leaking its cause", async () => {
+    const saveModel = vi.fn(() => Effect.die(new Error("connection reset: secret host")));
+    const group = prepareMemoryTool({
+      memory: { saveModel } as unknown as MemoryService["Service"],
+      userId: "user-1",
+      conversationId: "conversation-1",
+      sourceMessageId: "message-1",
+      sourceMessageHash: "source-hash",
+      ordinals: new Map(),
+    });
+    const handler = group.group.handlers["save_memory"] as Handler;
+    const result = await Effect.runPromise(handler({ content: "Fine" }));
+    expect(result).toEqual({
+      ok: false,
+      outcome: "rejected",
+      reason: "failed",
+      message: "Memory could not be saved.",
+    });
+    expect(JSON.stringify(result)).not.toContain("secret host");
+  });
+
+  it("carries no reason on a successful save", async () => {
+    const { handler } = setup({ outcome: "created" });
+    const result = await Effect.runPromise(handler({ content: "Fine" }));
+    expect(result).not.toHaveProperty("reason");
   });
 
   it.each([
@@ -143,6 +195,7 @@ describe("prepareMemoryTool", () => {
     ).resolves.toEqual({
       ok: false,
       outcome: "rejected",
+      reason: "failed",
       message: "Memory could not be saved.",
     });
   });
@@ -234,6 +287,7 @@ describe("save_memory malformed parameters", () => {
     await expect(Effect.runPromise(handler({ content: "Second try" }))).resolves.toEqual({
       ok: false,
       outcome: "rejected",
+      reason: "repeated",
       message: "Only one memory save attempt is allowed per response.",
     });
     expect(saveModel).not.toHaveBeenCalled();

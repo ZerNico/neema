@@ -20,11 +20,22 @@ describe("MemoryActivityBlock", () => {
     [activity("complete", "created"), "Saved to memory"],
     [activity("complete", "updated"), "Updated memory"],
     [activity("complete", "unchanged"), "Memory already saved"],
-    [activity("complete", "rejected"), "Couldn’t save memory"],
+    [activity("error", "rejected"), "No memory saved"],
     [activity("error"), "Couldn’t save memory"],
   ] as const)("renders the summary label %#", (value, label) => {
     render(<MemoryActivityBlock activity={value} />);
     expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  // A refusal is the model's decision, not something the user can fix, so it
+  // must not wear the destructive colour that marks an actual failure.
+  it("styles a transport failure as an error but a refusal as an ordinary outcome", () => {
+    const { container: refused } = render(
+      <MemoryActivityBlock activity={{ ...activity("error", "rejected"), reason: "sensitive" }} />,
+    );
+    expect(refused.firstElementChild).not.toHaveClass("text-destructive");
+    const { container: failed } = render(<MemoryActivityBlock activity={activity("error")} />);
+    expect(failed.firstElementChild).toHaveClass("text-destructive");
   });
 
   it("never renders disclosure controls, links, favicons, or memory content", () => {

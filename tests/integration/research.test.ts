@@ -705,6 +705,105 @@ describe("main-assistant research ownership", () => {
     },
   );
 
+  it("never offers a memory save on a turn whose user message is a clarification answer", async () => {
+    // A picked option is not something the user said about themselves. Offering
+    // the save there had the model store the research topic as a "fact" and
+    // spend its one attempt on a refusal that the transcript then showed.
+    finishWorkersEarly = true;
+    clarify = true;
+    memoryParams = { content: "Builds an Electron chat app." };
+    const input = await runtime.runPromise(seed);
+    await enableMemory(input.userId);
+    const remembered = "Prefers European primary sources.";
+    await runtime.runPromise(
+      MemoryService.use((service) => service.createManual(input.userId, remembered)),
+    );
+    const first = await runtime.runPromise(send(input.userId, input.conversationId));
+    await remote.runPromise(collect(first.assistantMessageId));
+    expect(requests.some((request) => phaseOf(request) === "planning")).toBe(false);
+    const answered = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const call = (yield* repo.listToolCalls([first.assistantMessageId])).find(
+          (row) => row.toolName === "ask_user",
+        )!;
+        return yield* ChatService.use((service) =>
+          service.sendMessage({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            modelId,
+            questionResponse: { callId: call.id, response: { kind: "skip" } },
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        );
+      }),
+    );
+    clarify = false;
+    requests.length = 0;
+    await remote.runPromise(collect(answered.assistantMessageId));
+    const planning = requests.filter((request) => phaseOf(request) === "planning");
+    expect(planning).toHaveLength(1);
+    expect(planning[0]!.toolkit?.tools["save_memory"]).toBeUndefined();
+    // Memory is still referenced; only the save is withheld for this turn.
+    expect(promptText(planning[0]!)).toContain(remembered);
+    expect(promptText(planning[0]!)).not.toContain("Call save_memory");
+    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const message = (yield* repo.getMessage(answered.assistantMessageId))!;
+        expect(message.status).toBe("complete");
+        const activities = yield* repo.listToolCalls([message.id]);
+        expect(activities.some((activity) => activity.toolName === "save_memory")).toBe(false);
+        const stored = yield* MemoryService.use((service) => service.list(input.userId));
+        expect(stored.map((memory) => memory.content)).toEqual([remembered]);
+      }),
+    );
+  });
+
+  it("persists the fixed reason for a refused save and nothing the model wrote", async () => {
+    finishWorkersEarly = true;
+    const input = await runtime.runPromise(seed);
+    await enableMemory(input.userId);
+    const secret = "sk-live-abcdefghijklmnopqrstuvwxyz";
+    memoryParams = { content: `API key is ${secret}` };
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    const events = await remote.runPromise(collect(sent.assistantMessageId));
+    const memoryEvents = events
+      .flatMap((event) =>
+        event.kind === "chunk" && event.chunkKind === "tool"
+          ? [JSON.parse(event.delta) as { family?: string; phase?: string; reason?: string }]
+          : [],
+      )
+      .filter((envelope) => envelope.family === "memory" && envelope.phase === "result");
+    expect(memoryEvents).toEqual([
+      expect.objectContaining({ ok: false, outcome: "rejected", reason: "sensitive" }),
+    ]);
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+        expect(message.status).toBe("complete");
+        const call = (yield* repo.listToolCalls([message.id])).find(
+          (row) => row.toolName === "save_memory",
+        )!;
+        expect(call.status).toBe("error");
+        expect(call.arguments).toEqual({});
+        expect(call.result).toEqual({ outcome: "rejected", reason: "sensitive" });
+        const chunks = yield* db
+          .select()
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, message.id));
+        expect(JSON.stringify({ call, chunks, events })).not.toContain(secret);
+        expect(JSON.stringify({ call, chunks, events })).not.toContain("API key");
+        const stored = yield* MemoryService.use((service) => service.list(input.userId));
+        expect(stored).toEqual([]);
+      }),
+    );
+  });
+
   it("carries the transactional guard into the actual preparation toolkit handler", async () => {
     finishWorkersEarly = true;
     const input = await runtime.runPromise(seed);

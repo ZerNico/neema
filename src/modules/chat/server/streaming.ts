@@ -40,6 +40,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
+import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import {
   KNOWLEDGE_SYSTEM_HINT,
@@ -1362,15 +1363,16 @@ export class StreamEngine extends Context.Service<
                             // any malformed preliminary part rather than persisting
                             // a second activity shape for this family.
                             if (isPreliminary) return;
-                            const result = part.result as {
-                              ok?: boolean;
-                              outcome?: "created" | "updated" | "unchanged" | "rejected";
-                            } | null;
+                            const decodedMemory = Schema.decodeUnknownOption(SaveMemoryResult)(
+                              part.result,
+                            );
+                            const result = Option.getOrUndefined(decodedMemory);
                             const outcome = result?.outcome ?? "rejected";
-                            const ok = !part.isFailure && result?.ok !== false;
+                            const reason = result?.reason;
+                            const ok = !part.isFailure && result?.ok === true;
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: { outcome },
+                              result: { outcome, ...(reason ? { reason } : {}) },
                               status: ok ? "complete" : "error",
                               ...(ok
                                 ? {}
@@ -1389,6 +1391,7 @@ export class StreamEngine extends Context.Service<
                               name: part.name,
                               ok,
                               outcome,
+                              ...(reason ? { reason } : {}),
                               ...(ok ? {} : { error: "memory was not saved" }),
                             });
                             return;
