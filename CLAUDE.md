@@ -595,6 +595,16 @@ endOffset }` beside explicitly tagged `{ kind: "web", url, ... }` sources; missi
   32 bytes); ciphertext never leaves the server (`toPublic` strips it).
 - First registered user becomes admin via the `user.create.before` database hook — do not
   bypass Better Auth for user creation.
+- `IdentityBoundary` (`src/modules/auth/identity-boundary.tsx`) pins one identity per
+  authenticated tree and replaces the document on any change; it never patches. A `401`
+  from any query or mutation ends the session on the spot — `requireSession` writes the
+  fixed body `UNAUTHENTICATED_BODY` because the Start client keeps only a failed
+  response's text, and `isUnauthenticatedError` matches on it; the two are one contract.
+  The focus/visibility revalidation exists for the case a `401` cannot catch: another tab
+  switched account or impersonation, so requests *succeed* as the wrong user. It runs
+  silently. Hiding the app while it is pending blanked every tab return, and doing it via
+  `<Activity hidden>` detached host refs, which Motion treats as a remount — every entrance
+  animation on screen replayed. Only the BFCache `pagehide` snapshot hides synchronously.
 - `usage_events` is an append-only ledger: one row per generation attempt (chat or
   title), written at finalize time. Retry appends, branching copies nothing, deleting a
   conversation leaves it intact. Analytics reads only the ledger — never

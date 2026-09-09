@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => ({
   cleanup: vi.fn(),
   navigate: vi.fn(),
 }));
+// A callback ref, not a ref object: the lint rule reads `hostRef` in JSX
+// as a ref access during render, and a plain function is what we assert on.
+const hostRef = vi.fn();
 vi.mock("./server/functions.ts", () => ({ getSessionIdentity: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
@@ -99,7 +102,7 @@ function Probe() {
   useSync(boundary?.reconcile);
   useEffect(() => () => mocks.cleanup(), []);
   return (
-    <div>
+    <div ref={hostRef}>
       Private content
       <button onClick={() => void boundary?.changeIdentity(async () => {}, "/admin/users")}>
         Switch
@@ -122,6 +125,7 @@ function mount(children = <Probe />, initial: SessionIdentity = original) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  hostRef.mockClear();
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
@@ -214,38 +218,7 @@ describe("authenticated identity boundary", () => {
     },
   );
 
-  it("coalesces focus checks and keeps old content hidden on failure until retry verifies it", async () => {
-    mount();
-    await act(async () => {});
-    const pending = deferred<typeof original>();
-    identity.mockReturnValueOnce(pending.promise);
-    fireEvent.focus(window);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(identity).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Private content")).not.toBeVisible();
-    await act(async () => pending.reject(new Error("offline")));
-    expect(identityNavigation.replace).not.toHaveBeenCalled();
-    expect(screen.getByText("Private content")).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByText("Private content")).toBeVisible());
-  });
-
-  it("blocks BFCache snapshots and discards pre-suspension identity responses", async () => {
-    const old = deferred<typeof original>();
-    identity.mockReturnValueOnce(old.promise);
-    mount();
-    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }));
-    expect(screen.getByText("Private content")).not.toBeVisible();
-    const fresh = deferred<typeof original>();
-    identity.mockReturnValueOnce(fresh.promise);
-    fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }));
-    await act(async () => old.resolve(original));
-    expect(screen.getByText("Private content")).not.toBeVisible();
-    await act(async () => fresh.resolve(original));
-    expect(screen.getByText("Private content")).toBeVisible();
-  });
-
-  it("hides portal content and pauses subscriptions without losing a draft during reconciliation", async () => {
+  it("revalidates silently on focus: coalesced, never hidden, and a transport error changes nothing", async () => {
     mount(
       <>
         <Probe />
@@ -255,14 +228,111 @@ describe("authenticated identity boundary", () => {
     );
     await act(async () => {});
     const source = FakeEventSource.instances.at(-1)!;
+    const node = screen.getByText("Private content");
     const pending = deferred<typeof original>();
     identity.mockReturnValueOnce(pending.promise);
     fireEvent.focus(window);
-    expect(screen.getByText("Private popup")).not.toBeVisible();
-    expect(source.close).toHaveBeenCalledOnce();
-    await act(async () => pending.resolve(original));
+    fireEvent(document, new Event("visibilitychange"));
+    expect(identity).toHaveBeenCalledTimes(2);
+    // The check is speculative, so nothing is concealed, torn down or restarted
+    // while it is in flight: hiding here is what replayed every animation on
+    // screen and dropped the sync stream on each tab return.
+    expect(screen.getByText("Private content")).toBeVisible();
     expect(screen.getByText("Private popup")).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(source.close).not.toHaveBeenCalled();
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+    // Host refs stay attached: detaching them (what `<Activity hidden>` does) is
+    // exactly the signal Motion reads as a remount.
+    expect(hostRef).not.toHaveBeenCalledWith(null);
+    await act(async () => pending.reject(new Error("offline")));
+    expect(hostRef).not.toHaveBeenCalledWith(null);
+    expect(identityNavigation.replace).not.toHaveBeenCalled();
+    expect(screen.getByText("Private content")).toBe(node);
     expect(screen.getByRole("textbox", { name: "Draft" })).toHaveValue("Keep this draft");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it.each([null, active])("replaces the document when a focus check finds %j", async (next) => {
+    const { client } = mount();
+    await act(async () => {});
+    const source = FakeEventSource.instances.at(-1)!;
+    identity.mockResolvedValue(next);
+    fireEvent.focus(window);
+    await waitFor(() =>
+      expect(identityNavigation.replace).toHaveBeenCalledExactlyOnceWith(next ? "/" : "/login"),
+    );
+    expect(screen.queryByText("Private content")).not.toBeInTheDocument();
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(client.getQueryCache().getAll()).toEqual([]);
+  });
+
+  it("treats a refused identity check as a logout, not a transport error", async () => {
+    mount();
+    await act(async () => {});
+    identity.mockRejectedValueOnce(new Error("Unauthorized"));
+    fireEvent.focus(window);
+    await waitFor(() =>
+      expect(identityNavigation.replace).toHaveBeenCalledExactlyOnceWith("/login"),
+    );
+  });
+
+  it("blocks BFCache snapshots and discards pre-suspension identity responses", async () => {
+    const old = deferred<typeof original>();
+    identity.mockReturnValueOnce(old.promise);
+    mount();
+    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }));
+    expect(screen.getByText("Private content")).not.toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("Checking session…");
+    const fresh = deferred<typeof original>();
+    identity.mockReturnValueOnce(fresh.promise);
+    fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }));
+    await act(async () => old.resolve(original));
+    expect(screen.getByText("Private content")).not.toBeVisible();
+    await act(async () => fresh.resolve(original));
+    expect(screen.getByText("Private content")).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["query", "Unauthorized", "/login"],
+    ["mutation", "Unauthorized", "/login"],
+  ] as const)(
+    "ends the session on a 401 from any %s without a confirmation round trip",
+    async (kind, body, destination) => {
+      const { client } = mount();
+      await act(async () => {});
+      expect(identity).toHaveBeenCalledTimes(1);
+      const failing = () => Promise.reject(new Error(body));
+      await act(async () => {
+        await (
+          kind === "query"
+            ? client.fetchQuery({ queryKey: ["refused"], queryFn: failing, retry: false })
+            : client.getMutationCache().build(client, { mutationFn: failing }).execute(undefined)
+        ).catch(() => {});
+      });
+      await waitFor(() =>
+        expect(identityNavigation.replace).toHaveBeenCalledExactlyOnceWith(destination),
+      );
+      expect(identity).toHaveBeenCalledTimes(1);
+      expect(client.getQueryCache().getAll()).toEqual([]);
+    },
+  );
+
+  it("leaves ordinary request failures to their callers", async () => {
+    const { client } = mount();
+    await act(async () => {});
+    await act(async () => {
+      await client
+        .fetchQuery({
+          queryKey: ["broken"],
+          queryFn: () => Promise.reject(new Error("Forbidden")),
+          retry: false,
+        })
+        .catch(() => {});
+    });
+    expect(identityNavigation.replace).not.toHaveBeenCalled();
+    expect(screen.getByText("Private content")).toBeVisible();
   });
 
   it("ignores unresolved native hydration and errors but checks a resolved native logout", async () => {

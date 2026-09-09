@@ -13,8 +13,12 @@ import {
 import { flushSync } from "react-dom";
 import { authClient } from "./client.ts";
 import { getSessionIdentity } from "./server/functions.ts";
-import { projectSessionIdentity, sameIdentity, type SessionIdentity } from "./identity.ts";
-import { Button } from "~/ui/primitives/button";
+import {
+  isUnauthenticatedError,
+  projectSessionIdentity,
+  sameIdentity,
+  type SessionIdentity,
+} from "./identity.ts";
 
 export const IDENTITY_CHANGE_KEY = "chat.identity-change";
 export const identityNavigation = { replace: (path: string) => window.location.replace(path) };
@@ -26,6 +30,30 @@ interface IdentityBoundaryActions {
 const IdentityContext = createContext<IdentityBoundaryActions | null>(null);
 export const useIdentityBoundary = () => useContext(IdentityContext);
 
+/**
+ * Guards one signed-in identity for the lifetime of the authenticated tree.
+ *
+ * The tree is rendered for `initialIdentity` and nothing else: cached queries,
+ * open streams and drafts all belong to that account, so a different one must
+ * never render into them. When the identity changes, the whole tree is torn
+ * down, caches are cleared and the document is replaced — never patched.
+ *
+ * Detection is layered, cheapest and most authoritative first:
+ * 1. A `401` from any server function ends the session on the spot — the
+ *    server said so, no confirmation round trip needed.
+ * 2. In-app changes (sign-out, impersonation) go through `changeIdentity`,
+ *    which broadcasts to sibling tabs over `localStorage`; Better Auth's own
+ *    session signal covers its native flows.
+ * 3. A silent revalidation on focus/visibility return catches what neither
+ *    sees: a cookie expired or cleared outside the app while the tab slept.
+ *
+ * Only (3) is speculative, so it never hides anything. Concealing the app
+ * before the check answers would blank it on every tab return — and via
+ * `<Activity>` it also detaches host refs, which Motion treats as a remount
+ * and replays every entrance animation on screen. The one exception is the
+ * BFCache snapshot: `pagehide` hides synchronously because the frozen page
+ * can be shown again without any script running first.
+ */
 export function IdentityBoundary({
   identity,
   children,
@@ -36,8 +64,7 @@ export function IdentityBoundary({
   const queryClient = useQueryClient();
   const [initialIdentity] = useState(identity);
   const [leaving, setLeaving] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [frozen, setFrozen] = useState(false);
   const state = useRef({
     leaving: false,
     mutating: false,
@@ -79,13 +106,14 @@ export function IdentityBoundary({
           replace(next ? "/" : "/login", false);
           return false;
         }
-        setChecking(false);
-        setFailed(false);
+        setFrozen(false);
         return true;
       })
-      .catch(() => {
-        if (!current.disposed && !current.leaving && epoch === current.epoch) setFailed(true);
-        return false; // A transport error is not a logout.
+      .catch((error: unknown) => {
+        if (current.disposed || current.leaving || epoch !== current.epoch) return false;
+        // The server refusing the check *is* the answer; a transport error is not.
+        if (isUnauthenticatedError(error)) replace("/login", false);
+        return false;
       })
       .finally(() => {
         if (epoch === current.epoch) current.check = null;
@@ -112,6 +140,23 @@ export function IdentityBoundary({
     [replace],
   );
 
+  // Layer 1: any request the server refuses ends the session immediately.
+  useEffect(() => {
+    const onError = (error: unknown) => {
+      if (isUnauthenticatedError(error) && !state.current.mutating) replace("/login", false);
+    };
+    const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "error") onError(event.action.error);
+    });
+    const unsubscribeMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "error") onError(event.action.error);
+    });
+    return () => {
+      unsubscribeQueries();
+      unsubscribeMutations();
+    };
+  }, [queryClient, replace]);
+
   useEffect(() => {
     const current = state.current;
     current.disposed = false;
@@ -126,7 +171,6 @@ export function IdentityBoundary({
         current.disposed
       )
         return;
-      setChecking(true);
       check();
     };
     const storage = (event: StorageEvent) => {
@@ -136,7 +180,7 @@ export function IdentityBoundary({
       // Hide synchronously in the BFCache snapshot, before React gets another paint.
       current.epoch++;
       current.check = null;
-      flushSync(() => setChecking(true));
+      flushSync(() => setFrozen(true));
     };
     const pageshow = (event: PageTransitionEvent) => {
       if (event.persisted) resume();
@@ -191,23 +235,13 @@ export function IdentityBoundary({
         </p>
       ) : (
         <>
-          {checking && (
-            <div className="p-4" role="status">
-              {failed ? (
-                <>
-                  Could not verify your session.{" "}
-                  <Button variant="outline" onClick={() => void reconcile()}>
-                    Retry
-                  </Button>
-                </>
-              ) : (
-                "Checking session…"
-              )}
-            </div>
+          {frozen && (
+            <p className="p-4" role="status">
+              Checking session…
+            </p>
           )}
-          {/* Activity also hides portals and cleans up subscriptions, while preserving
-              drafts across a focus check. A verified change unmounts it permanently. */}
-          <Activity mode={checking ? "hidden" : "visible"}>{children}</Activity>
+          {/* Hidden only across a BFCache round trip; a live tab is never blanked. */}
+          <Activity mode={frozen ? "hidden" : "visible"}>{children}</Activity>
         </>
       )}
     </IdentityContext.Provider>

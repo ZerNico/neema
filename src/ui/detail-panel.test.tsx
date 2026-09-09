@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ComponentProps } from "react";
 import { StrictMode, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getSessionIdentity } from "~/modules/auth/server/functions.ts";
 import { AppMotionProvider } from "~/ui/motion";
 import {
   DetailPanelProvider,
@@ -45,6 +46,17 @@ vi.mock("motion/react-m", async (importOriginal) => {
 });
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => environment.pathname }));
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => environment.mobile }));
+vi.mock("~/modules/auth/server/functions.ts", () => ({ getSessionIdentity: vi.fn() }));
+vi.mock("~/modules/auth/client.ts", () => ({
+  authClient: {
+    $store: {
+      atoms: {
+        $sessionSignal: { listen: () => () => {} },
+        session: { listen: () => () => {} },
+      },
+    },
+  },
+}));
 
 let panel: DetailPanelApi;
 function Probe() {
@@ -501,4 +513,50 @@ it("drops the old desktop host across breakpoints and cannot resurrect its pendi
   act(() => panel.open({ id: "two", title: "Mobile", body: <p>Mobile body</p> }));
   act(() => oldExit.complete(oldExit.target));
   expect(screen.getByText("Mobile body")).toBeInTheDocument();
+});
+
+it("survives an identity revalidation on tab return without replaying its open animation", async () => {
+  // A live tab is never blanked while the session is rechecked: hiding the tree
+  // detaches host refs, which Motion reads as a remount and answers by running
+  // `initial` again — the rail collapsed to 0 and slid open on every refocus.
+  environment.reducedMotion = false;
+  const { IdentityBoundary } = await import("~/modules/auth/identity-boundary.tsx");
+  const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+  const identity = { userId: "user", impersonatedBy: null };
+  let release!: (value: typeof identity) => void;
+  vi.mocked(getSessionIdentity).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <IdentityBoundary identity={identity}>
+        <Harness />
+      </IdentityBoundary>
+    </QueryClientProvider>,
+  );
+  act(() => release(identity));
+  act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Live" /> }));
+  const rail = screen.getByRole("complementary");
+  await waitFor(() => expect(rail.style.width).toBe("22rem"));
+  fireEvent.click(screen.getByRole("button", { name: "Count: 0" }));
+  const counter = screen.getByRole("button", { name: "Count: 1" });
+  const openTarget = animations.at(-1)?.target;
+
+  fireEvent(document, new Event("visibilitychange"));
+  fireEvent.focus(window);
+  expect(screen.getByRole("complementary")).toBe(rail);
+  expect(rail.style.width).toBe("22rem");
+  expect(rail).toBeVisible();
+  await act(async () => release(identity));
+  expect(screen.getByRole("complementary")).toBe(rail);
+  expect(rail.style.width).toBe("22rem");
+  expect(screen.getByRole("button", { name: "Count: 1" })).toBe(counter);
+  expect(animations.at(-1)?.target).toBe(openTarget);
+
+  // A real close/reopen still animates: the fix removed the false remount, not the motion.
+  act(() => panel.close());
+  expect(lastExit().target).toMatch(/^closed-/);
 });
