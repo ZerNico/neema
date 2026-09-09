@@ -6,7 +6,7 @@ import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/
 import { Option, Schema } from "effect";
 import { GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
 import { useSearchMode } from "./use-search-mode.ts";
+import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
@@ -251,6 +252,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const resetEditUploads = editUploads.reset;
   const submitEditUploads = editUploads.submit;
   const editUploadCount = editUploads.items.length;
+  // Seeded from the edited message, like the uploads above: an edit changes the
+  // message's own skills and collections, never the composer's live selection.
+  const [editSkillIds, setEditSkillIds] = useState<ReadonlyArray<string>>([]);
   const activeEditingMessage =
     editingMessageId === null
       ? null
@@ -341,9 +345,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
     [data.messages, data.toolCalls, data.attachments],
   );
-  const editingAnswers =
-    activeEditingMessage !== null &&
-    questionResponses.hiddenMessageIds.has(activeEditingMessage.id);
   const effectiveModelId = modelId ?? data.conversation.modelId;
   const {
     enabled: searchEnabled,
@@ -351,9 +352,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     reset: resetSearchEnabled,
   } = useSearchMode();
   const context = useContextSelection({ mode: "installed", agent: data.agent });
+  const editContext = useContextSelection({ mode: "installed", agent: data.agent });
+  // The composer loads the same list inside itself; the editor is a second
+  // consumer, and one shared query key means one fetch.
+  const editableSkills = useQuery(skillsQuery);
+  const seedEditContext = editContext.seed;
+  const settleEditContext = editContext.settle;
+
+  // Declared above the mutations: sending, answering, retrying and branching all
+  // abandon an open edit, and each has to drop its uploads and selections rather
+  // than just forgetting which message was being edited.
+  const closeEdit = useCallback(() => {
+    // Runs on every send/answer/retry/branch, so it must cost nothing when no
+    // edit is open: resetting then would throw away the composer's own uploads.
+    if (!editingMessageId) return;
+    setEditingMessageId(null);
+    setEditSkillIds([]);
+    settleEditContext();
+    // Structured edits have no upload lifecycle of their own.
+    if (!questionResponses.hiddenMessageIds.has(editingMessageId)) resetEditUploads();
+  }, [resetEditUploads, editingMessageId, questionResponses, settleEditContext]);
 
   const sendMutation = useMutation({
-    onMutate: () => setEditingMessageId(null),
+    onMutate: closeEdit,
     mutationFn: (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
@@ -405,7 +426,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
   };
   const answerMutation = useMutation({
-    onMutate: () => setEditingMessageId(null),
+    onMutate: closeEdit,
     mutationFn: (input: { callId: string; response: QuestionResponse }) =>
       answerQuestion({
         data: {
@@ -423,7 +444,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const answerInFlight = useRef(false);
 
   const retryMutation = useMutation({
-    onMutate: () => setEditingMessageId(null),
+    onMutate: closeEdit,
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -442,7 +463,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Branching leaves this conversation untouched and opens the copy, so the
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
-    onMutate: () => setEditingMessageId(null),
+    onMutate: closeEdit,
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -467,6 +488,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         modelId: string;
         searchEnabled: boolean;
         attachmentIds: ReadonlyArray<string>;
+        skillIds?: ReadonlyArray<string>;
+        collectionIds?: ReadonlyArray<string>;
       } & (
         | { content: string; questionResponse?: never }
         | { questionResponse: QuestionResponse; content?: never }
@@ -479,6 +502,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
         // Only ordinary edits claim uploads and consume the composer's search mode.
         editUploads.markClaimed();
+        setEditSkillIds([]);
+        settleEditContext();
         resetSearchEnabled();
       }
       setEditingMessageId(null);
@@ -509,14 +534,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
-  // An answer draft is local to its card; only submitting it locks the chat.
+  // An open edit locks nothing: its draft is local to the row, another message's
+  // Edit switches to it, and the composer stays live. Only work already in flight
+  // does, plus generating, which the server refuses to edit under anyway.
   const actionsDisabled =
     questionNeedsRefresh ||
     generating ||
     retryMutation.isPending ||
     editMutation.isPending ||
-    branchMutation.isPending ||
-    (activeEditingMessage !== null && !editingAnswers);
+    branchMutation.isPending;
   // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
   // oxlint-disable react-hooks/exhaustive-deps
   const respondToQuestion = useCallback(
@@ -631,25 +657,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     return next;
   }, [data.messages]);
 
-  const openEdit = useCallback(
-    (messageId: string) => {
-      setEditingMessageId(messageId);
-      // Seeded as existing/claimed: removing one only drops it from the
-      // replacement set, it is released by the save itself.
-      if (!questionResponses.hiddenMessageIds.has(messageId)) {
-        seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
-      }
-    },
-    [attachmentsByMessage, seedEditUploads, questionResponses],
-  );
-
-  const closeEdit = useCallback(() => {
-    setEditingMessageId(null);
-    // Structured edits have no upload lifecycle of their own.
-    if (!editingMessageId || !questionResponses.hiddenMessageIds.has(editingMessageId))
-      resetEditUploads();
-  }, [resetEditUploads, editingMessageId, questionResponses]);
-
   // Which model wrote each answer — null once its row is gone. The retry menu
   // marks it, and a retry that omits a model reuses it server-side.
   const modelByMessage = useMemo(
@@ -729,6 +736,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           modelId: effectiveModelId,
           searchEnabled,
           attachmentIds,
+          skillIds: editSkillIds,
+          collectionIds: editContext.sendFields.collectionIds,
         });
       });
     },
@@ -741,6 +750,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       mutateEdit,
       searchEnabled,
       submitEditUploads,
+      editSkillIds,
+      editContext,
     ],
   );
 
@@ -789,6 +800,42 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return result;
   }, [data.generations, data.messages]);
+  // Below the per-message maps it seeds from. Opening an editor while another is
+  // open is an ordinary switch: the previous draft goes with its unmounted row.
+  const openEdit = useCallback(
+    (messageId: string) => {
+      setEditingMessageId(messageId);
+      if (questionResponses.hiddenMessageIds.has(messageId)) {
+        // An answer edit has no uploads of its own, so there is nothing to seed.
+        // Only a switch away from another editor leaves chips needing clearing.
+        if (editingMessageId !== null && editingMessageId !== messageId) resetEditUploads();
+      } else {
+        // Seeded as existing/claimed: removing one only drops it from the
+        // replacement set, it is released by the save itself.
+        seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
+      }
+      setEditSkillIds((skillsByUserMessage.get(messageId) ?? []).map((skill) => skill.id));
+      // A message records the *effective* collections. The agent's own are in the
+      // selection already; reseeding them as standalone would rewrite the turn's
+      // provenance, so only the standalone remainder is seeded.
+      const fromAgent = new Set(data.agent?.collectionIds ?? []);
+      seedEditContext(
+        (collectionsByUserMessage.get(messageId) ?? []).filter((id) => !fromAgent.has(id)),
+      );
+    },
+    [
+      attachmentsByMessage,
+      seedEditUploads,
+      resetEditUploads,
+      questionResponses,
+      editingMessageId,
+      skillsByUserMessage,
+      collectionsByUserMessage,
+      seedEditContext,
+      data.agent,
+    ],
+  );
+
   const baseDisplay = useMemo(() => {
     // Citation numbering is conversation-scoped: each message inherits every
     // source discovered before it, deduplicated by index and message order.
@@ -939,6 +986,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               searchEnabled,
               onSearchEnabledChange: setSearchEnabled,
               attachments: editUploads,
+              skills: {
+                items: editableSkills.data ?? [],
+                selectedIds: editSkillIds,
+                onChange: setEditSkillIds,
+              },
+              context: editContext,
             },
           };
         }
@@ -1056,7 +1109,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 }
               : {})}
             disabled={actionsDisabled}
-            textareaDisabled={activeEditingMessage !== null && (!editingAnswers || editPending)}
+            textareaDisabled={editPending}
             controlsDisabled={mutationPending}
             modelId={effectiveModelId}
             onModelChange={setModelId}

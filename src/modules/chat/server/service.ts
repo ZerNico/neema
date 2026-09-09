@@ -118,6 +118,9 @@ export class ChatService extends Context.Service<
         searchEnabled: boolean;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
+        /** Omitted keeps the attempt's saved selection; sent replaces it. */
+        skillIds?: ReadonlyArray<string> | undefined;
+        collectionIds?: ReadonlyArray<string> | undefined;
       },
     ): Effect.Effect<
       { assistantMessageId: string },
@@ -300,7 +303,12 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
-          if (!defaults.agent && continuation) {
+          // An edit that submits a selection is changing it, so it cannot take the
+          // replay shortcut below: new collections need a rebuilt manifest.
+          const editing = input.attempt === "edit";
+          const editedCollections = editing ? input.collectionIds : undefined;
+          const editedSkills = editing ? input.skillIds : undefined;
+          if (!defaults.agent && continuation && editedCollections === undefined) {
             yield* knowledge.authorizeManifest(
               input.userId,
               continuation.collectionIds,
@@ -313,7 +321,7 @@ function makeChatService() {
               skills: yield* resolveAttemptSkills(
                 tx,
                 input.userId,
-                continuation.standaloneSkillIds ?? [],
+                editedSkills ?? continuation.standaloneSkillIds ?? [],
                 [],
               ),
               searchEnabled,
@@ -332,8 +340,13 @@ function makeChatService() {
             tx,
             userId: input.userId,
             agent,
-            collectionIds: continuation?.standaloneCollectionIds ?? input.collectionIds,
-            skillIds: continuation?.standaloneSkillIds ?? input.skillIds,
+            // Omitted still keeps the saved selection; only a submitted one wins.
+            collectionIds: editing
+              ? (editedCollections ?? continuation?.standaloneCollectionIds)
+              : (continuation?.standaloneCollectionIds ?? input.collectionIds),
+            skillIds: editing
+              ? (editedSkills ?? continuation?.standaloneSkillIds)
+              : (continuation?.standaloneSkillIds ?? input.skillIds),
             searchEnabled,
             model: input.model,
             searchAvailable: input.searchAvailable,
@@ -444,6 +457,8 @@ function makeChatService() {
         messageId: string;
         attachmentIds: ReadonlyArray<string>;
         searchEnabled: boolean;
+        skillIds?: ReadonlyArray<string> | undefined;
+        collectionIds?: ReadonlyArray<string> | undefined;
       };
     }) {
       const model = yield* providers.getModel(input.modelId);
@@ -462,7 +477,12 @@ function makeChatService() {
             model,
             searchAvailable,
             ...(input.edit
-              ? { attempt: "edit", searchEnabled: input.edit.searchEnabled }
+              ? {
+                  attempt: "edit",
+                  searchEnabled: input.edit.searchEnabled,
+                  ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
+                  ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
+                }
               : { attempt: "retry" }),
           }),
           ...(input.edit
@@ -702,6 +722,9 @@ function makeChatService() {
         searchEnabled: boolean;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
+        /** Omitted keeps the attempt's saved selection; sent replaces it. */
+        skillIds?: ReadonlyArray<string> | undefined;
+        collectionIds?: ReadonlyArray<string> | undefined;
       },
     ) {
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -764,6 +787,8 @@ function makeChatService() {
             ...edit,
             attachmentIds: input.attachmentIds,
             searchEnabled: input.searchEnabled,
+            ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+            ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
           },
         });
         if (!restarted) {
@@ -792,6 +817,8 @@ function makeChatService() {
           searchEnabled: input.searchEnabled,
           model,
           searchAvailable,
+          ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+          ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
         }),
       });
       if (!created) {

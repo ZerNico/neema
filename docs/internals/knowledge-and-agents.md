@@ -42,6 +42,17 @@ whatever agent the conversation is associated with.
   each generation actually ran with, so retry/edit never depend on later composer state. A
   collection shows only on the question that added it, never as an activity row on the answer
   (`knowledge_context` still exists underneath for citations/replay).
+- Editing a message resends its own selection: the editor is seeded from that message and its
+  submitted `skillIds`/`collectionIds` replace the saved standalone set, the same rule
+  `searchEnabled` follows. Omitting them keeps the saved selection; retry always does, having
+  no submission. Seed from the standalone remainder, never `message.collectionIds` — that is
+  the effective union, and reseeding the agent's own collections as standalone would rewrite
+  what the turn ran with. An edit that changes collections must skip the plain-chat replay
+  shortcut in `resolver`, because a new collection set needs a rebuilt manifest.
+- Editing is not a mode: an open editor disables nothing, another message's Edit switches to it
+  (the abandoned draft goes with its unmounted row), and sending from the composer ends the
+  edit. Every path that abandons an edit has to release its uploads, not just forget which
+  message was open.
 - Composer mention type-ahead (`useTextareaMentions`, `src/ui/textarea-mention.tsx`, shared by
   `/` skills and `#` collections) never owns the textarea value, only deletes the token and
   hands back an id. Accepting a row falls back to `setRangeText` when native delete isn't

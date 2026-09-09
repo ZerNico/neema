@@ -26,7 +26,8 @@ import {
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
-import { agentIcon, CollectionChip, ContextChip } from "./context-picker.tsx";
+import type { SkillSummary } from "~/modules/skills/schema.ts";
+import { agentIcon, CollectionChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
@@ -191,6 +192,13 @@ export interface DisplayMessage {
     onSearchEnabledChange: (enabled: boolean) => void;
     /** The view-level upload state, seeded with the message's own files. */
     attachments: AttachmentUploads;
+    /** Seeded with the message's own selections, so `/` and `#` work in an edit. */
+    skills?: {
+      items: readonly SkillSummary[];
+      selectedIds: readonly string[];
+      onChange: (ids: string[]) => void;
+    };
+    context?: ComposerContext;
   };
   /** Fork the conversation into a new one ending at this message. */
   onBranch?: () => void;
@@ -313,6 +321,8 @@ function InlineMessageEditor({
         researchEnabled={editState.researchEnabled ?? false}
         onSearchEnabledChange={editState.onSearchEnabledChange}
         attachments={editState.attachments}
+        {...(editState.skills ? { skills: editState.skills } : {})}
+        {...(editState.context ? { context: editState.context } : {})}
         placeholder="Edit message…"
         textareaLabel="Edit message"
         submitLabel="Save edit"

@@ -1216,6 +1216,54 @@ describe("knowledge-backed generations", () => {
     },
   );
 
+  // Editing a message is how a user fixes the selection they sent it with, so a
+  // submitted one replaces the saved standalone set — the same rule `searchEnabled`
+  // follows above. Retry has no submission and keeps what was saved.
+  it.each([false, true])("applies an edited collection selection (agent=%s)", async (withAgent) => {
+    const owner = await createUser();
+    const agentId = withAgent ? await makeAgent(owner) : null;
+    const first = await collectionWith(owner, [["First", "First dependency."]]);
+    const second = await collectionWith(owner, [["Second", "Second dependency."]]);
+    script = () => Stream.make(text("first"), finish());
+    const sent = await send({ userId: owner, agentId, collectionIds: [first.collectionId] });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await configRow(sent.assistantMessageId)).toMatchObject({
+      standalone_collection_ids: [first.collectionId],
+    });
+    const userMessage = (
+      await exec(
+        `select id from messages where conversation_id = '${sent.conversationId}' and role = 'user'`,
+      )
+    ).rows[0]!;
+    script = () => Stream.make(text("edited"), finish());
+    const edited = await run(
+      ChatService.use((chat) =>
+        chat.editMessage({
+          userId: owner,
+          conversationId: sent.conversationId,
+          messageId: String(userMessage.id),
+          modelId: smallModelId,
+          searchEnabled: false,
+          content: "Updated request",
+          attachmentIds: [],
+          collectionIds: [second.collectionId],
+        }),
+      ),
+    );
+    expect(await settle(edited.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await configRow(edited.assistantMessageId)).toMatchObject({
+      standalone_collection_ids: [second.collectionId],
+    });
+    // The swapped-in collection's documents are the ones the attempt may cite.
+    const versions = (
+      await exec(
+        `select version_id from message_knowledge_versions where message_id = '${edited.assistantMessageId}'`,
+      )
+    ).rows;
+    expect(versions).toContainEqual({ version_id: second.documents[0]!.versionId });
+    expect(versions).not.toContainEqual({ version_id: first.documents[0]!.versionId });
+  });
+
   it.each(
     [false, true].flatMap((withAgent) =>
       [false, true].map((searchEnabled) => ({ withAgent, searchEnabled })),

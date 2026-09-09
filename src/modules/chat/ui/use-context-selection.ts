@@ -67,6 +67,14 @@ export function useContextSelection(initial: ContextInput) {
       ...(!agentLocked && agent?.id ? { agentId: agent.id } : {}),
       collectionIds: standalone,
     },
+    /**
+     * Replaces the standalone selection outright. An editor is one instance
+     * mounted for the whole view and seeded when an edit opens, like the
+     * upload store beside it, so the ids arrive from an event rather than from
+     * an effect watching a prop. Callers pass standalone ids only: the agent's
+     * own collections are already in `selection` and must not be resent.
+     */
+    seed: (ids: ReadonlyArray<string>) => setStandalone(ids),
     settle: () => setStandalone([]),
   };
 }

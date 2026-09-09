@@ -20,10 +20,11 @@ import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
-const { navigate, markClaimed, resetUploads, streamProbe } = vi.hoisted(() => ({
+const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
   navigate: vi.fn(),
   markClaimed: vi.fn(),
   resetUploads: vi.fn(),
+  seedUploads: vi.fn(),
   streamProbe: vi.fn(),
 }));
 
@@ -102,7 +103,22 @@ vi.mock("./virtual-message-list.tsx", () => ({
               </output>
             ),
           )}
-          {message.editState ? <output>Editing {String(message.id)}</output> : null}
+          {message.editState ? (
+            <>
+              <output>Editing {String(message.id)}</output>
+              <output data-testid={`edit-selection-${String(message.id)}`}>
+                {(
+                  message.editState as { skills?: { selectedIds: readonly string[] } }
+                ).skills?.selectedIds.join(",") ?? ""}
+                |
+                {(
+                  message.editState as {
+                    context?: { sendFields: { collectionIds: readonly string[] } };
+                  }
+                ).context?.sendFields.collectionIds.join(",") ?? ""}
+              </output>
+            </>
+          ) : null}
           {message.onEdit ? (
             <button
               type="button"
@@ -217,7 +233,7 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
     queued: false,
     addFiles: vi.fn(),
     remove: vi.fn(),
-    seed: vi.fn(),
+    seed: seedUploads,
     submit: (send: (ids: ReadonlyArray<string>) => unknown) => send([]),
     cancelQueue: vi.fn(),
     markClaimed,
@@ -268,13 +284,21 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     kind: "text" | "reasoning" | "tool" | "compaction";
     delta: string;
   }>,
-  agent: null,
+  agent: null as {
+    id: string;
+    name: string;
+    icon: string;
+    collectionIds: ReadonlyArray<string>;
+    skillIds: ReadonlyArray<string>;
+    available: boolean;
+  } | null,
   collectionIds: [] as string[],
   generations: [] as Array<{
     messageId: string;
     agent: { name: string; icon: string } | null;
     collectionIds: ReadonlyArray<string>;
     knowledgeMode: "none" | "context" | "retrieval";
+    skills?: ReadonlyArray<{ id: string; name: string }>;
   }>,
   toolCalls: [] as Array<Parameters<typeof toActivity>[0] & { messageId: string }>,
   attachments: [],
@@ -635,8 +659,71 @@ describe("ChatView inline question answers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
     expect(screen.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument();
     expect(screen.getByText("Editing m-user")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toBeDisabled();
+    // An open editor locks nothing: the composer stays usable and the other
+    // messages keep their own Edit buttons, so one click switches between them.
+    expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit m-user" })).not.toBeDisabled();
     expect(editMock).not.toHaveBeenCalled();
+  });
+
+  it("switches between ordinary editors and reseeds the second message's files", () => {
+    const two = payload(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        message("m-answer", "assistant", "a1"),
+        message("m-user-2", "user", "u2"),
+        message("m-answer-2", "assistant", "a2"),
+      ],
+    });
+    renderView(null, two);
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    expect(screen.getByText("Editing m-user")).toBeInTheDocument();
+    seedUploads.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user-2" }));
+    expect(screen.getByText("Editing m-user-2")).toBeInTheDocument();
+    expect(screen.queryByText("Editing m-user")).not.toBeInTheDocument();
+    // `seed` drops the abandoned editor's uploads before taking the new ones.
+    expect(seedUploads).toHaveBeenCalledTimes(1);
+    expect(editMock).not.toHaveBeenCalled();
+  });
+
+  // The report was "the skills and collections are not there anymore": the server
+  // kept them, the editor just never received them.
+  it("seeds the editor with the message's own skills and standalone collections", () => {
+    const withSelection = payload(null, {
+      agent: {
+        id: "a1",
+        name: "Agent",
+        icon: "robot",
+        collectionIds: ["c-agent"],
+        skillIds: [],
+        available: true,
+      },
+      generations: [
+        {
+          messageId: "m-answer",
+          agent: null,
+          collectionIds: ["c-agent", "c-standalone"],
+          knowledgeMode: "context" as const,
+          skills: [{ id: "s1", name: "Brand" }],
+        },
+      ],
+    });
+    renderView(null, withSelection);
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    // The agent's own collection stays out: reseeding it as standalone would
+    // rewrite what the turn actually ran with.
+    expect(screen.getByTestId("edit-selection-m-user")).toHaveTextContent("s1|c-standalone");
+  });
+
+  it("ends the edit when the composer sends, releasing its uploads", async () => {
+    renderView(null, resolvedPayload());
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    expect(screen.getByText("Editing m-user")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    await waitFor(() => expect(sendMock).toHaveBeenCalled());
+    expect(screen.queryByText("Editing m-user")).not.toBeInTheDocument();
+    expect(resetUploads).toHaveBeenCalled();
   });
 
   it("locks other actions only while the answer save is submitting", async () => {
