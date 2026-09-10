@@ -17,8 +17,8 @@ that bug.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button
-  render={<Link/>} nativeButton={false}>` for navigation — Base UI forces `role="button"`; use `<Link
-  className={buttonVariants({...})}>`.
+render={<Link/>} nativeButton={false}>` for navigation — Base UI forces `role="button"`; use `<Link
+className={buttonVariants({...})}>`.
 - Radius scale is 2xl/3xl/4xl for app-authored chrome only, not generated primitive density or
   chart/favicon geometry. Semantic colour tokens only — `success`/`warning` exist beside `destructive`.
 
@@ -30,7 +30,7 @@ that bug.
   scrolls, because the chat view pins its composer/virtual list to that height, so every other route needs
   its own scroller — never nest another `overflow-y-auto` inside `Page`. Pinned by `page-shell.test.tsx`.
 - Loading a page's data is the **route loader's** job (`ensureQueryData`, or `prefetchQuery` + `retry:
-  false`), so a page body is written against data already there. Where a loader can't cover it,
+false`), so a page body is written against data already there. Where a loader can't cover it,
   `ListSkeleton` (`page-shell.tsx`) is the one pending shape, never a bare `null` or `animate-pulse` div.
 - Buttons go in exactly two places, chosen by what the button does: `Section`'s `actions` slot (top-right)
   is for "add one of these"; `FormActions` (`page-shell.tsx`) is the row under the fields, for
@@ -60,6 +60,27 @@ that bug.
   grants, groups, everyone signed in can overlap), so removing one grant never implies other access ended.
   Broadening to everyone confirms first; narrowing does not, since it takes nothing away that was granted
   directly.
+
+## Words on screen
+
+- Say a thing once per screen. A `Section` with a heading usually needs no `description`; a
+  field with a label usually needs no helper. Where helper text only repeats the label, the
+  icon, or the control beside it, delete it rather than shortening it — `EmptyState`'s
+  `description` is optional for exactly this reason.
+- Name what the reader can act on, not the part that failed. "Provider", "stream", "context",
+  "run", "instance", "generation attempt", "indexing", "embeddings" are internals: they
+  describe machinery nobody using the app can do anything about. `generation-failure.ts` is
+  the shared map for terminal failures and should stay in reader vocabulary.
+- Confirmations are the exception to brevity: the consequence is the thing being confirmed, so
+  a destructive dialog earns its sentence. Sharing scope is the same — who else can see this is
+  worth spelling out.
+- Progressive disclosure over deletion when detail is genuinely useful but rarely needed: a
+  plain summary with the rest folded away, as in the "Technical details" disclosure on a failed
+  answer and "About usage" on the usage page.
+- `/settings/usage` has no admin guard: it renders the same `usage-dashboard.tsx` as the admin
+  analytics page, so anything worded there is ordinary-user copy.
+- One state, one word. A document being prepared says "preparing" in the knowledge pages, the
+  collection page and the composer's picker; it used to say "indexing" in one of the three.
 
 ## Icons and text
 

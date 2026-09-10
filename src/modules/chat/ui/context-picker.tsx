@@ -168,7 +168,7 @@ export function AgentPicker({
             : agents.isError
               ? "Could not load agents."
               : items.length === 0
-                ? "No agents yet. Create one under Agents."
+                ? "No agents yet"
                 : "No agents match"}
         </ComboboxEmpty>
         <ComboboxList>
@@ -191,7 +191,7 @@ export function AgentPicker({
 
 export const collectionStatus = (collection: CollectionSummary) =>
   collection.pendingCount > 0
-    ? `${collection.pendingCount} indexing`
+    ? `${collection.pendingCount} preparing`
     : collection.failedCount > 0
       ? `${collection.failedCount} failed`
       : `${collection.documentCount} docs`;
@@ -277,7 +277,7 @@ export function CollectionPicker({
             : collections.isError
               ? "Could not load collections."
               : items.length === 0
-                ? "No collections yet. Create one under Knowledge."
+                ? "No collections yet"
                 : "No collections match"}
         </ComboboxEmpty>
         <ComboboxList>
@@ -303,7 +303,7 @@ export function CollectionPicker({
               ? `Up to ${MAX_SELECTED_COLLECTIONS} per message`
               : draftSet.size > 0
                 ? `${draftSet.size} selected`
-                : "Select collections for this message"}
+                : ""}
           </span>
           <Button
             size="sm"

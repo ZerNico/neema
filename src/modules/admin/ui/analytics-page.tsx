@@ -24,7 +24,7 @@ export function AnalyticsPage() {
   return (
     <Page
       title="Analytics"
-      description="Token usage, messages and cost across the instance. Every generation attempt counts — including retries and title runs."
+      description="Tokens, messages and cost for everyone using this app."
       width="wide"
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
@@ -34,7 +34,7 @@ export function AnalyticsPage() {
         <EmptyState
           icon={Analytics01Icon}
           title="No usage in this range"
-          description="Every generation attempt lands here once someone chats — tokens, messages and cost, including retries and title runs."
+          description="Tokens, messages and cost appear here once someone chats."
         />
       ) : (
         <>

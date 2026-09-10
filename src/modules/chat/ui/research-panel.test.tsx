@@ -276,7 +276,7 @@ describe("research panel", () => {
     expect(within(panel).queryByText(/No usable research reports/)).not.toBeInTheDocument();
     expect(within(panel).queryByText("Limitations")).not.toBeInTheDocument();
     expect(
-      within(panel).getByText("The investigation did not produce anything usable."),
+      within(panel).getByText("The research didn’t turn up anything usable."),
     ).toBeInTheDocument();
   });
 
@@ -322,7 +322,7 @@ describe("research panel", () => {
     expect(within(panel).getByText("Done")).toBeInTheDocument();
     expect(
       within(panel).getByText(
-        "One line of investigation could not be completed, so some coverage may be missing.",
+        "One topic couldn’t be finished, so some of this may be missing.",
       ),
     ).toBeInTheDocument();
     expect(within(panel).queryByText(/InvalidOutputError/)).not.toBeInTheDocument();

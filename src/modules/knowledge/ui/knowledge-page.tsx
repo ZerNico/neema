@@ -91,10 +91,7 @@ export function CollectionDialog({
       <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>{collection ? "Rename collection" : "New collection"}</DialogTitle>
-          <DialogDescription>
-            A collection holds documents and notes that chats and agents can use. It is private
-            until you share it.
-          </DialogDescription>
+          <DialogDescription>Private until you share it.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -107,13 +104,7 @@ export function CollectionDialog({
             {(field) => <field.TextField label="Name" placeholder="Contracts" />}
           </form.AppField>
           <form.AppField name="description">
-            {(field) => (
-              <field.TextareaField
-                label="Description"
-                description="Optional. Shown in the collection list."
-                rows={2}
-              />
-            )}
+            {(field) => <field.TextareaField label="Description" rows={2} />}
           </form.AppField>
           <form.AppForm>
             <DialogFooter>

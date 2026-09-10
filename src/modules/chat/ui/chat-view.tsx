@@ -411,7 +411,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         { throwOnError: true },
       ),
     onSuccess: () => setQuestionNeedsRefresh(false),
-    onError: () => toast.error("Could not refresh the chat. Refresh before answering again."),
+    onError: () => toast.error("Could not refresh the chat."),
   });
   const refreshQuestionState = async () => {
     try {
@@ -422,7 +422,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       );
     } catch {
       setQuestionNeedsRefresh(true);
-      toast.error("Could not refresh the chat. Refresh before answering again.");
+      toast.error("Could not refresh the chat.");
     }
   };
   const answerMutation = useMutation({
@@ -437,7 +437,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           timeZone: browserTimeZone(),
         },
       }),
-    onError: () => toast.error("Could not send your answers. Your draft has been kept."),
+    onError: () => toast.error("Could not send your answers."),
     onSettled: refreshQuestionState,
   });
   const mutateAnswer = answerMutation.mutateAsync;
@@ -511,7 +511,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     onError: async (_error, input) => {
       if (!input.questionResponse) return;
-      toast.error("Could not save your answers. Your draft has been kept.");
+      toast.error("Could not save your answers.");
       await refreshQuestionState();
     },
   });
@@ -1073,7 +1073,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         <div className="mx-auto w-full max-w-3xl px-4">
           {questionNeedsRefresh ? (
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
-              <span>Refresh the chat to check whether your answers were sent.</span>
+              <span>Your answers may not have been sent.</span>
               <PendingButton
                 size="sm"
                 variant="outline"

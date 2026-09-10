@@ -128,9 +128,11 @@ export function UsageRangePicker({
               autoFocus
             />
             <div className="flex items-center justify-between gap-3">
-              {/* Bucketing is UTC everywhere else; say so rather than let a
+              {/* Days run on UTC everywhere else; say so rather than let a
                   user near midnight wonder why a day looks light. */}
-              <span className="text-muted-foreground text-xs">Days are grouped in UTC</span>
+              <span className="text-muted-foreground text-xs">
+                Days run midnight to midnight, UTC
+              </span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={close}>
                   Cancel
@@ -268,7 +270,7 @@ const pointDelta = (current: number | null, previous: number | null): string | n
 const GENERATION_KINDS = [
   { key: "chat", label: "chat", color: "var(--chart-1)" },
   { key: "title", label: "title", color: "var(--chart-3)" },
-  { key: "compaction", label: "compaction", color: "var(--chart-4)" },
+  { key: "compaction", label: "summarizing", color: "var(--chart-4)" },
 ] as const;
 
 function SplitMeter({
@@ -376,23 +378,22 @@ export function UsageOverview({
           {...(summary.costComplete ? { spark: series((day) => day.cost) } : {})}
         />
         <StatTile
-          label="Cache hit rate"
+          label="Reused text"
           value={cacheRate === null ? "—" : formatPercent(cacheRate)}
-          sub="of input tokens"
+          sub="of what was sent"
           delta={pointDelta(cacheRate, previousCacheRate)}
         />
         <StatTile
-          label="Cost per 1M"
+          label="Cost per 1M tokens"
           value={
             summary.costComplete && tokens > 0 ? formatCostPerMillion(summary.cost, tokens) : "—"
           }
-          sub="blended"
           delta={null}
         />
         <StatTile
-          label="Generation error rate"
+          label="Failed responses"
           value={errorRate === null ? "—" : formatPercent(errorRate)}
-          sub={`${formatCount(summary.errorAttempts)} errors · ${formatCount(summary.abortedAttempts)} aborted · ${formatCount(summary.attempts)} attempts`}
+          sub={`${formatCount(summary.errorAttempts)} failed · ${formatCount(summary.abortedAttempts)} stopped · ${formatCount(summary.attempts)} tries`}
           delta={pointDelta(errorRate, previousErrorRate)}
         />
         {showActiveUsers ? (
@@ -404,7 +405,7 @@ export function UsageOverview({
         ) : null}
       </div>
       <ChartCard
-        title="Token composition"
+        title="What used tokens"
         legend={
           <ChartLegend
             items={[
@@ -437,7 +438,7 @@ export function UsageOverview({
       <ChartCard title="Messages per day">
         <MessagesPerDayChart daily={daily} window={scanned} />
       </ChartCard>
-      <ChartCard title="Generation types">
+      <ChartCard title="What ran">
         <SplitMeter
           counts={{
             chat: summary.messages,

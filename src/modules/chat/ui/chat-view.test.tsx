@@ -799,7 +799,7 @@ describe("ChatView inline question answers", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save answers" })).toBeEnabled());
     expect(draft).toHaveValue("Keep my revision");
     expect(toast.error).toHaveBeenCalledWith(
-      "Could not save your answers. Your draft has been kept.",
+      "Could not save your answers.",
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Simple")).toBeInTheDocument();
@@ -943,7 +943,7 @@ describe("ChatView question handoff", () => {
       "Keep this answer",
     );
     expect(toast.error).toHaveBeenCalledWith(
-      "Could not send your answers. Your draft has been kept.",
+      "Could not send your answers.",
     );
   });
 

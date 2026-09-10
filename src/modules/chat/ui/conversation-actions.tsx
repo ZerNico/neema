@@ -11,7 +11,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -107,9 +106,6 @@ export function useConversationActions(): ConversationActions {
           >
             <DialogHeader>
               <DialogTitle>Rename chat</DialogTitle>
-              <DialogDescription>
-                The new title shows in the sidebar and on the chats page.
-              </DialogDescription>
             </DialogHeader>
             <Input
               value={renaming?.title ?? ""}

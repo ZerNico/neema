@@ -23,11 +23,11 @@ describe("UsagePage", () => {
     );
     expect(screen.getByText("No usage in this range")).toBeVisible();
     expect(
-      screen.queryByText(/missing cost information is not free usage/),
+      screen.queryByText(/Where a cost is missing it is unknown, not free/),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "About usage" }));
-    expect(screen.getByText(/Usage includes retries and title generations/)).toBeVisible();
-    expect(screen.getByText(/missing cost information is not free usage/)).toBeVisible();
+    expect(screen.getByText(/Tokens measure the text a model reads and writes/)).toBeVisible();
+    expect(screen.getByText(/Where a cost is missing it is unknown, not free/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Date range" })).toBeVisible();
   });
 });

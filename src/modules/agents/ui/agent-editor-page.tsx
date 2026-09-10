@@ -282,7 +282,7 @@ function AgentForm({
         </div>
         <Section
           title="Knowledge"
-          description="Optional collections. People using this agent need separate access to them."
+          description="People using this agent need their own access to these."
           actions={
             <Button
               size="sm"
@@ -452,7 +452,7 @@ function AgentForm({
         </Section>
         <Section
           title="Skills"
-          description="Optional guidance this agent can load. People using it need separate access to each skill."
+          description="People using this agent need their own access to these."
         >
           <form.Field name="skillIds">
             {(field) => {
@@ -550,9 +550,6 @@ function AgentForm({
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Preferred model</span>
-                <span className="text-muted-foreground text-xs">
-                  People can choose a different model.
-                </span>
               </div>
               <form.Field name="modelId">
                 {(field) => (
@@ -592,9 +589,6 @@ function AgentForm({
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Web search by default</span>
-                <span className="text-muted-foreground text-xs">
-                  Start with web search on. People can turn it off.
-                </span>
               </div>
               <form.Field name="searchEnabled">
                 {(field) => (
@@ -609,9 +603,7 @@ function AgentForm({
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Working checklist</span>
-                <span className="text-muted-foreground text-xs">
-                  Let the model keep a checklist for multi-step requests.
-                </span>
+                <span className="text-muted-foreground text-xs">For multi-step requests.</span>
               </div>
               <form.Field name="planEnabled">
                 {(field) => (
@@ -627,7 +619,7 @@ function AgentForm({
         </Section>
         <Section
           title="Conversation starters"
-          description="Optional prompts shown when the agent is selected."
+          description="Shown when someone starts a chat with this agent."
         >
           <form.Field name="starters">
             {(field) => (

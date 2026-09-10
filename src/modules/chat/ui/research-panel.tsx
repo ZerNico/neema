@@ -42,16 +42,16 @@ const coverageNote = (progress: ResearchProgress | undefined): string | null => 
   const limitations = progress?.limitations ?? [];
   if (progress?.phase === "aborted") return null;
   if (limitations.some((limitation) => /search was unavailable/i.test(limitation)))
-    return "Web search was unavailable for this run, so most of the investigation could not happen.";
+    return "Web search wasn’t working, so most of the research couldn’t happen.";
   if (limitations.some((limitation) => /No usable research reports/i.test(limitation)))
-    return "The investigation did not produce anything usable.";
+    return "The research didn’t turn up anything usable.";
   const incomplete = (progress?.tasks ?? []).filter((task) => task.status === "error").length;
   if (incomplete > 0)
     return incomplete === 1
-      ? "One line of investigation could not be completed, so some coverage may be missing."
-      : `${incomplete} lines of investigation could not be completed, so some coverage may be missing.`;
+      ? "One topic couldn’t be finished, so some of this may be missing."
+      : `${incomplete} topics couldn’t be finished, so some of this may be missing.`;
   if (limitations.some((limitation) => /time limit|cut short|abridged/i.test(limitation)))
-    return "The investigation ran out of room, so some coverage may be missing.";
+    return "The research ran out of room, so some of this may be missing.";
   return null;
 };
 
@@ -262,7 +262,7 @@ export function ResearchActivityBody({
     <div className="flex flex-col gap-5">
       {empty ? (
         <p className="text-muted-foreground text-xs">
-          {running ? "Planning what to investigate…" : "No investigation was recorded."}
+          {running ? "Planning what to look into…" : "Nothing was researched."}
         </p>
       ) : null}
       {tasks.map((task) => (

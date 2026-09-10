@@ -141,12 +141,7 @@ export function MemoryPage() {
   const rows = memories.data ?? [];
 
   return (
-    <Page
-      title="Memory"
-      description="Control what the assistant can remember and use across chats."
-      rootPath="/settings"
-      rootLabel="Settings"
-    >
+    <Page title="Memory" rootPath="/settings" rootLabel="Settings">
       <Section title="Controls">
         {settings.data ? (
           <ListCard>
@@ -164,9 +159,6 @@ export function MemoryPage() {
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Use saved memories</span>
-                <span className="text-muted-foreground text-xs">
-                  Use what you’ve saved to personalize replies.
-                </span>
               </div>
               <Switch
                 checked={settings.data.referenceEnabled}
@@ -178,9 +170,6 @@ export function MemoryPage() {
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Save memories automatically</span>
-                <span className="text-muted-foreground text-xs">
-                  Remember useful facts and preferences from your chats.
-                </span>
               </div>
               <Switch
                 checked={settings.data.autoSaveEnabled}
@@ -231,7 +220,6 @@ export function MemoryPage() {
         {failed ? (
           <ErrorState
             title="Could not load memory"
-            description="Try loading your memory settings again."
             onRetry={() => {
               void Promise.all([settings.refetch(), memories.refetch()]);
             }}
@@ -241,7 +229,7 @@ export function MemoryPage() {
           <EmptyState
             icon={Brain02Icon}
             title="Nothing saved yet"
-            description="Add a memory yourself, or enable automatic saving for useful facts and preferences."
+            description="Add one yourself, or let them be saved automatically."
             action={
               <Button size="sm" onClick={() => openEditor("new")}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
@@ -283,9 +271,7 @@ export function MemoryPage() {
             <>
               <DialogHeader>
                 <DialogTitle>{editing === "new" ? "Add memory" : "Edit memory"}</DialogTitle>
-                <DialogDescription>
-                  Keep it short and durable. Do not store passwords, API keys, or other secrets.
-                </DialogDescription>
+                <DialogDescription>Don’t store passwords or other secrets.</DialogDescription>
               </DialogHeader>
               <form
                 className="flex flex-col gap-6"

@@ -136,7 +136,7 @@ describe("AnalyticsPage", () => {
     renderPage();
 
     const messagesLabel = (await screen.findAllByText("Messages"))[0]!;
-    const chartTitle = await screen.findByRole("heading", { name: "Token composition" });
+    const chartTitle = await screen.findByRole("heading", { name: "What used tokens" });
     expect(messagesLabel.closest('[data-slot="card-content"]')).toHaveTextContent("42");
     expect(chartTitle.closest('[data-slot="card-header"]')).not.toBeNull();
     for (const content of [messagesLabel, chartTitle]) {
@@ -163,7 +163,7 @@ describe("AnalyticsPage", () => {
     renderPage();
     expect(
       await screen.findByRole("img", {
-        name: "Token composition per day: input, cached, output and reasoning",
+        name: "What used tokens per day: input, cached, output and reasoning",
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Messages per day" })).toBeInTheDocument();
@@ -224,7 +224,7 @@ describe("AnalyticsPage", () => {
     renderPage();
     // Messages doubled: a count, so relative percent.
     expect((await screen.findAllByText("+100%")).length).toBeGreaterThan(0);
-    // Cache hit rate 25% → 50%. As a relative change that reads "+100%",
+    // Reused text 25% → 50%. As a relative change that reads "+100%",
     // which is why rates move in points instead.
     expect(screen.getByText("+25.0pp")).toBeInTheDocument();
     // Error rate 10% → 5%: down, and a minus sign rather than a hyphen.
@@ -233,7 +233,7 @@ describe("AnalyticsPage", () => {
 
   it("derives the cache, blended-cost and error KPIs", async () => {
     renderPage();
-    expect(await screen.findByText("Cache hit rate")).toBeInTheDocument();
+    expect(await screen.findByText("Reused text")).toBeInTheDocument();
     // 600K cached of 1.2M input. Cached is *inside* input, not added to it —
     // the wrong formula would give 33%.
     expect(screen.getByText("50%")).toBeInTheDocument();
@@ -241,12 +241,12 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("$0.833/M")).toBeInTheDocument();
     // 3 of 60 attempts, spanning chat and title runs alike.
     expect(screen.getByText("5%")).toBeInTheDocument();
-    expect(screen.getByText("3 errors · 2 aborted · 60 attempts")).toBeInTheDocument();
+    expect(screen.getByText("3 failed · 2 stopped · 60 tries")).toBeInTheDocument();
   });
 
   it("suppresses the blended rate when any cost in range is unknown", async () => {
     renderPage({ summary: { ...summary, costComplete: false } });
-    const tile = (await screen.findAllByText("Cost per 1M"))[0]!.parentElement!;
+    const tile = (await screen.findAllByText("Cost per 1M tokens"))[0]!.parentElement!;
     expect(tile).toHaveTextContent("—");
     expect(tile).not.toHaveTextContent("/M");
   });
@@ -262,11 +262,11 @@ describe("AnalyticsPage", () => {
 
   it("splits chat from title and compaction generations", async () => {
     renderPage();
-    expect(await screen.findByText("Generation types")).toBeInTheDocument();
+    expect(await screen.findByText("What ran")).toBeInTheDocument();
     // 42 chat + 12 title + 6 compaction = 60 attempts → 70/20/10.
     expect(screen.getByText(/70%/)).toBeInTheDocument();
     expect(screen.getByText(/20%/)).toBeInTheDocument();
     expect(screen.getByText(/10%/)).toBeInTheDocument();
-    expect(screen.getByText("compaction", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("summarizing", { exact: false })).toBeInTheDocument();
   });
 });

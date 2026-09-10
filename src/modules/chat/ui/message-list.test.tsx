@@ -312,7 +312,7 @@ describe("MessageBubble", () => {
     );
 
     const alert = screen.getByRole("alert");
-    expect(within(alert).getByText("Provider is temporarily busy")).toBeInTheDocument();
+    expect(within(alert).getByText("This model is busy")).toBeInTheDocument();
     expect(within(alert).getByText(/Try again in 2 seconds/)).toBeInTheDocument();
 
     const detailsTrigger = within(alert).getByRole("button", { name: "Technical details" });
@@ -934,7 +934,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    const trigger = screen.getByRole("button", { name: "Earlier context summarized" });
+    const trigger = screen.getByRole("button", { name: "Earlier messages shortened" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/append-only/)).toBeNull();
 
@@ -945,7 +945,7 @@ describe("MessageBubble actions", () => {
 
   it("draws no compaction activity when none occurred", () => {
     renderPlain();
-    expect(screen.queryByRole("button", { name: "Earlier context summarized" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Earlier messages shortened" })).toBeNull();
   });
 
   it("announces a running compaction instead of the thinking placeholder", () => {
@@ -963,7 +963,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getByText("Summarizing earlier context…")).toBeInTheDocument();
+    expect(screen.getByText("Shortening earlier messages…")).toBeInTheDocument();
     expect(screen.queryByText("Thinking…")).toBeNull();
     // Nothing to expand yet — a dead button would just be noise.
     expect(screen.queryByRole("button", { name: /Summarizing/ })).toBeNull();
@@ -986,7 +986,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    const trigger = screen.getByRole("button", { name: "Earlier context summarized" });
+    const trigger = screen.getByRole("button", { name: "Earlier messages shortened" });
     expect(screen.queryByText(/append-only/)).toBeNull();
 
     fireEvent.click(trigger);
@@ -1300,7 +1300,7 @@ describe("MessageBubble actions", () => {
     });
 
     const search = screen.getByRole("button", { name: /Searched the web/ });
-    const compact = screen.getByRole("button", { name: "Earlier context summarized" });
+    const compact = screen.getByRole("button", { name: "Earlier messages shortened" });
     const read = screen.getByRole("button", { name: /Read a page/ });
     expect(search.compareDocumentPosition(compact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(compact.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1319,7 +1319,7 @@ describe("MessageBubble actions", () => {
         },
       ],
     });
-    expect(screen.getByText("Earlier context truncated")).toBeInTheDocument();
+    expect(screen.getByText("Earlier messages left out")).toBeInTheDocument();
   });
 
   it("says so when compaction failed and the transcript was truncated instead", () => {
@@ -1337,7 +1337,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getByText("Couldn’t summarize earlier context")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t shorten earlier messages")).toBeInTheDocument();
   });
 });
 

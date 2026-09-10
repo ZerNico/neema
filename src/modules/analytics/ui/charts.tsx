@@ -109,7 +109,7 @@ export function TokensPerDayChart({
       <Chart
         definition={definition}
         height={240}
-        ariaLabel="Token composition per day: input, cached, output and reasoning"
+        ariaLabel="What used tokens per day: input, cached, output and reasoning"
       />
     </div>
   );

@@ -88,12 +88,7 @@ function ProfileForms({
   });
 
   return (
-    <Page
-      title="Profile"
-      description="Your account on this instance."
-      rootPath="/settings"
-      rootLabel="Settings"
-    >
+    <Page title="Profile" rootPath="/settings" rootLabel="Settings">
       <Section title="Account">
         <ListCard>
           <ListRow>
@@ -158,7 +153,6 @@ function ProfileForms({
                     label="New password"
                     type="password"
                     autoComplete="new-password"
-                    description="At least 8 characters."
                   />
                 )}
               </passwordForm.AppField>

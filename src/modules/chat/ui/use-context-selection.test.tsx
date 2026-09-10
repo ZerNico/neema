@@ -323,9 +323,7 @@ describe("composer context selection", () => {
     );
     await openPicker(/^Agent/, "Search agents…");
     // Base UI appends an invisible word joiner to live-region text.
-    expect(screen.getByRole("status")).toHaveTextContent(
-      /No agents yet\. Create one under Agents\./,
-    );
+    expect(screen.getByRole("status")).toHaveTextContent(/No agents yet/);
   });
 
   it("locks the association of an existing conversation but still takes extra knowledge per message", async () => {

@@ -15,9 +15,9 @@ import { activityRowClassName } from "./activity-row.ts";
 export type CompactionStatus = "running" | "complete" | "failed";
 
 const LABELS: Record<CompactionStatus, string> = {
-  running: "Summarizing earlier context…",
-  complete: "Earlier context summarized",
-  failed: "Couldn’t summarize earlier context",
+  running: "Shortening earlier messages…",
+  complete: "Earlier messages shortened",
+  failed: "Couldn’t shorten earlier messages",
 };
 
 /**
@@ -44,7 +44,7 @@ export function CompactionBlock({
   const running = status === "running";
   const label =
     status === "complete" && outcome === "hard_truncation"
-      ? "Earlier context truncated"
+      ? "Earlier messages left out"
       : LABELS[status];
 
   if (!summary) {

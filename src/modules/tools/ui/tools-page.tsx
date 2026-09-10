@@ -80,11 +80,7 @@ function MemorySection() {
   if (!tool) {
     return (
       <Section title="Memory">
-        <EmptyState
-          icon={Brain02Icon}
-          title="This tool isn’t set up yet"
-          description="Memory will appear here once it is available on this instance."
-        />
+        <EmptyState icon={Brain02Icon} title="This tool isn’t set up yet" />
       </Section>
     );
   }
@@ -174,11 +170,7 @@ function WebSearchSection() {
   if (!tool) {
     return (
       <Section title="Web search">
-        <EmptyState
-          icon={GlobalSearchIcon}
-          title="This tool isn’t set up yet"
-          description="Web search will appear here once it is available on this instance."
-        />
+        <EmptyState icon={GlobalSearchIcon} title="This tool isn’t set up yet" />
       </Section>
     );
   }
@@ -243,7 +235,7 @@ function WebSearchSection() {
                           const confirmed = await confirm({
                             title: "Clear the stored secret?",
                             description:
-                              "Web search will call SearXNG without a bearer token until a new secret is saved.",
+                              "Web search will connect without a secret until a new one is saved.",
                             confirmLabel: "Clear",
                           });
                           if (confirmed) clearSecret.mutate();
@@ -363,11 +355,7 @@ function UrlReaderSection() {
   if (!tool) {
     return (
       <Section title="URL reader">
-        <EmptyState
-          icon={Link01Icon}
-          title="This tool isn’t set up yet"
-          description="The URL reader will appear here once it is available on this instance."
-        />
+        <EmptyState icon={Link01Icon} title="This tool isn’t set up yet" />
       </Section>
     );
   }

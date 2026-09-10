@@ -169,7 +169,7 @@ describe("KnowledgeAdminPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "Rebuild all" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent(/across all users' collections/);
+    expect(dialog).toHaveTextContent(/across everyone's collections/);
     expect(rebuildAllKnowledgeIndexes).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Rebuild all" }));
     await waitFor(() => expect(rebuildAllKnowledgeIndexes).toHaveBeenCalledTimes(1));

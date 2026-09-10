@@ -249,11 +249,9 @@ export function ModelSettingsFields({
               placeholder="Unknown"
               aria-invalid={contextInvalid}
             />
-            <FieldDescription>
-              {draft.type === "chat"
-                ? "Maximum context window in tokens. Leave empty if unknown."
-                : "Leave empty if unknown."}
-            </FieldDescription>
+            {draft.type === "chat" ? (
+              <FieldDescription>Largest request the model accepts, in tokens.</FieldDescription>
+            ) : null}
           </Field>
           {draft.type === "embedding" ? (
             <Field data-invalid={dimensionsInvalid}>
@@ -300,10 +298,8 @@ export function ModelSettingsFields({
               </div>
               {detectError ? <FieldError>{detectError}</FieldError> : null}
               <FieldDescription>
-                Catalogs do not state this. Detect sends one short embedding request and reads the
-                width back, or leave it empty to use the provider default. Any width up to 8,192
-                works: knowledge search compares vectors exactly rather than through an index, so
-                wide models are fine at this scale.
+                Catalogs don’t list this. Detect asks the model, or leave it empty to use its
+                default.
               </FieldDescription>
             </Field>
           ) : null}
@@ -312,9 +308,7 @@ export function ModelSettingsFields({
           <Field orientation="horizontal">
             <FieldContent>
               <FieldTitle id={`${id}-enabled-title`}>Enabled</FieldTitle>
-              <FieldDescription>
-                Disabled models are unavailable to application features.
-              </FieldDescription>
+              <FieldDescription>Turn off to hide it everywhere.</FieldDescription>
             </FieldContent>
             <Switch
               id={`${id}-enabled`}
@@ -378,7 +372,7 @@ export function ModelSettingsFields({
       <FieldSet className="gap-3" disabled={disabled}>
         <FieldLegend variant="label">Pricing</FieldLegend>
         <FieldDescription>
-          USD per 1M tokens, used when the provider does not report its billed cost.
+          USD per 1M tokens, used when the provider doesn’t report a cost.
         </FieldDescription>
         <div className="grid grid-cols-2 gap-3">
           <Field data-invalid={inputPriceInvalid || partialChatPricing}>
@@ -406,11 +400,6 @@ export function ModelSettingsFields({
             </Field>
           ) : null}
         </div>
-        <FieldDescription>
-          {draft.type === "chat"
-            ? "Leave both empty if pricing is unknown."
-            : "Leave empty if pricing is unknown."}
-        </FieldDescription>
       </FieldSet>
 
       <FieldSet className="gap-4" disabled={disabled}>

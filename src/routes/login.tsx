@@ -4,14 +4,7 @@ import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "~/ui/card.tsx";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 
@@ -52,7 +45,6 @@ function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
-          <CardDescription>Welcome back.</CardDescription>
         </CardHeader>
         <CardContent>
           <form

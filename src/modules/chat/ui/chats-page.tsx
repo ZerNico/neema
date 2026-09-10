@@ -58,12 +58,7 @@ export function ChatsPage() {
   const empty = conversations.length === 0 && !pages.isPending;
 
   return (
-    <Page
-      title="Chats"
-      description="Every conversation you’ve had, newest first."
-      rootPath="/"
-      rootLabel="Back to chat"
-    >
+    <Page title="Chats" rootPath="/" rootLabel="Back to chat">
       <SearchInput
         value={search}
         onChange={(event) => setSearch(event.target.value)}
@@ -76,13 +71,13 @@ export function ChatsPage() {
           <EmptyState
             icon={Search01Icon}
             title="No chats match"
-            description={`Nothing found for “${query}”. Titles only — message text isn’t searched.`}
+            description={`No titles match “${query}”.`}
           />
         ) : (
           <EmptyState
             icon={BubbleChatIcon}
             title="No chats yet"
-            description="Start one from the composer and it will show up here."
+            description="Your chats will show up here."
             action={
               <Link to="/" className={cn(buttonVariants({ variant: "outline" }))}>
                 New chat

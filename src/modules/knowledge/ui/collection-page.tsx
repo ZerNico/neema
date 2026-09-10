@@ -199,7 +199,7 @@ function NoteDialog({
           <DialogDescription>
             {editing === "new"
               ? "Add text to use in chats."
-              : "The current text stays readable until the new version is ready. Existing citations keep pointing at the version they cited."}
+              : "The current text stays readable until the new one is ready."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -293,7 +293,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const retry = useMutation({
     mutationFn: (documentId: string) => retryKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
-    onError: (error) => toast.error(message(error, "Could not retry indexing.")),
+    onError: (error) => toast.error(message(error, "Could not try again.")),
   });
   const rebuild = useMutation({
     mutationFn: () => rebuildKnowledgeIndex({ data: { collectionId } }),
@@ -306,7 +306,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
           : `Rebuilding ${total} ${total === 1 ? "document" : "documents"} in the background. Search keeps working meanwhile.`,
       );
     },
-    onError: (error) => toast.error(message(error, "Could not rebuild the index.")),
+    onError: (error) => toast.error(message(error, "Could not redo preparation.")),
   });
   const removeCollection = useMutation({
     mutationFn: () => deleteKnowledgeCollection({ data: { collectionId } }),
@@ -404,7 +404,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   <span>
                     Rebuild index
                     <span className="text-muted-foreground block text-xs">
-                      Repair outdated document preparation and search.
+                      Redo preparation for documents that need it.
                     </span>
                   </span>
                 </DropdownMenuItem>

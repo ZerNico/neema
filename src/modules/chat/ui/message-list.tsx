@@ -614,10 +614,8 @@ function generationFailureCopy(error: string | null | undefined) {
   if (error && RATE_LIMIT.test(error)) {
     const delay = retryDelay(error);
     return {
-      title: "Provider is temporarily busy",
-      description: delay
-        ? `This model provider has reached its rate limit. Try again in ${delay}.`
-        : "This model provider has reached its rate limit. Try again in a moment.",
+      title: "This model is busy",
+      description: delay ? `Try again in ${delay}.` : "Try again in a moment.",
     };
   }
 

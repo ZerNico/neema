@@ -282,7 +282,8 @@ export function EmptyState({
 }: {
   icon: IconSvgElement;
   title: string;
-  description: string;
+  /** Optional, like `ErrorState`: a title that already says it needs no sentence under it. */
+  description?: string;
   action?: ReactNode;
   className?: string;
 }) {
@@ -293,7 +294,7 @@ export function EmptyState({
           <HugeiconsIcon icon={icon} strokeWidth={2} />
         </EmptyMedia>
         <EmptyTitle className="text-sm">{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
+        {description ? <EmptyDescription>{description}</EmptyDescription> : null}
       </EmptyHeader>
       {action ? <EmptyContent>{action}</EmptyContent> : null}
     </Empty>

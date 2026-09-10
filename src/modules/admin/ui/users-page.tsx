@@ -85,7 +85,7 @@ export function UsersPage() {
   });
 
   return (
-    <Page title="Users" description="Everyone with an account on this instance.">
+    <Page title="Users" description="Everyone with an account here.">
       {users.isLoading ? (
         <ListSkeleton media="avatar" label="Loading users" />
       ) : users.isError ? (
@@ -127,9 +127,8 @@ export function UsersPage() {
                   </Badge>
                 ) : null}
                 {user.banned ? <Badge variant="destructive">Banned</Badge> : null}
-                <Badge variant={isAdmin ? "default" : "outline"}>
-                  {isAdmin ? "Admin" : "User"}
-                </Badge>
+                {/* Only "Admin" carries information: every row here is a user. */}
+                {isAdmin ? <Badge>Admin</Badge> : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={

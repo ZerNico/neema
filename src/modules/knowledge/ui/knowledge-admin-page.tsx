@@ -101,7 +101,7 @@ function SemanticSearchSection() {
       const total = reextracted + reembedded;
       toast.success(
         total === 0
-          ? "Every collection is already indexed for the current model."
+          ? "Everything is already prepared."
           : `Rebuilding ${total} documents across ${collections} collections in the background.`,
       );
     },
@@ -119,7 +119,7 @@ function SemanticSearchSection() {
       const ok = await confirm({
         destructive: false,
         title: "Enable semantic search?",
-        description: `Document text from every collection that gets indexed will be sent to ${providerLabel} to compute embeddings. Existing collections are not indexed until their owners rebuild them.`,
+        description: `Document text from collections that get prepared is sent to ${providerLabel}. Existing collections stay as they are until their owners redo them.`,
         confirmLabel: "Enable",
       });
       if (ok) apply.mutate("rebuild");
@@ -179,8 +179,8 @@ function SemanticSearchSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Knowledge embeddings</span>
             <span className="text-muted-foreground text-xs">
-              Lets knowledge search find paraphrases, not just matching words. Keyword search works
-              without it. Enabling sends document text to the chosen provider.
+              Finds documents that mean the same thing, not just matching words. Sends their text to
+              the model you choose.
             </span>
           </div>
           <Badge variant={data.status === "ready" ? "secondary" : "outline"}>
@@ -216,10 +216,7 @@ function SemanticSearchSection() {
               disabled={pending}
               emptyPlaceholder="Add a public embedding model to a provider first"
             />
-            <FieldDescription>
-              Only enabled models of type Embedding that every user may use are listed.
-              Group-restricted models cannot become an instance-wide service.
-            </FieldDescription>
+            <FieldDescription>Only models everyone can use are listed.</FieldDescription>
           </Field>
           {selected && !selected.dimensions ? (
             <p className="text-warning text-xs" role="alert">
@@ -246,7 +243,7 @@ function SemanticSearchSection() {
                     destructive: false,
                     title: "Rebuild every collection’s index?",
                     description:
-                      "Every document not yet indexed for the current model is re-embedded, across all users' collections. Text is sent to the configured provider and billed. Documents that are already current are skipped, and keyword search keeps working throughout.",
+                      "Documents that need it are prepared again, across everyone's collections. This sends their text to the model and costs money. Search keeps working meanwhile.",
                     confirmLabel: "Rebuild all",
                   }).then((ok) => {
                     if (ok) rebuildAll.mutate();
@@ -266,7 +263,7 @@ function SemanticSearchSection() {
                     destructive: false,
                     title: "Disable semantic search?",
                     description:
-                      "Knowledge search falls back to keywords. Existing embeddings are kept and can be re-enabled later.",
+                      "Search goes back to matching words. Nothing is deleted, so you can turn this on again later.",
                     confirmLabel: "Disable",
                   }).then((ok) => {
                     if (ok) disable.mutate();
@@ -334,8 +331,8 @@ function DocumentParserSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">PDF text extraction</span>
             <span className="text-muted-foreground text-xs">
-              Extracts text in-process so PDFs still work on models that cannot read files natively.
-              Nothing leaves this server. Scanned PDFs without embedded text are not supported.
+              Reads text out of PDFs so they work with any model. Nothing leaves this server.
+              Scanned PDFs without text inside won’t work.
             </span>
           </div>
           <Switch
