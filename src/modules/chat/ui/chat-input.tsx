@@ -393,7 +393,9 @@ export const ChatInput = forwardRef<
         autoFocus={autoFocus}
         disabled={noModels || textareaDisabled}
       />
-      <div className="flex flex-wrap items-center gap-1 p-2 pt-0">
+      {/* The textarea's own bottom padding is inside its scroll box, so the gap
+          above the controls lives here: it stays constant once the text scrolls. */}
+      <div className="flex flex-wrap items-center gap-1 p-2 pt-2">
         {attachments ? (
           <input
             ref={fileInputRef}
