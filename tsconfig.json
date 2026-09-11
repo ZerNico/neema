@@ -1,20 +1,10 @@
 {
-  "include": ["**/*.ts", "**/*.tsx"],
+  "extends": "./tsconfig.base.json",
+  // Root-level config files only. Each package typechecks its own sources, so
+  // this exists to keep `oxlint.config.ts` honest: a misspelled rule or plugin
+  // name fails here rather than being silently ignored at lint time.
+  "include": ["*.ts"],
   "compilerOptions": {
-    "target": "ES2022",
-    "jsx": "react-jsx",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
-    "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "skipLibCheck": true,
-    "paths": {
-      "~/*": ["./src/*"]
-    }
+    "types": ["node"]
   }
 }

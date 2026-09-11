@@ -98,11 +98,14 @@ skipped one on purpose.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,
   not the ones you expected.
-- `eslint-plugin-slop` runs through oxlint's JS plugin loader on lines changed in
-  the last five commits plus the working tree, never on untouched code. It rejects
-  em dashes, comments over 50 words, inflated vocabulary in comments, chained type
-  assertions, trivial wrappers and static-only classes. Fix the line; do not widen
-  the window or disable the rule for the file.
+- `eslint-plugin-slop` runs through oxlint's JS plugin loader on changed lines,
+  never on untouched code. It rejects em dashes, comments over 50 words, inflated
+  vocabulary in comments, chained type assertions, trivial wrappers and static-only
+  classes. Fix the line; do not widen the window or disable the rule for the file.
+  It is on `uncommitted` (baseline `HEAD`) rather than the usual `recent-changes`
+  (baseline `HEAD~5`) because slop resolves its baseline by path and cannot see a
+  rename, so the monorepo move reads as 499 newly written lines. Put it back to
+  `recent-changes` once that move is more than five commits old.
 - Lint config is `oxlint.config.ts`, typed through `defineConfig` and checked by
   `pnpm typecheck`, so a misspelled rule or plugin name fails there instead of
   being silently ignored. Adding `.oxlintrc.json` beside it is a hard error.

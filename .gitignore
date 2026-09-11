@@ -9,7 +9,7 @@ dist
 *.log
 .DS_Store
 coverage
-src/routeTree.gen.ts
+**/routeTree.gen.ts
 
 # local blob storage (uploaded attachments)
 .data/

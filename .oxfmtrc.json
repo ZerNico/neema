@@ -9,7 +9,7 @@
     ".nitro",
     ".tanstack",
     "node_modules",
-    "src/routeTree.gen.ts",
-    "drizzle/**"
+    "**/routeTree.gen.ts",
+    "**/drizzle/**"
   ]
 }

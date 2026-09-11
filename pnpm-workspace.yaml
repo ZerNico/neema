@@ -1,6 +1,19 @@
 # pnpm >= 11 reads non-auth settings from here, not .npmrc.
 #
-# pnpm's default 24h cooldown blunts the window in which a compromised release
+packages:
+  - apps/*
+  - packages/*
+
+# Every package must resolve ONE copy of effect: two copies mean two Context
+# key identities, so a service provided by one is invisible to the other and
+# the failure is a silent missing-service at runtime, not a type error.
+catalog:
+  effect: 4.0.0-rc.112
+  "@effect/ai-openrouter": 4.0.0-rc.112
+  "@effect/sql-pg": 4.0.0-rc.112
+  "@effect/vitest": 4.0.0-rc.112
+
+# pnpm’s default 24h cooldown blunts the window in which a compromised release
 # is live. It is kept on; the exclusions below are the packages this project
 # deliberately tracks at same-day builds, where waiting a day means pinning a
 # build we already know is superseded:
