@@ -51,3 +51,11 @@ export class InvalidMessage extends Schema.TaggedError<InvalidMessage>()("Invali
 export class ConversationBusy extends Schema.TaggedError<ConversationBusy>()("ConversationBusy", {
   conversationId: Schema.String,
 }) {}
+
+// A work chat runs against a folder on the user's machine. A send without one,
+// from a browser tab or before a folder is chosen, is refused rather than run
+// as a plain chat the model cannot explain.
+export class WorkFolderRequired extends Schema.TaggedError<WorkFolderRequired>()(
+  "WorkFolderRequired",
+  {},
+) {}

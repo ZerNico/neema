@@ -9,7 +9,7 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import { useFolder } from "../client/bridge.ts";
+import type { FolderState } from "../client/bridge.ts";
 
 /**
  * A slim strip tucked under the composer, slightly narrower so it reads as
@@ -20,15 +20,14 @@ import { useFolder } from "../client/bridge.ts";
  * Splitting those across a control and a banner would mean keeping two surfaces
  * consistent about the same thing.
  *
- * Absent entirely in an ordinary browser. There is no machine behind it there,
- * and an inert control would only invite a click that cannot work.
+ * Shown only for a work chat inside the desktop app; the composer owns that
+ * decision and the folder state, so the two never disagree about whether a
+ * send is possible.
  */
-export function FolderStrip({ conversationId }: { conversationId: string }) {
-  const folder = useFolder(conversationId);
-  if (!folder) return null;
-
+export function FolderStrip({ folder }: { folder: FolderState }) {
   const { status, busy } = folder;
-  const attention = status.kind === "unresolved";
+  // No folder is the same problem as a lost one: nothing to work on yet.
+  const attention = status.kind !== "attached";
 
   return (
     <div className="mx-3 -mt-3 flex">
@@ -39,7 +38,7 @@ export function FolderStrip({ conversationId }: { conversationId: string }) {
           attention && "text-foreground border-warning/50 bg-warning/10",
         )}
       >
-        {attention ? (
+        {status.kind !== "attached" ? (
           <Button
             size="sm"
             variant="ghost"
@@ -47,12 +46,16 @@ export function FolderStrip({ conversationId }: { conversationId: string }) {
             disabled={busy}
             onClick={folder.choose}
           >
-            <HugeiconsIcon icon={Alert01Icon} strokeWidth={2} className="size-3.5" />
-            {status.name
+            <HugeiconsIcon
+              icon={status.kind === "unresolved" ? Alert01Icon : Folder01Icon}
+              strokeWidth={2}
+              className="size-3.5"
+            />
+            {status.kind === "unresolved" && status.name
               ? `Choose ${status.name} again to continue`
-              : "Choose a folder to continue"}
+              : "Choose a folder from this computer"}
           </Button>
-        ) : status.kind === "attached" ? (
+        ) : (
           <>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -77,17 +80,6 @@ export function FolderStrip({ conversationId }: { conversationId: string }) {
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
           </>
-        ) : (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground hover:text-foreground h-6 gap-1.5 px-1.5 text-xs"
-            disabled={busy}
-            onClick={folder.choose}
-          >
-            <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-3.5" />
-            Add a folder from this computer
-          </Button>
         )}
       </div>
     </div>

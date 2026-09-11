@@ -2894,6 +2894,87 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
+  it("refuses to continue a work chat without a folder, and stays a work chat", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    authoringScript = () =>
+      Stream.make(AiResponse.makePart("text-delta", { id: "t", delta: "Hi." }), authoringFinish());
+    try {
+      // The first send creates the conversation and fixes its mode.
+      const created = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: null,
+            modelId: textModelId,
+            content: "Start work.",
+            searchEnabled: false,
+            attachmentIds: [],
+            mode: "work",
+            desktopFolder: folder,
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(created.assistantMessageId, 0)),
+        ),
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, created.conversationId),
+      );
+      expect(detail.conversation.mode).toBe("work");
+
+      // A browser tab, or the desktop app before a folder is chosen, sends
+      // nothing about a folder. That is refused rather than run as plain chat.
+      const refused = await runtime.runPromise(
+        Effect.result(
+          Effect.flatMap(ChatService, (service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversationId: created.conversationId,
+              modelId: textModelId,
+              content: "Keep going.",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        ),
+      );
+      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkFolderRequired");
+      // Nothing was written: the refusal happened inside the turn, before rows.
+      const after = await runtime.runPromise(
+        loadConversationDetail(seed.userId, created.conversationId),
+      );
+      expect(after.messages).toHaveLength(detail.messages.length);
+
+      // A later send cannot change the mode; a plain chat stays plain.
+      const plain = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Hello.",
+            searchEnabled: false,
+            attachmentIds: [],
+            mode: "work",
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(plain.assistantMessageId, 0)),
+        ),
+      );
+      expect(
+        (await runtime.runPromise(loadConversationDetail(seed.userId, seed.conversation.id)))
+          .conversation.mode,
+      ).toBe("chat");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
   it("withholds the tools when no folder is attached", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];

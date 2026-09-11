@@ -58,6 +58,7 @@ import {
   MessageNotFound,
   InvalidMessage,
   QuestionUnavailable,
+  WorkFolderRequired,
 } from "../errors.ts";
 
 export type TurnContent =
@@ -92,11 +93,14 @@ export interface GenerationConfig {
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
+  /** Fixed at creation. Read by the resolver, which refuses a work send without a folder. */
+  readonly mode?: "chat" | "work";
   /** Every draft this conversation owns, oldest first. Names are already public. */
   readonly agentDrafts?: ReadonlyArray<{ id: string; name: string }>;
 }
 export type ResolveError =
   | AgentNotAvailable
+  | WorkFolderRequired
   | SkillNotAvailable
   | SkillRejected
   | KnowledgeNotAvailable
@@ -122,6 +126,8 @@ export const PLAIN_GENERATION: GenerationConfig = {
 /** Everything about a turn except its content; `CreateTurnInput` adds that. */
 export type TurnFields = {
   generationMode?: "chat" | "research" | undefined;
+  /** Applied only when this turn creates the conversation. */
+  mode?: "chat" | "work" | undefined;
   userId: string;
   conversationId: string | null;
   modelId: string;
@@ -333,9 +339,15 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationAgentDrafts.conversationId, conversationId))
     .orderBy(asc(conversationAgentDrafts.id))
     .pipe(Effect.orDie);
+  const [conversation] = yield* tx
+    .select({ mode: conversations.mode })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .pipe(Effect.orDie);
   return {
     agent: agent ? { agentId: agent.agentId } : null,
     agentDrafts: drafts.map((draft) => ({ id: draft.id, name: draft.settings.name })),
+    mode: conversation?.mode ?? "chat",
   } satisfies ConversationDefaults;
 });
 
@@ -817,6 +829,7 @@ export class ChatRepo extends Context.Service<
                       userId: input.userId,
                       modelId: input.modelId,
                       title: null,
+                      mode: input.mode ?? "chat",
                     })
                     .returning()
                     .pipe(Effect.orDie);
@@ -877,9 +890,11 @@ export class ChatRepo extends Context.Service<
                 const association = input.associateAgentId
                   ? { agentId: input.associateAgentId }
                   : null;
-                const defaults = association
-                  ? { agent: association }
-                  : yield* readDefaults(tx, conversation.id);
+                const defaults: ConversationDefaults = association
+                  ? { agent: association, mode: conversation.mode }
+                  : conversationCreated
+                    ? { agent: null, mode: conversation.mode }
+                    : yield* readDefaults(tx, conversation.id);
                 const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
                 if (association)
                   yield* tx
@@ -1079,6 +1094,9 @@ export class ChatRepo extends Context.Service<
                     // between the service's read and this lock counts.
                     title: source.title,
                     modelId: source.modelId,
+                    // A branch of a work chat is still work: its history is
+                    // full of folder activity the continuation has to match.
+                    mode: source.mode,
                     branchedFrom: source.id,
                     // Left null so the branch sorts by its own createdAt (now)
                     // and lands at the top of the list, like a new chat.

@@ -39,9 +39,14 @@ const generationFields = {
   ),
 };
 
+export const ConversationMode = Schema.Literals(["chat", "work"]);
+export type ConversationMode = typeof ConversationMode.Type;
+
 export const SendMessageInput = Schema.Struct({
   conversationId: Schema.NullOr(Schema.String),
   ...generationFields,
+  /** Chosen when a chat starts and fixed from then on; ignored on later sends. */
+  mode: Schema.optionalKey(ConversationMode),
 });
 
 export const AnswerQuestionInput = Schema.Struct({

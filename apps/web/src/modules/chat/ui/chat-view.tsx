@@ -41,6 +41,7 @@ import {
   stopGeneration,
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
+import type { ConversationMode } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
   DRAFT_CONVERSATION,
@@ -313,7 +314,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Bumped on retry/edit: the assistant id usually stays the same, so the
   // stream hook needs a separate signal to resubscribe from seq 0.
   const [retryEpoch, setRetryEpoch] = useState(0);
-  const attachedFolder = useAttachedFolder(conversationId);
+  // Only a work chat reports its folder; a plain chat never offers the tools.
+  const folder = useAttachedFolder(conversationId);
+  const attachedFolder = data.conversation.mode === "work" ? folder : null;
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
@@ -1238,6 +1241,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <Composer
               ref={composer}
               conversationId={conversationId}
+              mode={{ kind: "fixed", value: data.conversation.mode }}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
                 sendMutation.mutateAsync({
                   content,
@@ -1329,7 +1333,9 @@ export function NewChatView({
   const composer = useRef<ComposerHandle>(null);
   // No conversation yet, so a folder picked here hangs on the draft key until
   // the first message creates one to rebind it onto.
-  const attachedFolder = useAttachedFolder(DRAFT_CONVERSATION);
+  const draftFolder = useAttachedFolder(DRAFT_CONVERSATION);
+  const [mode, setMode] = useState<ConversationMode>("chat");
+  const attachedFolder = mode === "work" ? draftFolder : null;
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
@@ -1360,6 +1366,7 @@ export function NewChatView({
           modelId: modelId!,
           content: input.content,
           searchEnabled,
+          mode,
           ...attachedFolder,
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
@@ -1455,6 +1462,7 @@ export function NewChatView({
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             initialSkillId={initialSkillId}
+            mode={{ kind: "choose", value: mode, onChange: setMode }}
             onSend={(content, attachmentIds, generationMode, skillIds) =>
               sendMutation.mutateAsync({
                 content,

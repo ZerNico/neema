@@ -5,7 +5,8 @@ import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
 import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
-import { DRAFT_CONVERSATION } from "~/modules/desktop/client/bridge.ts";
+import type { ConversationMode } from "../schema.ts";
+import { DRAFT_CONVERSATION, useDesktop, useFolder } from "~/modules/desktop/client/bridge.ts";
 import { FolderStrip } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -42,6 +43,15 @@ interface ComposerProps {
    * uses the draft key and rebinds after the first message creates one.
    */
   conversationId?: string | undefined;
+  /**
+   * A new chat offers the choice; an existing chat's mode is fixed at creation
+   * and passed as a value. Work needs a folder from the desktop app: without
+   * one the composer says so and refuses to send.
+   */
+  mode?:
+    | { kind: "choose"; value: ConversationMode; onChange: (mode: ConversationMode) => void }
+    | { kind: "fixed"; value: ConversationMode }
+    | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -58,9 +68,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     context,
     initialSkillId,
     conversationId,
+    mode,
   },
   ref,
 ) {
+  const desktop = useDesktop();
+  const folderKey = conversationId ?? DRAFT_CONVERSATION;
+  const folder = useFolder(folderKey);
+  const working = mode?.value === "work";
+  // The reason is the nudge: sending stays blocked until it is gone.
+  const blockedReason = !working
+    ? null
+    : !desktop
+      ? "This is a work chat. Open it in the desktop app to continue."
+      : folder?.status.kind !== "attached"
+        ? "Choose a folder from this computer to continue."
+        : null;
   const skills = useQuery(skillsQuery);
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],
@@ -98,7 +121,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   });
 
   const send = () => {
-    if (disabled || !modelId) return;
+    if (disabled || !modelId || blockedReason) return;
     touched.current = true;
     attachments.submit((attachmentIds) => {
       const current = requestRef.current;
@@ -145,12 +168,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onSearchEnabledChange={onSearchEnabledChange}
         researchEnabled={researchEnabled}
         onResearchEnabledChange={setResearchEnabled}
+        // Offered only where Work can be honoured: a new chat, in the desktop app.
+        {...(mode?.kind === "choose" && desktop
+          ? { mode: { value: mode.value, onChange: mode.onChange } }
+          : {})}
+        blockedReason={blockedReason}
         attachments={attachments}
         {...(context ? { context } : {})}
       />
-      {/* Under the composer and inset, so it reads as part of it. Renders
-          nothing outside the desktop app. */}
-      <FolderStrip conversationId={conversationId ?? DRAFT_CONVERSATION} />
+      {/* Under the composer and inset, so it reads as part of it. Only a work
+          chat has a folder to show, and only the desktop app can show one. */}
+      {working && folder ? <FolderStrip folder={folder} /> : null}
     </div>
   );
 });

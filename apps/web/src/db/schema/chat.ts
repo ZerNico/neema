@@ -36,6 +36,12 @@ export const conversations = pgTable(
     branchedFrom: text("branched_from").references((): AnyPgColumn => conversations.id, {
       onDelete: "set null",
     }),
+    // Fixed at creation, like the agent association. A work chat reaches a
+    // folder on the user's machine, so every send needs one and a browser tab
+    // can only read it; a plain chat never offers those tools at all.
+    mode: text({ enum: ["chat", "work"] })
+      .notNull()
+      .default("chat"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),

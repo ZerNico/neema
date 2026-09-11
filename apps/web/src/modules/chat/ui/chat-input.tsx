@@ -4,6 +4,7 @@ import {
   ArrowUp02Icon,
   Attachment01Icon,
   Book02Icon,
+  Folder01Icon,
   GlobalSearchIcon,
   PlusSignIcon,
   StopIcon,
@@ -58,6 +59,8 @@ import { cn } from "~/ui/utils";
 import * as m from "motion/react-m";
 import { MotionSwap, useAppReducedMotion } from "~/ui/motion.tsx";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
+import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import type { ConversationMode } from "../schema.ts";
 
 export const ChatInput = forwardRef<
   HTMLTextAreaElement,
@@ -77,6 +80,14 @@ export const ChatInput = forwardRef<
     onSearchEnabledChange: (enabled: boolean) => void;
     researchEnabled?: boolean;
     onResearchEnabledChange?: (enabled: boolean) => void;
+    /**
+     * Chat or Work, offered only where Work can be honoured: a new chat inside
+     * the desktop app. Absent hides the toggle; an existing chat's mode is
+     * fixed at creation and shown by the folder strip instead.
+     */
+    mode?: { value: ConversationMode; onChange: (mode: ConversationMode) => void } | undefined;
+    /** Why sending is blocked right now, when it is. Shown under the row. */
+    blockedReason?: string | null | undefined;
     /** Owner-held upload state; research remains available without uploads. */
     attachments?: AttachmentUploads | undefined;
     /** Agent and collections for the next turn; absent hides the controls (edits). */
@@ -110,6 +121,8 @@ export const ChatInput = forwardRef<
     onSearchEnabledChange,
     researchEnabled = false,
     onResearchEnabledChange,
+    mode,
+    blockedReason = null,
     attachments,
     context,
     skills,
@@ -239,6 +252,7 @@ export const ChatInput = forwardRef<
     selectedModel.id === modelId &&
     !blocked &&
     !(researchEnabled && researchUnavailableReason) &&
+    !blockedReason &&
     !attachments?.queued &&
     (value.trim() !== "" || usable > 0);
 
@@ -520,6 +534,29 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
           />
         ) : null}
+        {mode ? (
+          <ToggleGroup
+            value={[mode.value]}
+            onValueChange={(values) => {
+              const next = values[0];
+              if (next === "chat" || next === "work") mode.onChange(next);
+            }}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            disabled={controlsDisabled}
+            aria-label="Chat mode"
+            className="shrink-0"
+          >
+            <ToggleGroupItem value="chat" aria-label="Chat">
+              Chat
+            </ToggleGroupItem>
+            <ToggleGroupItem value="work" aria-label="Work with a folder">
+              <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} data-icon="inline-start" />
+              Work
+            </ToggleGroupItem>
+          </ToggleGroup>
+        ) : null}
         {researchEnabled ? (
           // The only control the row still needs while research is on: the
           // choice itself lives in the menu, this just leaves it again.
@@ -608,10 +645,10 @@ export const ChatInput = forwardRef<
           </Tooltip>
         </div>
       </div>
-      <Disclosure open={researchEnabled && !!researchUnavailableReason}>
+      <Disclosure open={(researchEnabled && !!researchUnavailableReason) || !!blockedReason}>
         <DisclosureContent>
           <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
-            {researchUnavailableReason}
+            {blockedReason ?? researchUnavailableReason}
           </p>
         </DisclosureContent>
       </Disclosure>

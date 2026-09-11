@@ -10,6 +10,7 @@ import {
   ModelNotFound,
   RetryNotAllowed,
   QuestionUnavailable,
+  WorkFolderRequired,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
@@ -73,6 +74,7 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
+      | WorkFolderRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -94,6 +96,7 @@ export class ChatService extends Context.Service<
       | ModelNotFound
       | RetryNotAllowed
       | AgentNotAvailable
+      | WorkFolderRequired
       | KnowledgeRejected
       | InvalidMessage
       | AttachmentNotAvailable
@@ -119,6 +122,8 @@ export class ChatService extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        desktopFolder?: string | undefined;
+        desktopCommands?: boolean | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -136,6 +141,7 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
+      | WorkFolderRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -320,6 +326,10 @@ function makeChatService() {
             input.attempt === "retry"
               ? (continuation?.desktopCommands ?? false)
               : (input.desktopCommands ?? false);
+          // The whole point of a work chat is the folder. A send with none
+          // would run as a plain chat whose history the model cannot act on,
+          // so it is refused here, inside the turn, before any row is written.
+          if (defaults.mode === "work" && !desktopFolder) return yield* new WorkFolderRequired();
           // An edit that submits a selection is changing it, so it cannot take the
           // replay shortcut below: new collections need a rebuilt manifest.
           const editing = input.attempt === "edit";
