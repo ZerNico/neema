@@ -1,6 +1,7 @@
 import {
   Analytics01Icon,
   CloudServerIcon,
+  Key01Icon,
   FolderLibraryIcon,
   UserGroupIcon,
   UserMultipleIcon,
@@ -39,6 +40,12 @@ function AdminLayout() {
           label: "Documents",
           icon: FolderLibraryIcon,
           matchPrefix: "/admin/documents",
+        },
+        {
+          to: "/admin/auth",
+          label: "Sign-in",
+          icon: Key01Icon,
+          matchPrefix: "/admin/auth",
         },
         {
           to: "/admin/users",

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { auth } from "~/modules/auth/server/auth.ts";
+import { currentAuth } from "~/modules/auth/server/auth.ts";
 
 // Favicon proxy: the browser talks only to our origin; the upstream lookup
 // happens server-side. Without this every source chip would reveal the visited
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/api/favicon")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
+        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
         if (!session) return new Response("Unauthorized", { status: 401 });
 
         const domain = new URL(request.url).searchParams.get("domain") ?? "";

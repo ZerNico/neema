@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { auth } from "~/modules/auth/server/auth.ts";
+import { currentAuth } from "~/modules/auth/server/auth.ts";
 import { runtime } from "~/server/runtime.ts";
 
 // RFC 5987: an ASCII fallback for old agents plus the real UTF-8 name.
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
+        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
         if (!session) return new Response("Unauthorized", { status: 401 });
 
         const file = await runtime.runPromise(

@@ -253,6 +253,15 @@ Differs from most Effect 3 material online.
   never leaves the server.
 - First registered user becomes admin via the `user.create.before` hook. Do not
   bypass Better Auth for user creation.
+- Sign-in providers are rows in `oauth_providers`, secrets encrypted like
+  provider API keys. Better Auth resolves its context once per instance, so
+  that configuration is read once: every reader goes through `currentAuth()`,
+  and an admin write calls `invalidateAuth()` so the next one rebuilds. A
+  request already holding the old instance is unaffected, sessions being in the
+  database. Both kinds of provider sign in through `signIn.social`, since
+  `generic-oauth` registers an OpenID Connect entry as an ordinary social
+  provider; one whose discovery document cannot be fetched is skipped at
+  startup rather than reported.
 - `IdentityBoundary` pins one identity per authenticated tree and replaces the
   document on any change. A `401` from any query or mutation ends the session;
   `requireSession` writes the fixed body `UNAUTHENTICATED_BODY` because the Start

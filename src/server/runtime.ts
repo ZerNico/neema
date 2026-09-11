@@ -6,6 +6,7 @@ import { DocumentParser } from "~/modules/attachments/server/document-parser.ts"
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
@@ -45,6 +46,7 @@ const ReposLayer = Layer.mergeAll(
   AgentRepo.layer,
   ChatRepo.layer,
   MemoryRepo.layer,
+  OAuthRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,
   GroupRepo.layer,

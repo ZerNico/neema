@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { projectSessionIdentity } from "../identity.ts";
-import { auth } from "./auth.ts";
+import { currentAuth } from "./auth.ts";
 
 /**
  * The signed-in user, or null. Deliberately not the whole session: that record
@@ -10,12 +10,14 @@ import { auth } from "./auth.ts";
  * The route context only ever needed the user anyway.
  */
 export const getSessionUser = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await auth.api.getSession({ headers: getRequestHeaders() });
+  const session = await (await currentAuth()).api.getSession({ headers: getRequestHeaders() });
   return session?.user ?? null;
 });
 
 export const getSessionIdentity = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await auth.api.getSession({
+  const session = await (
+    await currentAuth()
+  ).api.getSession({
     headers: getRequestHeaders(),
     query: { disableCookieCache: true },
   });

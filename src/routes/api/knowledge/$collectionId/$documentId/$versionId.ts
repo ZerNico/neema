@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { auth } from "~/modules/auth/server/auth.ts";
+import { currentAuth } from "~/modules/auth/server/auth.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
 
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/api/knowledge/$collectionId/$documentId/$
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
+        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
         if (!session) return new Response("Unauthorized", { status: 401 });
         const file = await runtime.runPromise(
           Effect.flatMap(KnowledgeService, (service) =>

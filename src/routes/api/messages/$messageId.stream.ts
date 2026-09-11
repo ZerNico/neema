@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { auth } from "~/modules/auth/server/auth.ts";
+import { currentAuth } from "~/modules/auth/server/auth.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
+        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
         if (!session) return new Response("Unauthorized", { status: 401 });
 
         const url = new URL(request.url);

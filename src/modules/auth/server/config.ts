@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin } from "better-auth/plugins";
+import { admin, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { count } from "drizzle-orm";
 import { Effect } from "effect";
@@ -16,6 +16,66 @@ export interface ImpersonationEvent {
   timestamp: string;
 }
 
+/**
+ * One configured sign-in provider, already decrypted. Built-ins are registered
+ * under Better Auth's own key; an OIDC entry goes through the generic-oauth
+ * plugin, which registers it as an ordinary social provider under the id
+ * chosen here, so both kinds sign in through `signIn.social`.
+ */
+export type AuthOAuthProvider =
+  | {
+      kind: "builtin";
+      id: string;
+      clientId: string;
+      clientSecret: string;
+      tenantId?: string | undefined;
+      issuer?: string | undefined;
+    }
+  | {
+      kind: "oidc";
+      id: string;
+      label: string;
+      clientId: string;
+      clientSecret: string;
+      discoveryUrl: string;
+      scopes: readonly string[];
+    };
+
+type SocialProviders = NonNullable<Parameters<typeof betterAuth>[0]["socialProviders"]>;
+
+// Each built-in is named rather than keyed dynamically, because Better Auth
+// types every provider's options separately: `microsoft` takes a tenant and
+// `gitlab` an issuer, while the rest take credentials alone. An id with no
+// case here is a row whose provider left the catalogue, and is skipped.
+function socialProvidersFrom(providers: readonly AuthOAuthProvider[]): SocialProviders {
+  const social: SocialProviders = {};
+  for (const p of providers) {
+    if (p.kind !== "builtin") continue;
+    const base = { clientId: p.clientId, clientSecret: p.clientSecret };
+    switch (p.id) {
+      case "google":
+        social.google = base;
+        break;
+      case "github":
+        social.github = base;
+        break;
+      case "discord":
+        social.discord = base;
+        break;
+      case "apple":
+        social.apple = base;
+        break;
+      case "microsoft":
+        social.microsoft = { ...base, ...(p.tenantId ? { tenantId: p.tenantId } : {}) };
+        break;
+      case "gitlab":
+        social.gitlab = { ...base, ...(p.issuer ? { issuer: p.issuer } : {}) };
+        break;
+    }
+  }
+  return social;
+}
+
 type Operation = Omit<ImpersonationEvent, "timestamp">;
 const startPath = "/admin/impersonate-user";
 const stopPath = "/admin/stop-impersonating";
@@ -26,12 +86,14 @@ export function createAppAuth({
   baseURL,
   secret,
   purgeUserFiles,
+  oauthProviders = [],
   log = (event) => Effect.runPromise(Effect.logInfo("auth impersonation", event)),
 }: {
   db: Db;
   baseURL: string | undefined;
   secret: string | undefined;
   purgeUserFiles: (userId: string) => Promise<void>;
+  oauthProviders?: readonly AuthOAuthProvider[];
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
   return betterAuth({
@@ -39,6 +101,7 @@ export function createAppAuth({
     secret,
     database: drizzleAdapter(db, { provider: "pg", schema }),
     emailAndPassword: { enabled: true },
+    socialProviders: socialProvidersFrom(oauthProviders),
     advanced: { database: { generateId: () => uuidv7() } },
     databaseHooks: {
       user: {
@@ -101,6 +164,21 @@ export function createAppAuth({
         }
       }),
     },
-    plugins: [admin({ impersonationSessionDuration: 60 * 60 }), tanstackStartCookies()],
+    plugins: [
+      admin({ impersonationSessionDuration: 60 * 60 }),
+      genericOAuth({
+        config: oauthProviders
+          .filter((p) => p.kind === "oidc")
+          .map((p) => ({
+            providerId: p.id,
+            name: p.label,
+            clientId: p.clientId,
+            clientSecret: p.clientSecret,
+            discoveryUrl: p.discoveryUrl,
+            scopes: [...p.scopes],
+          })),
+      }),
+      tanstackStartCookies(),
+    ],
   });
 }

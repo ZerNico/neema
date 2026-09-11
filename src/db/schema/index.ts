@@ -6,6 +6,7 @@ export * from "./chat.ts";
 export * from "./groups.ts";
 export * from "./knowledge.ts";
 export * from "./memory.ts";
+export * from "./oauth.ts";
 export * from "./providers.ts";
 export * from "./tools.ts";
 export * from "./research.ts";

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { auth } from "~/modules/auth/server/auth.ts";
+import { currentAuth } from "~/modules/auth/server/auth.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/sync")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
+        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
         if (!session) return new Response("Unauthorized", { status: 401 });
 
         const stream = await runtime.runPromise(

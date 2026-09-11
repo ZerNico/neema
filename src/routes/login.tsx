@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
+import { SignInProviders, signInProvidersQuery } from "~/modules/auth/ui/sign-in-providers.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -16,6 +17,7 @@ const LoginSchema = Schema.Struct({
 });
 
 export const Route = createFileRoute("/login")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(signInProvidersQuery),
   component: LoginPage,
 });
 
@@ -46,7 +48,8 @@ function LoginPage() {
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
+          <SignInProviders />
           <form
             className="flex flex-col gap-4"
             onSubmit={(e) => {
