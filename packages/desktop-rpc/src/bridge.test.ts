@@ -1,0 +1,122 @@
+import { Effect } from "effect";
+import { describe, expect, it } from "vitest";
+import {
+  makeDesktopClient,
+  makeDesktopResponder,
+  PROTOCOL_VERSION,
+  readDesktopChannel,
+  type DesktopChannel,
+  type DesktopHandlers,
+} from "./bridge.ts";
+import { DesktopError } from "./schema.ts";
+
+const unimplemented = (tag: string) => () =>
+  Effect.fail(new DesktopError({ reason: "failed", message: `${tag} not part of this test` }));
+
+const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers =>
+  ({
+    folderStatus: unimplemented("folderStatus"),
+    chooseFolder: unimplemented("chooseFolder"),
+    detachFolder: unimplemented("detachFolder"),
+    listDirectory: unimplemented("listDirectory"),
+    readFile: unimplemented("readFile"),
+    writeFile: unimplemented("writeFile"),
+    runCommand: unimplemented("runCommand"),
+    sandboxAvailability: unimplemented("sandboxAvailability"),
+    setUpSandbox: unimplemented("setUpSandbox"),
+    revealPath: unimplemented("revealPath"),
+    ...overrides,
+  }) as DesktopHandlers;
+
+/** Stands in for contextBridge: the only thing crossing is what survives JSON. */
+const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
+  const respond = makeDesktopResponder(handlers(implemented));
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    request: async (tag, payload) => {
+      const wire = JSON.parse(JSON.stringify({ tag, payload })) as {
+        tag: string;
+        payload: unknown;
+      };
+      const reply = await Effect.runPromise(respond(wire.tag, wire.payload));
+      return JSON.parse(JSON.stringify(reply)) as typeof reply;
+    },
+  };
+};
+
+describe("the desktop channel", () => {
+  it("round-trips a decoded result through the declared schemas", async () => {
+    const client = makeDesktopClient(
+      connect({
+        readFile: ({ path }) => Effect.succeed({ path, text: "hello", truncated: false }),
+      }),
+    );
+
+    const contents = await Effect.runPromise(
+      client.readFile({ conversationId: "c1", path: "notes.md" }),
+    );
+
+    expect(contents).toEqual({ path: "notes.md", text: "hello", truncated: false });
+  });
+
+  it("carries a refusal across as a typed failure, not a thrown error", async () => {
+    const client = makeDesktopClient(
+      connect({
+        readFile: () =>
+          Effect.fail(
+            new DesktopError({
+              reason: "outside-folder",
+              message: "That file is outside the folder.",
+            }),
+          ),
+      }),
+    );
+
+    const outcome = await Effect.runPromise(
+      Effect.result(client.readFile({ conversationId: "c1", path: "../secrets" })),
+    );
+
+    expect(outcome._tag).toBe("Failure");
+    if (outcome._tag !== "Failure") return;
+    expect(outcome.failure).toBeInstanceOf(DesktopError);
+    expect(outcome.failure.reason).toBe("outside-folder");
+    expect(outcome.failure.message).toBe("That file is outside the folder.");
+  });
+
+  it("refuses a procedure the shell does not know rather than hanging", async () => {
+    const respond = makeDesktopResponder(handlers({}));
+
+    const reply = await Effect.runPromise(respond("deleteEverything", {}));
+
+    expect(reply.ok).toBe(false);
+  });
+
+  it("turns a malformed payload into a refusal before any handler runs", async () => {
+    let ran = false;
+    const respond = makeDesktopResponder(
+      handlers({
+        readFile: () => {
+          ran = true;
+          return Effect.succeed({ path: "x", text: "", truncated: false });
+        },
+      }),
+    );
+
+    const reply = await Effect.runPromise(respond("readFile", { conversationId: 42 }));
+
+    expect(reply.ok).toBe(false);
+    expect(ran).toBe(false);
+  });
+
+  it("ignores a shell speaking a different protocol version", () => {
+    const globals = globalThis as Record<string, unknown>;
+    globals.__chatDesktop = { protocolVersion: PROTOCOL_VERSION + 1, request: () => {} };
+    expect(readDesktopChannel()).toBeNull();
+
+    globals.__chatDesktop = { protocolVersion: PROTOCOL_VERSION, request: () => {} };
+    expect(readDesktopChannel()).not.toBeNull();
+
+    delete globals.__chatDesktop;
+    expect(readDesktopChannel()).toBeNull();
+  });
+});
