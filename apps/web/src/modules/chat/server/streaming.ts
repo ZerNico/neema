@@ -82,6 +82,8 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { isWebSource, sourceTarget, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
 import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import { attachmentKind } from "~/modules/attachments/constants.ts";
+import { buildTextFence } from "~/modules/attachments/server/validation.ts";
 import {
   DesktopToolName,
   DesktopToolResult,
@@ -104,7 +106,7 @@ import {
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
 } from "./compaction.ts";
-import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
+import { buildHistoryMessages, type PromptDeps, PDF_TEXT_LABEL } from "./prompt.ts";
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -161,6 +163,17 @@ const json = (value: unknown) => value as JsonValue;
 // full cause goes to the server log instead (see finalize).
 const shortErrorMessage = (error: unknown): string =>
   String(error).split("\n", 1)[0]!.slice(0, 200);
+
+// A local read that produced bytes carries them in the result. They go to the
+// model as a file part on the round, never as base64 inside the tool result,
+// which would be megabytes of text the model cannot look at anyway.
+const withoutDesktopFile = (part: Response.AnyPart): Response.AnyPart => {
+  if (part.type !== "tool-result") return part;
+  const result = part.result as { file?: unknown } | null;
+  if (!result || typeof result !== "object" || !("file" in result)) return part;
+  const { file: _dropped, ...rest } = result;
+  return { ...part, result: rest, encodedResult: rest };
+};
 
 // Runs assistant generations detached from any HTTP request, persists chunks
 // for resumability, and republishes them for live subscribers.
@@ -1245,6 +1258,10 @@ export class StreamEngine extends Context.Service<
             let finishReason: Response.FinishReason | undefined;
             let callIndex = turn === 0 ? firstCallIndex : 0;
             const turnParts: Response.AnyPart[] = [];
+            // Bytes a local read produced for the model this turn. A tool
+            // result is text on the wire, so an image or PDF rides as a user
+            // file part appended to the round, the way an attachment would.
+            const turnFiles: Array<Prompt.UserMessagePartEncoded> = [];
             const turnStartOffset = assembled.length;
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
@@ -1290,19 +1307,21 @@ export class StreamEngine extends Context.Service<
                           part.type === "tool-call" &&
                             (part.name === "save_memory" || part.name === "update_plan")
                             ? { ...part, params: {} }
-                            : part.type === "tool-result" && part.name === "update_plan"
-                              ? {
-                                  ...part,
-                                  encodedResult:
-                                    (part.result as PlanToolResult).outcome === "updated"
-                                      ? {
-                                          outcome: "updated",
-                                          message:
-                                            "The current checklist is in the trailing reminder.",
-                                        }
-                                      : part.encodedResult,
-                                }
-                              : redactAgentDraftPart(part),
+                            : part.type === "tool-result" && Schema.is(DesktopToolName)(part.name)
+                              ? withoutDesktopFile(part)
+                              : part.type === "tool-result" && part.name === "update_plan"
+                                ? {
+                                    ...part,
+                                    encodedResult:
+                                      (part.result as PlanToolResult).outcome === "updated"
+                                        ? {
+                                            outcome: "updated",
+                                            message:
+                                              "The current checklist is in the trailing reminder.",
+                                          }
+                                        : part.encodedResult,
+                                  }
+                                : redactAgentDraftPart(part),
                         );
                       }
                       switch (part.type) {
@@ -1574,8 +1593,48 @@ export class StreamEngine extends Context.Service<
                                     detail: "The computer did not report a usable result.",
                                     truncated: false,
                                   };
+                            if (result.file) {
+                              const bytes = Buffer.from(result.file.base64, "base64");
+                              const kind = attachmentKind(result.file.mediaType);
+                              const canTake =
+                                kind === "image"
+                                  ? (model?.capabilities.vision ?? false)
+                                  : kind === "pdf" && (model?.capabilities.files ?? false);
+                              if (canTake) {
+                                turnFiles.push({
+                                  type: "file",
+                                  mediaType: result.file.mediaType,
+                                  fileName: result.file.name,
+                                  data: bytes,
+                                });
+                              } else if (kind === "pdf") {
+                                // Same fallback an attached PDF takes for a
+                                // model without document input.
+                                const parsed = yield* promptDeps.parser
+                                  .parsePdf({ bytes, fileName: result.file.name })
+                                  .pipe(Effect.result);
+                                turnFiles.push({
+                                  type: "text",
+                                  text:
+                                    parsed._tag === "Success"
+                                      ? buildTextFence({
+                                          fileName: result.file.name,
+                                          text: parsed.success.text,
+                                          label: PDF_TEXT_LABEL,
+                                        })
+                                      : `${result.file.name} is a PDF, and its text could not be extracted on this server.`,
+                                });
+                              } else {
+                                turnFiles.push({
+                                  type: "text",
+                                  text: `${result.file.name} is an image, and this model cannot look at images. Tell the user rather than guessing at its contents.`,
+                                });
+                              }
+                            }
                             // The model reads the full detail through the
                             // prompt; the row and the chunk keep an excerpt.
+                            // The bytes never reach the row or the transcript:
+                            // the file part above is their only route in.
                             const stored = forTranscript(result);
                             yield* repo.completeToolCall({
                               id: rowId,
@@ -2010,13 +2069,20 @@ export class StreamEngine extends Context.Service<
             // A completed response/tool batch is one atomic unit. It becomes
             // eligible for compaction only now, after every tool result is
             // terminal; no call can ever be separated from its result.
+            const roundPrompt = imageOutput
+              ? responseTurnPrompt(turnParts)
+              : Prompt.fromResponseParts(turnParts);
             activeRounds = [
               ...activeRounds,
               {
                 turnIndex: turn,
-                prompt: imageOutput
-                  ? responseTurnPrompt(turnParts)
-                  : Prompt.fromResponseParts(turnParts),
+                prompt:
+                  turnFiles.length === 0
+                    ? roundPrompt
+                    : Prompt.concat(
+                        roundPrompt,
+                        Prompt.make([{ role: "user", content: turnFiles }]),
+                      ),
               },
             ];
             transcript = buildTranscript();

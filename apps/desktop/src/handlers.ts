@@ -1,5 +1,5 @@
-import { readdir, readFile, mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, extname } from "node:path";
 import { Effect } from "effect";
 import {
   DesktopError,
@@ -7,10 +7,28 @@ import {
   type DesktopHandlers,
   type DirectoryEntry,
   type FolderStatus,
+  type SearchMatch,
 } from "@chat/desktop-rpc";
+import { unifiedDiff } from "./diff.ts";
 import { folderLabel, GrantStore } from "./grants.ts";
 import { resolveInFolder } from "./folders.ts";
 import { Sandbox } from "./sandbox.ts";
+import { globToRegExp, walkFiles } from "./walk.ts";
+
+/** What a model can be handed as bytes: images for vision, PDFs for documents. */
+const BINARY_MEDIA_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+};
+
+/** Files visited before a find or search gives up. Visited, not returned. */
+const WALK_LIMIT = 50_000;
+
+const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
 
 /**
  * The desktop side of the contract. Every procedure that touches disk goes
@@ -150,7 +168,7 @@ export const makeHandlers = (shell: Shell) =>
           // A NUL in the first few kilobytes is what `file` and git use to
           // call something binary. Decoding it anyway would hand the model
           // noise and the server a string Postgres refuses.
-          if (bytes.subarray(0, 8_000).includes(0)) {
+          if (isBinary(bytes)) {
             return yield* Effect.fail(
               new DesktopError({
                 reason: "not-text",
@@ -168,6 +186,265 @@ export const makeHandlers = (shell: Shell) =>
             text: truncated ? text.slice(0, LIMITS.readChars) : text,
             truncated,
           };
+        }),
+
+      readBinary: ({ conversationId, path }) =>
+        Effect.gen(function* () {
+          const target = yield* locate(conversationId, path);
+          const mediaType = BINARY_MEDIA_TYPES[extname(target.relative).toLowerCase()];
+          if (!mediaType) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-binary",
+                message: `${target.relative} is not an image or a PDF.`,
+              }),
+            );
+          }
+          const info = yield* Effect.tryPromise({
+            try: () => stat(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${target.relative} does not exist.`,
+              }),
+          });
+          if (!info.isFile()) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-a-file",
+                message: `${target.relative} is not a file.`,
+              }),
+            );
+          }
+          if (info.size > LIMITS.binaryBytes) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "too-large",
+                message: `${target.relative} is too large to send to the model.`,
+              }),
+            );
+          }
+          const bytes = yield* Effect.tryPromise({
+            try: () => readFile(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "failed",
+                message: `Could not read ${target.relative}.`,
+              }),
+          });
+          return {
+            path: target.relative,
+            mediaType,
+            base64: bytes.toString("base64"),
+            bytes: bytes.length,
+          };
+        }),
+
+      editFile: ({ conversationId, path, old: before, new: after, all }) =>
+        Effect.gen(function* () {
+          const target = yield* locate(conversationId, path);
+          const bytes = yield* Effect.tryPromise({
+            try: () => readFile(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${target.relative} does not exist.`,
+              }),
+          });
+          if (isBinary(bytes)) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-text",
+                message: `${target.relative} is not a text file.`,
+              }),
+            );
+          }
+          const text = bytes.toString("utf8");
+          if (before === "") {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "no-match",
+                message: "The text to replace must not be empty.",
+              }),
+            );
+          }
+          // Exact, and unique unless told otherwise. Guessing at whitespace or
+          // taking the first hit would land an edit somewhere the model did not
+          // look; a sharp refusal it can act on is the safer answer.
+          const first = text.indexOf(before);
+          if (first === -1) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "no-match",
+                message: `The text to replace was not found in ${target.relative}. It must match exactly, whitespace included.`,
+              }),
+            );
+          }
+          const second = text.indexOf(before, first + before.length);
+          if (second !== -1 && !all) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "ambiguous-match",
+                message: `The text to replace appears more than once in ${target.relative}. Include more surrounding lines so it is unique, or set all to replace every occurrence.`,
+              }),
+            );
+          }
+          const next = all ? text.replaceAll(before, after) : text.replace(before, after);
+          const replacements = all ? text.split(before).length - 1 : 1;
+          yield* Effect.tryPromise({
+            try: () => writeFile(target.absolute, next, "utf8"),
+            catch: () =>
+              new DesktopError({
+                reason: "failed",
+                message: `Could not write ${target.relative}.`,
+              }),
+          });
+          const diff = unifiedDiff(target.relative, text, next);
+          const truncated = diff.length > LIMITS.readChars;
+          return {
+            path: target.relative,
+            replacements,
+            diff: truncated ? diff.slice(0, LIMITS.readChars) : diff,
+            truncated,
+          };
+        }),
+
+      movePath: ({ conversationId, from, to }) =>
+        Effect.gen(function* () {
+          // Both ends are contained: a move is a read of one path and a write
+          // of another, and either could be the one that escapes.
+          const source = yield* locate(conversationId, from);
+          const destination = yield* locate(conversationId, to);
+          yield* Effect.tryPromise({
+            try: () => stat(source.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${source.relative} does not exist.`,
+              }),
+          });
+          const taken = yield* Effect.promise(() =>
+            stat(destination.absolute).then(
+              () => true,
+              () => false,
+            ),
+          );
+          if (taken) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "already-exists",
+                message: `${destination.relative} already exists. Delete it first if you mean to replace it.`,
+              }),
+            );
+          }
+          yield* Effect.tryPromise({
+            try: async () => {
+              await mkdir(dirname(destination.absolute), { recursive: true });
+              await rename(source.absolute, destination.absolute);
+            },
+            catch: () =>
+              new DesktopError({
+                reason: "failed",
+                message: `Could not move ${source.relative} to ${destination.relative}.`,
+              }),
+          });
+          return { from: source.relative, to: destination.relative };
+        }),
+
+      deletePath: ({ conversationId, path }) =>
+        Effect.gen(function* () {
+          const target = yield* locate(conversationId, path);
+          if (target.relative === ".") {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "outside-folder",
+                message: "The folder itself cannot be deleted.",
+              }),
+            );
+          }
+          const info = yield* Effect.tryPromise({
+            try: () => stat(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${target.relative} does not exist.`,
+              }),
+          });
+          const kind = info.isDirectory() ? ("directory" as const) : ("file" as const);
+          yield* Effect.tryPromise({
+            try: () => rm(target.absolute, { recursive: kind === "directory" }),
+            catch: () =>
+              new DesktopError({
+                reason: "failed",
+                message: `Could not delete ${target.relative}.`,
+              }),
+          });
+          return { path: target.relative, kind };
+        }),
+
+      findFiles: ({ conversationId, pattern }) =>
+        Effect.gen(function* () {
+          const root = yield* locate(conversationId, ".");
+          const matcher = yield* Effect.try({
+            try: () => globToRegExp(pattern),
+            catch: () =>
+              new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
+          });
+          const walked = yield* Effect.promise(() =>
+            walkFiles(root.absolute, WALK_LIMIT, (rel) => matcher.test(rel)),
+          );
+          // Newest first: the file just changed is the one being asked about.
+          const sorted = walked.files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          const kept = sorted.slice(0, LIMITS.foundPaths);
+          return {
+            pattern,
+            paths: kept.map((file) => file.relative),
+            truncated: walked.truncated || sorted.length > kept.length,
+          };
+        }),
+
+      searchFiles: ({ conversationId, pattern, glob }) =>
+        Effect.gen(function* () {
+          const root = yield* locate(conversationId, ".");
+          const regex = yield* Effect.try({
+            try: () => new RegExp(pattern),
+            catch: () =>
+              new DesktopError({
+                reason: "bad-pattern",
+                message: `${pattern} is not a valid regular expression.`,
+              }),
+          });
+          const scope = glob ? globToRegExp(glob) : null;
+          const walked = yield* Effect.promise(() =>
+            walkFiles(root.absolute, WALK_LIMIT, (rel) => (scope ? scope.test(rel) : true)),
+          );
+          const matches: SearchMatch[] = [];
+          let filesSearched = 0;
+          let truncated = walked.truncated;
+          for (const file of walked.files) {
+            if (matches.length >= LIMITS.matches) {
+              truncated = true;
+              break;
+            }
+            const bytes = yield* Effect.promise(() => readFile(file.absolute).catch(() => null));
+            if (bytes === null || isBinary(bytes)) continue;
+            filesSearched += 1;
+            const lines = bytes.toString("utf8").split("\n");
+            for (let index = 0; index < lines.length; index += 1) {
+              const line = lines[index]!;
+              if (!regex.test(line)) continue;
+              matches.push({
+                path: file.relative,
+                line: index + 1,
+                text: line.length > LIMITS.matchChars ? line.slice(0, LIMITS.matchChars) : line,
+              });
+              if (matches.length >= LIMITS.matches) {
+                truncated = true;
+                break;
+              }
+            }
+          }
+          return { pattern, matches, filesSearched, truncated };
         }),
 
       writeFile: ({ conversationId, path, text }) =>

@@ -34,7 +34,7 @@ export interface PromptDeps {
   readonly parser: Pick<DocumentParser["Service"], "parsePdf" | "availability">;
 }
 
-const PDF_TEXT_LABEL = "Text extracted from attached PDF";
+export const PDF_TEXT_LABEL = "Text extracted from attached PDF";
 
 const decoder = new TextDecoder();
 

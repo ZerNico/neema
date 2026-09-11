@@ -40,10 +40,23 @@ describe("DesktopActivityBlock", () => {
           name: "write_local_file",
           args: { path: "src/index.ts" },
         })}
-        approval={{ kind: "write", decide }}
+        approval={{ kind: "edit", decide }}
       />,
     );
     expect(screen.getByRole("button", { name: "Allow edits for this chat" })).toBeInTheDocument();
+  });
+
+  it("offers no blanket grant for a delete", () => {
+    const decide = vi.fn();
+    render(
+      <DesktopActivityBlock
+        activity={running({ callId: "call-3", name: "delete_local_file", args: { path: "old/" } })}
+        approval={{ kind: "delete", decide }}
+      />,
+    );
+    expect(screen.getByText("Delete from this computer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
   });
 
   it("shows a plain row, with no way to act, once the call is decided", () => {

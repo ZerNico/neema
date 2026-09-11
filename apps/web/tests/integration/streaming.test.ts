@@ -2814,6 +2814,75 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
+  it("hands an image to a vision model as a file part, never as text in the row", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "read_local_file", { path: "logo.png" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "A red square." }),
+        authoringFinish(),
+      );
+    };
+    const png = generatedPng.toString("base64");
+    try {
+      const sent = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: visionModelId,
+            content: "What is in the logo?",
+            searchEnabled: false,
+            attachmentIds: [],
+            desktopFolder: folder,
+          }),
+        ),
+      );
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => ({
+            v: 1,
+            ok: true,
+            summary: "Read logo.png",
+            detail: "image/png, 70 bytes",
+            truncated: false,
+            file: { mediaType: "image/png", base64: png, name: "logo.png" },
+          }));
+          yield* Fiber.join(bridge.fiber);
+          return {
+            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
+            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+          };
+        }),
+      );
+      expect(prompts).toHaveLength(2);
+      // The bytes ride as a user file part on the round, the way an attached
+      // image does, so the model can look at them.
+      const second = prompts[1]!.prompt.content as ReadonlyArray<{
+        role: string;
+        content: unknown;
+      }>;
+      const fileMessage = second.find(
+        (message) =>
+          message.role === "user" &&
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === "file" && part.fileName === "logo.png"),
+      );
+      expect(fileMessage).toBeDefined();
+      // And never as base64 inside the tool result, the row or a chunk.
+      const toolResults = JSON.stringify(second.filter((message) => message.role === "tool"));
+      expect(toolResults).not.toContain(png.slice(0, 40));
+      expect(JSON.stringify(result.detail)).not.toContain(png.slice(0, 40));
+      expect(JSON.stringify(result.chunks)).not.toContain(png.slice(0, 40));
+      expect(result.detail.messages.at(-1)?.content).toContain("A red square.");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });

@@ -145,6 +145,130 @@ describe("once a folder is attached", () => {
     ).toBe("not-text");
   });
 
+  it("reads an image as bytes and refuses anything else", async () => {
+    const image = await Effect.runPromise(
+      handlers.readBinary({ conversationId: CONVERSATION, path: "src/logo.png" }),
+    );
+    expect(image.mediaType).toBe("image/png");
+    expect(Buffer.from(image.base64, "base64")[0]).toBe(0x89);
+    expect(
+      await failureOf(handlers.readBinary({ conversationId: CONVERSATION, path: "src/index.ts" })),
+    ).toBe("not-binary");
+  });
+
+  it("edits by exact unique match and returns the diff", async () => {
+    await writeFile(join(root, "src", "edit.ts"), "const a = 1;\nconst b = 1;\nconst c = 2;\n");
+    expect(
+      await failureOf(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          path: "src/edit.ts",
+          old: "= 1;",
+          new: "= 9;",
+          all: false,
+        }),
+      ),
+    ).toBe("ambiguous-match");
+    expect(
+      await failureOf(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          path: "src/edit.ts",
+          old: "const z",
+          new: "x",
+          all: false,
+        }),
+      ),
+    ).toBe("no-match");
+
+    const receipt = await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        path: "src/edit.ts",
+        old: "const c = 2;",
+        new: "const c = 3;",
+        all: false,
+      }),
+    );
+    expect(receipt.replacements).toBe(1);
+    expect(receipt.diff).toContain("-const c = 2;\n+const c = 3;");
+    expect(await readFile(join(root, "src", "edit.ts"), "utf8")).toBe(
+      "const a = 1;\nconst b = 1;\nconst c = 3;\n",
+    );
+
+    const every = await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        path: "src/edit.ts",
+        old: "= 1;",
+        new: "= 0;",
+        all: true,
+      }),
+    );
+    expect(every.replacements).toBe(2);
+  });
+
+  it("moves without overwriting and deletes, but never the folder itself", async () => {
+    await writeFile(join(root, "src", "old.txt"), "x");
+    await writeFile(join(root, "src", "taken.txt"), "y");
+    expect(
+      await failureOf(
+        handlers.movePath({
+          conversationId: CONVERSATION,
+          from: "src/old.txt",
+          to: "src/taken.txt",
+        }),
+      ),
+    ).toBe("already-exists");
+    expect(
+      await failureOf(
+        handlers.movePath({ conversationId: CONVERSATION, from: "src/old.txt", to: "../away.txt" }),
+      ),
+    ).toBe("outside-folder");
+    const moved = await Effect.runPromise(
+      handlers.movePath({
+        conversationId: CONVERSATION,
+        from: "src/old.txt",
+        to: "src/sub/new.txt",
+      }),
+    );
+    expect(moved).toEqual({ from: "src/old.txt", to: "src/sub/new.txt" });
+    expect(await readFile(join(root, "src", "sub", "new.txt"), "utf8")).toBe("x");
+
+    const gone = await Effect.runPromise(
+      handlers.deletePath({ conversationId: CONVERSATION, path: "src/sub" }),
+    );
+    expect(gone.kind).toBe("directory");
+    expect(
+      await failureOf(handlers.readFile({ conversationId: CONVERSATION, path: "src/sub/new.txt" })),
+    ).toBe("not-found");
+    expect(await failureOf(handlers.deletePath({ conversationId: CONVERSATION, path: "." }))).toBe(
+      "outside-folder",
+    );
+  });
+
+  it("finds by glob and searches by regex, ignoring what git ignores", async () => {
+    await writeFile(join(root, ".gitignore"), "ignored/\n");
+    await mkdir(join(root, "ignored"), { recursive: true });
+    await writeFile(join(root, "ignored", "noise.ts"), "needle");
+    await writeFile(join(root, "src", "hay.ts"), "no\nneedle here\nno");
+
+    const found = await Effect.runPromise(
+      handlers.findFiles({ conversationId: CONVERSATION, pattern: "*.ts" }),
+    );
+    expect(found.paths).toContain("src/hay.ts");
+    expect(found.paths).not.toContain("ignored/noise.ts");
+
+    const hits = await Effect.runPromise(
+      handlers.searchFiles({ conversationId: CONVERSATION, pattern: "needle", glob: "src/**" }),
+    );
+    expect(hits.matches).toEqual([{ path: "src/hay.ts", line: 2, text: "needle here" }]);
+    expect(hits.filesSearched).toBeGreaterThan(0);
+    expect(
+      await failureOf(handlers.searchFiles({ conversationId: CONVERSATION, pattern: "(" })),
+    ).toBe("bad-pattern");
+  });
+
   it("refuses to read or write through a symlink that leaves it", async () => {
     expect(
       await failureOf(

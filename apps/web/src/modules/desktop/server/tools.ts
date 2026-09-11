@@ -33,8 +33,67 @@ export const listFolderTool = Tool.make("list_folder", {
 
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a text file on the user's computer, relative to the attached folder. Long files come " +
-    "back truncated; say so if you rely on a truncated read.",
+    "Read a file on the user's computer, relative to the attached folder. Text comes back as " +
+    "text, truncated when long; an image or PDF comes back for you to look at when you can take " +
+    "it, otherwise as extracted text or a note that you cannot.",
+  parameters: Schema.Struct({ path: Path }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const findFilesTool = Tool.make("find_files", {
+  description:
+    "Find files in the attached folder by glob, newest first: `*.ts` at any depth, " +
+    "`src/**/*.test.ts`, `{a,b}.md`. Skips what .gitignore skips. Capped, so narrow the pattern " +
+    "if the result says it was truncated.",
+  parameters: Schema.Struct({
+    pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+  }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const searchFilesTool = Tool.make("search_files", {
+  description:
+    "Search file contents in the attached folder with a regular expression. Returns matching " +
+    "lines with their file and line number; skips binary files and what .gitignore skips. Pass " +
+    "a glob to narrow which files are searched.",
+  parameters: Schema.Struct({
+    pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+    glob: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
+  }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const editLocalFileTool = Tool.make("edit_local_file", {
+  description:
+    "Replace text inside a file on the user's computer. `old` must match exactly, whitespace " +
+    "included, and exactly once unless `all` is true; include enough surrounding lines to make " +
+    "it unique. Returns a diff of what changed. The user is asked before it happens and may refuse.",
+  parameters: Schema.Struct({
+    path: Path,
+    old: Schema.String.check(Schema.isMinLength(1)),
+    new: Schema.String,
+    all: Schema.optionalKey(Schema.Boolean),
+  }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const moveLocalFileTool = Tool.make("move_local_file", {
+  description:
+    "Rename or move a file or folder within the attached folder. Never overwrites an existing " +
+    "path. The user is asked before it happens and may refuse.",
+  parameters: Schema.Struct({ from: Path, to: Path }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const deleteLocalFileTool = Tool.make("delete_local_file", {
+  description:
+    "Delete a file, or a folder and everything inside it, within the attached folder. This " +
+    "cannot be undone. The user is always asked first and may refuse.",
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -115,15 +174,28 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
         });
       });
 
+  const files = [
+    listFolderTool,
+    findFilesTool,
+    searchFilesTool,
+    readLocalFileTool,
+    writeLocalFileTool,
+    editLocalFileTool,
+    moveLocalFileTool,
+    deleteLocalFileTool,
+  ] as const;
   return {
-    toolkit: deps.commands
-      ? Toolkit.make(listFolderTool, readLocalFileTool, writeLocalFileTool, runCommandTool)
-      : Toolkit.make(listFolderTool, readLocalFileTool, writeLocalFileTool),
+    toolkit: deps.commands ? Toolkit.make(...files, runCommandTool) : Toolkit.make(...files),
     handlers: {
       list_folder: handle("list_folder", DESKTOP_TIMEOUTS.quick),
+      find_files: handle("find_files", DESKTOP_TIMEOUTS.quick),
+      search_files: handle("search_files", DESKTOP_TIMEOUTS.quick),
       read_local_file: handle("read_local_file", DESKTOP_TIMEOUTS.quick),
-      // Writes and commands wait on a person as well as a machine.
+      // Changes wait on a person as well as a machine.
       write_local_file: handle("write_local_file", DESKTOP_TIMEOUTS.command),
+      edit_local_file: handle("edit_local_file", DESKTOP_TIMEOUTS.command),
+      move_local_file: handle("move_local_file", DESKTOP_TIMEOUTS.command),
+      delete_local_file: handle("delete_local_file", DESKTOP_TIMEOUTS.command),
       ...(deps.commands ? { run_command: handle("run_command", DESKTOP_TIMEOUTS.command) } : {}),
     },
   };

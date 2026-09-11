@@ -17,6 +17,14 @@ export const LIMITS = {
   entries: 1_000,
   /** Bytes accepted in a single write. */
   writeBytes: 2_000_000,
+  /** Paths returned by one find. Sorted by modification time, newest first. */
+  foundPaths: 100,
+  /** Matching lines returned by one search, across all files. */
+  matches: 200,
+  /** Characters kept of one matching line. */
+  matchChars: 400,
+  /** Bytes of one binary file (image or document) sent to the model. */
+  binaryBytes: 20 * 1024 * 1024,
 } as const;
 
 export const DirectoryEntry = Schema.Struct({
@@ -51,6 +59,72 @@ export const WriteReceipt = Schema.Struct({
 });
 export type WriteReceipt = typeof WriteReceipt.Type;
 
+/**
+ * A file the model reads as bytes rather than text: an image for a vision
+ * model, a PDF for one that accepts documents or for the server's parser.
+ * Base64 because the site's transport is JSON and the server's is too.
+ */
+export const BinaryContents = Schema.Struct({
+  path: Schema.String,
+  mediaType: Schema.String,
+  base64: Schema.String,
+  bytes: Schema.Int,
+});
+export type BinaryContents = typeof BinaryContents.Type;
+
+/**
+ * What an edit did. The diff is the model's proof that the change landed
+ * where it meant it to; without it a wrong-but-unique match goes unnoticed
+ * until something breaks.
+ */
+export const EditReceipt = Schema.Struct({
+  path: Schema.String,
+  replacements: Schema.Int,
+  /** Unified diff of the change, capped like a read. */
+  diff: Schema.String,
+  truncated: Schema.Boolean,
+});
+export type EditReceipt = typeof EditReceipt.Type;
+
+export const MoveReceipt = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+});
+export type MoveReceipt = typeof MoveReceipt.Type;
+
+export const DeleteReceipt = Schema.Struct({
+  path: Schema.String,
+  kind: Schema.Literals(["file", "directory"]),
+});
+export type DeleteReceipt = typeof DeleteReceipt.Type;
+
+export const FoundPaths = Schema.Struct({
+  pattern: Schema.String,
+  /** Relative to the folder root, newest first. */
+  paths: Schema.Array(Schema.String),
+  /** True when more than `LIMITS.foundPaths` matched. */
+  truncated: Schema.Boolean,
+});
+export type FoundPaths = typeof FoundPaths.Type;
+
+export const SearchMatch = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Int,
+  /** The matching line, capped at `LIMITS.matchChars`. */
+  text: Schema.String,
+});
+export type SearchMatch = typeof SearchMatch.Type;
+
+export const SearchMatches = Schema.Struct({
+  pattern: Schema.String,
+  matches: Schema.Array(SearchMatch),
+  /** Files searched, so an empty result reads as "nothing found" not "nothing looked at". */
+  filesSearched: Schema.Int,
+  /** True when more than `LIMITS.matches` lines matched. */
+  truncated: Schema.Boolean,
+});
+export type SearchMatches = typeof SearchMatches.Type;
+
 export const CommandOutput = Schema.Struct({
   exitCode: Schema.Int,
   output: Schema.String,
@@ -78,6 +152,15 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
     "not-a-directory",
     /** The file is not text, so reading it as text would only produce noise. */
     "not-text",
+    /** The file is neither an image nor a document the model could take. */
+    "not-binary",
+    /** An edit's old text was not found, or was found more than once. */
+    "no-match",
+    "ambiguous-match",
+    /** A move's destination already exists. */
+    "already-exists",
+    /** The pattern could not be compiled. */
+    "bad-pattern",
     "too-large",
     /** Commands are unavailable because the sandbox is not ready. */
     "sandbox-unavailable",

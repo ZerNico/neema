@@ -46,6 +46,16 @@ const refusalSummary = (reason: string) => {
       return "That file does not exist";
     case "not-text":
       return "That is not a text file";
+    case "not-binary":
+      return "That is not an image or a PDF";
+    case "no-match":
+      return "The text to replace was not found";
+    case "ambiguous-match":
+      return "The text to replace appears more than once";
+    case "already-exists":
+      return "That path already exists";
+    case "bad-pattern":
+      return "That pattern could not be read";
     case "sandbox-unavailable":
       return "Commands are unavailable";
     case "timed-out":
@@ -63,12 +73,76 @@ const execute = (
   activity: Extract<ToolActivity, { family: "desktop" }>,
 ): Effect.Effect<DesktopToolResult> => {
   const args = activity.args ?? {};
-  const path = typeof args.path === "string" ? args.path : "";
-  const text = typeof args.text === "string" ? args.text : "";
-  const command = typeof args.command === "string" ? args.command : "";
+  const str = (value: unknown) => (typeof value === "string" ? value : "");
+  const path = str(args.path);
+  const text = str(args.text);
+  const command = str(args.command);
+  const pattern = str(args.pattern);
 
   const call = (): Effect.Effect<DesktopToolResult, DesktopError> => {
     switch (activity.name) {
+      case "find_files":
+        return Effect.map(client.findFiles({ conversationId, pattern }), (found) => ({
+          v: 1 as const,
+          ok: true,
+          summary: `Found ${found.paths.length} ${found.paths.length === 1 ? "file" : "files"} matching ${found.pattern}`,
+          detail: found.paths.length === 0 ? "(no matches)" : found.paths.join("\n"),
+          truncated: found.truncated,
+        }));
+      case "search_files":
+        return Effect.map(
+          client.searchFiles({
+            conversationId,
+            pattern,
+            ...(str(args.glob) ? { glob: str(args.glob) } : {}),
+          }),
+          (hits) => ({
+            v: 1 as const,
+            ok: true,
+            summary: `${hits.matches.length} ${hits.matches.length === 1 ? "match" : "matches"} for ${hits.pattern} in ${hits.filesSearched} files`,
+            detail:
+              hits.matches.length === 0
+                ? "(no matches)"
+                : hits.matches.map((hit) => `${hit.path}:${hit.line}: ${hit.text}`).join("\n"),
+            truncated: hits.truncated,
+          }),
+        );
+      case "edit_local_file":
+        return Effect.map(
+          client.editFile({
+            conversationId,
+            path,
+            old: str(args.old),
+            new: str(args.new),
+            all: args.all === true,
+          }),
+          (receipt) => ({
+            v: 1 as const,
+            ok: true,
+            summary: `Edited ${receipt.path}${receipt.replacements > 1 ? ` (${receipt.replacements} places)` : ""}`,
+            detail: receipt.diff,
+            truncated: receipt.truncated,
+          }),
+        );
+      case "move_local_file":
+        return Effect.map(
+          client.movePath({ conversationId, from: str(args.from), to: str(args.to) }),
+          (receipt) => ({
+            v: 1 as const,
+            ok: true,
+            summary: `Moved ${receipt.from} to ${receipt.to}`,
+            detail: `${receipt.from} is now ${receipt.to}.`,
+            truncated: false,
+          }),
+        );
+      case "delete_local_file":
+        return Effect.map(client.deletePath({ conversationId, path }), (receipt) => ({
+          v: 1 as const,
+          ok: true,
+          summary: `Deleted ${receipt.path}`,
+          detail: `${receipt.kind === "directory" ? "Folder" : "File"} ${receipt.path} deleted.`,
+          truncated: false,
+        }));
       case "list_folder":
         return Effect.map(client.listDirectory({ conversationId, path }), (listing) => ({
           v: 1 as const,
@@ -89,7 +163,22 @@ const execute = (
           summary: `Read ${file.path}`,
           detail: file.text,
           truncated: file.truncated,
-        }));
+        })).pipe(
+          // Not text is not a failure yet: an image or a PDF goes to the model
+          // as bytes, and the server decides what this model can do with it.
+          Effect.catchIf(
+            (error) => error.reason === "not-text",
+            () =>
+              Effect.map(client.readBinary({ conversationId, path }), (file) => ({
+                v: 1 as const,
+                ok: true,
+                summary: `Read ${file.path}`,
+                detail: `${file.mediaType}, ${file.bytes} bytes`,
+                truncated: false,
+                file: { mediaType: file.mediaType, base64: file.base64, name: file.path },
+              })),
+          ),
+        );
       case "write_local_file":
         return Effect.map(client.writeFile({ conversationId, path, text }), (receipt) => ({
           v: 1 as const,

@@ -1,10 +1,15 @@
 import {
-  Folder01Icon,
-  TerminalIcon,
+  Delete02Icon,
+  Edit02Icon,
   File01Icon,
+  Folder01Icon,
+  FolderSearchIcon,
+  FolderTransferIcon,
   PencilEdit02Icon,
+  SearchList01Icon,
+  TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import type { ApprovalChoice, ApprovalKind } from "~/modules/desktop/client/approvals.ts";
@@ -20,17 +25,34 @@ import {
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
-const ICONS = {
+const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   list_folder: Folder01Icon,
+  find_files: FolderSearchIcon,
+  search_files: SearchList01Icon,
   read_local_file: File01Icon,
   write_local_file: PencilEdit02Icon,
+  edit_local_file: Edit02Icon,
+  move_local_file: FolderTransferIcon,
+  delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
-} as const;
+};
 
+const text = (value: unknown) => (typeof value === "string" ? value : "");
+
+/** The argument a reader would want to see: the path, the pattern, the command. */
 const argText = (activity: DesktopToolActivity) => {
   const args = activity.args ?? {};
-  const value = activity.name === "run_command" ? args.command : args.path;
-  return typeof value === "string" ? value : "";
+  switch (activity.name) {
+    case "run_command":
+      return text(args.command);
+    case "find_files":
+    case "search_files":
+      return text(args.pattern);
+    case "move_local_file":
+      return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
+    default:
+      return text(args.path);
+  }
 };
 
 /** Names the thing acted on, never the machinery that acted. */
@@ -39,14 +61,43 @@ const runningLabel = (activity: DesktopToolActivity) => {
   switch (activity.name) {
     case "list_folder":
       return what && what !== "." ? `Listing ${what}` : "Listing the folder";
+    case "find_files":
+      return what ? `Finding ${what}` : "Finding files";
+    case "search_files":
+      return what ? `Searching for ${what}` : "Searching files";
     case "read_local_file":
       return what ? `Reading ${what}` : "Reading a file";
     case "write_local_file":
       return what ? `Writing ${what}` : "Writing a file";
+    case "edit_local_file":
+      return what ? `Editing ${what}` : "Editing a file";
+    case "move_local_file":
+      return what ? `Moving ${what}` : "Moving a file";
+    case "delete_local_file":
+      return what ? `Deleting ${what}` : "Deleting a file";
     case "run_command":
       return what ? `Running ${what}` : "Running a command";
   }
 };
+
+/** What the reader is being asked to allow, in their words. */
+const approvalTitle = (activity: DesktopToolActivity, kind: ApprovalKind) => {
+  switch (kind) {
+    case "command":
+      return "Run on this computer";
+    case "delete":
+      return "Delete from this computer";
+    default:
+      return activity.name === "move_local_file"
+        ? "Move on this computer"
+        : activity.name === "write_local_file"
+          ? "Write this file"
+          : "Change this file";
+  }
+};
+
+const blanketLabel = (kind: ApprovalKind) =>
+  kind === "command" ? "Allow commands for this chat" : "Allow edits for this chat";
 
 export interface DesktopApprovalRequest {
   readonly kind: ApprovalKind;
@@ -79,9 +130,7 @@ function ApprovalCard({
             className="size-4 shrink-0"
             aria-hidden
           />
-          <span className="min-w-0 truncate">
-            {approval.kind === "command" ? "Run on this computer" : "Change this file"}
-          </span>
+          <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind)}</span>
         </div>
         {what ? (
           <pre className="bg-muted overflow-x-auto rounded-xl p-2 text-xs whitespace-pre-wrap">
@@ -95,11 +144,12 @@ function ApprovalCard({
           <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
             Deny
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
-            {approval.kind === "command"
-              ? "Allow commands for this chat"
-              : "Allow edits for this chat"}
-          </Button>
+          {/* A delete is asked about every time; there is no blanket for it. */}
+          {approval.kind !== "delete" ? (
+            <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
+              {blanketLabel(approval.kind)}
+            </Button>
+          ) : null}
         </div>
       </CardContent>
     </Card>

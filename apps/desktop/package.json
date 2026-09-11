@@ -12,7 +12,8 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.75",
     "@chat/desktop-rpc": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "ignore": "5.3.2"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

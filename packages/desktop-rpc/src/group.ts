@@ -1,12 +1,18 @@
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { Schema } from "effect";
 import {
+  BinaryContents,
   CommandOutput,
+  DeleteReceipt,
   DesktopError,
   DirectoryListing,
+  EditReceipt,
   FileContents,
   FolderStatus,
+  FoundPaths,
+  MoveReceipt,
   SandboxAvailability,
+  SearchMatches,
   WriteReceipt,
 } from "./schema.ts";
 
@@ -70,6 +76,63 @@ export const DesktopRpcs = RpcGroup.make(
       text: Schema.String,
     },
     success: WriteReceipt,
+    error: DesktopError,
+  }),
+
+  /** The raw bytes of an image or document, for a model that can take them. */
+  Rpc.make("readBinary", {
+    payload: { conversationId: Schema.String, path: Schema.String },
+    success: BinaryContents,
+    error: DesktopError,
+  }),
+
+  /**
+   * Replaces `old` with `new` in a file. Exact match, and unless `all` is set,
+   * exactly one occurrence: a fuzzy or first-match edit lands in the wrong
+   * place quietly, and the model can widen its anchor when told to.
+   */
+  Rpc.make("editFile", {
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      old: Schema.String,
+      new: Schema.String,
+      all: Schema.Boolean,
+    },
+    success: EditReceipt,
+    error: DesktopError,
+  }),
+
+  /** Renames or relocates within the folder. Never overwrites. */
+  Rpc.make("movePath", {
+    payload: { conversationId: Schema.String, from: Schema.String, to: Schema.String },
+    success: MoveReceipt,
+    error: DesktopError,
+  }),
+
+  /** Removes a file, or a directory and everything under it. */
+  Rpc.make("deletePath", {
+    payload: { conversationId: Schema.String, path: Schema.String },
+    success: DeleteReceipt,
+    error: DesktopError,
+  }),
+
+  /** Files whose path matches a glob, `.gitignore` respected. */
+  Rpc.make("findFiles", {
+    payload: { conversationId: Schema.String, pattern: Schema.String },
+    success: FoundPaths,
+    error: DesktopError,
+  }),
+
+  /** Lines matching a regular expression, `.gitignore` respected. */
+  Rpc.make("searchFiles", {
+    payload: {
+      conversationId: Schema.String,
+      pattern: Schema.String,
+      /** Narrows to paths matching this glob; absent searches everything. */
+      glob: Schema.optionalKey(Schema.String),
+    },
+    success: SearchMatches,
     error: DesktopError,
   }),
 
