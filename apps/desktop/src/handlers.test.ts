@@ -135,6 +135,16 @@ describe("once a folder is attached", () => {
     expect(await readFile(join(root, "src", "new", "note.md"), "utf8")).toBe("hello");
   });
 
+  it("refuses to read a binary file as text", async () => {
+    await writeFile(
+      join(root, "src", "logo.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a]),
+    );
+    expect(
+      await failureOf(handlers.readFile({ conversationId: CONVERSATION, path: "src/logo.png" })),
+    ).toBe("not-text");
+  });
+
   it("refuses to read or write through a symlink that leaves it", async () => {
     expect(
       await failureOf(

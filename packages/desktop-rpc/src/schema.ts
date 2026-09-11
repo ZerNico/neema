@@ -76,6 +76,8 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
     "not-found",
     "not-a-file",
     "not-a-directory",
+    /** The file is not text, so reading it as text would only produce noise. */
+    "not-text",
     "too-large",
     /** Commands are unavailable because the sandbox is not ready. */
     "sandbox-unavailable",

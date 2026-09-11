@@ -51,11 +51,16 @@ export type DesktopToolResult = typeof DesktopToolResult.Type;
  */
 const TRANSCRIPT_DETAIL_CHARS = 2_000;
 
+// Postgres refuses a NUL inside jsonb, and a binary file read as text is full
+// of them. The page is untrusted input, so the row is made safe here rather
+// than trusting every reader on the machine to have been careful.
+const storable = (text: string) => text.replaceAll("\u0000", "");
+
 export const forTranscript = (result: DesktopToolResult): DesktopToolResult => ({
   v: 1,
   ok: result.ok,
-  summary: result.summary,
-  detail: result.detail.slice(0, TRANSCRIPT_DETAIL_CHARS),
+  summary: storable(result.summary),
+  detail: storable(result.detail.slice(0, TRANSCRIPT_DETAIL_CHARS)),
   truncated: result.truncated || result.detail.length > TRANSCRIPT_DETAIL_CHARS,
   ...(result.violations && result.violations.length > 0
     ? { violations: [...result.violations] }

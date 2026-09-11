@@ -44,6 +44,8 @@ const refusalSummary = (reason: string) => {
       return "That path is outside the folder";
     case "not-found":
       return "That file does not exist";
+    case "not-text":
+      return "That is not a text file";
     case "sandbox-unavailable":
       return "Commands are unavailable";
     case "timed-out":

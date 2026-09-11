@@ -139,14 +139,26 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const text = yield* Effect.tryPromise({
-            try: () => readFile(target.absolute, "utf8"),
+          const bytes = yield* Effect.tryPromise({
+            try: () => readFile(target.absolute),
             catch: () =>
               new DesktopError({
                 reason: "failed",
                 message: `Could not read ${target.relative}.`,
               }),
           });
+          // A NUL in the first few kilobytes is what `file` and git use to
+          // call something binary. Decoding it anyway would hand the model
+          // noise and the server a string Postgres refuses.
+          if (bytes.subarray(0, 8_000).includes(0)) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-text",
+                message: `${target.relative} is not a text file.`,
+              }),
+            );
+          }
+          const text = bytes.toString("utf8");
           // Capped here rather than at the caller: an uncapped read would go
           // into the transcript and, on models without native tool calling,
           // into the prompt as prose.
