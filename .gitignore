@@ -13,3 +13,6 @@ coverage
 
 # local blob storage (uploaded attachments)
 .data/
+
+# Electron shell bundle
+apps/desktop/dist/

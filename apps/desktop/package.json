@@ -1,0 +1,23 @@
+{
+  "name": "@chat/desktop",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm exec vitest run",
+    "build": "node build.mjs",
+    "start": "pnpm build && electron dist/main.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.75",
+    "@chat/desktop-rpc": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "electron": "^44.3.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -38,6 +38,8 @@ minimumReleaseAgeExclude:
 # (protobufjs) — they have been off since before pnpm required this list, and
 # the integration suites that pull them in pass without them.
 allowBuilds:
+  # Fetches and links its platform binary; without it there is no app to run.
+  electron: true
   esbuild: true
   cpu-features: false
   msgpackr-extract: false

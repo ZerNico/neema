@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Connect</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        height: 100vh;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 320px;
+      }
+      h1 {
+        font-size: 17px;
+        margin: 0;
+      }
+      p {
+        margin: 0;
+        font-size: 13px;
+        opacity: 0.7;
+        line-height: 1.4;
+      }
+      input {
+        font: inherit;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgb(128 128 128 / 0.4);
+        background: transparent;
+        color: inherit;
+      }
+      button {
+        font: inherit;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 0;
+        background: rgb(120 120 128 / 0.24);
+        color: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .error {
+        color: #d1495b;
+        font-size: 13px;
+        min-height: 1em;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="form">
+      <h1>Connect to your chat server</h1>
+      <p>The address you use in the browser. This app will only share files with that server.</p>
+      <input id="url" placeholder="chat.example.com" autofocus spellcheck="false" />
+      <p class="error" id="error"></p>
+      <button id="submit" type="submit">Connect</button>
+    </form>
+    <script>
+      const form = document.getElementById("form");
+      const url = document.getElementById("url");
+      const error = document.getElementById("error");
+      const submit = document.getElementById("submit");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        error.textContent = "";
+        submit.disabled = true;
+        const result = await window.__chatConnect.connect(url.value);
+        if (!result.ok) {
+          error.textContent = result.message;
+          submit.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
