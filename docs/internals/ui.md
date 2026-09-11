@@ -48,6 +48,15 @@ false`), so a page body is written against data already there. Where a loader ca
   `role="status"` on its own — pass `aria-hidden` where a control already has a label or `aria-busy`, or
   assistive tech announces "Loading" twice.
 
+## The detail panel
+
+- `DetailPanelRequest` has an `actions` slot the shell renders pinned under the panel
+  header, outside the scroller, and a `body` it renders inside. A body must never pin
+  itself: the desktop rail and the mobile sheet pad their scrollers differently, so a
+  body sticking to the scroll edge can only be right in one of them, and the agent draft
+  spent two rounds of negative margins learning that. Actions that submit a form in the
+  body reach it with the `form` attribute rather than moving back inside it.
+
 ## Errors and confirmations
 
 - Inline errors are `FieldError` (`role="alert"` + destructive text, null when empty) — override size with

@@ -26,6 +26,13 @@ export interface DetailPanelRequest {
   title: string;
   /** Snapshotted like the body; live owners refresh both after committing data. */
   subtitle?: ReactNode;
+  /**
+   * Pinned under the panel header, outside the scroller. The shell owns this
+   * region so a body never has to position itself against padding it does not
+   * control: the rail and the mobile sheet pad their scrollers differently, and
+   * a body sticking itself to the scroll edge can only be right in one of them.
+   */
+  actions?: ReactNode;
   /** Props are snapshotted at open time, then updated by re-open or refresh. */
   body: ReactNode;
 }
@@ -181,10 +188,11 @@ function MobilePanel() {
             <p className="text-muted-foreground text-xs">{request.subtitle}</p>
           ) : null}
         </SheetHeader>
-        {/* Horizontal padding only on the scroller: a body's sticky header must
-            sit flush with the scroll edge, or content shows through above it. */}
+        {request?.actions ? (
+          <div className="shrink-0 border-b px-6 pb-3">{request.actions}</div>
+        ) : null}
         <div key={request?.id} className="min-h-0 flex-1 overflow-y-auto px-6">
-          <div className="pb-6">{request?.body}</div>
+          <div className="py-4">{request?.body}</div>
         </div>
       </SheetContent>
     </Sheet>
@@ -302,6 +310,9 @@ function DesktopPanel({ className }: { className: string | undefined }) {
             <TooltipContent>Close panel</TooltipContent>
           </Tooltip>
         </div>
+        {request.actions ? (
+          <div className="shrink-0 border-b px-4 py-3">{request.actions}</div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-y-auto px-4">
           <div className="py-4">{request.body}</div>
         </div>
