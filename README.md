@@ -10,7 +10,7 @@ A self-hosted, ChatGPT-style chat app built as a modular monolith.
 - **Auth**: Better Auth (Drizzle adapter, admin plugin). The **first registered user becomes the instance admin**.
 - **AI**: OpenRouter / OpenAI-compatible providers via `@effect/ai-openrouter`; providers and models are managed in the admin panel, with autocomplete backed by each provider's live `/models` catalog
 - **Tests**: Vitest 4, `@effect/vitest`, Testing Library + jsdom, Testcontainers
-- **Lint/format**: oxlint + oxfmt
+- **Lint/format**: oxlint (`oxlint.config.ts`) + oxfmt, with `eslint-plugin-slop` loaded as an oxlint JS plugin for recently changed lines
 
 ## Getting started
 
