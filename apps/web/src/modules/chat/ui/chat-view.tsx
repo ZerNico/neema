@@ -411,7 +411,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
   // Runs the model's local tool calls on this machine and reports back, once
   // the reader has allowed anything that changes it.
-  const desktopApprovals = useDesktopApprovals();
+  const desktopApprovals = useDesktopApprovals(conversationId);
   useDesktopTools(conversationId, stream.tools, desktopApprovals);
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
@@ -1242,6 +1242,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               ref={composer}
               conversationId={conversationId}
               mode={{ kind: "fixed", value: data.conversation.mode }}
+              permissions={{
+                level: desktopApprovals.level,
+                onLevelChange: desktopApprovals.setLevel,
+              }}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
                 sendMutation.mutateAsync({
                   content,

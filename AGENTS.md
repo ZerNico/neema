@@ -80,7 +80,8 @@ skipped one on purpose.
 - **Display path**: the live SSE stream, the conversation-detail loader on reload,
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
-- **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft.
+- **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
+  desktop.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -159,6 +160,8 @@ skipped one on purpose.
   markdown plugins.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
+- `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
+  handler and its timeout, containment, consent levels.
 
 ## Version pins
 

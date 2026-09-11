@@ -237,8 +237,7 @@ export const useDesktopTools = (
     );
     for (const activity of pending.slice(0, CONVERSATION_LIMIT)) {
       handled.current.add(activity.callId);
-      const kind = approvalKind(activity.name);
-      const allowed = kind ? ask(activity.callId, kind) : Promise.resolve(true);
+      const allowed = ask(activity.callId, approvalKind(activity.name));
       void allowed
         .then((permitted) =>
           Effect.runPromise(

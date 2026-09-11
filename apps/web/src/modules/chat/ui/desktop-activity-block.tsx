@@ -12,7 +12,7 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
-import type { ApprovalChoice, ApprovalKind } from "~/modules/desktop/client/approvals.ts";
+import type { ApprovalChoice, PendingKind } from "~/modules/desktop/client/approvals.ts";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/card.tsx";
 import {
@@ -81,8 +81,14 @@ const runningLabel = (activity: DesktopToolActivity) => {
 };
 
 /** What the reader is being asked to allow, in their words. */
-const approvalTitle = (activity: DesktopToolActivity, kind: ApprovalKind) => {
+const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
   switch (kind) {
+    case "read":
+      return activity.name === "list_folder"
+        ? "List this folder"
+        : activity.name === "find_files" || activity.name === "search_files"
+          ? "Search this computer"
+          : "Read this file";
     case "command":
       return "Run on this computer";
     case "delete":
@@ -96,11 +102,11 @@ const approvalTitle = (activity: DesktopToolActivity, kind: ApprovalKind) => {
   }
 };
 
-const blanketLabel = (kind: ApprovalKind) =>
+const blanketLabel = (kind: PendingKind) =>
   kind === "command" ? "Allow commands for this chat" : "Allow edits for this chat";
 
 export interface DesktopApprovalRequest {
-  readonly kind: ApprovalKind;
+  readonly kind: PendingKind;
   readonly decide: (choice: ApprovalChoice) => void;
 }
 
@@ -144,8 +150,9 @@ function ApprovalCard({
           <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
             Deny
           </Button>
-          {/* A delete is asked about every time; there is no blanket for it. */}
-          {approval.kind !== "delete" ? (
+          {/* A delete is asked about every time; there is no blanket for it.
+              A read is only asked under "ask each time", which is the blanket. */}
+          {approval.kind !== "delete" && approval.kind !== "read" ? (
             <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
               {blanketLabel(approval.kind)}
             </Button>

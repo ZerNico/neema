@@ -18,25 +18,76 @@ export { approvalKind, type ApprovalKind };
 
 export type ApprovalChoice = "allow" | "deny" | "allow-rest";
 
+/**
+ * How much the reader wants to be asked, per conversation.
+ *
+ * - `manual`: every call, reads included.
+ * - `auto`: changes and commands; reads run. The default.
+ * - `skip`: nothing.
+ *
+ * A delete is asked about at every level. It is the one change nothing can
+ * undo, and the same rule the desktop assistants this mirrors keep.
+ */
+export type PermissionLevel = "manual" | "auto" | "skip";
+
+/** What a card may be asking about: a change kind, or a read under `manual`. */
+export type PendingKind = ApprovalKind | "read";
+
+export const PERMISSION_LEVELS: ReadonlyArray<{
+  value: PermissionLevel;
+  label: string;
+  description: string;
+}> = [
+  { value: "manual", label: "Ask each time", description: "Every read, change and command." },
+  { value: "auto", label: "Ask before changes", description: "Reads run on their own." },
+  { value: "skip", label: "Don’t ask", description: "Everything runs. Deletes still ask." },
+];
+
+const KEY_PREFIX = "desktop.permissions.";
+
+const readLevel = (conversationId: string): PermissionLevel => {
+  if (typeof window === "undefined") return "auto";
+  const stored = window.localStorage.getItem(KEY_PREFIX + conversationId);
+  return stored === "manual" || stored === "skip" ? stored : "auto";
+};
+
 export interface DesktopApprovals {
   /** What each waiting call is asking permission to do, by call id. */
-  readonly pending: ReadonlyMap<string, ApprovalKind>;
+  readonly pending: ReadonlyMap<string, PendingKind>;
   /** Kinds already allowed for the rest of this conversation. */
   readonly blanket: Readonly<Record<ApprovalKind, boolean>>;
-  /** Resolves once a decision is made, immediately under a blanket grant. */
-  readonly ask: (callId: string, kind: ApprovalKind) => Promise<boolean>;
+  readonly level: PermissionLevel;
+  readonly setLevel: (level: PermissionLevel) => void;
+  /**
+   * Resolves once a decision is made, immediately when the level or a blanket
+   * grant already answers it. `kind` null is a read, asked about only under
+   * `manual`.
+   */
+  readonly ask: (callId: string, kind: ApprovalKind | null) => Promise<boolean>;
   readonly decide: (callId: string, choice: ApprovalChoice) => void;
   /** Abandons a request whose call is no longer live, without deciding it. */
   readonly forget: (callId: string) => void;
 }
 
-export const useDesktopApprovals = (): DesktopApprovals => {
-  const [pending, setPending] = useState<ReadonlyMap<string, ApprovalKind>>(new Map());
+export const useDesktopApprovals = (conversationId: string): DesktopApprovals => {
+  const [pending, setPending] = useState<ReadonlyMap<string, PendingKind>>(new Map());
   const [blanket, setBlanket] = useState<Record<ApprovalKind, boolean>>({
     edit: false,
     delete: false,
     command: false,
   });
+  // Remembered per conversation on this machine, beside the folder itself:
+  // the server has no say in what this computer asks its owner.
+  const [level, setLevelState] = useState<PermissionLevel>(() => readLevel(conversationId));
+  const levelRef = useRef(level);
+  const setLevel = useCallback(
+    (next: PermissionLevel) => {
+      levelRef.current = next;
+      setLevelState(next);
+      window.localStorage.setItem(KEY_PREFIX + conversationId, next);
+    },
+    [conversationId],
+  );
   // Resolvers cannot live in state: deciding must not depend on a render
   // having happened, and a re-render must not lose the parked promise.
   const waiting = useRef(new Map<string, (allowed: boolean) => void>());
@@ -54,14 +105,21 @@ export const useDesktopApprovals = (): DesktopApprovals => {
   }, []);
 
   const ask = useCallback(
-    (callId: string, kind: ApprovalKind) =>
+    (callId: string, kind: ApprovalKind | null) =>
       new Promise<boolean>((resolve) => {
-        if (granted.current[kind]) {
+        const current = levelRef.current;
+        const answered =
+          kind === null
+            ? current !== "manual"
+            : kind === "delete"
+              ? false
+              : current === "skip" || granted.current[kind];
+        if (answered) {
           resolve(true);
           return;
         }
         waiting.current.set(callId, resolve);
-        setPending((current) => new Map(current).set(callId, kind));
+        setPending((pendingNow) => new Map(pendingNow).set(callId, kind ?? "read"));
       }),
     [],
   );
@@ -71,7 +129,7 @@ export const useDesktopApprovals = (): DesktopApprovals => {
       if (choice === "allow-rest") {
         const kind = pending.get(callId);
         // A delete is asked about every time, whatever was allowed before.
-        if (kind && kind !== "delete") {
+        if (kind && kind !== "delete" && kind !== "read") {
           granted.current = { ...granted.current, [kind]: true };
           setBlanket(granted.current);
           // Everything else already waiting on that kind is answered too, so a
@@ -88,7 +146,7 @@ export const useDesktopApprovals = (): DesktopApprovals => {
   const forget = useCallback((callId: string) => settle(callId, false), [settle]);
 
   return useMemo(
-    () => ({ pending, blanket, ask, decide, forget }),
-    [pending, blanket, ask, decide, forget],
+    () => ({ pending, blanket, level, setLevel, ask, decide, forget }),
+    [pending, blanket, level, setLevel, ask, decide, forget],
   );
 };

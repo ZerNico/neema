@@ -1,15 +1,23 @@
-import { Alert01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
+import { Alert01Icon, Folder01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SandboxAvailability } from "@chat/desktop-rpc";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
+import { PERMISSION_LEVELS, type PermissionLevel } from "../client/approvals.ts";
 import type { FolderState } from "../client/bridge.ts";
+
+export interface PermissionControl {
+  readonly level: PermissionLevel;
+  readonly onLevelChange: (level: PermissionLevel) => void;
+}
 
 /**
  * A slim strip tucked under the composer, slightly narrower so it reads as
@@ -24,7 +32,14 @@ import type { FolderState } from "../client/bridge.ts";
  * decision and the folder state, so the two never disagree about whether a
  * send is possible.
  */
-export function FolderStrip({ folder }: { folder: FolderState }) {
+export function FolderStrip({
+  folder,
+  permissions,
+}: {
+  folder: FolderState;
+  /** Absent before the conversation exists: there is nothing to ask about yet. */
+  permissions?: PermissionControl | undefined;
+}) {
   const { status, busy } = folder;
   // No folder is the same problem as a lost one: nothing to work on yet.
   const attention = status.kind !== "attached";
@@ -79,6 +94,7 @@ export function FolderStrip({ folder }: { folder: FolderState }) {
               </DropdownMenuContent>
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
+            {permissions ? <PermissionPicker {...permissions} /> : null}
           </>
         )}
       </div>
@@ -120,5 +136,48 @@ function SandboxNotice({
     >
       {state.kind === "missing-deps" ? "Commands unavailable" : "Commands not supported here"}
     </span>
+  );
+}
+
+/**
+ * How much this chat asks before acting. Lives in the strip because it is a
+ * property of the folder relationship, not of the composer: the same setting
+ * a reader would look for beside the folder name.
+ */
+function PermissionPicker({ level, onLevelChange }: PermissionControl) {
+  const current = PERMISSION_LEVELS.find((option) => option.value === level)!;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
+            aria-label={`Permissions: ${current.label}`}
+          />
+        }
+      >
+        <HugeiconsIcon icon={Shield01Icon} strokeWidth={2} className="size-3.5" />
+        <span className="truncate">{current.label}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup
+          value={level}
+          onValueChange={(value) => {
+            if (value === "manual" || value === "auto" || value === "skip") onLevelChange(value);
+          }}
+        >
+          {PERMISSION_LEVELS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              <span className="flex flex-col">
+                <span>{option.label}</span>
+                <span className="text-muted-foreground text-xs">{option.description}</span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

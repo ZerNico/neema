@@ -7,7 +7,7 @@ import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
 import { DRAFT_CONVERSATION, useDesktop, useFolder } from "~/modules/desktop/client/bridge.ts";
-import { FolderStrip } from "~/modules/desktop/ui/folder-strip.tsx";
+import { FolderStrip, type PermissionControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
 export interface ComposerHandle {
@@ -52,6 +52,8 @@ interface ComposerProps {
     | { kind: "choose"; value: ConversationMode; onChange: (mode: ConversationMode) => void }
     | { kind: "fixed"; value: ConversationMode }
     | undefined;
+  /** How much a work chat asks before acting. Only an existing chat has one. */
+  permissions?: PermissionControl | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -69,6 +71,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     initialSkillId,
     conversationId,
     mode,
+    permissions,
   },
   ref,
 ) {
@@ -178,7 +181,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       />
       {/* Under the composer and inset, so it reads as part of it. Only a work
           chat has a folder to show, and only the desktop app can show one. */}
-      {working && folder ? <FolderStrip folder={folder} /> : null}
+      {working && folder ? <FolderStrip folder={folder} permissions={permissions} /> : null}
     </div>
   );
 });
