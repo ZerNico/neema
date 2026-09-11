@@ -18,6 +18,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers =>
     folderStatus: unimplemented("folderStatus"),
     chooseFolder: unimplemented("chooseFolder"),
     detachFolder: unimplemented("detachFolder"),
+    rebindFolder: unimplemented("rebindFolder"),
     listDirectory: unimplemented("listDirectory"),
     readFile: unimplemented("readFile"),
     writeFile: unimplemented("writeFile"),

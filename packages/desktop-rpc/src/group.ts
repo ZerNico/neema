@@ -41,6 +41,16 @@ export const DesktopRpcs = RpcGroup.make(
     success: Schema.Void,
   }),
 
+  /**
+   * Moves a grant from one key to another, which is how a folder picked before
+   * the first message survives: a new chat has no id yet, so the strip attaches
+   * under a draft key and rebinds once the conversation exists.
+   */
+  Rpc.make("rebindFolder", {
+    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    success: FolderStatus,
+  }),
+
   Rpc.make("listDirectory", {
     payload: { conversationId: Schema.String, path: Schema.String },
     success: DirectoryListing,

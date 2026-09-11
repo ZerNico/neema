@@ -79,6 +79,18 @@ export const makeHandlers = (shell: Shell) =>
 
       detachFolder: ({ conversationId }) => grants.forget(conversationId),
 
+      rebindFolder: ({ fromConversationId, toConversationId }) =>
+        Effect.gen(function* () {
+          const folder = yield* grants.lookup(fromConversationId);
+          // Nothing under the draft key is the ordinary case: the chat was
+          // started without picking a folder first.
+          if (folder !== null) {
+            yield* grants.remember(toConversationId, folder);
+            yield* grants.forget(fromConversationId);
+          }
+          return yield* status(toConversationId);
+        }),
+
       listDirectory: ({ conversationId, path }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);

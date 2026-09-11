@@ -42,6 +42,7 @@ import {
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
+import { rebindDraftFolder } from "~/modules/desktop/client/bridge.ts";
 import { agentIcon } from "./context-picker.tsx";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
@@ -1188,6 +1189,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             ) : null}
             <Composer
               ref={composer}
+              conversationId={conversationId}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
                 sendMutation.mutateAsync({
                   content,
@@ -1326,6 +1328,9 @@ export function NewChatView({
     // up to where the user left it.
     onError: () => setSending(false),
     onSuccess: async (result) => {
+      // A folder picked before the first message was attached to the draft key;
+      // move it onto the conversation that message just created.
+      rebindDraftFolder(result.conversationId);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
         slide.current,

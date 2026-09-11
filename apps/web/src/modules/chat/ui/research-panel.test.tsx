@@ -321,9 +321,7 @@ describe("research panel", () => {
     expect(within(panel).getByText("Incomplete")).toBeInTheDocument();
     expect(within(panel).getByText("Done")).toBeInTheDocument();
     expect(
-      within(panel).getByText(
-        "One topic couldn’t be finished, so some of this may be missing.",
-      ),
+      within(panel).getByText("One topic couldn’t be finished, so some of this may be missing."),
     ).toBeInTheDocument();
     expect(within(panel).queryByText(/InvalidOutputError/)).not.toBeInTheDocument();
     expect(within(panel).queryByText(/output limit/)).not.toBeInTheDocument();

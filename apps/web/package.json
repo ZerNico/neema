@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@chat/desktop-rpc": "workspace:*",
     "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/language": "6.12.4",
     "@codemirror/language-data": "6.5.2",

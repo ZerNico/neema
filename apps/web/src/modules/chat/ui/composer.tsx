@@ -5,6 +5,8 @@ import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
 import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import { DRAFT_CONVERSATION } from "~/modules/desktop/client/bridge.ts";
+import { FolderStrip } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
 export interface ComposerHandle {
@@ -35,6 +37,11 @@ interface ComposerProps {
   controlsDisabled?: boolean;
   context?: ComposerContext | undefined;
   initialSkillId?: string | null | undefined;
+  /**
+   * Which conversation the folder attaches to. A new chat has no id yet, so it
+   * uses the draft key and rebinds after the first message creates one.
+   */
+  conversationId?: string | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -50,6 +57,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     controlsDisabled,
     context,
     initialSkillId,
+    conversationId,
   },
   ref,
 ) {
@@ -117,27 +125,32 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   };
 
   return (
-    <ChatInput
-      ref={textareaRef}
-      skills={{ items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds }}
-      value={draft}
-      onValueChange={(value) => {
-        touched.current = true;
-        setDraft(value);
-      }}
-      onSubmit={send}
-      {...(onStop ? { onStop } : {})}
-      disabled={disabled}
-      textareaDisabled={textareaDisabled}
-      {...(controlsDisabled !== undefined ? { controlsDisabled } : {})}
-      modelId={modelId}
-      onModelChange={onModelChange}
-      searchEnabled={searchEnabled}
-      onSearchEnabledChange={onSearchEnabledChange}
-      researchEnabled={researchEnabled}
-      onResearchEnabledChange={setResearchEnabled}
-      attachments={attachments}
-      {...(context ? { context } : {})}
-    />
+    <div className="flex flex-col">
+      <ChatInput
+        ref={textareaRef}
+        skills={{ items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds }}
+        value={draft}
+        onValueChange={(value) => {
+          touched.current = true;
+          setDraft(value);
+        }}
+        onSubmit={send}
+        {...(onStop ? { onStop } : {})}
+        disabled={disabled}
+        textareaDisabled={textareaDisabled}
+        {...(controlsDisabled !== undefined ? { controlsDisabled } : {})}
+        modelId={modelId}
+        onModelChange={onModelChange}
+        searchEnabled={searchEnabled}
+        onSearchEnabledChange={onSearchEnabledChange}
+        researchEnabled={researchEnabled}
+        onResearchEnabledChange={setResearchEnabled}
+        attachments={attachments}
+        {...(context ? { context } : {})}
+      />
+      {/* Under the composer and inset, so it reads as part of it. Renders
+          nothing outside the desktop app. */}
+      <FolderStrip conversationId={conversationId ?? DRAFT_CONVERSATION} />
+    </div>
   );
 });
