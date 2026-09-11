@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
+import { setSignupPolicy } from "../server/signup-functions.ts";
 import { OAuthPage } from "./oauth-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -17,6 +19,11 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({}),
 }));
 
+vi.mock("../server/signup-functions.ts", () => ({
+  getSignupPolicy: vi.fn(),
+  setSignupPolicy: vi.fn(),
+}));
+
 vi.mock("../server/oauth-functions.ts", () => ({
   listOAuthProviders: vi.fn(),
   saveBuiltinOAuthProvider: vi.fn(),
@@ -26,6 +33,7 @@ vi.mock("../server/oauth-functions.ts", () => ({
 
 const saveBuiltin = vi.mocked(saveBuiltinOAuthProvider);
 const saveOidc = vi.mocked(saveOidcOAuthProvider);
+const savePolicy = vi.mocked(setSignupPolicy);
 
 type Provider = {
   id: string;
@@ -33,12 +41,14 @@ type Provider = {
   label: string;
   enabled: boolean;
   clientId: string;
+  trusted: boolean;
   secretConfigured: boolean;
   config: Record<string, unknown>;
 };
 
 const provider = (overrides: Partial<Provider> & Pick<Provider, "id" | "kind" | "label">) => ({
   enabled: true,
+  trusted: false,
   clientId: `${overrides.id}-client`,
   secretConfigured: true,
   config: {},
@@ -50,6 +60,7 @@ const provider = (overrides: Partial<Provider> & Pick<Provider, "id" | "kind" | 
 const renderPage = (providers: ReturnType<typeof provider>[], baseURL = "https://chat.example") => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "oauth"], { baseURL, providers });
+  client.setQueryData(["admin", "signup-policy"], "approval");
   return render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -68,6 +79,7 @@ const openEditor = async (label: string) => {
 beforeEach(() => {
   vi.clearAllMocks();
   saveBuiltin.mockResolvedValue({ ok: true } as never);
+  savePolicy.mockResolvedValue(undefined as never);
   saveOidc.mockResolvedValue({ ok: true } as never);
 });
 
@@ -122,6 +134,7 @@ describe("OAuthPage", () => {
     expect(saveBuiltin.mock.calls[0]?.[0].data).toEqual({
       id: "microsoft",
       enabled: false,
+      trusted: false,
       clientId: "entra-client",
       secret: "entra-secret",
       tenantId: "contoso",
@@ -139,8 +152,31 @@ describe("OAuthPage", () => {
     expect(saveBuiltin.mock.calls[0]?.[0].data).toEqual({
       id: "google",
       enabled: true,
+      trusted: false,
       clientId: "google-client",
     });
+  });
+
+  it("marks a provider trusted so its accounts skip the queue", async () => {
+    renderPage([provider({ id: "google", kind: "builtin", label: "Google" })]);
+    await openEditor("Edit");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Skip approval for Google" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(saveBuiltin).toHaveBeenCalled());
+    expect(saveBuiltin.mock.calls[0]?.[0].data).toMatchObject({ trusted: true });
+  });
+
+  it("changes who can join without a save step", async () => {
+    renderPage([]);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("combobox", { name: "Who can join" }));
+    await user.click(await screen.findByRole("option", { name: "Nobody new" }));
+
+    await waitFor(() => expect(savePolicy).toHaveBeenCalled());
+    expect(savePolicy.mock.calls[0]?.[0].data).toEqual({ policy: "closed" });
   });
 
   it("lists OpenID Connect providers under their own id and enables them in place", async () => {

@@ -4,6 +4,8 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
 import { createAppAuth } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
+import { makeSignupGate } from "./signup-gate.ts";
+import { SignupRepo } from "./signup-repo.ts";
 
 export type Auth = ReturnType<typeof createAppAuth>;
 export type Session = Auth["$Infer"]["Session"];
@@ -24,6 +26,8 @@ const purgeUserFiles = async (userId: string) => {
   );
 };
 
+const signup = makeSignupGate((effect) => runtime.runPromise(effect));
+
 const build = async (): Promise<Auth> =>
   createAppAuth({
     // The Better Auth pool is memoized, so a rebuild costs one provider query
@@ -32,6 +36,7 @@ const build = async (): Promise<Auth> =>
     baseURL: process.env.BETTER_AUTH_URL,
     secret: process.env.BETTER_AUTH_SECRET,
     purgeUserFiles,
+    signup,
     oauthProviders: await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) => repo.listForAuth()),
     ),
@@ -62,4 +67,20 @@ export function currentAuth(): Promise<Auth> {
 /** Call after a successful write to the provider table. */
 export function invalidateAuth(): void {
   version += 1;
+}
+
+/**
+ * The session behind a request, and whether the account it names may use the
+ * app yet. Callers decide what an unapproved session means for them: a server
+ * function refuses it distinctly so the client can show the waiting screen,
+ * while an API route has nowhere to say that and simply declines.
+ */
+export async function sessionFromHeaders(headers: Headers) {
+  const session = await (await currentAuth()).api.getSession({ headers });
+  if (!session) return null;
+  const status = await runtime.runPromise(
+    Effect.flatMap(SignupRepo, (repo) => repo.statusOf(session.user.id)),
+  );
+  // No row means an account created before approvals existed.
+  return { session, approved: status === null || status === "approved" };
 }

@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   publishGlobal: vi.fn(),
 }));
 vi.mock("~/modules/auth/server/auth.ts", () => ({
-  currentAuth: () => Promise.resolve({ api: { getSession: mocks.session } }),
+  sessionFromHeaders: async () => {
+    const session: unknown = await mocks.session();
+    return session ? { session, approved: true } : null;
+  },
 }));
 // Execute the registered middleware and handler without starting the application runtime.
 // Authorization is the real requireAdmin implementation, not a replacement policy.

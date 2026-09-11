@@ -112,6 +112,7 @@ const google = {
   kind: "builtin" as const,
   label: "Google",
   enabled: true,
+  trusted: false,
   clientId: "google-client",
   config: {},
 };
@@ -168,6 +169,7 @@ describe("OAuth provider storage", () => {
         kind: "oidc",
         label: "Acme",
         enabled: true,
+        trusted: false,
         clientId: "acme-client",
         secret: "acme-secret",
         config: { scopes: ["openid"] },

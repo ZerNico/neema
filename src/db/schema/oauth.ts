@@ -13,6 +13,9 @@ export const oauthProviders = pgTable("oauth_providers", {
   // button label on the sign-in page
   label: text().notNull(),
   enabled: boolean().notNull().default(false),
+  // Accounts this provider creates skip the approval queue: a work identity
+  // provider already decided who belongs, where a public one has not.
+  trusted: boolean().notNull().default(false),
   clientId: text("client_id").notNull(),
   // AES-256-GCM via KeyCipher, like provider API keys
   clientSecretCiphertext: text("client_secret_ciphertext"),

@@ -83,6 +83,7 @@ const ClientId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(5
 export const SaveBuiltinProviderInput = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1)),
   enabled: Schema.Boolean,
+  trusted: Schema.Boolean,
   clientId: ClientId,
   // empty means "keep the stored secret"
   secret: Schema.optionalKey(Schema.String),
@@ -95,6 +96,7 @@ export const SaveOidcProviderInput = Schema.Struct({
   id: OidcProviderId,
   label: Label,
   enabled: Schema.Boolean,
+  trusted: Schema.Boolean,
   clientId: ClientId,
   secret: Schema.optionalKey(Schema.String),
   discoveryUrl: Schema.String.check(Schema.isMinLength(1)),

@@ -34,6 +34,7 @@ export interface UpsertOAuthProvider {
   readonly kind: "builtin" | "oidc";
   readonly label: string;
   readonly enabled: boolean;
+  readonly trusted: boolean;
   readonly clientId: string;
   /** Absent keeps whatever is stored; a value replaces it. */
   readonly secret?: string | undefined;
@@ -52,6 +53,8 @@ export class OAuthRepo extends Context.Service<
     listForAuth(): Effect.Effect<AuthOAuthProvider[]>;
     /** Public: what a sign-in button needs, for signed-out callers. */
     listForSignIn(): Effect.Effect<SignInProvider[]>;
+    /** Whether accounts this provider creates skip the approval queue. */
+    isTrusted(id: string): Effect.Effect<boolean>;
     upsert(input: UpsertOAuthProvider): Effect.Effect<PublicOAuthProvider>;
     remove(id: string): Effect.Effect<void>;
   }
@@ -74,6 +77,15 @@ export class OAuthRepo extends Context.Service<
           return (yield* all())
             .filter((row) => row.enabled)
             .map((row) => ({ id: row.id, label: row.label }));
+        }),
+
+        isTrusted: Effect.fn("OAuthRepo.isTrusted")(function* (id) {
+          const rows = yield* db
+            .select({ trusted: oauthProviders.trusted })
+            .from(oauthProviders)
+            .where(eq(oauthProviders.id, id))
+            .pipe(Effect.orDie);
+          return rows[0]?.trusted ?? false;
         }),
 
         listForAuth: Effect.fn("OAuthRepo.listForAuth")(function* () {
@@ -131,6 +143,7 @@ export class OAuthRepo extends Context.Service<
               kind: input.kind,
               label: input.label,
               enabled: input.enabled,
+              trusted: input.trusted,
               clientId: input.clientId,
               clientSecretCiphertext: clientSecretCiphertext ?? null,
               config: input.config,
@@ -141,6 +154,7 @@ export class OAuthRepo extends Context.Service<
               set: {
                 label: input.label,
                 enabled: input.enabled,
+                trusted: input.trusted,
                 clientId: input.clientId,
                 // An omitted secret keeps the stored one, so the admin form
                 // never has to round-trip a value it cannot display.

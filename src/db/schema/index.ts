@@ -10,4 +10,5 @@ export * from "./oauth.ts";
 export * from "./providers.ts";
 export * from "./tools.ts";
 export * from "./research.ts";
+export * from "./signup.ts";
 export * from "./skills.ts";

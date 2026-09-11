@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { getSessionUser, getSessionIdentity } from "./server/functions.ts";
+import { getApprovalStatus } from "./server/signup-functions.ts";
 
 export const authClient = createAuthClient({
   plugins: [adminClient()],
@@ -27,5 +28,16 @@ export const sessionUserQuery = queryOptions({
 export const sessionIdentityQuery = queryOptions({
   queryKey: ["session-identity"],
   queryFn: () => getSessionIdentity(),
+  staleTime: 30_000,
+});
+
+/**
+ * Whether this account may use the app. Not folded into `sessionUserQuery`
+ * because the waiting screen polls it, and a user held there for a week must
+ * not keep a week-old answer.
+ */
+export const approvalStatusQuery = queryOptions({
+  queryKey: ["approval-status"],
+  queryFn: () => getApprovalStatus(),
   staleTime: 30_000,
 });

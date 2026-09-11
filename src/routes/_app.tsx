@@ -2,7 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { IdentityBoundary, useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import type { SessionIdentity } from "~/modules/auth/identity.ts";
-import { sessionIdentityQuery, sessionUserQuery } from "~/modules/auth/client.ts";
+import {
+  approvalStatusQuery,
+  sessionIdentityQuery,
+  sessionUserQuery,
+} from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
@@ -17,6 +21,10 @@ export const Route = createFileRoute("/_app")({
     if (!user) throw redirect({ to: "/login" });
     const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
     if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
+    // Every server function this tree loads would refuse an unapproved
+    // account, so it is turned away before any of them runs.
+    const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
+    if (approval !== "approved") throw redirect({ to: "/pending" });
     return { user, identity };
   },
   loader: async ({ context }) => {

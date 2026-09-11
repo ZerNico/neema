@@ -68,6 +68,12 @@ vi.mock("./client.ts", () => ({
 vi.mock("~/modules/admin/ui/groups-page.tsx", () => ({
   membershipsQuery: { queryKey: ["memberships"], queryFn: async () => [] },
 }));
+// The approval queue is the users page's other half and has its own tests;
+// here it would only add a suspense boundary to the impersonation controls.
+vi.mock("./ui/pending-accounts.tsx", () => ({
+  PendingAccounts: () => null,
+  pendingAccountsQuery: { queryKey: ["admin", "pending-accounts"], queryFn: async () => [] },
+}));
 
 const original = { userId: "admin", impersonatedBy: null };
 const active = { userId: "target", impersonatedBy: "admin" };

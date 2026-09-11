@@ -11,6 +11,13 @@ import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import {
   OAUTH_BUILTINS,
@@ -24,12 +31,24 @@ import {
   saveBuiltinOAuthProvider,
   saveOidcOAuthProvider,
 } from "../server/oauth-functions.ts";
+import { getSignupPolicy, setSignupPolicy } from "../server/signup-functions.ts";
+import { SIGNUP_POLICIES, SIGNUP_POLICY_LABELS, type SignupPolicy } from "../signup.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
 
 export const oauthProvidersQuery = queryOptions({
   queryKey: ["admin", "oauth"],
   queryFn: () => listOAuthProviders(),
 });
+
+export const signupPolicyQuery = queryOptions({
+  queryKey: ["admin", "signup-policy"],
+  queryFn: () => getSignupPolicy(),
+});
+
+const POLICY_ITEMS = SIGNUP_POLICIES.map((value) => ({
+  value,
+  label: SIGNUP_POLICY_LABELS[value].title,
+}));
 
 const useInvalidateProviders = () => {
   const queryClient = useQueryClient();
@@ -81,6 +100,33 @@ function SecretField({
   );
 }
 
+function TrustedField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium">Skip approval</span>
+        <span className="text-muted-foreground text-xs">
+          An account created through {label} can use the app straight away, whatever the policy for
+          new accounts says.
+        </span>
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
+        aria-label={`Skip approval for ${label}`}
+      />
+    </div>
+  );
+}
+
 export function OAuthPage() {
   const { data } = useSuspenseQuery(oauthProvidersQuery);
   const byId = new Map(data.providers.map((p) => [p.id, p]));
@@ -90,6 +136,7 @@ export function OAuthPage() {
       title="Sign-in"
       description="Providers users can sign in with, beside email and password."
     >
+      <SignupPolicySection />
       <Section title="Providers">
         <ListCard>
           {OAUTH_BUILTINS.map((builtin) => (
@@ -110,6 +157,45 @@ export function OAuthPage() {
   );
 }
 
+function SignupPolicySection() {
+  const { data: policy } = useSuspenseQuery(signupPolicyQuery);
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: (next: SignupPolicy) => setSignupPolicy({ data: { policy: next } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "signup-policy"] }),
+    onError: () => toast.error("Could not change who can join."),
+  });
+
+  return (
+    <Section title="New accounts">
+      <ListCard>
+        <ListRow className="flex-col items-stretch gap-3">
+          <Field>
+            <FieldLabel htmlFor="signup-policy">Who can join</FieldLabel>
+            <Select
+              value={policy}
+              onValueChange={(value) => value && save.mutate(value as SignupPolicy)}
+              items={POLICY_ITEMS}
+            >
+              <SelectTrigger id="signup-policy" className="w-full" disabled={save.isPending}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {POLICY_ITEMS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription>{SIGNUP_POLICY_LABELS[policy].description}</FieldDescription>
+          </Field>
+        </ListRow>
+      </ListCard>
+    </Section>
+  );
+}
+
 function BuiltinProvider({
   builtin,
   provider,
@@ -124,6 +210,7 @@ function BuiltinProvider({
   const [clientId, setClientId] = useState(provider?.clientId ?? "");
   const storedExtra = String(provider?.config[builtin.field?.key ?? ""] ?? "");
   const [extra, setExtra] = useState(storedExtra);
+  const [trusted, setTrusted] = useState(provider?.trusted ?? false);
   const invalidate = useInvalidateProviders();
   const confirm = useConfirm();
 
@@ -135,6 +222,7 @@ function BuiltinProvider({
         data: {
           id: builtin.id,
           enabled,
+          trusted: draft ? trusted : (provider?.trusted ?? false),
           clientId: draft ? clientId : (provider?.clientId ?? clientId),
           ...(draft && secret ? { secret } : {}),
           ...(builtin.field?.key === "tenantId" ? { tenantId: draft ? extra : storedExtra } : {}),
@@ -192,6 +280,7 @@ function BuiltinProvider({
             onChange={setSecret}
             configured={provider?.secretConfigured ?? false}
           />
+          <TrustedField label={builtin.label} checked={trusted} onChange={setTrusted} />
           {builtin.field ? (
             <Field>
               <FieldLabel htmlFor={`extra-${builtin.id}`}>{builtin.field.label}</FieldLabel>
@@ -261,6 +350,7 @@ function OidcSection({
           id: input.provider.id,
           label: input.provider.label,
           enabled: input.enabled,
+          trusted: input.provider.trusted,
           clientId: input.provider.clientId,
           discoveryUrl: String(input.provider.config.discoveryUrl ?? ""),
           scopes: (input.provider.config.scopes as string[] | undefined) ?? [],
@@ -378,6 +468,7 @@ function OidcProviderForm({
 }) {
   const [clientId, setClientId] = useState(provider?.clientId ?? "");
   const [secret, setSecret] = useState("");
+  const [trusted, setTrusted] = useState(provider?.trusted ?? false);
 
   const form = useAppForm({
     defaultValues: {
@@ -393,6 +484,7 @@ function OidcProviderForm({
           id: value.id,
           label: value.label,
           enabled: provider?.enabled ?? false,
+          trusted,
           clientId,
           ...(secret ? { secret } : {}),
           discoveryUrl: value.discoveryUrl,
@@ -458,6 +550,11 @@ function OidcProviderForm({
       <form.AppField name="scopes">
         {(field) => <field.TextField label="Scopes" description="Separated by spaces." />}
       </form.AppField>
+      <TrustedField
+        label={provider?.label ?? "this provider"}
+        checked={trusted}
+        onChange={setTrusted}
+      />
       <FormActions>
         <form.AppForm>
           <form.SubmitButton size="sm" disabled={!clientId}>

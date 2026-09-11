@@ -7,6 +7,7 @@ import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts"
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
+import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
@@ -47,6 +48,7 @@ const ReposLayer = Layer.mergeAll(
   ChatRepo.layer,
   MemoryRepo.layer,
   OAuthRepo.layer,
+  SignupRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,
   GroupRepo.layer,

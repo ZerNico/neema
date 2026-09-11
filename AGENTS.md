@@ -252,7 +252,16 @@ Differs from most Effect 3 material online.
 - Provider API keys are AES-256-GCM at rest (`PROVIDER_KEY_SECRET`); ciphertext
   never leaves the server.
 - First registered user becomes admin via the `user.create.before` hook. Do not
-  bypass Better Auth for user creation.
+  bypass Better Auth for user creation. That first account is also the one
+  account no policy can refuse, since there is nobody to ask yet.
+- `auth_settings.signup_policy` governs every route in, `/register` and OAuth
+  alike, and is read on the creation it governs rather than captured at
+  startup. `closed` refuses creation; `approval` still creates the account and
+  leaves it unusable until an admin decides, which is what lets an OAuth
+  redirect finish. Approval lives in `user_approvals`, not on `user`, because
+  Better Auth owns that table's columns. A provider marked `trusted` admits its
+  accounts straight away. A rejected account is kept, never deleted: deleting
+  it would let the same person sign up again and reappear in the queue.
 - Sign-in providers are rows in `oauth_providers`, secrets encrypted like
   provider API keys. Better Auth resolves its context once per instance, so
   that configuration is read once: every reader goes through `currentAuth()`,

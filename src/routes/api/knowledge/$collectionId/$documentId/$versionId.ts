@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { currentAuth } from "~/modules/auth/server/auth.ts";
+import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
 
@@ -8,8 +8,12 @@ export const Route = createFileRoute("/api/knowledge/$collectionId/$documentId/$
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const session = await (await currentAuth()).api.getSession({ headers: request.headers });
-        if (!session) return new Response("Unauthorized", { status: 401 });
+        const current = await sessionFromHeaders(request.headers);
+        // An account still waiting on approval is declined here as though
+        // signed out: only a server function can say why, and the browser
+        // is already being sent to the waiting screen by the app route.
+        if (!current?.approved) return new Response("Unauthorized", { status: 401 });
+        const session = current.session;
         const file = await runtime.runPromise(
           Effect.flatMap(KnowledgeService, (service) =>
             service.download(session.user.id, params),

@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, SessionAppSidebar } from "./_app.tsx";
 import { sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
 import { getSessionUser, getSessionIdentity } from "~/modules/auth/server/functions.ts";
+import { getApprovalStatus } from "~/modules/auth/server/signup-functions.ts";
 
 vi.mock("~/modules/auth/server/functions.ts", () => ({
   getSessionUser: vi.fn(),
   getSessionIdentity: vi.fn(),
 }));
+vi.mock("~/modules/auth/server/signup-functions.ts", () => ({ getApprovalStatus: vi.fn() }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
 vi.mock("~/modules/chat/ui/app-sidebar.tsx", () => ({
   AppSidebar: ({ user, impersonating }: { user: { name: string }; impersonating?: boolean }) => (
@@ -47,9 +49,19 @@ const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: fa
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getSessionIdentity).mockResolvedValue({ userId: "u1", impersonatedBy: null });
+  vi.mocked(getApprovalStatus).mockResolvedValue("approved");
 });
 
 describe("app shell guard", () => {
+  it("sends an account still waiting to the pending screen, not into the app", async () => {
+    sessionMock.mockResolvedValue(user as never);
+    vi.mocked(getApprovalStatus).mockResolvedValue("pending");
+
+    await expect(runBeforeLoad(newClient())).rejects.toMatchObject({
+      options: { to: "/pending" },
+    });
+  });
+
   it("puts the signed-in user in the route context", async () => {
     sessionMock.mockResolvedValue(user as never);
 

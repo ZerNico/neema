@@ -76,6 +76,38 @@ function socialProvidersFrom(providers: readonly AuthOAuthProvider[]): SocialPro
   return social;
 }
 
+/**
+ * How a new account is treated, decided by the caller because the policy and
+ * the provider's trust live in the database and this factory deliberately
+ * reaches no further than the arguments it is given.
+ */
+export interface SignupGate {
+  /** False refuses creation outright, before any row is written. */
+  allow: () => Promise<boolean>;
+  /** Records whether the new account may be used yet. */
+  record: (input: {
+    userId: string;
+    providerId: string | null;
+    isFirstUser: boolean;
+  }) => Promise<void>;
+}
+
+const openSignup: SignupGate = { allow: async () => true, record: async () => {} };
+
+/**
+ * The provider an account is being created through, or null for email and
+ * password. Better Auth routes every OAuth return through `callback/:id`, so
+ * the route parameter is the provider id for built-in and generic entries
+ * alike; no other user-creating endpoint carries one.
+ */
+const providerFromContext = (context: { path?: string; params?: unknown } | null) => {
+  if (!context?.path?.startsWith("/callback")) return null;
+  const params = context.params;
+  if (typeof params !== "object" || params === null) return null;
+  const id = (params as Record<string, unknown>).id;
+  return typeof id === "string" ? id : null;
+};
+
 type Operation = Omit<ImpersonationEvent, "timestamp">;
 const startPath = "/admin/impersonate-user";
 const stopPath = "/admin/stop-impersonating";
@@ -87,6 +119,7 @@ export function createAppAuth({
   secret,
   purgeUserFiles,
   oauthProviders = [],
+  signup = openSignup,
   log = (event) => Effect.runPromise(Effect.logInfo("auth impersonation", event)),
 }: {
   db: Db;
@@ -94,6 +127,7 @@ export function createAppAuth({
   secret: string | undefined;
   purgeUserFiles: (userId: string) => Promise<void>;
   oauthProviders?: readonly AuthOAuthProvider[];
+  signup?: SignupGate;
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
   return betterAuth({
@@ -108,7 +142,24 @@ export function createAppAuth({
         create: {
           before: async (userData) => {
             const [row] = await db.select({ n: count() }).from(schema.user);
-            return { data: { ...userData, role: (row?.n ?? 0) === 0 ? "admin" : "user" } };
+            const isFirstUser = (row?.n ?? 0) === 0;
+            // The account that becomes admin is how a fresh instance is set
+            // up, so it is never refused; there is nobody to ask yet.
+            if (!isFirstUser && !(await signup.allow())) {
+              throw new APIError("FORBIDDEN", {
+                message: "This instance is not accepting new accounts.",
+              });
+            }
+            return { data: { ...userData, role: isFirstUser ? "admin" : "user" } };
+          },
+          after: async (created, context) => {
+            await signup.record({
+              userId: created.id,
+              providerId: providerFromContext(context),
+              // Recounting here would find the row just written, so the role
+              // the before hook assigned is what identifies the first user.
+              isFirstUser: created.role === "admin",
+            });
           },
         },
         delete: { after: (deleted) => purgeUserFiles(deleted.id) },
