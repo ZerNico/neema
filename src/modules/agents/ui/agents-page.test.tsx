@@ -13,6 +13,12 @@ vi.mock("../server/functions.ts", () => ({
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(),
 }));
+vi.mock("~/modules/chat/server/functions.ts", () => ({
+  sendMessage: vi.fn(),
+  listChatModels: vi.fn(),
+  listConversations: vi.fn(),
+  getConversationWithMessages: vi.fn(),
+}));
 vi.mock("~/modules/sharing/server/functions.ts", () => ({
   getResourceSharing: vi.fn(),
   shareResourceWithEmail: vi.fn(),
@@ -96,7 +102,7 @@ describe("AgentsPage", () => {
     // A recipient gets no menu at all: no Edit, no Access, no Delete.
     expect(screen.queryByRole("button", { name: "Actions for Analyst" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Actions for Reviewer" }));
-    expect(screen.getByRole("menuitem", { name: /Edit/ })).toHaveAttribute("data-agent-id", "a1");
+    expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toHaveAttribute("data-agent-id", "a1");
     expect(screen.getByRole("menuitem", { name: /Access/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Delete/ })).toBeInTheDocument();
     expect(screen.getByText(/Shared by Dana/)).toBeInTheDocument();

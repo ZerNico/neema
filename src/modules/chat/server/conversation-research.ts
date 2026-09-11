@@ -1,4 +1,6 @@
 import { Effect } from "effect";
+import type { PreparedAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
+import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
 import { Prompt, Toolkit } from "effect/unstable/ai";
 import type { SkillReader } from "~/modules/skills/server/reader.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
@@ -19,6 +21,7 @@ import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
   computeBudget,
   estimatePromptTokens,
+  estimateToolSchemaTokens,
   latestValidCheckpoint,
   prepareCompactedActiveRounds,
   prepareCompactedHistory,
@@ -52,6 +55,7 @@ import { prepareConversationContext } from "./conversation-context.ts";
 
 export const runConversationResearch = Effect.fn("chat.conversationResearch")(function* (deps: {
   memory: MemoryService["Service"];
+  authoring?: PreparedAgentDraftTools;
   store: ResearchStore;
   fence: ResearchFence;
   gateway: AiGateway["Service"];
@@ -110,6 +114,7 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
     execution;
   const compactionDeps = execution.compactionDepsFor();
   const skillContext = (): Prompt.MessageEncoded[] => [
+    ...(deps.authoring?.messages() ?? []),
     ...execution.skillContext(),
     deps.runtimeContext,
   ];
@@ -184,6 +189,7 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
     : [];
   const fixedPrefixFor = (phase: ResearchCallPhase): Prompt.MessageEncoded[] => [
     { role: "system", content: prompts.assistantPolicy },
+    { role: "system", content: AGENT_APP_POLICY },
     ...knowledgePolicy,
     ...context.messages(
       phase === "planning" && context.memoryTools !== undefined && !context.memoryTools.attempted(),
@@ -215,7 +221,9 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
     data = "",
     notice = "",
     continuation?: Prompt.Prompt,
+    toolkit?: Pick<Toolkit.Any, "tools">,
   ) {
+    const toolSchemaTokens = estimateToolSchemaTokens(toolkit);
     const fixedPrefix = fixedPrefixFor(spec.phase);
     const usesEvidence = spec.phase === "synthesis";
     const request: Prompt.MessageEncoded = {
@@ -230,7 +238,9 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
     const inputBudget = computeBudget({
       contextLength: model?.contextLength,
       outputReserve: spec.maxOutputTokens,
-      webToolsEnabled: spec.phase === "planning" || spec.phase === "clarification",
+      toolSchemaTokens,
+      webToolsEnabled:
+        spec.phase === "planning" || spec.phase === "clarification" || !!deps.authoring,
     }).input;
     const protectedIndex = Math.max(
       0,
@@ -261,6 +271,7 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
       modelId: deps.modelId,
       contextLength: model?.contextLength,
       outputReserve: spec.maxOutputTokens,
+      toolSchemaTokens,
       existingCheckpoint: selected?.checkpoint ?? null,
       ...(historyProjection ? { projection: historyProjection } : {}),
       messages: history,
@@ -268,7 +279,8 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
       renderedMessageGroups: historyGroups,
       fixedPrefix,
       trailingMessages,
-      webToolsEnabled: spec.phase === "planning" || spec.phase === "clarification",
+      webToolsEnabled:
+        spec.phase === "planning" || spec.phase === "clarification" || !!deps.authoring,
       maxStartIndex: protectedIndex,
     });
     historyProjection = decision;
@@ -304,7 +316,8 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
         modelId: deps.modelId,
         contextLength: model?.contextLength,
         outputReserve: spec.maxOutputTokens,
-        webToolsEnabled: false,
+        toolSchemaTokens,
+        webToolsEnabled: toolkit !== undefined,
         basePrompt: Prompt.make(baseMessages),
         summary: evidenceSummary,
         rounds: evidenceRounds,
@@ -406,16 +419,18 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
     toolkit?: Toolkit.WithHandler<any> | undefined;
     continuation?: Prompt.Prompt;
   }) {
+    if (deps.authoring) yield* deps.authoring.refresh();
     const prepared = yield* stage(
       specs[input.phase],
       input.policy,
       input.data,
       input.notice,
       input.continuation,
+      input.toolkit,
     );
     const invoke = (value: { prompt: Prompt.Prompt }) =>
       input.phase === "synthesis"
-        ? execution.invokeFinal(value)
+        ? execution.invokeFinal({ ...value, ...(input.toolkit ? { toolkit: input.toolkit } : {}) })
         : execution.invokeInternal({
             ...value,
             spec: specs[input.phase],
@@ -490,12 +505,31 @@ export const runConversationResearch = Effect.fn("chat.conversationResearch")(fu
   for (const block of investigation.evidence) appendEvidence(block);
   yield* update("synthesizing");
   const beforeSynthesis = deps.getTextOffset();
-  const final = yield* invokeStage({
-    phase: "synthesis",
-    policy: prompts.synthesisPolicy,
-    // The ceiling is not a user-facing limitation, but the answer still has to
-    // say it explored only so far — that disclosure is the model's job.
-    data: `Limitations:\n${investigation.limitations.join("\n")}\nExecution bounds:\n${investigation.executionBounds}`,
+  const final = yield* Effect.gen(function* () {
+    const toolkit = deps.authoring ? yield* mergeToolGroups([deps.authoring.group]) : undefined;
+    let continuation = Prompt.empty;
+    let text = "";
+    // Every round uses the same accounted final sink, budget, deadline and fence.
+    // The last pass is tool-free, like the ordinary conversation loop.
+    for (let round = 0; round <= 4; round++) {
+      const result = yield* invokeStage({
+        phase: "synthesis",
+        policy: prompts.synthesisPolicy,
+        toolkit: round < 4 ? toolkit : undefined,
+        continuation,
+        ...(round > 0
+          ? {
+              notice:
+                "Continue after the tool results. Do not repeat any answer text already emitted. The current agent draft is in the application data.",
+            }
+          : {}),
+        data: `Limitations:\n${investigation.limitations.join("\n")}\nExecution bounds:\n${investigation.executionBounds}`,
+      });
+      text += result.text;
+      if (result.finishReason !== "tool-calls") return { text };
+      continuation = Prompt.concat(continuation, Prompt.fromResponseParts(result.parts));
+    }
+    return yield* Effect.die(new Error("The assistant did not finish after updating the draft."));
   }).pipe(
     // Synthesis emits validated lines as they arrive. Once the reader has an
     // answer on screen, a failure on the way to the finish part is a truncated

@@ -59,6 +59,15 @@ export class AgentRepo extends Context.Service<
      * atomically read, not one an edit bumped between validation and the write.
      */
     get(userId: string, agentId: string, tx?: DbTx): Effect.Effect<StoredAgent | null>;
+    saveInTransaction(
+      tx: DbTx,
+      userId: string,
+      input: AgentSettings,
+      update?: { agentId: string; expectedRevision: number },
+    ): Effect.Effect<
+      { agentId: string; configRevision: number },
+      AgentNotAvailable | AgentRejected
+    >;
     create(userId: string, input: AgentSettings): Effect.Effect<string, AgentRejected>;
     update(
       userId: string,
@@ -71,101 +80,105 @@ export class AgentRepo extends Context.Service<
     AgentRepo,
     Effect.gen(function* () {
       const db = yield* Db;
-      const save = Effect.fn("AgentRepo.save")(function* (
+      const saveInTransaction = Effect.fn("AgentRepo.saveInTransaction")(function* (
+        tx: DbTx,
         userId: string,
         input: AgentSettings,
         update?: { agentId: string; expectedRevision: number },
       ) {
-        return yield* db
-          .transaction((tx) =>
-            Effect.gen(function* () {
-              const id = update?.agentId ?? uuidv7();
-              if (update) {
-                const [current] = yield* tx
-                  .select()
-                  .from(agents)
-                  .where(owned(userId, id))
-                  .for("update");
-                if (!current) return yield* new AgentNotAvailable({ agentId: id });
-                if (current.configRevision !== update.expectedRevision)
-                  return yield* new AgentRejected({
-                    reason: "agent changed; reload before saving",
-                  });
-              } else {
-                const [owner] = yield* tx
-                  .select({ id: user.id })
-                  .from(user)
-                  .where(eq(user.id, userId))
-                  .for("update");
-                const [count] = yield* tx
-                  .select({ value: sql<number>`count(*)::int` })
-                  .from(agents)
-                  .where(eq(agents.userId, userId));
-                if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
-                  return yield* new AgentRejected({ reason: "agent limit reached" });
-              }
-              const { collectionIds, skillIds = [], ...settings } = input;
-              if (skillIds.length) {
-                const available = yield* tx
-                  .select({ id: skills.id })
-                  .from(skills)
-                  .where(and(inArray(skills.id, [...skillIds]), skillReadable(userId)));
-                if (available.length !== skillIds.length)
-                  return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
-              }
-              if (collectionIds.length) {
-                const available = yield* tx
-                  .select({ id: knowledgeCollections.id })
-                  .from(knowledgeCollections)
-                  .where(
-                    and(
-                      inArray(knowledgeCollections.id, [...collectionIds]),
-                      collectionReadable(userId),
-                    ),
-                  );
-                if (available.length !== collectionIds.length)
-                  return yield* new AgentRejected({
-                    reason: "a selected collection is unavailable",
-                  });
-              }
-              const values = { ...settings, starters: [...settings.starters] };
-              if (update) {
-                yield* tx
-                  .update(agents)
-                  .set({
-                    ...values,
-                    configRevision: sql`${agents.configRevision} + 1`,
-                    updatedAt: new Date(),
-                  })
-                  .where(owned(userId, id));
-                yield* tx.delete(agentCollections).where(eq(agentCollections.agentId, id));
-                yield* tx.delete(agentSkills).where(eq(agentSkills.agentId, id));
-              } else {
-                yield* tx.insert(agents).values({ id, userId, ...values });
-              }
-              if (collectionIds.length)
-                yield* tx.insert(agentCollections).values(
-                  collectionIds.map((collectionId, position) => ({
-                    agentId: id,
-                    collectionId,
-                    position,
-                  })),
-                );
-              if (skillIds.length)
-                yield* tx
-                  .insert(agentSkills)
-                  .values(
-                    skillIds.map((skillId, position) => ({ agentId: id, skillId, position })),
-                  );
-              return id;
-            }),
-          )
+        return yield* Effect.gen(function* () {
+          const id = update?.agentId ?? uuidv7();
+          if (update) {
+            const [current] = yield* tx
+              .select()
+              .from(agents)
+              .where(owned(userId, id))
+              .for("update");
+            if (!current) return yield* new AgentNotAvailable({ agentId: id });
+            if (current.configRevision !== update.expectedRevision)
+              return yield* new AgentRejected({
+                reason: "agent changed; reload before saving",
+              });
+          } else {
+            const [owner] = yield* tx
+              .select({ id: user.id })
+              .from(user)
+              .where(eq(user.id, userId))
+              .for("update");
+            const [count] = yield* tx
+              .select({ value: sql<number>`count(*)::int` })
+              .from(agents)
+              .where(eq(agents.userId, userId));
+            if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
+              return yield* new AgentRejected({ reason: "agent limit reached" });
+          }
+          const { collectionIds, skillIds = [], ...settings } = input;
+          if (skillIds.length) {
+            const available = yield* tx
+              .select({ id: skills.id })
+              .from(skills)
+              .where(and(inArray(skills.id, [...skillIds]), skillReadable(userId)));
+            if (available.length !== skillIds.length)
+              return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
+          }
+          if (collectionIds.length) {
+            const available = yield* tx
+              .select({ id: knowledgeCollections.id })
+              .from(knowledgeCollections)
+              .where(
+                and(
+                  inArray(knowledgeCollections.id, [...collectionIds]),
+                  collectionReadable(userId),
+                ),
+              );
+            if (available.length !== collectionIds.length)
+              return yield* new AgentRejected({
+                reason: "a selected collection is unavailable",
+              });
+          }
+          const values = { ...settings, starters: [...settings.starters] };
+          if (update) {
+            yield* tx
+              .update(agents)
+              .set({
+                ...values,
+                configRevision: sql`${agents.configRevision} + 1`,
+                updatedAt: new Date(),
+              })
+              .where(owned(userId, id));
+            yield* tx.delete(agentCollections).where(eq(agentCollections.agentId, id));
+            yield* tx.delete(agentSkills).where(eq(agentSkills.agentId, id));
+          } else {
+            yield* tx.insert(agents).values({ id, userId, ...values });
+          }
+          if (collectionIds.length)
+            yield* tx.insert(agentCollections).values(
+              collectionIds.map((collectionId, position) => ({
+                agentId: id,
+                collectionId,
+                position,
+              })),
+            );
+          if (skillIds.length)
+            yield* tx
+              .insert(agentSkills)
+              .values(skillIds.map((skillId, position) => ({ agentId: id, skillId, position })));
+          return { agentId: id, configRevision: update ? update.expectedRevision + 1 : 1 };
+        }).pipe(Effect.catchTag("EffectDrizzleQueryError", Effect.die));
+      });
+      const save = (
+        userId: string,
+        input: AgentSettings,
+        update?: { agentId: string; expectedRevision: number },
+      ) =>
+        db
+          .transaction((tx) => saveInTransaction(tx, userId, input, update))
           .pipe(
-            Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+            Effect.map(({ agentId }) => agentId),
             Effect.catchTag("SqlError", Effect.die),
           );
-      });
       return AgentRepo.of({
+        saveInTransaction,
         list: Effect.fn("AgentRepo.list")(function* (userId) {
           const rows = yield* db
             .select({

@@ -30,6 +30,7 @@ import type { SkillSummary } from "~/modules/skills/schema.ts";
 import { agentIcon, CollectionChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
+import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
@@ -263,14 +264,10 @@ function useEditSwapHeight(editing: boolean) {
       typeof element.animate === "function" &&
       !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     ) {
-      // The fade lands early and holds, so the back half of the swap is visually
-      // still. Running it to the end kept the composer under 1 opacity — which
-      // both washed out its shadow and put the row on its own compositing layer
-      // — right up to the frame where that layer went away and the shadow
-      // repainted, and the pair read as a flicker just before the swap finished.
-      // (An `overflow: "hidden"` keyframe used to sit here. It never applied,
-      // overflow is not animatable, so the growing direction can still overlap
-      // the row below for the duration; clipping it would cut the shadow off.)
+      // The fade lands early and holds: fading to the end kept the row on its
+      // own compositing layer, and the shadow repaint when that layer went away
+      // read as a flicker. Overflow is not animatable, so the growing side may
+      // overlap the row below; clipping would cut the shadow off.
       element.animate(
         [
           { height: `${lastHeight.current}px`, opacity: 0 },
@@ -533,6 +530,8 @@ const AssistantBody = memo(function AssistantBody({
     if (part.activity.family === "knowledge" || part.activity.family === "skill") return null;
     if (part.activity.family === "plan")
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "agent-draft")
+      return <AgentDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }

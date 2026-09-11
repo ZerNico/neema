@@ -1,3 +1,9 @@
+import {
+  AgentDraftToolEnvelope,
+  projectAgentDraftResult,
+  agentDraftResultOk,
+  type AgentDraftActivityResult,
+} from "~/modules/agents/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
 import {
@@ -89,7 +95,13 @@ export interface ResearchToolActivity extends ToolActivityBase {
 export const readResearchProgress = (value: unknown): ResearchProgress | null =>
   Option.getOrNull(Schema.decodeUnknownOption(ResearchProgress)(value));
 
+export interface AgentDraftToolActivity extends ToolActivityBase {
+  family: "agent-draft";
+  result?: AgentDraftActivityResult;
+}
+
 export type ToolActivity =
+  | AgentDraftToolActivity
   | WebToolActivity
   | MemoryToolActivity
   | AskToolActivity
@@ -226,6 +238,7 @@ export function applyToolChunk(
   };
   if (e.v !== 1 || !e.callId || !e.name) return tools;
   if (
+    e.family !== "agent-draft" &&
     e.family !== "web" &&
     e.family !== "memory" &&
     e.family !== "ask" &&
@@ -248,6 +261,26 @@ export function applyToolChunk(
   // Bootstrap can replay older progress after a terminal durable row was read.
   if (existing && existing.status !== "running") return tools;
 
+  if (family === "agent-draft") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(AgentDraftToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const result = parsed.phase === "result" ? projectAgentDraftResult(parsed) : undefined;
+    const next: AgentDraftToolActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: result ? (agentDraftResultOk(result) ? "complete" : "error") : "running",
+      ...(result ? { result } : {}),
+      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
   if (family === "skill") {
     const parsed = Option.getOrNull(Schema.decodeUnknownOption(SkillToolEnvelope)(envelope));
     if (!parsed || (existing && parsed.phase === "start")) return tools;

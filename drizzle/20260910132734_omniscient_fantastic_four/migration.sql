@@ -1,0 +1,2 @@
+ALTER TABLE "messages" ADD COLUMN "generation_lease_until" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "messages_streaming_lease_idx" ON "messages" ("generation_lease_until") WHERE "status" = 'streaming';

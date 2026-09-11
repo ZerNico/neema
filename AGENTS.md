@@ -80,8 +80,8 @@ skipped one on purpose.
 - **Display path**: the live SSE stream, the conversation-detail loader on reload,
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
-- **Tool families**: web, knowledge, skill, memory, ask, plan, research. Each has
-  its own envelope with a required `family`; there is no inference from shape.
+- **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft.
+  Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
 - **Reverse states**: every way in needs a way out. Stop, lease expiry, owner change
@@ -98,6 +98,14 @@ skipped one on purpose.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,
   not the ones you expected.
+- `eslint-plugin-slop` runs through oxlint's JS plugin loader on lines changed in
+  the last five commits plus the working tree, never on untouched code. It rejects
+  em dashes, comments over 50 words, inflated vocabulary in comments, chained type
+  assertions, trivial wrappers and static-only classes. Fix the line; do not widen
+  the window or disable the rule for the file.
+- Lint config is `oxlint.config.ts`, typed through `defineConfig` and checked by
+  `pnpm typecheck`, so a misspelled rule or plugin name fails there instead of
+  being silently ignored. Adding `.oxlintrc.json` beside it is a hard error.
 - Integration suites run in tens of seconds; run them in the background and read
   the result. Never `sleep` in a loop to wait.
 - A test that only passes with a timeout or a sleep is wrong. Wait on the thing:
@@ -216,10 +224,11 @@ Differs from most Effect 3 material online.
   are evicted. Research shares `RESEARCH_LIMITS.externalOps` (3) permits, and
   SearXNG fans each query to every enabled engine, so that is the burst upstreams
   see. `infra/searxng/settings.yml` enables only Bing and Yandex on purpose.
-- Search follows the composer toggle. The reader is armed with search, and also
-  when user text or prior sources seed URL authority; assistant prose never grants
-  authority. Retry uses the target's saved search setting capped by availability;
-  edit uses the submitted choice.
+- Search follows the composer toggle, which rests on the installed agent's "web
+  search by default" (plain chat rests on true) and returns there after each send.
+  The reader is armed with search, and also when user text or prior sources seed
+  URL authority; assistant prose never grants authority. Retry uses the target's
+  saved search setting capped by availability; edit uses the submitted choice.
 
 ## Invariants
 
@@ -228,6 +237,14 @@ Differs from most Effect 3 material online.
   for server modules.
 - `message_chunks.seq` starts at 1 and is contiguous per message; resume relies on
   it.
+- A streaming assistant row is only alive while its lease
+  (`messages.generation_lease_until`) is in the future, judged by the database clock.
+  Every flush renews it, including the empty ones the periodic flusher makes between
+  chunks, or a slow first token would get a live answer reaped. That empty-batch
+  renewal is a single self-fenced UPDATE, never the conversation lock: at four times
+  a second it would otherwise queue ahead of the writes it exists to outlive. The engine reaps lapsed rows into `error` with what was
+  streamed, on a timer and whenever a subscriber, the detail loader or Stop meets
+  one. Research has its own lease on `research_runs`.
 - Better Auth owns its tables' columns; `src/db/schema/auth.ts` tracks the
   installed version only (1.7.1 added `account.issuer`, 1.7.3 removed it). After
   an upgrade, diff `@better-auth/core`'s `dist/db/get-tables.mjs` and verify a

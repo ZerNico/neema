@@ -123,6 +123,28 @@ export const conversationAgents = pgTable("conversation_agents", {
 });
 
 /**
+ * The target is an identity snapshot, not a foreign key: deleting an agent must
+ * never turn the next save into creation, or erase an accepted save receipt.
+ */
+export const conversationAgentDrafts = pgTable(
+  "conversation_agent_drafts",
+  {
+    id: text().primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    settings: jsonb().$type<import("~/modules/agents/draft-schema.ts").DraftSettings>().notNull(),
+    revision: integer().notNull().default(1),
+    targetAgentId: text("target_agent_id"),
+    targetRevision: integer("target_revision"),
+    savedDraftRevision: integer("saved_draft_revision"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("conversation_agent_drafts_conversation_idx").on(t.conversationId)],
+);
+
+/**
  * Private execution record for one attempt, never a source of future agent
  * settings. Retries replace it atomically; branches copy historical records.
  */

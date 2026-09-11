@@ -1,7 +1,27 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ChatRepo } from "./repo.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
+
+const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
+  Effect.gen(function* () {
+    const settled = yield* repo.reapExpiredGenerations();
+    if (settled.length === 0) return;
+    const sync = yield* Effect.serviceOption(SyncBus);
+    if (Option.isNone(sync)) return;
+    yield* Effect.forEach(
+      settled,
+      (row) =>
+        sync.value.publish(row.userId, {
+          type: "message.status",
+          conversationId: row.conversationId,
+          messageId: row.messageId,
+          status: "error",
+        }),
+      { discard: true },
+    );
+  }).pipe(Effect.catchCause((cause) => Effect.logError("generation reconciliation failed", cause)));
 
 /**
  * Everything the chat view needs for one conversation, in three dependency
@@ -21,6 +41,9 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   // children are read.
   const conversation = yield* repo.getConversation(userId, conversationId);
   yield* repo.research?.reap() ?? Effect.void;
+  // Loader path has no engine handle; the reaper is a repo concern so a stuck
+  // row settles on reload too, not only for SSE subscribers.
+  yield* reapGenerationsForDetail(repo);
   // The source of a branch, for the "branched from" link. Read through the
   // same ownership check, and null when it has been deleted since. It depends
   // on the conversation only, so it rides with the messages.
@@ -83,6 +106,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     : null;
   return {
     conversation,
+    agentDrafts: defaults.agentDrafts ?? [],
     messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
     pendingChunks,
     toolCalls,
@@ -98,6 +122,8 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
           icon: liveAgent?.row.icon ?? "robot",
           collectionIds: liveAgent?.collectionIds ?? [],
           skillIds: liveAgent?.skillIds ?? [],
+          // The composer's resting toggle: the agent's own default, like its model.
+          searchEnabled: liveAgent?.row.searchEnabled ?? true,
           available: liveAgent !== null,
         }
       : null,

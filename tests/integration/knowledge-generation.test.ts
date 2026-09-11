@@ -1217,7 +1217,7 @@ describe("knowledge-backed generations", () => {
   );
 
   // Editing a message is how a user fixes the selection they sent it with, so a
-  // submitted one replaces the saved standalone set — the same rule `searchEnabled`
+  // submitted one replaces the saved standalone set, the same rule `searchEnabled`
   // follows above. Retry has no submission and keeps what was saved.
   it.each([false, true])("applies an edited collection selection (agent=%s)", async (withAgent) => {
     const owner = await createUser();

@@ -18,7 +18,8 @@ Deep research is a persisted request mode of an ordinary conversation, not a cha
 ## Clarification and synthesis
 
 - Clarification is internal: discard its prose, emit only validated `ask_user` activities. Only main-assistant synthesis writes outer research prose — a model ignoring stage policy must not leak an uncited answer before investigation.
-- Context-overflow repair may retry synthesis only before any answer text was emitted; after that it ends partial, never appends a restarted answer.
+- Synthesis can prepare or revise an [agent draft](knowledge-and-agents.md#conversational-drafts) through four tool-capable rounds followed by one tool-free answer. These are continuations of the same final answer and run, not fresh research: each call uses the existing budget, deadline, fence, accounting and citation-aware text sink. Clarification stays ask-only; coordinator/workers/reporting receive neither the draft toolkit nor private settings. Main-stage prompts refresh current draft data and budget the actual toolkit before dispatch.
+- Context-overflow repair may retry a synthesis call only before that call emits answer text; after output it ends partial, never appends a restarted answer. A late failure anywhere in the bounded continuation preserves earlier prose and committed draft changes, with no duplicated answer.
 - Synthesis is prompted to cite sparingly: one marker on a claim worth verifying, the strongest source, at most two per sentence, none on common knowledge or summary lines. The chip rendering is identical either way, so the prompt is the only lever against a citation on every clause.
 
 ## Transcript and panels

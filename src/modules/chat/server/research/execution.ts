@@ -1,4 +1,11 @@
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
+import {
+  AgentDraftToolName,
+  agentDraftFailureReason,
+  projectAgentDraftResult,
+  agentDraftResultOk,
+  redactAgentDraftPart,
+} from "~/modules/agents/tool-schema.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
@@ -448,7 +455,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             );
             budget.finish(reservation, complete ? part.usage.outputTokens.total : undefined);
           }
-          if (!preliminary && part.type !== "error") parts.push(part);
+          if (!preliminary && part.type !== "error") parts.push(redactAgentDraftPart(part));
           if (part.type === "text-delta") {
             text += part.delta;
             if (input.finalText) {
@@ -469,6 +476,10 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             // decision: even a provider's unsolicited full answer is discarded.
             // Validated ask_user activities below remain visible at the current offset.
           }
+          const isAgentDraft =
+            phase === "synthesis" &&
+            (part.type === "tool-call" || part.type === "tool-result") &&
+            Schema.is(AgentDraftToolName)(part.name);
           const isSkill =
             (part.type === "tool-call" || part.type === "tool-result") &&
             Schema.is(SkillToolName)(part.name);
@@ -482,12 +493,13 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
               part.name === "read_url" ||
               (phase === "planning" && part.name === "save_memory") ||
               isKnowledge ||
+              isAgentDraft ||
               isSkill)
           ) {
             const rowId = uuidv7();
             rows.set(part.id, rowId);
             const index = callIndex++;
-            const textOffset = part.name === "ask_user" ? deps.getTextOffset() : 0;
+            const textOffset = part.name === "ask_user" || isAgentDraft ? deps.getTextOffset() : 0;
             yield* store.locked(fence, (tx) =>
               tx
                 .insert(messageToolCalls)
@@ -501,7 +513,8 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
                   toolName: part.name,
-                  arguments: isSkill || part.name === "save_memory" ? {} : json(part.params),
+                  arguments:
+                    isSkill || isAgentDraft || part.name === "save_memory" ? {} : json(part.params),
                   status: "running",
                 })
                 .pipe(Effect.orDie, Effect.asVoid),
@@ -525,6 +538,17 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name,
+                turnIndex: reservation.ordinal,
+                callIndex: index,
+                textOffset,
+              });
+            else if (isAgentDraft)
+              yield* deps.emit({
+                v: 1,
+                family: "agent-draft",
+                phase: "start",
+                callId: rowId,
+                name: part.name as AgentDraftToolName,
                 turnIndex: reservation.ordinal,
                 callIndex: index,
                 textOffset,
@@ -585,6 +609,35 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           if (part.type === "tool-result") {
             const rowId = rows.get(part.id);
             if (!rowId) return;
+            if (isAgentDraft && Schema.is(AgentDraftToolName)(part.name)) {
+              if (preliminary) return;
+              const activity = projectAgentDraftResult(part.isFailure ? null : part.result);
+              const reason = part.isFailure
+                ? "The draft tool failed before it could respond."
+                : agentDraftFailureReason(part.result);
+              yield* store.locked(fence, (tx) =>
+                tx
+                  .update(messageToolCalls)
+                  .set({
+                    result: json(activity),
+                    status: agentDraftResultOk(activity) ? "complete" : "error",
+                    completedAt: new Date(),
+                    ...(reason ? { error: { code: "AgentDraftNotUpdated", message: reason } } : {}),
+                  })
+                  .where(eq(messageToolCalls.id, rowId))
+                  .pipe(Effect.orDie, Effect.asVoid),
+              );
+              yield* deps.emit({
+                v: 1,
+                family: "agent-draft",
+                phase: "result",
+                callId: rowId,
+                name: part.name,
+                ...activity,
+                ...(reason ? { reason } : {}),
+              });
+              return;
+            }
             if (part.name === "ask_user") {
               if (preliminary) return;
               const decoded = Schema.decodeUnknownOption(AskUserResult)(part.result);
@@ -956,8 +1009,10 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     specs,
     invokeInternal,
     // The final sink is never passed into the investigation runner.
-    invokeFinal: (input: { prompt: Prompt.Prompt }) =>
-      invoke({ ...input, spec: specs.synthesis, finalText: deps.text }),
+    invokeFinal: (input: {
+      prompt: Prompt.Prompt;
+      toolkit?: Parameters<typeof invoke>[0]["toolkit"];
+    }) => invoke({ ...input, spec: specs.synthesis, finalText: deps.text }),
   };
 });
 

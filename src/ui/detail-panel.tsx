@@ -181,8 +181,10 @@ function MobilePanel() {
             <p className="text-muted-foreground text-xs">{request.subtitle}</p>
           ) : null}
         </SheetHeader>
-        <div key={request?.id} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-          {request?.body}
+        {/* Horizontal padding only on the scroller: a body's sticky header must
+            sit flush with the scroll edge, or content shows through above it. */}
+        <div key={request?.id} className="min-h-0 flex-1 overflow-y-auto px-6">
+          <div className="pb-6">{request?.body}</div>
         </div>
       </SheetContent>
     </Sheet>
@@ -300,7 +302,9 @@ function DesktopPanel({ className }: { className: string | undefined }) {
             <TooltipContent>Close panel</TooltipContent>
           </Tooltip>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{request.body}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4">
+          <div className="py-4">{request.body}</div>
+        </div>
       </m.div>
     </m.aside>
   );

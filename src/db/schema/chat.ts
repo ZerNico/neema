@@ -76,6 +76,11 @@ export const messages = pgTable(
       .default("chat"),
     researchRunId: text("research_run_id"),
     generationId: text("generation_id").$defaultFn(uuidv7),
+    // Heartbeat for a streaming ordinary generation, renewed by the owning
+    // fiber's periodic flush. Null while streaming means a process died before
+    // its first flush; the reaper terminalizes both cases. Research keeps its
+    // own lease on research_runs.
+    generationLeaseUntil: timestamp("generation_lease_until", { withTimezone: true }),
     assistantOutput: jsonb("assistant_output").$type<AssistantOutput>(),
     providerReplay: jsonb("provider_replay").$type<ProviderReplay>(),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
@@ -105,6 +110,9 @@ export const messages = pgTable(
     // collide within a turn; uuidv7 ids break the tie in insertion order, and
     // compaction boundaries are positions in exactly this sequence.
     index("messages_conversation_order_idx").on(t.conversationId, t.createdAt, t.id),
+    index("messages_streaming_lease_idx")
+      .on(t.generationLeaseUntil)
+      .where(sql`${t.status} = 'streaming'`),
   ],
 );
 

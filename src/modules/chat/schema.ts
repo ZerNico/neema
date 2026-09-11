@@ -20,10 +20,8 @@ const generationFields = {
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
   /**
-   * Installs this agent's current configuration into the new conversation.
-   * Accepted only on the first message: an agent chat keeps its agent and
-   * revision for good, so sending it for an existing conversation is refused.
-   * Omitted keeps whatever is installed.
+   * Installs the fixed agent association on the first message only.
+   * Each later attempt resolves its current settings; the association cannot change.
    */
   agentId: Schema.optionalKey(Schema.NullOr(ResourceId)),
   skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),

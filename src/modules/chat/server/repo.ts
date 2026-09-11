@@ -32,6 +32,7 @@ import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
   conversationAgents,
+  conversationAgentDrafts,
   conversationCompactionCheckpoints,
   conversations,
   messageChunks,
@@ -87,6 +88,8 @@ export interface GenerationConfig {
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
+  /** Every draft this conversation owns, oldest first. Names are already public. */
+  readonly agentDrafts?: ReadonlyArray<{ id: string; name: string }>;
 }
 export type ResolveError =
   | AgentNotAvailable
@@ -178,6 +181,15 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
       message.completedAt?.getTime() === previous.completedAt?.getTime()
     );
   });
+// How long a streaming row may go without a heartbeat before it is treated as
+// abandoned. Flushes run every 250ms, so this survives a slow provider call
+// and a busy event loop but not a dead process.
+const GENERATION_LEASE = sql`interval '45 seconds'`;
+// Granted whenever a row enters "streaming", so a retry of an old row is not
+// judged by its original creation time. Renewed by every flush afterwards.
+const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
+export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
+
 export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "image";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 // Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -309,8 +321,15 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .from(conversationAgents)
     .where(eq(conversationAgents.conversationId, conversationId))
     .pipe(Effect.orDie);
+  const drafts = yield* tx
+    .select({ id: conversationAgentDrafts.id, settings: conversationAgentDrafts.settings })
+    .from(conversationAgentDrafts)
+    .where(eq(conversationAgentDrafts.conversationId, conversationId))
+    .orderBy(asc(conversationAgentDrafts.id))
+    .pipe(Effect.orDie);
   return {
     agent: agent ? { agentId: agent.agentId } : null,
+    agentDrafts: drafts.map((draft) => ({ id: draft.id, name: draft.settings.name })),
   } satisfies ConversationDefaults;
 });
 
@@ -541,6 +560,21 @@ export class ChatRepo extends Context.Service<
     }): Effect.Effect<void>;
     // Marks an interrupted compaction terminal alongside interrupted tools.
     failRunningCompactionEvents(messageId: string, message: string): Effect.Effect<void>;
+    /**
+     * Renews a streaming row's lease without taking the conversation lock: the
+     * generation identity sits in the WHERE clause instead, so a row a retry
+     * already reclaimed matches nothing. Called between chunks, so it must not
+     * queue behind the writes it is meant to outlive.
+     */
+    renewGenerationLease(messageId: string, generationId: string): Effect.Effect<void>;
+    /**
+     * Terminalizes ordinary generations whose owning process stopped renewing
+     * their lease (crash, restart, HMR disposal). The row keeps what was
+     * streamed. Returns the messages it settled so the caller can notify.
+     */
+    reapExpiredGenerations(): Effect.Effect<
+      ReadonlyArray<{ userId: string; conversationId: string; messageId: string }>
+    >;
     listCompactionEvents(messageIds: ReadonlyArray<string>): Effect.Effect<CompactionEventRow[]>;
     finalizeMessage(input: {
       messageId: string;
@@ -852,6 +886,7 @@ export class ChatRepo extends Context.Service<
                     conversationId: conversation.id,
                     role: "assistant",
                     status: "streaming",
+                    generationLeaseUntil: freshLease(),
                     modelId: input.modelId,
                     generationMode,
                   })
@@ -1054,6 +1089,7 @@ export class ChatRepo extends Context.Service<
                       id: clonedIds.get(m.id)!,
                       conversationId: branch.id,
                       generationId: null,
+                      generationLeaseUntil: null,
                       // createdAt/completedAt/editedAt stay as they were: the
                       // branch shows the same history, day dividers included.
                     })),
@@ -1321,6 +1357,7 @@ export class ChatRepo extends Context.Service<
                     conversationId: input.conversationId,
                     role: input.role,
                     status: input.status ?? "complete",
+                    generationLeaseUntil: input.status === "streaming" ? freshLease() : null,
                     content: input.content ?? "",
                     modelId: input.modelId,
                   })
@@ -1345,6 +1382,14 @@ export class ChatRepo extends Context.Service<
         appendChunks: Effect.fn("ChatRepo.appendChunks")(function* (messageId, chunks) {
           return yield* generationWrite((db) =>
             Effect.gen(function* () {
+              // The periodic flusher calls this with an empty batch; renewing
+              // before the early return is what keeps the lease alive between
+              // chunks. The fence above makes a late renewal impossible.
+              yield* db
+                .update(messages)
+                .set({ generationLeaseUntil: sql`clock_timestamp() + ${GENERATION_LEASE}` })
+                .where(eq(messages.id, messageId))
+                .pipe(Effect.orDie);
               if (chunks.length === 0) return;
               yield* db
                 .insert(messageChunks)
@@ -1354,6 +1399,126 @@ export class ChatRepo extends Context.Service<
                 .pipe(Effect.orDie);
             }),
           );
+        }),
+
+        renewGenerationLease: Effect.fn("ChatRepo.renewGenerationLease")(
+          function* (messageId, generationId) {
+            yield* db
+              .update(messages)
+              .set({ generationLeaseUntil: sql`clock_timestamp() + ${GENERATION_LEASE}` })
+              .where(
+                and(
+                  eq(messages.id, messageId),
+                  eq(messages.generationId, generationId),
+                  eq(messages.status, "streaming"),
+                ),
+              )
+              .pipe(Effect.orDie, Effect.asVoid);
+          },
+        ),
+
+        reapExpiredGenerations: Effect.fn("ChatRepo.reapExpiredGenerations")(function* () {
+          const expired = yield* db
+            .select({
+              id: messages.id,
+              conversationId: messages.conversationId,
+              generationId: messages.generationId,
+            })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.status, "streaming"),
+                eq(messages.generationMode, "chat"),
+                // Judged by the database clock, like every other lease here. A
+                // null lease is a row from before the column existed; every
+                // path into "streaming" now grants one.
+                sql`coalesce(${messages.generationLeaseUntil}, ${messages.createdAt} + ${GENERATION_LEASE}) <= clock_timestamp()`,
+              ),
+            )
+            .pipe(Effect.orDie);
+          const settled: Array<{ userId: string; conversationId: string; messageId: string }> = [];
+          for (const row of expired) {
+            const result = yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  const [conversation] = yield* tx
+                    .select({ userId: conversations.userId })
+                    .from(conversations)
+                    .where(eq(conversations.id, row.conversationId))
+                    .for("update")
+                    .pipe(Effect.orDie);
+                  if (!conversation) return null;
+                  const chunks = yield* tx
+                    .select({ kind: messageChunks.kind, delta: messageChunks.delta })
+                    .from(messageChunks)
+                    .where(eq(messageChunks.messageId, row.id))
+                    .orderBy(asc(messageChunks.seq))
+                    .pipe(Effect.orDie);
+                  const joined = (kind: "text" | "reasoning") =>
+                    chunks
+                      .filter((chunk) => chunk.kind === kind)
+                      .map((chunk) => chunk.delta)
+                      .join("");
+                  // Same identity check as the fence: a retry that already
+                  // reclaimed the row must not be overwritten by stale cleanup.
+                  const claimed = yield* tx
+                    .update(messages)
+                    .set({
+                      status: "error",
+                      content: joined("text"),
+                      reasoning: joined("reasoning"),
+                      error: { tag: "GenerationFailed", message: INTERRUPTED_MESSAGE },
+                      completedAt: new Date(),
+                    })
+                    .where(
+                      and(
+                        eq(messages.id, row.id),
+                        eq(messages.status, "streaming"),
+                        row.generationId === null
+                          ? isNull(messages.generationId)
+                          : eq(messages.generationId, row.generationId),
+                        sql`coalesce(${messages.generationLeaseUntil}, ${messages.createdAt} + ${GENERATION_LEASE}) <= clock_timestamp()`,
+                      ),
+                    )
+                    .returning({ id: messages.id })
+                    .pipe(Effect.orDie);
+                  if (claimed.length === 0) return null;
+                  const interrupted = {
+                    status: "error" as const,
+                    error: { code: "GenerationFailed", message: INTERRUPTED_MESSAGE },
+                    completedAt: new Date(),
+                  };
+                  yield* tx
+                    .update(messageToolCalls)
+                    .set(interrupted)
+                    .where(
+                      and(
+                        eq(messageToolCalls.messageId, row.id),
+                        eq(messageToolCalls.status, "running"),
+                      ),
+                    )
+                    .pipe(Effect.orDie);
+                  yield* tx
+                    .update(messageCompactionEvents)
+                    .set(interrupted)
+                    .where(
+                      and(
+                        eq(messageCompactionEvents.messageId, row.id),
+                        eq(messageCompactionEvents.status, "running"),
+                      ),
+                    )
+                    .pipe(Effect.orDie);
+                  return {
+                    userId: conversation.userId,
+                    conversationId: row.conversationId,
+                    messageId: row.id,
+                  };
+                }),
+              )
+              .pipe(Effect.catchTag("SqlError", Effect.die));
+            if (result) settled.push(result);
+          }
+          return settled;
         }),
 
         chunksAfter: Effect.fn("ChatRepo.chunksAfter")(function* (messageId, afterSeq) {
@@ -1590,6 +1755,7 @@ export class ChatRepo extends Context.Service<
                   .set({
                     status: "streaming",
                     generationId,
+                    generationLeaseUntil: freshLease(),
                     assistantOutput: null,
                     providerReplay: null,
                     content: "",
@@ -1794,6 +1960,7 @@ export class ChatRepo extends Context.Service<
                     conversationId: input.conversationId,
                     role: "assistant",
                     status: "streaming",
+                    generationLeaseUntil: freshLease(),
                     modelId: input.modelId,
                     generationMode: current[index]!.generationMode,
                   })

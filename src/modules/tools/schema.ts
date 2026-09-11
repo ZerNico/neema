@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentDraftToolEnvelope } from "~/modules/agents/tool-schema.ts";
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
@@ -155,6 +156,7 @@ const planEnvelopeFields = {
   name: Schema.Literals(["update_plan"]),
 };
 export const ToolChunkEnvelope = Schema.Union([
+  AgentDraftToolEnvelope,
   KnowledgeToolEnvelope,
   SkillToolEnvelope,
   Schema.Struct({

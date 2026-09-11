@@ -26,6 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: () => null,
   useNavigate: () => vi.fn(),
   useRouterState: () => "/chat/c1",
+  useBlocker: vi.fn(),
 }));
 vi.mock("./composer.tsx", () => ({ Composer: () => null }));
 // Keep the real stream hook, chronology, research disclosure and question controls;
@@ -74,6 +75,7 @@ it.each(["stream first", "detail first"])(
       compactionEvents: [],
       attachments: [],
       branchedFrom: null,
+      agentDrafts: [],
     };
     const questions = [
       { question: "Which area should I focus on?", options: [], multiSelect: false },

@@ -232,7 +232,14 @@ const FakeGateway = Layer.succeed(AiGateway, {
     Stream.suspend(() => {
       gatewayState.calls.push({
         prompt: JSON.stringify(input.prompt),
-        tools: Object.keys(input.toolkit?.tools ?? {}),
+        // Draft tools are always advertised now; these suites assert the
+        // memory and question toolkit, so filter the constant family out.
+        tools: Object.keys(input.toolkit?.tools ?? {}).filter(
+          (name) =>
+            !name.endsWith("agent_draft") &&
+            name !== "draft_agent" &&
+            name !== "list_agent_options",
+        ),
       });
       if (gatewayState.calls.length === 1) {
         if (gatewayState.askOnFirstCall)

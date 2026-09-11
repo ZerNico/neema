@@ -3,19 +3,24 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
-import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Response as AiResponse, type Prompt } from "effect/unstable/ai";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   attachmentBlobs,
   attachments,
   messageAttachments,
+  messageChunks,
   messages,
   models,
+  skills,
+  skillRevisions,
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
+import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -27,6 +32,7 @@ import { loadConversationDetail } from "~/modules/chat/server/conversation-detai
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
@@ -54,6 +60,7 @@ const FakeKnowledge = Layer.mergeAll(
 let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
   | AgentRepo
+  | AgentDraftService
   | ChatRepo
   | ChatService
   | StreamEngine
@@ -106,6 +113,56 @@ let hold: {
 } | null = null;
 
 const streamPrompts: Array<Prompt.Prompt> = [];
+type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
+let authoringScript:
+  | ((input: GatewayInput) => ReturnType<AiGateway["Service"]["streamChat"]>)
+  | null = null;
+const authoringFinish = (reason: "stop" | "tool-calls" = "stop") =>
+  AiResponse.makePart("finish", {
+    reason,
+    usage: new AiResponse.Usage({ inputTokens: { total: 100 }, outputTokens: { total: 10 } }),
+  });
+const authoringTool = (input: GatewayInput, name: string, params: unknown, hermes = false) => {
+  const id = uuidv7();
+  const calls = hermes
+    ? hermesToolCalls(
+        Stream.make(
+          AiResponse.makePart("text-delta", {
+            id: "t",
+            delta: `<tool_call>${JSON.stringify({ name, arguments: params })}</tool_call>`,
+          }),
+          authoringFinish(),
+        ),
+        { tools: Object.values(input.toolkit!.tools), nextId: Effect.succeed(id) },
+      )
+    : Stream.make(
+        AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
+        authoringFinish("tool-calls"),
+      );
+  return calls.pipe(
+    Stream.flatMap((part): Stream.Stream<ChatStreamPart, never, unknown> =>
+      part.type === "tool-call"
+        ? Stream.make(part).pipe(
+            Stream.concat(
+              Stream.unwrap(
+                input.toolkit!.handle(name, part.params, part.id).pipe(Effect.orDie),
+              ).pipe(
+                Stream.orDie,
+                Stream.map((result) =>
+                  AiResponse.toolResultPart({
+                    id: part.id,
+                    name,
+                    providerExecuted: false,
+                    ...result,
+                  }),
+                ),
+              ),
+            ),
+          )
+        : Stream.make(part),
+    ),
+  ) as Stream.Stream<ChatStreamPart>;
+};
 
 // Deterministic fake AI provider: streams 5 words with a small delay.
 const FakeGateway = Layer.succeed(AiGateway, {
@@ -119,6 +176,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
   streamChat: (input) =>
     Stream.suspend(() => {
       streamPrompts.push(input.prompt);
+      if (authoringScript) return authoringScript(input);
       if (terminalFixtures) {
         const parts = terminalFixtures.shift();
         if (!parts) return Stream.die("Unexpected extra provider call");
@@ -331,6 +389,791 @@ const retryInput = (seed: Effect.Success<typeof setupQuestion>) => ({
   expectedMessages: seed.expectedMessages,
   deleteMessageIds: [],
   invalidateCheckpointThroughMessageIds: [],
+});
+
+describe("conversational agent authoring", () => {
+  const ordinaryChat = Effect.gen(function* () {
+    const seed = yield* setupConversation;
+    const conversation = yield* (yield* ChatRepo).createConversation({
+      userId: seed.userId,
+      modelId: textModelId,
+    });
+    return { ...seed, conversation };
+  });
+  const reply = () =>
+    Stream.make(
+      AiResponse.makePart("text-delta", { id: "t", delta: "The draft is ready to review." }),
+      authoringFinish(),
+    );
+  const collectDraftTurn = (id: string) =>
+    runtime.runPromise(
+      Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(id, 0))),
+    );
+  it.each([false, true])(
+    "opens and edits a private draft in ordinary chat (Hermes: %s), not its target",
+    async (hermes) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const targetId = await runtime.runPromise(
+        AgentRepo.use((repo) =>
+          repo.create(seed.userId, {
+            ...EMPTY_AGENT_DRAFT,
+            name: "Original agent",
+            instructions: "PRIVATE_TARGET_PERSONA",
+          }),
+        ),
+      );
+      const prompts: GatewayInput[] = [];
+      authoringScript = (input) => {
+        prompts.push(input);
+        if (prompts.length === 1)
+          return authoringTool(input, "draft_agent", { agentId: targetId }, hermes);
+        if (prompts.length === 2)
+          return authoringTool(
+            input,
+            "update_agent_draft",
+            { expectedRevision: "bad", changes: { name: "Wrong" } },
+            hermes,
+          ).pipe(
+            Stream.filter((part) => part.type !== "finish"),
+            Stream.concat(authoringTool(input, "list_agent_options", { kind: "models" }, hermes)),
+          );
+        if (prompts.length === 3)
+          return authoringTool(
+            input,
+            "update_agent_draft",
+            {
+              expectedRevision: 1,
+              changes: {
+                name: "Draft agent",
+                instructions: "PRIVATE_DRAFT_BODY",
+              },
+            },
+            hermes,
+          );
+        if (prompts.length === 4)
+          return authoringTool(
+            input,
+            "draft_agent",
+            { agentId: targetId, changes: { instructions: "PRIVATE_STALE_PROPOSAL" } },
+            hermes,
+          );
+        return reply();
+      };
+      try {
+        expect(
+          await runtime.runPromise(
+            AgentDraftService.use((service) =>
+              service
+                .list(seed.userId, seed.conversation.id)
+                .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+            ),
+          ),
+        ).toBeNull();
+        const { conversationId, assistantMessageId } = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              modelId: textModelId,
+              content: "Help me edit this agent.",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+        await collectDraftTurn(assistantMessageId);
+        expect(prompts).toHaveLength(5);
+        expect(JSON.stringify(prompts[0]!.prompt)).not.toContain("PRIVATE_TARGET_PERSONA");
+        expect(JSON.stringify(prompts[1]!.prompt)).toContain("PRIVATE_TARGET_PERSONA");
+        expect(JSON.stringify(prompts[4]!.prompt)).toContain("PRIVATE_DRAFT_BODY");
+        expect(JSON.stringify(prompts[4]!.prompt)).not.toContain("PRIVATE_STALE_PROPOSAL");
+        const draft = await runtime.runPromise(
+          AgentDraftService.use((service) =>
+            service
+              .list(seed.userId, conversationId)
+              .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+          ),
+        );
+        expect(draft).toMatchObject({
+          revision: 2,
+          settings: { name: "Draft agent", instructions: "PRIVATE_DRAFT_BODY" },
+        });
+        expect(
+          (await runtime.runPromise(AgentRepo.use((repo) => repo.get(seed.userId, targetId))))?.row,
+        ).toMatchObject({
+          name: "Original agent",
+          instructions: "PRIVATE_TARGET_PERSONA",
+          configRevision: 1,
+        });
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        expect(detail.agentDrafts.map((draft) => draft.id)).toEqual([draft!.id]);
+        expect(detail.agent).toBeNull();
+        expect(detail.messages).toHaveLength(2);
+        expect(detail.messages.at(-1)?.status).toBe("complete");
+        expect(detail.toolCalls.map((call) => call.arguments)).toEqual([{}, {}, {}, {}, {}]);
+        const rejected = detail.toolCalls.find(
+          (call) => call.result && (call.result as { outcome?: string }).outcome === "invalid",
+        )!;
+        expect(rejected.error?.code).toBe("AgentDraftNotUpdated");
+        expect(rejected.error?.message).toContain("expectedRevision");
+        expect(rejected.error?.message).not.toContain("Wrong");
+        expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
+        const chunks = await runtime.runPromise(
+          ChatRepo.use((repo) => repo.chunksAfter(assistantMessageId, 0)),
+        );
+        expect(JSON.stringify(chunks)).not.toContain("PRIVATE_");
+        expect(chunks.some((chunk) => chunk.delta.includes('"family":"agent-draft"'))).toBe(true);
+        expect(
+          chunks.some((chunk) =>
+            chunk.delta.includes('"reason":"Provide the current expectedRevision'),
+          ),
+        ).toBe(true);
+        // Branch before retry erases the original activities, so this proves actual
+        // historical widget copying rather than merely the absence of a live draft.
+        const branch = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.branchConversation({
+              userId: seed.userId,
+              conversationId,
+              messageId: assistantMessageId,
+            }),
+          ),
+        );
+        const branched = await runtime.runPromise(
+          loadConversationDetail(seed.userId, branch.conversationId),
+        );
+        expect(branched.agentDrafts).toEqual([]);
+        expect(branched.toolCalls).toHaveLength(5);
+        expect(branched.toolCalls[0]!.result).toMatchObject({
+          outcome: "drafted",
+          draftConversationId: conversationId,
+        });
+        expect(
+          await runtime.runPromise(
+            AgentDraftService.use((service) =>
+              service
+                .list(seed.userId, branch.conversationId)
+                .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+            ),
+          ),
+        ).toBeNull();
+        expect(JSON.stringify(branched)).not.toContain("PRIVATE_");
+        expect(
+          await runtime.runPromise(
+            AgentDraftService.use((service) =>
+              service.save(seed.userId, { draftId: draft!.id, expectedRevision: draft!.revision }),
+            ),
+          ),
+        ).toMatchObject({ outcome: "saved", agentId: targetId, configRevision: 2 });
+        await runtime.runPromise(
+          AgentDraftService.use((service) =>
+            service.patch(seed.userId, {
+              draftId: draft!.id,
+              expectedRevision: draft!.revision,
+              changes: { instructions: "PRIVATE_LATER_DRAFT" },
+            }),
+          ),
+        );
+        authoringScript = (input) => {
+          expect(JSON.stringify(input.prompt)).toContain("PRIVATE_LATER_DRAFT");
+          return reply();
+        };
+        await runtime.runPromise(
+          ChatService.use((service) =>
+            service.retryMessage({
+              userId: seed.userId,
+              conversationId,
+              messageId: assistantMessageId,
+            }),
+          ),
+        );
+        await collectDraftTurn(assistantMessageId);
+        const retried = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        expect(retried.toolCalls).toHaveLength(0);
+        expect(retried.agentDrafts).toHaveLength(1);
+        const sent = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversationId,
+              modelId: textModelId,
+              content: "Keep working with my changes.",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+        await collectDraftTurn(sent.assistantMessageId);
+        const edited = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.editMessage({
+              userId: seed.userId,
+              conversationId,
+              messageId: detail.messages[0]!.id,
+              modelId: textModelId,
+              content: "Let’s refine the agent.",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+        await collectDraftTurn(edited.assistantMessageId);
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "refreshes and budgets a direct edit before the next provider call (small context: %s)",
+    async (small) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const [model] = await runtime.runPromise(
+        Db.use((db) => db.select().from(models).where(eq(models.id, textModelId))),
+      );
+      if (small)
+        await runtime.runPromise(
+          Db.use((db) =>
+            db.update(models).set({ contextLength: 8000 }).where(eq(models.id, textModelId)),
+          ),
+        );
+      let calls = 0;
+      const instructions = small ? "x".repeat(20000) : "PRIVATE_DIRECT_EDIT";
+      authoringScript = (input) => {
+        calls++;
+        if (calls > 1) {
+          expect(JSON.stringify(input.prompt)).toContain(instructions);
+          return reply();
+        }
+        // Resolved when it runs, not when it is built: the draft only exists
+        // once draft_agent below has executed.
+        const directEdit = Effect.promise(() =>
+          runtime.runPromise(
+            AgentDraftService.use((service) =>
+              service.list(seed.userId, seed.conversation.id).pipe(
+                Effect.flatMap((drafts) =>
+                  service.patch(seed.userId, {
+                    draftId: drafts[0]!.id,
+                    expectedRevision: 1,
+                    changes: { instructions },
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+        return authoringTool(input, "draft_agent", { changes: { name: "Working draft" } }).pipe(
+          Stream.map((part) =>
+            part.type === "finish"
+              ? AiResponse.makePart("finish", {
+                  reason: "tool-calls",
+                  usage: new AiResponse.Usage({
+                    inputTokens: { total: estimatePromptTokens(input.prompt.content) },
+                    outputTokens: { total: 10 },
+                  }),
+                })
+              : part,
+          ),
+          Stream.concat(Stream.fromEffectDrain(directEdit)),
+        );
+      };
+      try {
+        const sent = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              modelId: textModelId,
+              content: "Prepare an agent.",
+              searchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+        await collectDraftTurn(sent.assistantMessageId);
+        expect(calls).toBe(small ? 1 : 2);
+        expect(
+          await runtime.runPromise(
+            ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+          ),
+        ).toMatchObject({ status: small ? "error" : "complete" });
+        expect(
+          await runtime.runPromise(
+            AgentDraftService.use((service) =>
+              service
+                .list(seed.userId, seed.conversation.id)
+                .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+            ),
+          ),
+        ).toMatchObject({ revision: 2, settings: { instructions } });
+      } finally {
+        authoringScript = null;
+        await runtime.runPromise(
+          Db.use((db) =>
+            db
+              .update(models)
+              .set({ contextLength: model!.contextLength })
+              .where(eq(models.id, textModelId)),
+          ),
+        );
+      }
+    },
+  );
+
+  it("uses the current draft when answering a structured clarification", async () => {
+    const seed = await runtime.runPromise(setupQuestion);
+    const opened = await runtime.runPromise(
+      AgentDraftService.use((service) =>
+        service.open(
+          seed.userId,
+          {
+            conversationId: seed.conversation.id,
+            changes: { name: "Before clarification" },
+          },
+          () => Effect.void,
+        ),
+      ),
+    );
+    await runtime.runPromise(
+      AgentDraftService.use((service) =>
+        service.patch(seed.userId, {
+          draftId: opened.draft.id,
+          expectedRevision: opened.draft.revision,
+          changes: { instructions: "PRIVATE_CLARIFIED_DRAFT" },
+        }),
+      ),
+    );
+    let calls = 0;
+    authoringScript = (input) => {
+      calls++;
+      expect(JSON.stringify(input.prompt)).toContain("PRIVATE_CLARIFIED_DRAFT");
+      return reply();
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({ ...answerInput(seed), searchEnabled: false }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      expect(calls).toBe(1);
+      expect(
+        (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId))))
+          ?.status,
+      ).toBe("complete");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("lists the user's models beside the draft and accepts a singular option kind", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      const prompt = JSON.stringify(input.prompt);
+      if (round === 1) {
+        expect(prompt).not.toContain("availableModels");
+        expect(prompt).not.toContain("Text Only");
+        return authoringTool(input, "draft_agent", { changes: { name: "Model picker" } });
+      }
+      if (round === 2) {
+        // The data block is JSON inside a text part, so its quotes arrive escaped.
+        const escaped = (value: unknown) => JSON.stringify(JSON.stringify(value)).slice(1, -1);
+        expect(prompt).toContain(escaped({ id: textModelId, name: "Text Only", current: true }));
+        return authoringTool(input, "list_agent_options", { kind: "Model" });
+      }
+      return reply();
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Use Claude as the preferred model.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      expect(round).toBe(3);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(
+        detail.toolCalls.map((call) => [call.status, (call.result as { outcome: string }).outcome]),
+      ).toEqual([
+        ["complete", "drafted"],
+        ["complete", "options"],
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("offers manual-only skill metadata without opening a draft or exposing it in activity", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const id = uuidv7();
+    await runtime.runPromise(
+      Db.use((db) =>
+        db.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(skills).values({
+              id,
+              userId: seed.userId,
+              name: "PRIVATE_MANUAL_SKILL",
+              description: "PRIVATE_SKILL_DESCRIPTION",
+              manualOnly: true,
+            });
+            yield* tx.insert(skillRevisions).values({
+              id: uuidv7(),
+              skillId: id,
+              revision: 1,
+              name: "PRIVATE_MANUAL_SKILL",
+              description: "PRIVATE_SKILL_DESCRIPTION",
+              manualOnly: true,
+              contentHash: "fixture",
+            });
+          }),
+        ),
+      ),
+    );
+    let calls = 0;
+    authoringScript = (input) => {
+      if (++calls === 1) {
+        expect(JSON.stringify(input.prompt)).not.toContain("PRIVATE_MANUAL_SKILL");
+        return authoringTool(input, "list_agent_options", {
+          kind: "skills",
+          query: "PRIVATE_MANUAL",
+        });
+      }
+      expect(JSON.stringify(input.prompt)).toContain("PRIVATE_MANUAL_SKILL");
+      expect(JSON.stringify(input.prompt)).toContain(id);
+      return reply();
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Find a skill for a future agent.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      expect(calls).toBe(2);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.agentDrafts).toEqual([]);
+      expect(detail.toolCalls).toHaveLength(1);
+      expect(detail.toolCalls[0]!.result).toEqual({ outcome: "options" });
+      expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("accepts null placeholders and numeric strings the way models write them", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "draft_agent", {
+          agentId: null,
+          changes: {
+            title: "Jira helper",
+            description: null,
+            model: null,
+            conversationStarters: ["Write a bug report"],
+            systemPrompt: "Be precise.",
+          },
+        });
+      if (round === 2)
+        return authoringTool(input, "update_agent_draft", {
+          expectedRevision: "1",
+          changes: { instructions: "Write clear tickets.", icon: null },
+        });
+      return reply();
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Make a Jira agent.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      expect(round).toBe(3);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      const draft = await runtime.runPromise(
+        AgentDraftService.use((service) =>
+          service
+            .list(seed.userId, seed.conversation.id)
+            .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+        ),
+      );
+      // Both rows point at the one draft the tools actually wrote.
+      expect(detail.toolCalls.map((call) => call.result)).toEqual([
+        {
+          outcome: "drafted",
+          revision: 1,
+          draftId: draft!.id,
+          draftConversationId: seed.conversation.id,
+        },
+        {
+          outcome: "updated",
+          revision: 2,
+          changedFields: ["instructions"],
+          draftId: draft!.id,
+          draftConversationId: seed.conversation.id,
+        },
+      ]);
+      expect(draft).toMatchObject({
+        revision: 2,
+        settings: {
+          name: "Jira helper",
+          description: "",
+          modelId: null,
+          starters: ["Write a bug report"],
+          instructions: "Write clear tickets.",
+          icon: "robot",
+        },
+      });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("prepares a second agent in its own draft instead of overwriting the first", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    // Two separate sends: the tool loop would otherwise run every round inside
+    // the first generation, before the first draft is saved.
+    let turn: "first" | "second" = "first";
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (turn === "second")
+        return round === 1
+          ? authoringTool(input, "draft_agent", { changes: { name: "Release notes" } })
+          : reply();
+      if (round === 1) return authoringTool(input, "draft_agent", { changes: { name: "Tickets" } });
+      if (round === 2)
+        return authoringTool(input, "update_agent_draft", {
+          expectedRevision: 1,
+          changes: { instructions: "PRIVATE_FIRST" },
+        });
+      return reply();
+    };
+    try {
+      const first = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Make a ticket agent.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(first.assistantMessageId);
+      const drafts = Effect.flatMap(AgentDraftService, (service) =>
+        service.list(seed.userId, seed.conversation.id),
+      );
+      const started = await runtime.runPromise(drafts);
+      expect(started).toHaveLength(1);
+      const saved = await runtime.runPromise(
+        AgentDraftService.use((service) =>
+          service.save(seed.userId, {
+            draftId: started[0]!.id,
+            expectedRevision: started[0]!.revision,
+          }),
+        ),
+      );
+      if (saved.outcome !== "saved") throw new Error("expected saved");
+      turn = "second";
+      round = 0;
+      const second = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Now make a release notes agent.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(second.assistantMessageId);
+      const both = await runtime.runPromise(drafts);
+      expect(both).toHaveLength(2);
+      // The saved agent keeps the first draft's settings; the second is separate.
+      expect(both.find((draft) => draft.targetAgentId === saved.agentId)).toMatchObject({
+        settings: { name: "Tickets", instructions: "PRIVATE_FIRST" },
+      });
+      expect(both.find((draft) => draft.targetAgentId === null)).toMatchObject({
+        settings: { name: "Release notes", instructions: "" },
+      });
+      expect(
+        (await runtime.runPromise(AgentRepo.use((repo) => repo.get(seed.userId, saved.agentId))))!
+          .row,
+      ).toMatchObject({ name: "Tickets", configRevision: 1 });
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.agentDrafts.map((draft) => draft.name).sort()).toEqual([
+        "Release notes",
+        "Tickets",
+      ]);
+      expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("names both drafts when an update omits the id, and patches the right one when given it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    // The id comes from the trailing draft data in the prompt, which is how a
+    // real model learns it.
+    const idOf = (input: GatewayInput, name: string) => {
+      const block = input.prompt.content
+        .flatMap((message) => {
+          const content: unknown = message.content;
+          return typeof content === "string"
+            ? [content]
+            : (content as Array<{ text?: string }>).map((part) => part.text ?? "");
+        })
+        .find((text) => text.startsWith("Application-provided agent draft"));
+      const data = JSON.parse(block!.slice(block!.indexOf("\n") + 1)) as {
+        draft: { draftId: string; name: string } | null;
+        otherDrafts: ReadonlyArray<{ draftId: string; name: string }>;
+      };
+      return [...(data.draft ? [data.draft] : []), ...data.otherDrafts].find(
+        (draft) => draft.name === name,
+      )!.draftId;
+    };
+    authoringScript = (input) => {
+      round++;
+      // Four tool rounds is the ceiling; the fifth call has no toolkit.
+      if (round === 1)
+        return authoringTool(input, "draft_agent", {
+          changes: { name: "Alpha", instructions: "Alpha body" },
+        });
+      if (round === 2) return authoringTool(input, "draft_agent", { changes: { name: "Beta" } });
+      // Ambiguous: two drafts and no id.
+      if (round === 3)
+        return authoringTool(input, "update_agent_draft", {
+          expectedRevision: 1,
+          changes: { instructions: "Which one?" },
+        });
+      if (round === 4)
+        return authoringTool(input, "update_agent_draft", {
+          draftId: idOf(input, "Beta"),
+          expectedRevision: 1,
+          changes: { instructions: "Beta body" },
+        });
+      return reply();
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Make two agents.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      const drafts = await runtime.runPromise(
+        AgentDraftService.use((service) => service.list(seed.userId, seed.conversation.id)),
+      );
+      // Addressed by id, the patch lands on Beta and leaves Alpha alone.
+      expect(drafts.find((draft) => draft.settings.name === "Beta")!.settings.instructions).toBe(
+        "Beta body",
+      );
+      expect(drafts.find((draft) => draft.settings.name === "Alpha")!.settings.instructions).toBe(
+        "Alpha body",
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      const ambiguous = detail.toolCalls.find(
+        (call) => (call.result as { outcome?: string }).outcome === "invalid",
+      )!;
+      expect(ambiguous.error?.code).toBe("AgentDraftNotUpdated");
+      expect(ambiguous.error?.message).toContain("draftId is required");
+      expect(ambiguous.error?.message).toContain("Alpha");
+      expect(ambiguous.error?.message).toContain("Beta");
+      // The reason is for debugging only; the transcript never carries it.
+      expect(JSON.stringify(detail.toolCalls.map((call) => call.result))).not.toContain(
+        "draftId is required",
+      );
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("refuses unavailable edit targets without turning an ordinary chat into a builder session", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) =>
+      ++round === 1 ? authoringTool(input, "draft_agent", { agentId: uuidv7() }) : reply();
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Edit this unavailable agent.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(sent.assistantMessageId);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.agentDrafts).toEqual([]);
+      expect(detail.messages.at(-1)?.status).toBe("complete");
+      expect(detail.toolCalls[0]!.result).toEqual({ outcome: "unavailable" });
+      expect(detail.toolCalls[0]!.error).toEqual({
+        code: "AgentDraftNotUpdated",
+        message: "That agent is not available to edit.",
+      });
+    } finally {
+      authoringScript = null;
+    }
+  });
 });
 
 describe("structured answer persistence and edits", () => {
@@ -748,6 +1591,36 @@ describe("atomic question answers", () => {
   });
 });
 
+// A finished exchange whose answer came from `originalModelId`: the state
+// the retry menu acts on.
+const seedAnswered = (originalModelId: string) =>
+  Effect.gen(function* () {
+    const repo = yield* ChatRepo;
+    const db = yield* Db;
+    const userId = uuidv7();
+    yield* db.execute(
+      `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+    );
+    const conversation = yield* repo.createConversation({ userId, modelId: originalModelId });
+    const userMessage = yield* repo.insertMessage({
+      conversationId: conversation.id,
+      role: "user",
+      content: "hi",
+    });
+    const assistant = yield* repo.insertMessage({
+      conversationId: conversation.id,
+      role: "assistant",
+      status: "streaming",
+      modelId: originalModelId,
+    });
+    yield* repo.finalizeMessage({
+      messageId: assistant.id,
+      status: "complete",
+      content: "first answer",
+    });
+    return { userId, conversation, userMessage, assistant };
+  });
+
 describe("resumable streaming pipeline", () => {
   it("persists chunks, finalizes the message, and replays for late subscribers", async () => {
     const result = await runtime.runPromise(
@@ -854,6 +1727,203 @@ describe("resumable streaming pipeline", () => {
     // on both, and the stop path has its own flush.
     expect(result.chunks.map((c) => c.seq)).toEqual(result.chunks.map((_, index) => index + 1));
     expect(result.chunks.map((c) => c.delta).join("")).toBe(result.final?.content);
+  }, 60_000);
+
+  it("settles a generation whose process died and lets the reader stop or resend", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const { userId, conversation, assistant } = yield* setupConversation;
+        // A crashed process left chunks, a running tool row and a lapsed lease
+        // behind. Nothing is registered in this engine, exactly as after a restart.
+        yield* db.insert(messageChunks).values([
+          { messageId: assistant.id, seq: 1, kind: "text", delta: "partial " },
+          { messageId: assistant.id, seq: 2, kind: "reasoning", delta: "thinking" },
+          { messageId: assistant.id, seq: 3, kind: "text", delta: "answer" },
+        ]);
+        yield* repo.insertToolCall({
+          id: uuidv7(),
+          messageId: assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "orphan",
+          toolName: "web_search",
+          arguments: {},
+        });
+        // Fresh lease: still considered alive, so nothing may settle it yet.
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() + interval '1 minute'` })
+          .where(eq(messages.id, assistant.id));
+        yield* engine.reapOrphans;
+        const stillLive = yield* repo.getMessage(assistant.id);
+        const busy = yield* repo
+          .createTurn({
+            userId,
+            conversationId: conversation.id,
+            modelId: textModelId,
+            content: "again",
+            attachmentIds: [],
+          })
+          .pipe(Effect.flip);
+        // Lease lapsed: the process is gone. A subscriber that arrives now must
+        // not hang on a live tail that can never end.
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
+          .where(eq(messages.id, assistant.id));
+        const events = yield* engine
+          .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
+          .pipe(Stream.runCollect, Effect.timeout("5 seconds"));
+        const stopped = yield* chat.stopGeneration({
+          userId,
+          conversationId: conversation.id,
+          messageId: assistant.id,
+          generationId: assistant.generationId ?? undefined,
+        });
+        const settled = yield* repo.getMessage(assistant.id);
+        const toolCalls = yield* repo.listToolCalls([assistant.id]);
+        const next = yield* repo.createTurn({
+          userId,
+          conversationId: conversation.id,
+          modelId: textModelId,
+          content: "again",
+          attachmentIds: [],
+        });
+        return {
+          stillLive,
+          busy: busy._tag,
+          events: Array.from(events),
+          stopped,
+          settled,
+          toolCalls,
+          next,
+        };
+      }),
+    );
+    expect(result.stillLive?.status).toBe("streaming");
+    expect(result.busy).toBe("ConversationBusy");
+    expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "error" });
+    expect(result.events.filter((event) => event.kind === "chunk")).toHaveLength(3);
+    expect(result.stopped).toEqual({ stopped: false });
+    expect(result.settled).toMatchObject({
+      status: "error",
+      content: "partial answer",
+      reasoning: "thinking",
+      error: {
+        tag: "GenerationFailed",
+        message: "The response was interrupted before it finished.",
+      },
+    });
+    expect(result.toolCalls[0]).toMatchObject({
+      status: "error",
+      error: { code: "GenerationFailed" },
+    });
+    expect(result.next.assistant.status).toBe("streaming");
+  }, 60_000);
+
+  it("grants a retry of an old row a fresh lease instead of reaping it at once", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const { userId, conversation, assistant } = yield* seedAnswered(textModelId);
+        // An answer from long ago: any fallback on the row's creation time
+        // would call the new attempt lapsed before it streamed a byte.
+        yield* db
+          .update(messages)
+          .set({
+            createdAt: sql`clock_timestamp() - interval '2 hours'`,
+            generationLeaseUntil: null,
+          })
+          .where(eq(messages.id, assistant.id));
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        hold = { after: 2, reached, release };
+        yield* chat.retryMessage({
+          userId,
+          conversationId: conversation.id,
+          messageId: assistant.id,
+        });
+        yield* Deferred.await(reached);
+        yield* engine.reapOrphans;
+        const during = yield* repo.getMessage(assistant.id);
+        yield* Deferred.succeed(release, undefined);
+        hold = null;
+        const collected = yield* engine.subscribe(assistant.id, 0).pipe(Stream.runCollect);
+        return {
+          during,
+          final: yield* repo.getMessage(assistant.id),
+          last: Array.from(collected).at(-1),
+        };
+      }),
+    );
+    expect(result.during?.status).toBe("streaming");
+    expect(result.last).toMatchObject({ kind: "done", status: "complete" });
+    expect(result.final).toMatchObject({
+      status: "complete",
+      content: "alpha beta gamma delta epsilon",
+    });
+  }, 60_000);
+
+  it("renews the lease while a generation is alive and never reaps it", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const { userId, conversation, assistant } = yield* setupConversation;
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        hold = { after: 3, reached, release };
+        yield* engine.startGeneration({
+          generationId: assistant.generationId ?? undefined,
+          userId,
+          conversationId: conversation.id,
+          messageId: assistant.id,
+          modelId: "fake",
+          searchEnabled: false,
+        });
+        yield* Deferred.await(reached);
+        // Wait for the buffered chunks to land first: while any remain, a
+        // non-empty flush would renew the lease and the assertion below would
+        // hold even with the heartbeat gone.
+        yield* Effect.repeat(
+          // Delayed so the flusher fiber actually gets to run between attempts.
+          repo.chunksAfter(assistant.id, 0).pipe(Effect.delay(Duration.millis(10))),
+          // `hold.after` blocks inside the tap, so that chunk never reaches the
+          // buffer: two land, not three.
+          { until: (rows) => rows.length === 2 },
+        );
+        // Held mid-stream with nothing left to write, so only the empty-batch
+        // heartbeat can move this lease back into the future.
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 hour'` })
+          .where(eq(messages.id, assistant.id));
+        yield* Effect.repeat(
+          db
+            .select({ lease: messages.generationLeaseUntil })
+            .from(messages)
+            .where(eq(messages.id, assistant.id))
+            .pipe(Effect.delay(Duration.millis(10))),
+          { until: (rows) => (rows[0]?.lease?.getTime() ?? 0) > Date.now() },
+        );
+        yield* engine.reapOrphans;
+        const during = yield* repo.getMessage(assistant.id);
+        yield* Deferred.succeed(release, undefined);
+        hold = null;
+        const collected = yield* engine.subscribe(assistant.id, 0).pipe(Stream.runCollect);
+        return { during, last: Array.from(collected).at(-1) };
+      }),
+    );
+    expect(result.during?.status).toBe("streaming");
+    expect(result.last).toMatchObject({ kind: "done", status: "complete" });
   }, 60_000);
 
   it("reports nothing to stop for a message that is not generating here", async () => {
@@ -1027,36 +2097,6 @@ describe("resumable streaming pipeline", () => {
 });
 
 describe("retry with a different model", () => {
-  // A finished exchange whose answer came from `originalModelId` — the state
-  // the retry menu acts on.
-  const seedAnswered = (originalModelId: string) =>
-    Effect.gen(function* () {
-      const repo = yield* ChatRepo;
-      const db = yield* Db;
-      const userId = uuidv7();
-      yield* db.execute(
-        `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
-      );
-      const conversation = yield* repo.createConversation({ userId, modelId: originalModelId });
-      const userMessage = yield* repo.insertMessage({
-        conversationId: conversation.id,
-        role: "user",
-        content: "hi",
-      });
-      const assistant = yield* repo.insertMessage({
-        conversationId: conversation.id,
-        role: "assistant",
-        status: "streaming",
-        modelId: originalModelId,
-      });
-      yield* repo.finalizeMessage({
-        messageId: assistant.id,
-        status: "complete",
-        content: "first answer",
-      });
-      return { userId, conversation, userMessage, assistant };
-    });
-
   // Rows only: the guard under test runs before any blob is read, so the
   // stubbed store never has to hold bytes.
   const attachImage = (userId: string, messageId: string) =>

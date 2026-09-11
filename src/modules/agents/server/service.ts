@@ -13,6 +13,45 @@ import {
 } from "../schema.ts";
 import { AgentRepo, summarizeAgent } from "./repo.ts";
 
+const modelFor = Effect.fn(function* (
+  providers: ProviderRepo["Service"],
+  userId: string,
+  modelId: string,
+) {
+  const model = yield* providers.getModel(modelId);
+  if (
+    !model ||
+    !model.enabled ||
+    model.type !== "chat" ||
+    !(yield* providers.isModelAccessible(userId, modelId))
+  )
+    return null;
+  return { id: model.id, name: model.displayName, available: true };
+});
+
+/** Shared by manual saves and the draft transaction; never normalize working input. */
+export const validateAgentSettings = Effect.fn(function* (
+  providers: ProviderRepo["Service"],
+  userId: string,
+  input: AgentSettings,
+) {
+  const settings = yield* Schema.decodeUnknownEffect(AgentSettings)(input).pipe(
+    Effect.mapError(() => new AgentRejected({ reason: "invalid agent settings" })),
+  );
+  if (!settings.name.trim() || settings.starters.some((starter) => !starter.trim()))
+    return yield* new AgentRejected({ reason: "name and conversation starters must not be blank" });
+  if (settings.modelId && !(yield* modelFor(providers, userId, settings.modelId)))
+    return yield* new AgentRejected({ reason: "selected model is unavailable" });
+  return {
+    ...settings,
+    name: settings.name.trim(),
+    description: settings.description.trim(),
+    starters: settings.starters.map((starter) => starter.trim()),
+    collectionIds: [...new Set(settings.collectionIds)],
+    skillIds: [...new Set(settings.skillIds ?? [])],
+  };
+});
+
 export class AgentService extends Context.Service<
   AgentService,
   {
@@ -48,36 +87,8 @@ export class AgentService extends Context.Service<
           return yield* new AgentNotAvailable({ agentId });
         return agent;
       });
-      const modelFor = Effect.fn(function* (userId: string, modelId: string) {
-        const model = yield* providers.getModel(modelId);
-        if (
-          !model ||
-          !model.enabled ||
-          model.type !== "chat" ||
-          !(yield* providers.isModelAccessible(userId, modelId))
-        )
-          return null;
-        return { id: model.id, name: model.displayName, available: true };
-      });
-      const validate = Effect.fn(function* (userId: string, input: AgentSettings) {
-        const settings = yield* Schema.decodeUnknownEffect(AgentSettings)(input).pipe(
-          Effect.mapError(() => new AgentRejected({ reason: "invalid agent settings" })),
-        );
-        if (!settings.name.trim() || settings.starters.some((starter) => !starter.trim()))
-          return yield* new AgentRejected({
-            reason: "name and conversation starters must not be blank",
-          });
-        if (settings.modelId && !(yield* modelFor(userId, settings.modelId)))
-          return yield* new AgentRejected({ reason: "selected model is unavailable" });
-        return {
-          ...settings,
-          name: settings.name.trim(),
-          description: settings.description.trim(),
-          starters: settings.starters.map((starter) => starter.trim()),
-          collectionIds: [...new Set(settings.collectionIds)],
-          skillIds: [...new Set(settings.skillIds ?? [])],
-        };
-      });
+      const validate = (userId: string, input: AgentSettings) =>
+        validateAgentSettings(providers, userId, input);
       const load = Effect.fn("AgentService.load")(function* (
         userId: string,
         agentId: string,
@@ -89,7 +100,7 @@ export class AgentService extends Context.Service<
           ownerOnly,
         );
         const model = row.modelId
-          ? ((yield* modelFor(userId, row.modelId)) ?? {
+          ? ((yield* modelFor(providers, userId, row.modelId)) ?? {
               id: row.modelId,
               name: null,
               available: false,

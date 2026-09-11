@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "@effect/vitest";
-import { Effect } from "effect";
-import { Prompt, type Response } from "effect/unstable/ai";
+import { Effect, Schema } from "effect";
+import { Prompt, Tool, Toolkit, type Response } from "effect/unstable/ai";
 import {
   COMPACTION_CONFIG,
   activeCompactionSummaryMessage,
@@ -10,6 +10,7 @@ import {
   ContextTooLarge,
   estimateMessageTokens,
   estimatePromptTokens,
+  estimateToolSchemaTokens,
   hardTruncateHistory,
   latestValidCheckpoint,
   prepareCompactedActiveRounds,
@@ -190,6 +191,39 @@ describe("calibrationFactor", () => {
 });
 
 describe("computeBudget", () => {
+  it("reserves the measured toolkit schema once it exceeds the flat overhead guess", () => {
+    const tool = Tool.make("draft_agent", {
+      description: "Prepare editable settings",
+      parameters: Schema.Struct({ instructions: Schema.String }),
+    });
+    const tokens = estimateToolSchemaTokens(Toolkit.make(tool));
+    expect(tokens).toBe(
+      estimatePromptTokens([
+        {
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              name: tool.name,
+              description: tool.description,
+              parameters: Tool.getJsonSchema(tool),
+            },
+          ]),
+        },
+      ]),
+    );
+    expect(tokens).toBeGreaterThan(0);
+    expect(estimateToolSchemaTokens(undefined)).toBe(0);
+    const base = { contextLength: 8000, webToolsEnabled: false };
+    const overhead = 8000 * COMPACTION_CONFIG.baseOverheadRatio;
+    expect(computeBudget({ ...base, toolSchemaTokens: overhead - 1 }).input).toBe(
+      computeBudget(base).input,
+    );
+    expect(computeBudget({ ...base, toolSchemaTokens: overhead + 500 }).input).toBe(
+      computeBudget(base).input - 500,
+    );
+    expect(computeBudget({ ...base, toolSchemaTokens: 16000 }).input).toBe(1);
+  });
+
   it("falls back to a default window when the catalog never reported one", () => {
     expect(computeBudget({ contextLength: null, webToolsEnabled: false }).context).toBe(
       COMPACTION_CONFIG.defaultContextLength,

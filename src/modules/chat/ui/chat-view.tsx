@@ -1,3 +1,10 @@
+import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
+import { AgentDraftWidget } from "./agent-draft-activity-block.tsx";
+import {
+  AgentDraftToolName,
+  projectAgentDraftResult,
+  agentDraftResultOk,
+} from "~/modules/agents/tool-schema.ts";
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { applyImageChunk } from "../client/use-message-stream.ts";
 import type { AssistantImage } from "../assistant-output.ts";
@@ -76,6 +83,21 @@ export function toActivity(row: {
 }): ToolActivity {
   const textOffset = readTextOffset(row.textOffset);
   const position = textOffset === undefined ? {} : { textOffset };
+  if (Schema.is(AgentDraftToolName)(row.toolName)) {
+    const result = projectAgentDraftResult(row.result);
+    return {
+      family: "agent-draft",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status:
+        row.status === "running" ? "running" : agentDraftResultOk(result) ? "complete" : "error",
+      ...(row.status === "running" ? {} : { result }),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
   if (Schema.is(SkillToolName)(row.toolName)) {
     const result = Option.getOrNull(Schema.decodeUnknownOption(SkillActivity)(row.result));
     return {
@@ -229,6 +251,7 @@ function toCompactionActivity(row: {
 }
 
 export function ChatView({ conversationId }: { conversationId: string }) {
+  const agentDraft = useRef<AgentDraftHandle>(null);
   const composer = useRef<ComposerHandle>(null);
   const isMobile = useIsMobile();
   // Opening a chat should leave the caret ready to type. Not on a phone: that
@@ -341,6 +364,43 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     subscribedMessage?.researchRunId ?? subscribedMessage?.generationId ?? null,
   );
 
+  // A draft of this conversation, from any of the three paths that can reveal
+  // one. References whose owning conversation is not this one are branch copies.
+  const discoveredDrafts = useMemo(() => {
+    const ids = new Set(data.agentDrafts.map((draft) => draft.id));
+    const mine = (result: { draftId?: string; draftConversationId?: string }) => {
+      if (result.draftId && result.draftConversationId === conversationId) ids.add(result.draftId);
+    };
+    for (const row of data.toolCalls)
+      if (Schema.is(AgentDraftToolName)(row.toolName)) mine(projectAgentDraftResult(row.result));
+    for (const activity of stream.tools)
+      if (activity.family === "agent-draft" && activity.result) mine(activity.result);
+    return ids;
+  }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
+  // Retry/edit can remove every reference before the refreshed loader sees the
+  // retained draft, so ids accumulate while this conversation is mounted. A
+  // discarded draft is removed again: nothing on the server can reintroduce it.
+  const [remembered, setRemembered] = useState<{
+    conversationId: string;
+    ids: ReadonlySet<string>;
+  }>({ conversationId, ids: new Set() });
+  const scoped = remembered.conversationId === conversationId ? remembered.ids : new Set<string>();
+  const draftIds = useMemo(
+    () => [...new Set([...scoped, ...discoveredDrafts])].sort(),
+    [discoveredDrafts, scoped],
+  );
+  if (draftIds.length !== scoped.size || remembered.conversationId !== conversationId)
+    setRemembered({ conversationId, ids: new Set(draftIds) });
+  const forgetDraft = useCallback(
+    (draftId: string) =>
+      setRemembered((current) => {
+        const ids = new Set(current.ids);
+        return ids.delete(draftId) ? { ...current, ids } : current;
+      }),
+    [],
+  );
+  const hasAgentDraft = draftIds.length > 0;
+
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
     [data.messages, data.toolCalls, data.attachments],
@@ -350,7 +410,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     enabled: searchEnabled,
     setEnabled: setSearchEnabled,
     reset: resetSearchEnabled,
-  } = useSearchMode();
+  } = useSearchMode(data.agent?.searchEnabled ?? true);
   const context = useContextSelection({ mode: "installed", agent: data.agent });
   const editContext = useContextSelection({ mode: "installed", agent: data.agent });
   // The composer loads the same list inside itself; the editor is a second
@@ -373,8 +433,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     if (!questionResponses.hiddenMessageIds.has(editingMessageId)) resetEditUploads();
   }, [resetEditUploads, editingMessageId, questionResponses, settleEditContext]);
 
+  // Blocking a generation has to say so: onMutate throwing cancels the mutation,
+  // and send/retry/branch carry no onError of their own, so without this the
+  // button would simply do nothing.
+  const flushAgentDraft = async () => {
+    if (hasAgentDraft && !(await agentDraft.current?.flush())) {
+      toast.error("Resolve the changes in your agent draft before continuing.");
+      throw new Error("agent draft has unresolved changes");
+    }
+  };
+  const beforeGeneration = async () => {
+    await flushAgentDraft();
+    closeEdit();
+  };
   const sendMutation = useMutation({
-    onMutate: closeEdit,
+    onMutate: beforeGeneration,
     mutationFn: (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
@@ -426,7 +499,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
   };
   const answerMutation = useMutation({
-    onMutate: closeEdit,
+    onMutate: beforeGeneration,
     mutationFn: (input: { callId: string; response: QuestionResponse }) =>
       answerQuestion({
         data: {
@@ -444,7 +517,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const answerInFlight = useRef(false);
 
   const retryMutation = useMutation({
-    onMutate: closeEdit,
+    onMutate: beforeGeneration,
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -463,7 +536,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Branching leaves this conversation untouched and opens the copy, so the
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
-    onMutate: closeEdit,
+    onMutate: beforeGeneration,
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -482,6 +555,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const editMutation = useMutation({
+    onMutate: flushAgentDraft,
     mutationFn: (
       input: {
         messageId: string;
@@ -1042,84 +1116,113 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     ],
   );
 
+  // Drafts with no transcript row of their own: a retry can delete the tool call
+  // that introduced one, and the draft itself survives that.
+  const shown = new Set(
+    display.flatMap((message) =>
+      message.toolActivities.flatMap((activity) =>
+        activity.family === "agent-draft" &&
+        activity.result?.draftId &&
+        activity.result.draftConversationId === conversationId
+          ? [activity.result.draftId]
+          : [],
+      ),
+    ),
+  );
+  const orphaned = draftIds.filter((draftId) => !shown.has(draftId));
+
   return (
-    <div className="flex h-full flex-col">
-      {data.branchedFrom ? (
-        // Outside the scroller, on the message column's geometry: lineage is a
-        // property of the conversation, not of its first message.
-        <div className="[scrollbar-gutter:stable_both-edges]">
-          <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
-            <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
-            <span className="shrink-0">Branched from</span>
-            <Link
-              to="/chat/$conversationId"
-              params={{ conversationId: data.branchedFrom.conversationId }}
-              className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
-            >
-              {data.branchedFrom.title ?? "New chat…"}
-            </Link>
-          </div>
-        </div>
-      ) : null}
-      <div className="min-h-0 flex-1">
-        {/* lastSeq covers tool-activity-only updates too */}
-        <ResearchPanelOwner messages={display} />
-        <VirtualMessageList messages={display} followKey={stream.lastSeq} />
-      </div>
-      {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
-          composer edges align exactly with message content above. No top
-          padding: the scroller's fade mask handles the visual transition. */}
-      <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
-        <div className="mx-auto w-full max-w-3xl px-4">
-          {questionNeedsRefresh ? (
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
-              <span>Your answers may not have been sent.</span>
-              <PendingButton
-                size="sm"
-                variant="outline"
-                pending={refreshQuestionMutation.isPending}
-                onClick={() => refreshQuestionMutation.mutate()}
+    <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
+      <div className="flex h-full flex-col">
+        {data.branchedFrom ? (
+          // Outside the scroller, on the message column's geometry: lineage is a
+          // property of the conversation, not of its first message.
+          <div className="[scrollbar-gutter:stable_both-edges]">
+            <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
+              <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
+              <span className="shrink-0">Branched from</span>
+              <Link
+                to="/chat/$conversationId"
+                params={{ conversationId: data.branchedFrom.conversationId }}
+                className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
               >
-                Refresh chat
-              </PendingButton>
+                {data.branchedFrom.title ?? "New chat…"}
+              </Link>
             </div>
-          ) : null}
-          <Composer
-            ref={composer}
-            onSend={(content, attachmentIds, generationMode, skillIds) =>
-              sendMutation.mutateAsync({
-                content,
-                attachmentIds,
-                ...(generationMode ? { generationMode } : {}),
-                ...(skillIds ? { skillIds } : {}),
-              })
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          {/* lastSeq covers tool-activity-only updates too */}
+          <ResearchPanelOwner messages={display} />
+          <VirtualMessageList
+            messages={display}
+            followKey={stream.lastSeq}
+            footer={
+              orphaned.length ? (
+                <div className="flex flex-col">
+                  {orphaned.map((draftId) => (
+                    <AgentDraftWidget key={draftId} draftId={draftId} />
+                  ))}
+                </div>
+              ) : null
             }
-            {...(stoppableId
-              ? {
-                  onStop: () =>
-                    stopMutation.mutate({
-                      messageId: stoppableId,
-                      ...(streamingMessage?.generationId
-                        ? { generationId: streamingMessage.generationId }
-                        : {}),
-                      ...(streamingMessage?.researchRunId
-                        ? { researchRunId: streamingMessage.researchRunId }
-                        : {}),
-                    }),
-                }
-              : {})}
-            disabled={actionsDisabled}
-            textareaDisabled={editPending}
-            controlsDisabled={mutationPending}
-            modelId={effectiveModelId}
-            onModelChange={setModelId}
-            searchEnabled={searchEnabled}
-            onSearchEnabledChange={setSearchEnabled}
-            context={context}
           />
         </div>
+        {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
+          composer edges align exactly with message content above. No top
+          padding: the scroller's fade mask handles the visual transition. */}
+        <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
+          <div className="mx-auto w-full max-w-3xl px-4">
+            {questionNeedsRefresh ? (
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
+                <span>Your answers may not have been sent.</span>
+                <PendingButton
+                  size="sm"
+                  variant="outline"
+                  pending={refreshQuestionMutation.isPending}
+                  onClick={() => refreshQuestionMutation.mutate()}
+                >
+                  Refresh chat
+                </PendingButton>
+              </div>
+            ) : null}
+            <Composer
+              ref={composer}
+              onSend={(content, attachmentIds, generationMode, skillIds) =>
+                sendMutation.mutateAsync({
+                  content,
+                  attachmentIds,
+                  ...(generationMode ? { generationMode } : {}),
+                  ...(skillIds ? { skillIds } : {}),
+                })
+              }
+              {...(stoppableId
+                ? {
+                    onStop: () =>
+                      stopMutation.mutate({
+                        messageId: stoppableId,
+                        ...(streamingMessage?.generationId
+                          ? { generationId: streamingMessage.generationId }
+                          : {}),
+                        ...(streamingMessage?.researchRunId
+                          ? { researchRunId: streamingMessage.researchRunId }
+                          : {}),
+                      }),
+                  }
+                : {})}
+              disabled={actionsDisabled}
+              textareaDisabled={editPending}
+              controlsDisabled={mutationPending}
+              modelId={effectiveModelId}
+              onModelChange={setModelId}
+              searchEnabled={searchEnabled}
+              onSearchEnabledChange={setSearchEnabled}
+              context={context}
+            />
+          </div>
+        </div>
       </div>
-    </div>
+    </AgentDraftOwner>
   );
 }
 
@@ -1136,25 +1239,32 @@ export function NewChatView({
   user,
   initialAgentId = null,
   initialSkillId = null,
+  initialPrefill = null,
+  onPrefillConsumed,
 }: {
   user: { name: string };
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
   initialSkillId?: string | null;
+  initialPrefill?: string | null;
+  onPrefillConsumed?: () => void;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modelId, setModelId] = useState<string | null>(null);
-  const { enabled: searchEnabled, setEnabled: setSearchEnabled } = useSearchMode();
   const context = useContextSelection({
     mode: "draft",
     agent: initialAgentId ? { id: initialAgentId, name: null } : null,
   });
   const selectedAgentId = context.selection.agent?.id ?? null;
   const selectedAgent = context.detail;
+  const {
+    enabled: searchEnabled,
+    setEnabled: setSearchEnabled,
+    reset: resetSearchEnabled,
+  } = useSearchMode(selectedAgent.data?.searchEnabled ?? true);
   const preferredModelApplied = useRef<string | null>(null);
   const modelOverride = useRef<string | null>(null);
-  const searchOverride = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedAgentId) {
       preferredModelApplied.current = null;
@@ -1162,16 +1272,19 @@ export function NewChatView({
     }
     if (!selectedAgent.data || preferredModelApplied.current === selectedAgentId) return;
     preferredModelApplied.current = selectedAgentId;
-    if (searchOverride.current !== selectedAgentId)
-      setSearchEnabled(selectedAgent.data.searchEnabled);
     if (modelOverride.current !== selectedAgentId && selectedAgent.data.model?.available)
       setModelId(selectedAgent.data.model.id);
-  }, [selectedAgentId, selectedAgent.data, setSearchEnabled]);
+  }, [selectedAgentId, selectedAgent.data]);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
-    if (!isMobile) composer.current?.focus();
+    if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
+    onPrefillConsumed?.();
+  }, [initialPrefill, onPrefillConsumed]);
+  useEffect(() => {
+    // Hydration initially uses the server’s desktop snapshot even on a phone.
+    if (!isMobile && !window.matchMedia?.("(max-width: 767px)").matches) composer.current?.focus();
   }, [isMobile]);
   // Flipped the moment the first message actually leaves: the composer drops
   // into the position it occupies in ChatView, so the route swap that follows
@@ -1300,16 +1413,14 @@ export function NewChatView({
               setModelId(id);
             }}
             searchEnabled={searchEnabled}
-            onSearchEnabledChange={(enabled) => {
-              searchOverride.current = selectedAgentId;
-              setSearchEnabled(enabled);
-            }}
+            onSearchEnabledChange={setSearchEnabled}
             context={{
               ...context,
               onAgentChange: (id) => {
                 preferredModelApplied.current = null;
                 modelOverride.current = null;
-                searchOverride.current = null;
+                // Picking another agent starts from that agent's default again.
+                resetSearchEnabled();
                 context.onAgentChange(id);
               },
             }}

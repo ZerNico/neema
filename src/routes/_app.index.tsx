@@ -1,4 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useRouter } from "@tanstack/react-router";
+import { useCallback } from "react";
+import { readChatPrefill } from "~/modules/agents/authoring.ts";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import { NewChatView } from "~/modules/chat/ui/chat-view.tsx";
 import {
@@ -34,12 +36,26 @@ function NewChatPage() {
   // `user` comes from the parent `_app` route's beforeLoad context.
   const { user } = Route.useRouteContext();
   const { agent, skill } = Route.useSearch();
+  const router = useRouter();
+  const location = useLocation();
+  // oxlint-disable eslint/no-underscore-dangle -- TanStack owns this history entry key.
+  const consumePrefill = useCallback(() => {
+    const current = router.history.location;
+    if (current.state.__TSR_key !== location.state.__TSR_key || !("chatPrefill" in current.state))
+      return;
+    const { chatPrefill: _consumed, ...state } = current.state;
+    // Replace this entry, not the view. Keep the router’s index and all unrelated state.
+    router.history.replace(current.href, state);
+  }, [location.state.__TSR_key, router]);
+  // oxlint-enable eslint/no-underscore-dangle
   return (
     <NewChatView
       key={JSON.stringify([agent, skill])}
       user={user}
       initialAgentId={agent ?? null}
       initialSkillId={skill ?? null}
+      initialPrefill={readChatPrefill(location.state.chatPrefill)}
+      onPrefillConsumed={consumePrefill}
     />
   );
 }

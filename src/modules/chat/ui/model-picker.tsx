@@ -126,7 +126,7 @@ export function ModelPicker({
               <ComboboxLabel>{group.value}</ComboboxLabel>
               <ComboboxCollection>
                 {(model: PickableModel) => (
-                  <ComboboxItem key={model.id} value={model}>
+                  <ComboboxItem key={model.id} value={model} className="pr-9">
                     <span className="min-w-0 flex-1 truncate">{model.displayName}</span>
                     <CapabilityIcons capabilities={model.capabilities} audience="user" />
                   </ComboboxItem>

@@ -11,6 +11,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import {
+  AgentAuthoringLaunchButton,
+  AgentAuthoringLaunchMenuItem,
+} from "./agent-authoring-launch.tsx";
 import { toast } from "sonner";
 import { agentsQuery } from "../client/queries.ts";
 import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
@@ -107,6 +111,7 @@ export function AgentsPage() {
                   <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
                   Edit
                 </DropdownMenuItem>
+                <AgentAuthoringLaunchMenuItem agentId={agent.id} />
                 <DropdownMenuItem onClick={() => setSharing(agent)}>
                   <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
                   Access
@@ -151,7 +156,17 @@ export function AgentsPage() {
     </Link>
   );
   return (
-    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={newAgent}>
+    <Page
+      title="Agents"
+      rootPath="/"
+      rootLabel="Chat"
+      actions={
+        <>
+          {newAgent}
+          <AgentAuthoringLaunchButton disabled={atLimit} />
+        </>
+      }
+    >
       {agents.isError ? (
         <ErrorState
           title="Could not load agents"

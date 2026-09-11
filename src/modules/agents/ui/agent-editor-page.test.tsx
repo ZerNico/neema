@@ -2,7 +2,7 @@ vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEditorPage } from "./agent-editor-page.tsx";
@@ -20,6 +20,7 @@ vi.mock("../server/functions.ts", () => ({
   deleteAgent: vi.fn(),
 }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({
+  sendMessage: vi.fn(),
   listChatModels: vi.fn(),
   listConversations: vi.fn(),
   getConversationWithMessages: vi.fn(),
@@ -92,13 +93,16 @@ const renderEditor = (
   client.setQueryData(["agents", "detail", agent.id], agent);
   client.setQueryData(["chat-models"], []);
   if (collections !== null) client.setQueryData(["knowledge", "collections"], collections);
-  return render(
-    <QueryClientProvider client={client}>
-      <ConfirmProvider>
-        <AgentEditorPage agentId={agent.id} />
-      </ConfirmProvider>
-    </QueryClientProvider>,
-  );
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <ConfirmProvider>
+          <AgentEditorPage agentId={agent.id} />
+        </ConfirmProvider>
+      </QueryClientProvider>,
+    ),
+  };
 };
 
 beforeEach(() => {
@@ -218,6 +222,38 @@ describe("AgentEditorPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Access" }));
     expect(screen.getByRole("dialog", { name: "Access" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
+  });
+
+  it("keeps dirty values and their original revision when another editor updates the query", async () => {
+    const { client } = renderEditor();
+    const name = screen.getByRole("textbox", { name: "Name" });
+    name.focus();
+    fireEvent.change(name, { target: { value: "My unsaved name" } });
+    act(() =>
+      client.setQueryData(
+        ["agents", "detail", "a1"],
+        detail({ configRevision: 2, name: "Other editor" }),
+      ),
+    );
+    expect(await screen.findByText(/This agent changed elsewhere/)).toBeVisible();
+    expect(name).toHaveValue("My unsaved name");
+    expect(name).toHaveFocus();
+    vi.mocked(updateAgent).mockRejectedValueOnce(new Error("agent changed; reload before saving"));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenCalledWith({
+        data: expect.objectContaining({ expectedRevision: 1, name: "My unsaved name" }),
+      }),
+    );
+    expect(name).toHaveValue("My unsaved name");
+    fireEvent.click(screen.getByRole("button", { name: "Reload agent" }));
+    await waitFor(() => expect(name).toHaveValue("Other editor"));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateAgent).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({ expectedRevision: 2, name: "Other editor" }),
+      }),
+    );
   });
 
   it("refuses the editor to a recipient", () => {

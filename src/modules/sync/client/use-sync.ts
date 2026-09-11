@@ -90,6 +90,11 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       if (disposed || !authorized) return;
       const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
       switch (event.type) {
+        case "agent.draft.changed":
+          void queryClient.invalidateQueries({ queryKey: ["agents", "draft", event.draftId] });
+          // A tool can create the draft after this chat’s loader snapshot.
+          void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
+          break;
         case "conversation.created":
         case "conversation.updated":
         case "conversation.deleted":

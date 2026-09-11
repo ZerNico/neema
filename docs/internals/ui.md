@@ -94,10 +94,34 @@ false`), so a page body is written against data already there. Where a loader ca
 
 ## Chat-specific pieces
 
-- Deep research mode changes only `researchEnabled`; normal chat's independent web-search preference
-  stays intact while its toggle is hidden in research. Opening a conversation or new chat focuses the
+- The web-search toggle rests on a default (`useSearchMode(defaultEnabled)`): true in plain chat,
+  the installed or selected agent's "web search by default" otherwise. A manual flip is one
+  message's opt-in or opt-out and resets on send; picking another agent in a new chat resets it
+  too. Deep research mode changes only `researchEnabled`; that search preference stays intact
+  while its toggle is hidden in research. Opening a conversation or new chat focuses the
   composer, except on a phone (`useIsMobile`), where it would raise the keyboard over what the user came
   to read.
+- Agent Create/Edit with chat uses a one-shot TanStack history-state text prefill, not a query
+  string, automatic send or hidden launch RPC. Consume only the app’s state key without
+  remounting the composer or overwriting input typed before consumption; SSR has no browser
+  history state. An edit link names the target, never copies its private instructions or installs
+  it as the conversation’s agent.
+- An agent-draft activity opens the editor; it never owns the form or auto-opens the panel.
+  `AgentDraftOwner` mounts one controller per draft at conversation level, above the virtualiser,
+  so a widget scrolling out of view cannot take unsaved edits with it; widgets look their
+  controller up by draft id and a send flushes every one. A session publishes on every commit
+  because the controller is a fresh object each render, so only a visible change may set state.
+  The owner refreshes only its selected panel, so closing it or opening Sources cannot discard
+  edits or steal selection back. Loader,
+  matching live references and sync discover lazy creation; the same existence predicate enables
+  the controller and flush-before-action gate. A measured transcript recovery widget keeps the
+  canonical draft reachable after retry/edit removes its tool rows. Branch references stay
+  historical even if the branch later acquires its own draft.
+- Draft reconciliation accepts clean remote fields and disjoint edits, but differing edits to
+  one field require an inline choice. Flush before send/answer/retry/edit/branch/save, never Stop.
+  If flushing changes what the user reviewed, saving needs another click. Failed local edits
+  remain protected on navigation/unload. The manual agent editor similarly pins its dirty
+  baseline rather than treating a background refetch as permission to overwrite newer settings.
 - Upload-queued composer sends dispatch the current draft and selections together. `Composer` keeps one
   effect-updated request ref, including `onSend`, so an upload can't pair fresh text with stale skills or
   a stale parent callback; research mode stays locked while queued.

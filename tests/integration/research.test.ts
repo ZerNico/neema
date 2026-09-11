@@ -22,6 +22,7 @@ import { projectResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -69,6 +70,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | ToolsRepo
   | MemoryService
   | AgentRepo
+  | AgentDraftService
   | AttachmentRepo,
   unknown
 >;
@@ -81,6 +83,8 @@ let clarificationProse = "";
 let coordinatorFailure: "provider" | "context" | "defect" | null = null;
 let coordinatorFirstResponse: "finish" | "text" | "empty" | null = null;
 let synthesisCutShort: "provider" | "context" | null = null;
+let draftInSynthesis = false;
+let draftSynthesisTurns = 0;
 let evidenceUrl = "https://evidence.example/source";
 let overflowPhase: string | null = null;
 let dispatchWaves = 1;
@@ -107,6 +111,24 @@ let hold: {
   interrupted: Deferred.Deferred<void>;
   release?: Deferred.Deferred<void>;
 } | null = null;
+/** The draft the tools last wrote, as the trailing application data reports it. */
+const focusedDraftId = (input: GatewayInput) => {
+  const block = input.prompt.content
+    .flatMap((message) => {
+      const content: unknown = message.content;
+      return typeof content === "string"
+        ? [content]
+        : (content as Array<{ text?: string }>).map((part) => part.text ?? "");
+    })
+    .find((text) => text.startsWith("Application-provided agent draft"));
+  return (
+    (
+      JSON.parse(block!.slice(block!.indexOf("\n") + 1)) as {
+        draft: { draftId: string } | null;
+      }
+    ).draft?.draftId ?? ""
+  );
+};
 const phaseOf = (input: GatewayInput) => {
   const content = input.prompt.content.map((message) => JSON.stringify(message)).join("\n");
   if (content.includes("You compact the older part of a chat conversation")) return "compaction";
@@ -263,6 +285,24 @@ const FakeGateway = Layer.succeed(AiGateway, {
           ),
           finish(reportFinishReason),
         );
+      if (draftInSynthesis) {
+        if (draftSynthesisTurns++ === 0)
+          return Stream.make(text("I found useful guidance for the draft.\n")).pipe(
+            Stream.concat(
+              tool(input, "draft_agent", {
+                changes: { name: "Research agent", instructions: "PRIVATE_INITIAL_DRAFT" },
+              }),
+            ),
+          );
+        if (draftSynthesisTurns === 2)
+          return tool(input, "update_agent_draft", {
+            // Named explicitly: a chat may already hold another draft, and an
+            // unaddressed update is ambiguous then.
+            draftId: focusedDraftId(input),
+            expectedRevision: 1,
+            changes: { instructions: "PRIVATE_RESEARCH_DRAFT" },
+          });
+      }
       // A report whose stream dies after emitting whole lines: the reader
       // already has those, so the run is truncated rather than failed.
       if (synthesisCutShort)
@@ -407,6 +447,8 @@ beforeEach(async () => {
   coordinatorFailure = null;
   coordinatorFirstResponse = null;
   synthesisCutShort = null;
+  draftInSynthesis = false;
+  draftSynthesisTurns = 0;
   overflowPhase = null;
   dispatchWaves = 1;
   coordinatorTurns = 0;
@@ -466,6 +508,140 @@ const enableMemory = (userId: string, referenceEnabled = true, autoSaveEnabled =
 const promptText = (input: GatewayInput) => JSON.stringify(input.prompt);
 
 describe("main-assistant research ownership", () => {
+  it.each([false, true])(
+    "uses real draft tools only in main synthesis (existing draft: %s)",
+    async (existing) => {
+      finishWorkersEarly = true;
+      draftInSynthesis = true;
+      const input = await runtime.runPromise(seed);
+      if (existing)
+        await runtime.runPromise(
+          AgentDraftService.use((service) =>
+            service.open(
+              input.userId,
+              {
+                conversationId: input.conversationId,
+                changes: { name: "Existing draft", instructions: "PRIVATE_EXISTING_DRAFT" },
+              },
+              () => Effect.void,
+            ),
+          ),
+        );
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await remote.runPromise(collect(sent.assistantMessageId));
+      const main = requests.filter((request) => phaseOf(request) === "synthesis");
+      expect(main).toHaveLength(3);
+      expect(main.every((request) => request.toolkit?.tools["draft_agent"])).toBe(true);
+      // The focused draft is the one the tool just wrote, in full. A draft that
+      // was already in the chat rides along as a summary, without its body.
+      expect(promptText(main[1]!)).toContain("PRIVATE_INITIAL_DRAFT");
+      if (existing) {
+        expect(promptText(main[1]!)).toContain("Existing draft");
+        expect(promptText(main[1]!)).not.toContain("PRIVATE_EXISTING_DRAFT");
+      }
+      expect(promptText(main[2]!)).toContain("PRIVATE_RESEARCH_DRAFT");
+      for (const request of requests.filter((request) =>
+        ["coordinator", "worker", "report"].includes(phaseOf(request)),
+      )) {
+        expect(promptText(request)).not.toContain("PRIVATE_");
+        expect(request.toolkit?.tools["draft_agent"]).toBeUndefined();
+        expect(request.toolkit?.tools["update_agent_draft"]).toBeUndefined();
+      }
+      // The draft the tools wrote, not the one that was already in the chat.
+      const draft = await runtime.runPromise(
+        AgentDraftService.use((service) =>
+          service
+            .list(input.userId, input.conversationId)
+            .pipe(
+              Effect.map(
+                (drafts) => drafts.find((row) => row.settings.name === "Research agent") ?? null,
+              ),
+            ),
+        ),
+      );
+      expect(draft).toMatchObject({
+        revision: 2,
+        targetAgentId: null,
+        settings: { instructions: "PRIVATE_RESEARCH_DRAFT" },
+      });
+      const detail = await runtime.runPromise(
+        loadConversationDetail(input.userId, input.conversationId),
+      );
+      // With a draft already in the chat, synthesis adds its own rather than
+      // reusing it, so the loader reports both.
+      expect(detail.agentDrafts).toHaveLength(existing ? 2 : 1);
+      expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
+      const activity = detail.toolCalls.filter((call) =>
+        ["draft_agent", "update_agent_draft"].includes(call.toolName),
+      );
+      expect(activity).toHaveLength(2);
+      expect(activity.map((call) => call.arguments)).toEqual([{}, {}]);
+      expect(
+        activity.every(
+          (call) =>
+            call.result &&
+            typeof call.result === "object" &&
+            "draftConversationId" in call.result &&
+            call.result.draftConversationId === input.conversationId,
+        ),
+      ).toBe(true);
+      const message = detail.messages.at(-1)!;
+      expect(message.status).toBe("complete");
+      expect(message.content.match(/I found useful guidance/g)).toHaveLength(1);
+      const chunks = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+      );
+      expect(JSON.stringify(chunks)).not.toContain("PRIVATE_");
+      const calls = await runtime.runPromise(
+        Db.use((db) =>
+          db.select().from(researchCalls).where(eq(researchCalls.runId, message.researchRunId!)),
+        ),
+      );
+      expect(calls.filter((call) => call.phase === "synthesis")).toHaveLength(3);
+      expect(
+        calls
+          .filter((call) => call.phase === "synthesis")
+          .every((call) => call.status === "complete"),
+      ).toBe(true);
+    },
+  );
+
+  it.each(["provider", "context"] as const)(
+    "retains committed draft changes and earlier prose after a late synthesis %s failure",
+    async (failure) => {
+      finishWorkersEarly = true;
+      draftInSynthesis = true;
+      synthesisCutShort = failure;
+      const input = await runtime.runPromise(seed);
+      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+      await remote.runPromise(collect(sent.assistantMessageId));
+      const message = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+      );
+      expect(message).toMatchObject({
+        status: "complete",
+        content: "I found useful guidance for the draft.\n# Findings\nSupported conclusion[^1].\n",
+      });
+      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(3);
+      expect(
+        await runtime.runPromise(
+          AgentDraftService.use((service) =>
+            service
+              .list(input.userId, input.conversationId)
+              .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+          ),
+        ),
+      ).toMatchObject({ revision: 2, settings: { instructions: "PRIVATE_RESEARCH_DRAFT" } });
+      expect(
+        (
+          await runtime.runPromise(
+            ChatRepo.use((repo) => repo.research!.get(message!.researchRunId!)),
+          )
+        )?.progress.phase,
+      ).toBe("partial");
+    },
+  );
+
   it("keeps history and memories with the main assistant and delegates only the brief", async () => {
     finishWorkersEarly = true;
     const input = await runtime.runPromise(seed);

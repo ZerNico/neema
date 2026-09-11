@@ -857,6 +857,10 @@ function makeChatService() {
       yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
+      // A Stop on a generation nobody is running is the user telling us the
+      // process died. If the lease has lapsed, settle it now instead of waiting
+      // for the timer; if it is still live elsewhere, the fence protects it.
+      yield* engine.reapOrphans;
       const message = yield* repo.getMessage(input.messageId);
       if (!message || message.conversationId !== input.conversationId) {
         return yield* new MessageNotFound({ messageId: input.messageId });

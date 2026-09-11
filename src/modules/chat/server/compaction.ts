@@ -1,5 +1,5 @@
 import { Duration, Effect, Schema } from "effect";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt, Tool, type Toolkit } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
@@ -177,9 +177,26 @@ export const calibrationFactor = (
   );
 };
 
+export const estimateToolSchemaTokens = (toolkit: Pick<Toolkit.Any, "tools"> | undefined) =>
+  toolkit
+    ? estimatePromptTokens([
+        {
+          role: "assistant",
+          content: JSON.stringify(
+            Object.values(toolkit.tools).map((tool) => ({
+              name: tool.name,
+              description: tool.description ?? "",
+              parameters: Tool.getJsonSchema(tool),
+            })),
+          ),
+        },
+      ])
+    : 0;
+
 export const computeBudget = (input: {
   contextLength: number | null | undefined;
   webToolsEnabled: boolean;
+  toolSchemaTokens?: number | undefined;
   /**
    * Overrides the output allowance this budget subtracts. Deep research asks
    * for a larger final answer than ordinary chat, and the prompt it builds has
@@ -199,7 +216,12 @@ export const computeBudget = (input: {
           context * COMPACTION_CONFIG.outputReserveRatio,
           COMPACTION_CONFIG.outputReserveMax,
         )) +
-    Math.min(context * COMPACTION_CONFIG.baseOverheadRatio, COMPACTION_CONFIG.baseOverheadMax) +
+    // The flat overhead is a guess that already covers tool schemas; when the
+    // advertised toolkit is measured and larger, the measurement replaces it.
+    Math.max(
+      Math.min(context * COMPACTION_CONFIG.baseOverheadRatio, COMPACTION_CONFIG.baseOverheadMax),
+      input.toolSchemaTokens ?? 0,
+    ) +
     (input.webToolsEnabled
       ? Math.min(
           context * COMPACTION_CONFIG.webToolReserveRatio,
@@ -582,6 +604,7 @@ export interface CompactionInput {
   readonly modelId: string;
   readonly contextLength: number | null | undefined;
   readonly outputReserve?: number | undefined;
+  readonly toolSchemaTokens?: number | undefined;
   /** Latest run-local projection, including hard truncation without a checkpoint. */
   readonly projection?: Pick<CompactionDecision, "startIndex" | "injectedMessages" | "checkpoint">;
   /** Selected against the full completed history before attachment rendering. */
@@ -653,6 +676,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     });
   const budget = computeBudget({
     outputReserve: input.outputReserve,
+    toolSchemaTokens: input.toolSchemaTokens,
     contextLength: input.contextLength,
     webToolsEnabled: input.webToolsEnabled,
   });
@@ -903,6 +927,7 @@ export interface ActiveRoundCompactionInput {
   readonly modelId: string;
   readonly contextLength: number | null | undefined;
   readonly outputReserve?: number | undefined;
+  readonly toolSchemaTokens?: number | undefined;
   readonly webToolsEnabled: boolean;
   /** Historical prompt after checkpoint/truncation shaping. */
   readonly basePrompt: Prompt.Prompt;
@@ -950,6 +975,7 @@ export const prepareCompactedActiveRounds = Effect.fn("chat.prepareCompactedActi
   function* (deps: CompactionDeps, input: ActiveRoundCompactionInput) {
     const budget = computeBudget({
       outputReserve: input.outputReserve,
+      toolSchemaTokens: input.toolSchemaTokens,
       contextLength: input.contextLength,
       webToolsEnabled: input.webToolsEnabled,
     });

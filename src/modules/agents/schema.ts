@@ -15,18 +15,21 @@ export const AgentIcon = Schema.Literals([
 export type AgentIcon = typeof AgentIcon.Type;
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const AgentIdInput = Schema.Struct({ agentId: ResourceId });
+export const AgentName = Schema.String.check(Schema.isMaxLength(120));
+export const AgentStarter = Schema.String.check(Schema.isMaxLength(200));
+export const AgentSkillIds = Schema.Array(ResourceId).check(Schema.isMaxLength(20));
 export const AgentSettings = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+  name: AgentName.check(Schema.isMinLength(1)),
   description: Schema.String.check(Schema.isMaxLength(500)),
   icon: AgentIcon,
   instructions: Schema.String.check(Schema.isMaxLength(AGENT_LIMITS.maxInstructions)),
   modelId: Schema.NullOr(ResourceId),
   searchEnabled: Schema.Boolean,
   planEnabled: Schema.Boolean,
-  starters: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
+  starters: Schema.Array(AgentStarter.check(Schema.isMinLength(1))).check(
     Schema.isMaxLength(AGENT_LIMITS.maxStarters),
   ),
-  skillIds: Schema.optional(Schema.Array(ResourceId).check(Schema.isMaxLength(20))),
+  skillIds: Schema.optional(AgentSkillIds),
   collectionIds: Schema.Array(ResourceId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),

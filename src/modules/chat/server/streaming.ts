@@ -1,9 +1,23 @@
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
+import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
+import {
+  AgentDraftToolName,
+  agentDraftFailureReason,
+  projectAgentDraftResult,
+  agentDraftResultOk,
+  redactAgentDraftPart,
+} from "~/modules/agents/tool-schema.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
+import { SkillRepo } from "~/modules/skills/server/repo.ts";
+import { lockResearchFence } from "./research/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedImage } from "./generated-images.ts";
-import { GenerationFence, type GenerationIdentity } from "./generation-fence.ts";
+import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
 import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
 import { messageChunks } from "~/db/schema/chat.ts";
@@ -32,7 +46,7 @@ import {
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
 import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
-import { Prompt, Tool, type Response } from "effect/unstable/ai";
+import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
@@ -71,6 +85,8 @@ import {
   compileActivePrompt,
   computeBudget,
   estimatePromptTokens,
+  estimateToolSchemaTokens,
+  ContextTooLarge,
   latestValidCheckpoint,
   prepareCompactedActiveRounds,
   prepareCompactedHistory,
@@ -121,6 +137,10 @@ const MAX_TOOL_ROUNDS = 4;
  */
 const MAX_KNOWLEDGE_TOOL_ROUNDS = 24;
 
+// Projected activities are literal structs; one widening at the boundary
+// beats an assertion chain at every persistence site.
+const json = (value: unknown) => value as JsonValue;
+
 // Message and tool-call rows are shipped to the client wholesale, so the
 // stored error must not carry provider stack traces or internal URLs — the
 // full cause goes to the server log instead (see finalize).
@@ -149,6 +169,11 @@ export class StreamEngine extends Context.Service<
     // single-instance constraint the live chunk tail has (replay is durable,
     // the in-flight fiber is not).
     stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
+    /**
+     * Settles ordinary generations whose lease lapsed (their process is gone)
+     * and notifies subscribers. Runs on a timer; callers may run it on demand.
+     */
+    reapOrphans: Effect.Effect<void>;
     // Chunks already persisted after `afterSeq`, then live chunks, then done.
     // Terminates when the message reaches a terminal status.
     subscribe(
@@ -167,6 +192,13 @@ export class StreamEngine extends Context.Service<
       const webSearch = yield* WebSearchExecutor;
       const urlReader = yield* UrlReaderExecutor;
       const providers = yield* ProviderRepo;
+      const authoringServices = {
+        agents: yield* AgentRepo,
+        providers,
+        drafts: yield* AgentDraftService,
+        skills: yield* SkillRepo,
+        knowledge: yield* KnowledgeRepo,
+      };
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
       const knowledgeSearch = yield* KnowledgeSearch;
@@ -194,14 +226,48 @@ export class StreamEngine extends Context.Service<
         { abort: Deferred.Deferred<void>; runId?: string | undefined }
       >();
       const runtimeScope = yield* Effect.scope;
-      if (repo.research)
-        yield* Effect.forkScoped(
-          repo.research.reap().pipe(
-            Effect.catchCause((cause) => Effect.logError("research reconciliation failed", cause)),
-            Effect.delay(Duration.seconds(10)),
-            Effect.forever,
+      // A generation whose process died stays "streaming" forever unless
+      // someone settles it: the client cannot stop it (nothing is registered
+      // here) and cannot send (the conversation is busy). Settle it from the
+      // database clock and tell subscribers, exactly as a crash-time finalize
+      // would have.
+      const reapGenerations = repo.reapExpiredGenerations().pipe(
+        Effect.flatMap((settled) =>
+          Effect.forEach(
+            settled,
+            (row) =>
+              PubSub.publish(pubsub, {
+                kind: "done",
+                messageId: row.messageId,
+                status: "error",
+              }).pipe(
+                Effect.andThen(
+                  sync.publish(row.userId, {
+                    type: "message.status",
+                    conversationId: row.conversationId,
+                    messageId: row.messageId,
+                    status: "error",
+                  }),
+                ),
+              ),
+            { discard: true },
           ),
-        );
+        ),
+        Effect.catchCause((cause) => Effect.logError("generation reconciliation failed", cause)),
+      );
+      yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          if (repo.research)
+            yield* repo.research
+              .reap()
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("research reconciliation failed", cause),
+                ),
+              );
+          yield* reapGenerations;
+        }).pipe(Effect.delay(Duration.seconds(10)), Effect.forever),
+      );
 
       const runGeneration = Effect.fn("StreamEngine.runGeneration")(function* (input: {
         userId: string;
@@ -286,9 +352,15 @@ export class StreamEngine extends Context.Service<
         const flush = writer.withPermits(1)(
           Effect.uninterruptible(
             Effect.suspend(() => {
-              if (buffer.length === 0) return Effect.void;
               const batch = buffer;
               buffer = [];
+              // Nothing to write still renews the lease for ordinary chat, so a
+              // slow first token or a long tool round cannot get the row reaped
+              // mid-answer. Research keeps its own lease on the run.
+              if (batch.length === 0)
+                return research || !fence
+                  ? Effect.void
+                  : repo.renewGenerationLease(input.messageId, fence.generationId);
               const persist = research
                 ? research.store.locked(
                     research.fence,
@@ -462,6 +534,18 @@ export class StreamEngine extends Context.Service<
         let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
+          const authoring = yield* prepareAgentDraftTools({
+            services: authoringServices,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            currentModelId: input.modelId,
+            writeGuard: (tx) =>
+              research
+                ? lockResearchFence(tx, research.fence)
+                : fence
+                  ? lockGeneration(tx, fence)
+                  : Effect.interrupt,
+          });
           if (research) {
             // Research reads the same frozen configuration; its knowledge
             // session is scoped to `generate` like the ordinary path's.
@@ -478,6 +562,7 @@ export class StreamEngine extends Context.Service<
                 : null;
             const work = runConversationResearch({
               memory,
+              authoring,
               store: research.store,
               fence: research.fence,
               gateway,
@@ -600,6 +685,7 @@ export class StreamEngine extends Context.Service<
           });
           const { memoryTools } = conversationContext;
           const commonGroups = [
+            authoring.group,
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
@@ -612,6 +698,7 @@ export class StreamEngine extends Context.Service<
             ...(knowledgeTools ? [knowledgeTools.group] : []),
             ...(memoryTools ? [memoryTools.group] : []),
           ]);
+          const toolSchemaTokens = estimateToolSchemaTokens(budgetToolkit);
           let retrievalEnabled = config.knowledgeMode === "retrieval";
 
           // Select once, before resolving attachments: the checkpoint replaces
@@ -729,6 +816,7 @@ export class StreamEngine extends Context.Service<
           // Rebuilt per call: loaded skills and the clock change, and being
           // after history keeps the cacheable prefix intact when they do.
           const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
+            ...authoring.messages(),
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             runtimeContext,
@@ -744,6 +832,7 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
+            { role: "system" as const, content: AGENT_APP_POLICY },
             ...(knowledgeSession
               ? [{ role: "system" as const, content: KNOWLEDGE_SYSTEM_HINT }]
               : []),
@@ -783,6 +872,7 @@ export class StreamEngine extends Context.Service<
               messageId: input.messageId,
               modelId: input.modelId,
               contextLength: model?.contextLength,
+              toolSchemaTokens,
               existingCheckpoint: selected?.checkpoint ?? null,
               textOffset: assembled.length,
               maxStartIndex,
@@ -804,20 +894,6 @@ export class StreamEngine extends Context.Service<
           // the protected trailing context — overflow repair drops history
           // turns, not document bodies.
           if (knowledgeSession && config) {
-            const toolSchemaTokens = budgetToolkit
-              ? estimatePromptTokens([
-                  {
-                    role: "assistant",
-                    content: JSON.stringify(
-                      Object.values(budgetToolkit.tools).map((tool) => ({
-                        name: tool.name,
-                        description: tool.description ?? "",
-                        parameters: Tool.getJsonSchema(tool),
-                      })),
-                    ),
-                  },
-                ])
-              : 0;
             const prepared = yield* prepareKnowledgeContext({
               userId: input.userId,
               session: knowledgeSession,
@@ -1040,6 +1116,83 @@ export class StreamEngine extends Context.Service<
 
           let questionPresented = false;
           for (let turn = 0; turn <= maxToolRounds; turn++) {
+            yield* authoring.refresh();
+            // Direct edits can land between calls. Rebuild before budgeting, not
+            // just after the previous batch, so the next call sees current data.
+            transcript = buildTranscript();
+            const factor =
+              firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
+                ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
+                : calibrationFactor(priorUsage);
+            const schemaReserve = turn < maxToolRounds ? toolSchemaTokens : 0;
+            while (true) {
+              const trailing = reminderPrompt(turn >= maxToolRounds);
+              const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
+                { gateway, repo, providers, analytics },
+                {
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  modelId: input.modelId,
+                  contextLength: model?.contextLength,
+                  toolSchemaTokens: schemaReserve,
+                  webToolsEnabled: webTools !== undefined,
+                  basePrompt: buildBaseTranscript(),
+                  summary: activeSummary,
+                  rounds: activeRounds,
+                  beforeTurnIndex: turn,
+                  textOffset: assembled.length,
+                  passIndex: nextPassIndex(turn),
+                  calibrationFactor: factor,
+                  sourceManifest: sourceManifest(),
+                  ...(trailing ? { trailingPrompt: trailing } : {}),
+                  onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                },
+              );
+              if (!reduced.compacted) break;
+              activeSummary = reduced.summary;
+              activeRounds = reduced.rounds;
+              transcript = buildTranscript();
+            }
+            const requestBudget = computeBudget({
+              contextLength: model?.contextLength,
+              webToolsEnabled: webTools !== undefined,
+              toolSchemaTokens: schemaReserve,
+            }).input;
+            while (
+              Math.ceil(estimateRequestPrompt(turn >= maxToolRounds) * factor) > requestBudget
+            ) {
+              const active = compileActivePrompt({
+                basePrompt: Prompt.empty,
+                summary: activeSummary,
+                rounds: activeRounds,
+              });
+              const shrunk = shrinkForOverflow({
+                decision: compaction,
+                maxStartIndex,
+                messages: historySuffix,
+                renderedMessages: historyMessages,
+                renderedMessageGroups: historyGroups,
+                fixedPrefix: [
+                  ...fixedPrefix,
+                  ...(active.content as ReadonlyArray<Prompt.MessageEncoded>),
+                ],
+                trailingMessages: historyBudgetTail(turn >= maxToolRounds),
+                calibrationFactor: factor,
+              });
+              if (!shrunk)
+                return yield* new ContextTooLarge({
+                  conversationId: input.conversationId,
+                  estimatedInputTokens: Math.ceil(
+                    estimateRequestPrompt(turn >= maxToolRounds) * factor,
+                  ),
+                  inputBudget: requestBudget,
+                });
+              compaction = { ...compaction, ...shrunk, mode: "truncated" };
+              transcript = buildTranscript();
+              yield* recordHardTruncation(turn);
+            }
+            if (turn === 0) estimatedFirstInputTokens = estimateRequestPrompt(false);
             if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
             else if (knowledgeSession) yield* knowledgeSession.authorize();
@@ -1103,7 +1256,7 @@ export class StreamEngine extends Context.Service<
                                         }
                                       : part.encodedResult,
                                 }
-                              : part,
+                              : redactAgentDraftPart(part),
                         );
                       }
                       switch (part.type) {
@@ -1163,8 +1316,9 @@ export class StreamEngine extends Context.Service<
                         }
                         case "tool-call": {
                           const args = part.params as Record<string, unknown>;
-                          const family =
-                            part.name === "save_memory"
+                          const family = Schema.is(AgentDraftToolName)(part.name)
+                            ? "agent-draft"
+                            : part.name === "save_memory"
                               ? "memory"
                               : part.name === "ask_user"
                                 ? "ask"
@@ -1197,7 +1351,7 @@ export class StreamEngine extends Context.Service<
                             // of proposed content. Chat activity stores only that
                             // the tool ran, so deleting memory actually removes it.
                             arguments:
-                              family === "memory" || family === "skill"
+                              family === "memory" || family === "skill" || family === "agent-draft"
                                 ? {}
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
@@ -1229,6 +1383,19 @@ export class StreamEngine extends Context.Service<
                                     textOffset,
                                   },
                             );
+                            return;
+                          }
+                          if (family === "agent-draft") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as AgentDraftToolName,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
                             return;
                           }
                           if (family === "skill") {
@@ -1294,6 +1461,36 @@ export class StreamEngine extends Context.Service<
                         case "tool-result": {
                           const rowId = callRowIds.get(part.id);
                           if (!rowId) return;
+                          if (Schema.is(AgentDraftToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = projectAgentDraftResult(
+                              part.isFailure ? null : part.result,
+                            );
+                            // The reason is the handler's own sentence, kept so a
+                            // "not updated" row can be explained later. A failed
+                            // part carries driver output and gets a fixed message.
+                            const reason = part.isFailure
+                              ? "The draft tool failed before it could respond."
+                              : agentDraftFailureReason(part.result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: agentDraftResultOk(activity) ? "complete" : "error",
+                              ...(reason
+                                ? { error: { code: "AgentDraftNotUpdated", message: reason } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "agent-draft",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                              ...(reason ? { reason } : {}),
+                            });
+                            return;
+                          }
                           if (part.name === "ask_user") {
                             if (isPreliminary) return;
                             const decoded = Schema.decodeUnknownOption(AskUserResult)(part.result);
@@ -1621,6 +1818,7 @@ export class StreamEngine extends Context.Service<
                             messageId: input.messageId,
                             modelId: input.modelId,
                             contextLength: model?.contextLength,
+                            toolSchemaTokens: schemaReserve,
                             webToolsEnabled: webTools !== undefined,
                             basePrompt: buildBaseTranscript(),
                             summary: activeSummary,
@@ -1714,43 +1912,6 @@ export class StreamEngine extends Context.Service<
               },
             ];
             transcript = buildTranscript();
-
-            // Re-budget before every continuation call. The helper accepts a
-            // pass only when the exact prompt (trailing reminder included) gets
-            // smaller, so repeated passes cannot loop on a verbose summary.
-            while (true) {
-              const factor =
-                firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
-                  ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
-                  : calibrationFactor(priorUsage);
-              const trailing = reminderPrompt(turn + 1 >= maxToolRounds);
-              const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
-                { gateway, repo, providers, analytics },
-                {
-                  userId: input.userId,
-                  conversationId: input.conversationId,
-                  messageId: input.messageId,
-                  modelId: input.modelId,
-                  contextLength: model?.contextLength,
-                  webToolsEnabled: webTools !== undefined,
-                  basePrompt: buildBaseTranscript(),
-                  summary: activeSummary,
-                  rounds: activeRounds,
-                  beforeTurnIndex: turn + 1,
-                  textOffset: assembled.length,
-                  passIndex: nextPassIndex(turn + 1),
-                  calibrationFactor: factor,
-                  sourceManifest: sourceManifest(),
-                  ...(trailing ? { trailingPrompt: trailing } : {}),
-                  onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
-                },
-              );
-              if (!reduced.compacted) break;
-
-              activeSummary = reduced.summary;
-              activeRounds = reduced.rounds;
-              transcript = buildTranscript();
-            }
           }
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
@@ -1885,8 +2046,12 @@ export class StreamEngine extends Context.Service<
               );
             }
 
+            if (message.status === "streaming" && !inFlight.has(messageId)) yield* reapGenerations;
             const snapshot = repo.research ? yield* repo.research.tail(messageId, afterSeq) : null;
-            const current = snapshot?.message ?? message;
+            const current =
+              snapshot?.message ??
+              (yield* repo.getMessage(messageId).pipe(Effect.orDie)) ??
+              message;
             const runId = expectedRunId ?? current.generationId ?? undefined;
             if (current.generationId && current.generationId !== runId)
               return Stream.make({
@@ -1920,7 +2085,11 @@ export class StreamEngine extends Context.Service<
             }
 
             const live: Stream.Stream<StreamEvent> = Stream.fromSubscription(subscription).pipe(
-              Stream.filter((event) => event.messageId === messageId && event.runId === runId),
+              Stream.filter(
+                (event) =>
+                  event.messageId === messageId &&
+                  (event.runId === runId || (event.kind === "done" && event.runId === undefined)),
+              ),
               Stream.filter((event) => event.kind === "done" || event.seq > lastSeq),
               Stream.tap((event) =>
                 Effect.sync(() => {
@@ -1934,7 +2103,17 @@ export class StreamEngine extends Context.Service<
           }),
         );
 
-      return StreamEngine.of({ startGeneration, stopGeneration, subscribe });
+      return StreamEngine.of({
+        startGeneration,
+        stopGeneration,
+        reapOrphans: reapGenerations,
+        subscribe,
+      });
     }),
-  ).pipe(Layer.provideMerge(SkillReader.layer));
+  ).pipe(
+    Layer.provideMerge(AgentDraftService.layer),
+    Layer.provideMerge(AgentRepo.layer),
+    Layer.provideMerge(KnowledgeRepo.layer),
+    Layer.provideMerge(SkillReader.layer),
+  );
 }

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { AskUserBlock } from "./ask-user-block.tsx";
@@ -15,9 +15,19 @@ import {
   editMessage,
   retryMessage,
   sendMessage,
+  stopGeneration,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import { AppMotionProvider } from "~/ui/motion.tsx";
+import { EMPTY_AGENT_DRAFT, type AgentDraft } from "~/modules/agents/draft-schema.ts";
+import {
+  getAgentDraft,
+  patchAgentDraft,
+  saveAgentDraft,
+} from "~/modules/agents/server/draft-functions.ts";
+import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
+import type { ToolActivity } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
 const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
@@ -26,6 +36,17 @@ const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoi
   resetUploads: vi.fn(),
   seedUploads: vi.fn(),
   streamProbe: vi.fn(),
+}));
+
+const liveDraft = vi.hoisted(() => ({
+  tools: [] as ToolActivity[],
+  status: "complete" as "complete" | "streaming",
+}));
+vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
+  getAgentDraft: vi.fn(),
+  patchAgentDraft: vi.fn(),
+  saveAgentDraft: vi.fn(),
+  reloadAgentDraft: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -49,6 +70,8 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
 vi.mock("~/modules/knowledge/server/functions.ts", () => ({
   listKnowledgeCollections: vi.fn(),
   getKnowledgeCollection: vi.fn(),
+  createKnowledgeCollection: vi.fn(),
+  updateKnowledgeCollection: vi.fn(),
 }));
 vi.mock("~/modules/agents/server/functions.ts", () => ({
   listAgents: vi.fn(),
@@ -69,12 +92,19 @@ vi.mock("@tanstack/react-router", () => ({
   ),
   useNavigate: () => navigate,
   useRouterState: () => "/chat/c1",
+  useBlocker: vi.fn(),
 }));
 
 // The list itself is covered by message-list.test; here it only has to expose
 // what the view wired onto each row.
 vi.mock("./virtual-message-list.tsx", () => ({
-  VirtualMessageList: ({ messages }: { messages: ReadonlyArray<Record<string, unknown>> }) => (
+  VirtualMessageList: ({
+    messages,
+    footer,
+  }: {
+    messages: ReadonlyArray<Record<string, unknown>>;
+    footer?: ReactNode;
+  }) => (
     <div>
       {messages.map((message) => (
         <div
@@ -94,6 +124,8 @@ vi.mock("./virtual-message-list.tsx", () => ({
                 messageStatus={String(message.status)}
                 {...(message.questionActions as DisplayMessage["questionActions"])}
               />
+            ) : activity.family === "agent-draft" ? (
+              <AgentDraftActivityBlock key={activity.callId} activity={activity} />
             ) : null,
           )}
           {(message.compactionActivities as ReadonlyArray<{ summary?: string }> | undefined)?.map(
@@ -106,6 +138,16 @@ vi.mock("./virtual-message-list.tsx", () => ({
           {message.editState ? (
             <>
               <output>Editing {String(message.id)}</output>
+              <button
+                type="button"
+                onClick={() =>
+                  (message.editState as NonNullable<DisplayMessage["editState"]>).onSave(
+                    "Changed user message",
+                  )
+                }
+              >
+                Save message edit
+              </button>
               <output data-testid={`edit-selection-${String(message.id)}`}>
                 {(
                   message.editState as { skills?: { selectedIds: readonly string[] } }
@@ -161,6 +203,7 @@ vi.mock("./virtual-message-list.tsx", () => ({
           ) : null}
         </div>
       ))}
+      {footer ? <div data-testid="message-footer">{footer}</div> : null}
     </div>
   ),
 }));
@@ -168,6 +211,7 @@ vi.mock("./virtual-message-list.tsx", () => ({
 vi.mock("./composer.tsx", () => ({
   Composer: ({
     onSend,
+    onStop,
     modelId,
     onModelChange,
     searchEnabled,
@@ -180,6 +224,7 @@ vi.mock("./composer.tsx", () => ({
     controlsDisabled?: boolean;
     textareaDisabled?: boolean;
     onSend: (content: string, attachmentIds: ReadonlyArray<string>) => Promise<unknown>;
+    onStop?: () => void;
     modelId: string | null;
     onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
@@ -199,7 +244,21 @@ vi.mock("./composer.tsx", () => ({
       >
         Disable search
       </button>
-      <button type="button" disabled={disabled} onClick={() => void onSend("hello", [])}>
+      <button type="button" disabled={controlsDisabled} onClick={() => onSearchEnabledChange(true)}>
+        Enable search
+      </button>
+      {onStop ? (
+        <button type="button" onClick={onStop}>
+          Stop test generation
+        </button>
+      ) : null}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          void onSend("hello", []).catch(() => {});
+        }}
+      >
         Send test message
       </button>
     </div>
@@ -214,10 +273,10 @@ vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
       text: "",
       reasoning: "",
       reasoningSeen: false,
-      tools: [],
+      tools: liveDraft.tools,
       compactions: [],
       lastSeq: 0,
-      status: "complete",
+      status: liveDraft.status,
     };
   },
 }));
@@ -253,7 +312,7 @@ const message = (id: string, role: "user" | "assistant" | "system", content: str
   id,
   conversationId: "c1",
   role,
-  status: "complete" as const,
+  status: "complete" as "complete" | "streaming",
   content,
   reasoning: "",
   modelId: "m1",
@@ -290,8 +349,10 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     icon: string;
     collectionIds: ReadonlyArray<string>;
     skillIds: ReadonlyArray<string>;
+    searchEnabled: boolean;
     available: boolean;
   } | null,
+  agentDrafts: [] as ReadonlyArray<{ id: string; name: string }>,
   collectionIds: [] as string[],
   generations: [] as Array<{
     messageId: string;
@@ -387,22 +448,31 @@ const renderView = (
     configured: true,
     enabled: true,
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <SyncProbe />
-      <ConfirmProvider>
-        <DetailPanelProvider>
-          <Suspense fallback={null}>
-            <ChatView conversationId="c1" />
-          </Suspense>
-        </DetailPanelProvider>
-      </ConfirmProvider>
-    </QueryClientProvider>,
-  );
+  client.setQueryData(["skills"], []);
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <SyncProbe />
+        <AppMotionProvider>
+          <ConfirmProvider>
+            <DetailPanelProvider>
+              <Suspense fallback={null}>
+                <ChatView conversationId="c1" />
+              </Suspense>
+              <DetailPanelRail />
+            </DetailPanelProvider>
+          </ConfirmProvider>
+        </AppMotionProvider>
+      </QueryClientProvider>,
+    ),
+  };
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  liveDraft.tools = [];
+  liveDraft.status = "complete";
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
 });
@@ -697,6 +767,7 @@ describe("ChatView inline question answers", () => {
         icon: "robot",
         collectionIds: ["c-agent"],
         skillIds: [],
+        searchEnabled: true,
         available: true,
       },
       generations: [
@@ -798,9 +869,7 @@ describe("ChatView inline question answers", () => {
     await waitFor(() => expect(conversationMock).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole("button", { name: "Save answers" })).toBeEnabled());
     expect(draft).toHaveValue("Keep my revision");
-    expect(toast.error).toHaveBeenCalledWith(
-      "Could not save your answers.",
-    );
+    expect(toast.error).toHaveBeenCalledWith("Could not save your answers.");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Simple")).toBeInTheDocument();
     expect(resetUploads).not.toHaveBeenCalled();
@@ -942,9 +1011,7 @@ describe("ChatView question handoff", () => {
     expect(screen.getByRole("textbox", { name: "Or write your own answer" })).toHaveValue(
       "Keep this answer",
     );
-    expect(toast.error).toHaveBeenCalledWith(
-      "Could not send your answers.",
-    );
+    expect(toast.error).toHaveBeenCalledWith("Could not send your answers.");
   });
 
   it("keeps answers locked after failed recovery until an explicit refresh succeeds", async () => {
@@ -1017,6 +1084,33 @@ describe("ChatView search mode", () => {
   it("starts enabled for an available tool-capable model", () => {
     renderView();
     expect(screen.getByTestId("search-mode")).toHaveTextContent("on");
+  });
+
+  it("rests on the installed agent's search default and returns to it after a send", async () => {
+    const quiet = payload(null, {
+      agent: {
+        id: "a1",
+        name: "Quiet agent",
+        icon: "robot",
+        collectionIds: [],
+        skillIds: [],
+        searchEnabled: false,
+        available: true,
+      },
+    });
+    conversationMock.mockResolvedValue(quiet as never);
+    sendMock.mockResolvedValue({} as never);
+    renderView(null, quiet);
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("off");
+    fireEvent.click(screen.getByRole("button", { name: "Enable search" }));
+    expect(screen.getByTestId("search-mode")).toHaveTextContent("on");
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ searchEnabled: true }) }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("search-mode")).toHaveTextContent("off"));
   });
 
   it("resets a one-message opt-out after a successful send", async () => {
@@ -1141,6 +1235,246 @@ describe("ChatView retry", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(retryMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
+  });
+});
+
+const draftReference = (conversationId = "c1", draftId = "d1"): Payload["toolCalls"][number] => ({
+  id: "draft-call",
+  messageId: "m-answer",
+  toolName: "draft_agent",
+  arguments: {},
+  result: { outcome: "drafted", draftId, draftConversationId: conversationId, revision: 1 },
+  status: "complete",
+  turnIndex: 0,
+  callIndex: 0,
+  error: null,
+});
+const draftWriteGate = () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+};
+
+describe("ChatView agent drafts", () => {
+  let current: AgentDraft;
+  beforeEach(() => {
+    for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
+      rpc.mockReset();
+    current = {
+      id: "d1",
+      conversationId: "c1",
+      settings: { ...EMPTY_AGENT_DRAFT, name: "Writer" },
+      revision: 1,
+      targetAgentId: null,
+      targetRevision: null,
+      savedDraftRevision: null,
+      createdAt: BASE.toISOString(),
+      updatedAt: BASE.toISOString(),
+    };
+    vi.mocked(getAgentDraft)
+      .mockReset()
+      .mockImplementation(async () => current);
+    vi.mocked(patchAgentDraft)
+      .mockReset()
+      .mockImplementation(async ({ data }) => {
+        current = {
+          ...current,
+          revision: current.revision + 1,
+          settings: { ...current.settings, ...data.changes },
+        };
+        return { outcome: "updated", draft: current };
+      });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  });
+
+  it("discovers a live tool-created draft without a loader flag or automatic opening", async () => {
+    const { client, container } = renderView();
+    expect(getAgentDraft).not.toHaveBeenCalled();
+    liveDraft.tools = [toActivity(draftReference())];
+    act(() =>
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, {
+          messages: [
+            message("m-user", "user", "u1"),
+            { ...message("m-answer", "assistant", ""), status: "streaming" },
+          ],
+        }),
+      ),
+    );
+    const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
+    expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
+    fireEvent.click(widget);
+    expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Writer");
+    expect(getAgentDraft).toHaveBeenCalledWith({ data: { draftId: "d1" } });
+  });
+
+  it("discovers a draft from sync-refreshed loader metadata and offers inline recovery", async () => {
+    renderView();
+    expect(getAgentDraft).not.toHaveBeenCalled();
+    conversationMock.mockResolvedValueOnce(
+      payload(null, { agentDrafts: [{ id: "d1", name: "Writer" }] }) as never,
+    );
+    act(() =>
+      FakeEventSource.instances
+        .at(-1)!
+        .emit("sync", { type: "agent.draft.changed", conversationId: "c1" }),
+    );
+    const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
+    expect(screen.getByTestId("message-footer")).toContainElement(widget);
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+  });
+
+  it("retains the same editor through retry when every tool reference disappears", async () => {
+    const { client } = renderView(null, { toolCalls: [draftReference()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "My writer" } });
+    retryMock.mockResolvedValueOnce({} as never);
+    // Deliberately omit even the loader summary: a stale reload must not orphan a known draft.
+    conversationMock.mockResolvedValueOnce(payload(null) as never);
+    fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+    await waitFor(() => expect(retryMock).toHaveBeenCalled());
+    const footer = await screen.findByTestId("message-footer");
+    expect(
+      within(footer).getByRole("button", { name: "Open agent draft: My writer" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Name" })).toBe(name);
+    expect(name).toHaveValue("My writer");
+    expect(client.getQueryData(["agents", "draft", "d1"])).toMatchObject({
+      settings: { name: "My writer" },
+    });
+  });
+
+  it("keeps copied references historical even after the branch gets its own draft", async () => {
+    const { client } = renderView(
+      { conversationId: "original", title: "Original" },
+      { toolCalls: [draftReference("original", "other-draft")] },
+    );
+    expect(screen.getByText("From another chat")).toBeVisible();
+    expect(getAgentDraft).not.toHaveBeenCalled();
+    act(() =>
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, {
+          toolCalls: [draftReference("original", "other-draft")],
+          agentDrafts: [{ id: "d1", name: "Writer" }],
+        }),
+      ),
+    );
+    const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
+    expect(screen.getAllByRole("button", { name: /Open agent draft/ })).toHaveLength(1);
+    expect(screen.getByTestId("message-footer")).toContainElement(widget);
+    expect(screen.getByText("From another chat")).toBeVisible();
+    expect(getAgentDraft).not.toHaveBeenCalledWith({ data: { conversationId: "original" } });
+  });
+
+  it.each(["send", "retry", "branch", "edit", "answer", "answer edit"] as const)(
+    "flushes local settings before %s reaches its RPC",
+    async (action) => {
+      const start =
+        action === "answer edit"
+          ? resolvedPayload()
+          : payload(null, action === "answer" ? { toolCalls: [askRow] } : {});
+      const withDraft = { ...start, agentDrafts: [{ id: "d1", name: "Writer" }] };
+      renderView(null, withDraft);
+      conversationMock.mockResolvedValue(withDraft as never);
+      sendMock.mockResolvedValueOnce({} as never);
+      retryMock.mockResolvedValueOnce({} as never);
+      branchMock.mockResolvedValueOnce({ conversationId: "branch" } as never);
+      editMock.mockResolvedValueOnce({} as never);
+      answerMock.mockResolvedValueOnce({} as never);
+      fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
+      const blocked = draftWriteGate();
+      vi.mocked(patchAgentDraft).mockImplementationOnce(async ({ data }) => {
+        await blocked.promise;
+        current = { ...current, revision: 2, settings: { ...current.settings, ...data.changes } };
+        return { outcome: "updated", draft: current };
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+        target: { value: "Reviewed settings" },
+      });
+      const rpc =
+        action === "send"
+          ? sendMock
+          : action === "retry"
+            ? retryMock
+            : action === "branch"
+              ? branchMock
+              : action === "answer"
+                ? answerMock
+                : editMock;
+      if (action === "edit") fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+      if (action === "answer edit")
+        fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+      const label = {
+        send: "Send test message",
+        retry: "Retry m-answer",
+        branch: "Branch off m-answer",
+        edit: "Save message edit",
+        answer: "Skip and continue",
+        "answer edit": "Save answers",
+      }[action];
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(patchAgentDraft).toHaveBeenCalledTimes(1));
+      expect(rpc).not.toHaveBeenCalled();
+      await act(async () => blocked.release());
+      await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+      expect(current.settings.name).toBe("Reviewed settings");
+      expect(saveAgentDraft).not.toHaveBeenCalled();
+    },
+  );
+
+  it("blocks send when persistence fails, without discarding local settings", async () => {
+    renderView(null, { agentDrafts: [{ id: "d1", name: "Writer" }] });
+    fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
+    vi.mocked(patchAgentDraft).mockRejectedValue(new Error("Offline"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Keep this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    expect(await screen.findByText("Offline")).toBeVisible();
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Keep this");
+  });
+
+  it("never waits for a pending draft autosave before stopping generation", async () => {
+    liveDraft.status = "streaming";
+    renderView(null, {
+      agentDrafts: [{ id: "d1", name: "Writer" }],
+      messages: [
+        message("m-user", "user", "u1"),
+        { ...message("m-answer", "assistant", ""), status: "streaming" },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
+    const blocked = draftWriteGate();
+    vi.mocked(patchAgentDraft).mockImplementationOnce(async ({ data }) => {
+      await blocked.promise;
+      current = { ...current, revision: 2, settings: { ...current.settings, ...data.changes } };
+      return { outcome: "updated", draft: current };
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Still persisting" },
+    });
+    await waitFor(() => expect(patchAgentDraft).toHaveBeenCalledTimes(1));
+    vi.mocked(stopGeneration).mockResolvedValueOnce({ stopped: true });
+    fireEvent.click(screen.getByRole("button", { name: "Stop test generation" }));
+    await waitFor(() => expect(stopGeneration).toHaveBeenCalledTimes(1));
+    expect(current.settings.name).toBe("Writer");
+    await act(async () => blocked.release());
+    await waitFor(() => expect(current.settings.name).toBe("Still persisting"));
   });
 });
 
