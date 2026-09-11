@@ -7,6 +7,7 @@ import {
   OAuthProviderId,
   SaveBuiltinProviderInput,
   SaveOidcProviderInput,
+  SetOAuthProviderEnabledInput,
 } from "../oauth.ts";
 import { invalidateAuth } from "./auth.ts";
 import { requireAdmin } from "./middleware.ts";
@@ -91,6 +92,29 @@ export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
       config: { discoveryUrl: data.discoveryUrl, scopes: [...data.scopes] },
     });
   });
+
+export const setOAuthProviderEnabled = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(SetOAuthProviderEnabledInput))
+  .handler(({ data }) =>
+    runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const repo = yield* OAuthRepo;
+          const stored = (yield* repo.list()).find((p) => p.id === data.id);
+          if (!stored) return { ok: false as const, error: "That provider is gone." };
+          if (data.enabled && !stored.secretConfigured) {
+            return { ok: false as const, error: "Add the client secret before enabling this." };
+          }
+          yield* repo.setEnabled(data.id, data.enabled);
+          return { ok: true as const };
+        }),
+      )
+      .then((result) => {
+        if (result.ok) invalidateAuth();
+        return result;
+      }),
+  );
 
 export const deleteOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])

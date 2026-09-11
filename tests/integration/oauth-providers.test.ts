@@ -181,6 +181,19 @@ describe("OAuth provider storage", () => {
     expect(await repo((r) => r.listForAuth())).toMatchObject([{ id: "google" }]);
   });
 
+  it("turns a provider on without disturbing what else is stored", async () => {
+    await repo((r) => r.upsert({ ...google, enabled: false, secret: "first-secret" }));
+
+    await repo((r) => r.setEnabled("google", true));
+
+    expect((await repo((r) => r.list()))[0]).toMatchObject({
+      enabled: true,
+      clientId: "google-client",
+      secretConfigured: true,
+    });
+    expect(await repo((r) => r.listForAuth())).toMatchObject([{ clientSecret: "first-secret" }]);
+  });
+
   it("removes a provider", async () => {
     await repo((r) => r.upsert({ ...google, secret: "first-secret" }));
     await repo((r) => r.remove("google"));

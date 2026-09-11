@@ -56,6 +56,11 @@ export class OAuthRepo extends Context.Service<
     /** Whether accounts this provider creates skip the approval queue. */
     isTrusted(id: string): Effect.Effect<boolean>;
     upsert(input: UpsertOAuthProvider): Effect.Effect<PublicOAuthProvider>;
+    /**
+     * Turning a provider on or off touches nothing else, so a page showing
+     * stale credentials cannot write them back on its way past.
+     */
+    setEnabled(id: string, enabled: boolean): Effect.Effect<PublicOAuthProvider | null>;
     remove(id: string): Effect.Effect<void>;
   }
 >()("chat/auth/OAuthRepo") {
@@ -168,6 +173,16 @@ export class OAuthRepo extends Context.Service<
           const row = rows[0];
           if (!row) return yield* Effect.die("oauth provider upsert returned no row");
           return toPublic(row);
+        }),
+
+        setEnabled: Effect.fn("OAuthRepo.setEnabled")(function* (id, enabled) {
+          const rows = yield* db
+            .update(oauthProviders)
+            .set({ enabled, updatedAt: new Date() })
+            .where(eq(oauthProviders.id, id))
+            .returning()
+            .pipe(Effect.orDie);
+          return rows[0] ? toPublic(rows[0]) : null;
         }),
 
         remove: Effect.fn("OAuthRepo.remove")(function* (id) {

@@ -104,6 +104,11 @@ export const SaveOidcProviderInput = Schema.Struct({
 });
 export type SaveOidcProviderInput = typeof SaveOidcProviderInput.Type;
 
+export const SetOAuthProviderEnabledInput = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1)),
+  enabled: Schema.Boolean,
+});
+
 export const OAuthProviderId = Schema.Struct({ id: Schema.String.check(Schema.isMinLength(1)) });
 
 /** What the sign-in page needs: enough for a button, nothing about the client. */
