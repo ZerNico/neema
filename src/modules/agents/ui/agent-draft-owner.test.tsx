@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef, useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_AGENT_DRAFT, type AgentDraft } from "../draft-schema.ts";
@@ -60,8 +60,24 @@ vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
-    <a href={to}>{children}</a>
+  // Params are interpolated so a test can tell which agent a link points at.
+  Link: ({
+    children,
+    to,
+    params,
+  }: {
+    children: React.ReactNode;
+    to: string;
+    params?: Record<string, string>;
+  }) => (
+    <a
+      href={Object.entries(params ?? {}).reduce(
+        (path, [key, value]) => path.replace(`$${key}`, value),
+        to,
+      )}
+    >
+      {children}
+    </a>
   ),
   useNavigate: () => vi.fn(),
   useRouterState: () => "/chat/conversation",
@@ -461,6 +477,22 @@ describe("conversation-owned agent draft", () => {
     expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Writer edited");
   });
 
+  it("offers no discard once the draft is saved, there being nothing to throw away", async () => {
+    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    await fixture();
+
+    expect(await screen.findByRole("textbox", { name: "Name" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard draft" })).not.toBeInTheDocument();
+  });
+
+  it("offers the editor behind a button rather than a sentence of link text", async () => {
+    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    await fixture();
+
+    const editor = await screen.findByRole("link", { name: "Open in editor" });
+    expect(editor).toHaveAttribute("href", "/agents/saved-agent");
+  });
+
   it("discards one draft on confirmation and leaves the other alone", async () => {
     extra = { ...fresh(), id: "draft-2", settings: { ...EMPTY_AGENT_DRAFT, name: "Second" } };
     await fixture({ activities: [reference("first", "draft-1"), reference("second", "draft-2")] });
@@ -533,7 +565,27 @@ describe("conversation-owned agent draft", () => {
       return { outcome: "reloaded", draft: server };
     });
     fireEvent.click(screen.getByRole("button", { name: "Reload agent" }));
+    // The working copy is only given up once the consequence has been named.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("replaced by the agent’s current settings");
+    expect(name).toHaveValue("Working copy");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reload agent" }));
     await waitFor(() => expect(name).toHaveValue("Current saved agent"));
     expect(reloadAgentDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads a saved draft without asking, there being no edits to lose", async () => {
+    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    await fixture();
+    vi.mocked(reloadAgentDraft).mockImplementationOnce(async () => ({
+      outcome: "reloaded",
+      draft: server!,
+    }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reload agent" }));
+
+    await waitFor(() => expect(reloadAgentDraft).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 });

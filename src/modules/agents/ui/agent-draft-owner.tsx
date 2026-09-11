@@ -53,6 +53,15 @@ const AgentDraftPanelContext = createContext<DraftPanelScope>({
   owned: new Set(),
   entries: new Map(),
 });
+/**
+ * Saved to the agent with nothing edited since, so the draft holds no work of
+ * its own. The panel subtitle and the footer both turn on this.
+ */
+const isSaved = (controller: ReturnType<typeof useAgentDraft>) =>
+  controller.draft !== null &&
+  controller.draft.savedDraftRevision === controller.draft.revision &&
+  !controller.dirty;
+
 export const useAgentDraftPanel = (draftId: string) => {
   const scope = useContext(AgentDraftPanelContext);
   return { owned: scope.owned.has(draftId), entry: scope.entries.get(draftId) ?? null };
@@ -164,11 +173,11 @@ function AgentDraftSession({
   // autosave runs on every pause in typing, and narrating it ("pending",
   // "keeping…") flickers faster than anyone can read. Failures still surface
   // through the form's own error line.
-  const saved =
-    controller.draft !== null &&
-    controller.draft.savedDraftRevision === controller.draft.revision &&
-    !controller.dirty;
-  const status = controller.saving ? "Saving agent…" : saved ? "Agent saved" : "Draft";
+  const status = controller.saving
+    ? "Saving agent…"
+    : isSaved(controller)
+      ? "Agent saved"
+      : "Draft";
   const name = controller.values.name || "Untitled agent";
   const request = useMemo(
     () => ({
@@ -176,7 +185,8 @@ function AgentDraftSession({
       // The title names the draft: several can exist and the panel shows one.
       title: controller.draft ? name : "Agent draft",
       subtitle: status,
-      body: <AgentDraftBody controller={controller} />,
+      actions: <AgentDraftActions controller={controller} formId={formId(id)} />,
+      body: <AgentDraftBody controller={controller} formId={formId(id)} />,
     }),
     [controller, id, name, status],
   );
@@ -231,7 +241,58 @@ function AgentDraftSession({
   return null;
 }
 
-function AgentDraftBody({ controller }: { controller: ReturnType<typeof useAgentDraft> }) {
+/** The form lives in the scroller, so its submit reaches it by id from outside. */
+const formId = (panelId: string) => `${panelId}-form`;
+
+function AgentDraftActions({
+  controller,
+  formId: id,
+}: {
+  controller: ReturnType<typeof useAgentDraft>;
+  formId: string;
+}) {
+  const draft = controller.draft;
+  if (!draft) return null;
+  const target = draft.targetAgentId;
+  return (
+    <div className="space-y-2">
+      <FormActions>
+        <PendingButton
+          type="submit"
+          form={id}
+          size="sm"
+          pending={controller.saving}
+          disabled={controller.reloading || controller.conflicts.length > 0}
+        >
+          {target ? "Save changes" : "Create agent"}
+        </PendingButton>
+        {target ? (
+          <Link
+            to="/"
+            search={{ agent: target }}
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            Start chat
+          </Link>
+        ) : null}
+      </FormActions>
+      <p className="text-muted-foreground text-xs">
+        {target
+          ? "Saving changes affects future replies in chats using this agent."
+          : "The agent is created only when you choose Create agent."}
+      </p>
+      {controller.error ? <FieldError>{controller.error}</FieldError> : null}
+    </div>
+  );
+}
+
+function AgentDraftBody({
+  controller,
+  formId: id,
+}: {
+  controller: ReturnType<typeof useAgentDraft>;
+  formId: string;
+}) {
   const { draft, form } = controller;
   const confirm = useConfirm();
   if (!draft) {
@@ -245,43 +306,16 @@ function AgentDraftBody({ controller }: { controller: ReturnType<typeof useAgent
     return <ListSkeleton rows={3} media="none" label="Loading agent draft" />;
   }
   const target = draft.targetAgentId;
+  const saved = isSaved(controller);
   return (
     <form
+      id={id}
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
         void controller.save();
       }}
     >
-      {/* Pulled into the body's top padding so it keeps that breathing room
-          once stuck instead of pressing against the panel header. */}
-      <div className="bg-background sticky top-0 z-10 -mt-4 space-y-2 border-b pt-4 pb-3">
-        <FormActions>
-          <PendingButton
-            type="submit"
-            size="sm"
-            pending={controller.saving}
-            disabled={controller.reloading || controller.conflicts.length > 0}
-          >
-            {target ? "Save changes" : "Create agent"}
-          </PendingButton>
-          {target ? (
-            <Link
-              to="/"
-              search={{ agent: target }}
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              Start chat
-            </Link>
-          ) : null}
-        </FormActions>
-        <p className="text-muted-foreground text-xs">
-          {target
-            ? "Saving changes affects future replies in chats using this agent."
-            : "The agent is created only when you choose Create agent."}
-        </p>
-        {controller.error ? <FieldError>{controller.error}</FieldError> : null}
-      </div>
       {controller.conflicts.map((key) => (
         <section
           key={key}
@@ -308,48 +342,68 @@ function AgentDraftBody({ controller }: { controller: ReturnType<typeof useAgent
       <fieldset disabled={controller.reloading} className="flex min-w-0 flex-col gap-6">
         <AgentSettingsFields form={form} />
       </fieldset>
-      <div className="flex justify-end border-t pt-3">
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-destructive hover:text-destructive"
-          onClick={() =>
-            void confirm({
-              title: `Discard "${controller.values.name || "Untitled agent"}"?`,
-              description: target
-                ? "The draft is removed from this chat. The saved agent itself is not affected."
-                : "The draft is removed from this chat. Nothing was saved, so it cannot be recovered.",
-              confirmLabel: "Discard draft",
-              destructive: true,
-            }).then((confirmed) => confirmed && controller.discard())
-          }
-        >
-          Discard draft
-        </Button>
-      </div>
       {target ? (
         <div className="space-y-2 border-t pt-3">
-          <Link
-            to="/agents/$agentId"
-            params={{ agentId: target }}
-            className="text-sm underline underline-offset-2"
-          >
-            View agent in the editor
-          </Link>
-          <p className="text-muted-foreground text-xs">
-            Reloading replaces this working draft with the current agent.
-          </p>
-          <PendingButton
-            size="sm"
-            variant="outline"
-            pending={controller.reloading}
-            disabled={controller.saving}
-            onClick={() => void controller.reload()}
-          >
-            Reload agent
-          </PendingButton>
+          <FormActions>
+            <Link
+              to="/agents/$agentId"
+              params={{ agentId: target }}
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+            >
+              Open in editor
+            </Link>
+            <PendingButton
+              size="sm"
+              variant="outline"
+              pending={controller.reloading}
+              disabled={controller.saving}
+              onClick={() => {
+                // Reload resets the form to the agent's settings, so a draft
+                // holding edits of its own loses them. A saved draft matches
+                // the agent already and has nothing to ask about.
+                if (saved) {
+                  void controller.reload();
+                  return;
+                }
+                void confirm({
+                  title: "Reload from the saved agent?",
+                  description:
+                    "The edits in this draft are replaced by the agent’s current settings.",
+                  confirmLabel: "Reload agent",
+                  destructive: true,
+                }).then((confirmed) => {
+                  if (confirmed) void controller.reload();
+                });
+              }}
+            >
+              Reload agent
+            </PendingButton>
+          </FormActions>
         </div>
       ) : null}
+      {/* A saved draft holds no work of its own, so there is nothing to throw
+          away; it goes with the conversation, which cascades to its drafts. */}
+      {saved ? null : (
+        <div className="flex justify-end border-t pt-3">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            onClick={() =>
+              void confirm({
+                title: `Discard "${controller.values.name || "Untitled agent"}"?`,
+                description: target
+                  ? "The draft is removed from this chat. The saved agent itself is not affected."
+                  : "The draft is removed from this chat. Nothing was saved, so it cannot be recovered.",
+                confirmLabel: "Discard draft",
+                destructive: true,
+              }).then((confirmed) => confirmed && controller.discard())
+            }
+          >
+            Discard draft
+          </Button>
+        </div>
+      )}
     </form>
   );
 }
