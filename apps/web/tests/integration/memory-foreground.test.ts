@@ -17,6 +17,7 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -410,6 +411,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        ExternalCompletion.layer,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),

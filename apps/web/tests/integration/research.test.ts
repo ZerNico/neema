@@ -17,6 +17,7 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { RESEARCH_LIMITS, researchOutputCaps } from "~/modules/chat/server/research/budget.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { computeBudget, estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { projectResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -390,6 +391,7 @@ beforeAll(async () => {
         FakeBlobStore,
         FakeDocumentParser,
         MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
+        ExternalCompletion.layer,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(repos)),
     ),

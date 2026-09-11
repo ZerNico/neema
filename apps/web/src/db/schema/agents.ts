@@ -177,6 +177,15 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    */
   searchEnabled: boolean("search_enabled").notNull().default(false),
   /**
+   * The folder attached on the machine this attempt was sent from, by name.
+   * Null means the tools that reach a machine were not offered. Only a name:
+   * the path stays on the machine that granted it, so the same conversation
+   * continued elsewhere resolves its own folder or none.
+   */
+  desktopFolder: text("desktop_folder"),
+  /** Whether that machine could sandbox a command when this was sent. */
+  desktopCommands: boolean("desktop_commands").notNull().default(false),
+  /**
    * The effective union of agent dependencies and standalone inputs, in order. Kept beside the resolved
    * document manifest because an empty or fully-pending collection resolves to
    * no version rows at all, and "nothing selected" must not be confused with

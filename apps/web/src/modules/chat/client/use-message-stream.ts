@@ -13,6 +13,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { ResearchProgress } from "../research-schema.ts";
+import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useSmoothText } from "./use-smooth-text.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
@@ -100,8 +101,18 @@ export interface AgentDraftToolActivity extends ToolActivityBase {
   result?: AgentDraftActivityResult;
 }
 
+export interface DesktopToolActivity extends ToolActivityBase {
+  family: "desktop";
+  /** Narrowed from the base so the transcript can switch on it exhaustively. */
+  name: DesktopToolName;
+  /** Present from `start`, because the page is what executes the call. */
+  args?: Record<string, unknown>;
+  result?: DesktopToolResult;
+}
+
 export type ToolActivity =
   | AgentDraftToolActivity
+  | DesktopToolActivity
   | WebToolActivity
   | MemoryToolActivity
   | AskToolActivity
@@ -245,7 +256,8 @@ export function applyToolChunk(
     e.family !== "plan" &&
     e.family !== "research" &&
     e.family !== "knowledge" &&
-    e.family !== "skill"
+    e.family !== "skill" &&
+    e.family !== "desktop"
   )
     return tools;
 
@@ -338,6 +350,35 @@ export function applyToolChunk(
             ...(parsed.error ? { error: parsed.error } : {}),
           }
         : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+
+  if (family === "desktop") {
+    const decodedResult =
+      e.phase === "result"
+        ? Option.getOrNull(Schema.decodeUnknownOption(DesktopToolResult)(e.result))
+        : null;
+    // A result that does not decode leaves the activity alone rather than
+    // dropping it to a state the transcript cannot explain.
+    if (e.phase === "result" && !decodedResult) return tools;
+    if (!Schema.is(DesktopToolName)(e.name)) return tools;
+    const next: DesktopToolActivity = {
+      family: "desktop",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? 0,
+      status: decodedResult ? (decodedResult.ok ? "complete" : "error") : "running",
+      ...(e.args && typeof e.args === "object"
+        ? { args: e.args as Record<string, unknown> }
+        : existing?.family === "desktop" && existing.args
+          ? { args: existing.args }
+          : {}),
+      ...(decodedResult ? { result: decodedResult } : {}),
     };
     return index === -1
       ? [...tools, next]

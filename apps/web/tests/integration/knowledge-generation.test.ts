@@ -6,6 +6,7 @@ import { Response, type Prompt } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SkillService } from "~/modules/skills/server/service.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
@@ -285,6 +286,7 @@ beforeAll(async () => {
   ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
   const CoreLayer = Layer.mergeAll(
     FakeGateway,
+    ExternalCompletion.layer,
     SyncBus.layer,
     WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
     FakeReader,

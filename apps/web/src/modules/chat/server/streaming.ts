@@ -36,6 +36,7 @@ import {
   Stream,
   Semaphore,
   Schedule,
+  type Scope,
 } from "effect";
 import {
   AskUserParams,
@@ -44,6 +45,7 @@ import {
   readPresentedQuestions,
 } from "~/modules/tools/ask-user-schema.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
+import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
 import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
 import { Prompt, type Response } from "effect/unstable/ai";
@@ -79,6 +81,13 @@ import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { isWebSource, sourceTarget, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
 import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import {
+  DesktopToolName,
+  DesktopToolResult,
+  desktopToolsSystemHint,
+  forTranscript,
+} from "~/modules/desktop/tool-schema.ts";
 import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
   calibrationFactor,
@@ -130,6 +139,12 @@ export type StreamEvent =
 // One assistant message may span several model turns when tools are involved:
 // model → tool_calls → execute → feed results back → model continues.
 const MAX_TOOL_ROUNDS = 4;
+/**
+ * Work on a folder is many small steps: list, read, edit, run, read again.
+ * Four rounds is a couple of files, which is why knowledge already raises its
+ * own ceiling rather than living with the default.
+ */
+const MAX_DESKTOP_TOOL_ROUNDS = 24;
 /**
  * Knowledge-backed chats list, read and compare documents in batches, which
  * takes more rounds than a web lookup. A ceiling, not a target: the budget of
@@ -187,6 +202,7 @@ export class StreamEngine extends Context.Service<
     StreamEngine,
     Effect.gen(function* () {
       const repo = yield* ChatRepo;
+      const external = yield* ExternalCompletion;
       const gateway = yield* AiGateway;
       const sync = yield* SyncBus;
       const webSearch = yield* WebSearchExecutor;
@@ -665,6 +681,17 @@ export class StreamEngine extends Context.Service<
               }).pipe(Effect.provideService(SkillReader, skillReader))
             : null;
           const askTools = prepareAskUserTool();
+          // Replaced each turn, because a provider call id is unique only
+          // within one and a handler only ever runs inside one.
+          const turnCallRows = { rows: new Map<string, string>() };
+          // Offered only when the machine that sent this message said a folder
+          // was attached, so a browser tab never sees these names.
+          const desktopTools = config.desktopFolder
+            ? prepareDesktopTools({
+                rowIdFor: (providerCallId) => turnCallRows.rows.get(providerCallId),
+                commands: config.desktopCommands ?? false,
+              })
+            : null;
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
           const planTools = config.planEnabled ? preparePlanTool() : undefined;
@@ -686,6 +713,7 @@ export class StreamEngine extends Context.Service<
           const { memoryTools } = conversationContext;
           const commonGroups = [
             authoring.group,
+            ...(desktopTools ? [desktopTools] : []),
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
@@ -848,6 +876,17 @@ export class StreamEngine extends Context.Service<
             ...(webTools
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
               : []),
+            ...(desktopTools && config.desktopFolder
+              ? [
+                  {
+                    role: "system" as const,
+                    content: desktopToolsSystemHint(
+                      config.desktopFolder,
+                      config.desktopCommands ?? false,
+                    ),
+                  },
+                ]
+              : []),
             ...conversationContext.messages(),
             // Agent instructions are user-level configuration: they shape the
             // answer but cannot override application policy above them.
@@ -1006,7 +1045,13 @@ export class StreamEngine extends Context.Service<
           const toolkit = memoryTools
             ? yield* mergeToolGroups([...executionGroups, memoryTools.group])
             : nonMemoryToolkit;
-          const maxToolRounds = retrievalEnabled ? MAX_KNOWLEDGE_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+          // Keyed on which families are actually active, so a family that
+          // needs more rounds adds a case instead of another boolean.
+          const maxToolRounds = Math.max(
+            MAX_TOOL_ROUNDS,
+            retrievalEnabled ? MAX_KNOWLEDGE_TOOL_ROUNDS : 0,
+            desktopTools ? MAX_DESKTOP_TOOL_ROUNDS : 0,
+          );
 
           // Direct context reserves the first call slot; model calls start after.
           const firstCallIndex = knowledgeContext?.activity ? 1 : 0;
@@ -1203,6 +1248,7 @@ export class StreamEngine extends Context.Service<
             const turnStartOffset = assembled.length;
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
+            turnCallRows.rows = callRowIds;
             let providerOutputStarted = false;
             const currentReminderPrompt = () => reminderPrompt(!toolRoundsLeft);
             const requestPrompt = () => {
@@ -1318,19 +1364,21 @@ export class StreamEngine extends Context.Service<
                           const args = part.params as Record<string, unknown>;
                           const family = Schema.is(AgentDraftToolName)(part.name)
                             ? "agent-draft"
-                            : part.name === "save_memory"
-                              ? "memory"
-                              : part.name === "ask_user"
-                                ? "ask"
-                                : part.name === "update_plan"
-                                  ? "plan"
-                                  : Schema.is(SkillToolName)(part.name)
-                                    ? "skill"
-                                    : Schema.is(KnowledgeToolName)(part.name)
-                                      ? "knowledge"
-                                      : part.name === "web_search" || part.name === "read_url"
-                                        ? "web"
-                                        : null;
+                            : Schema.is(DesktopToolName)(part.name)
+                              ? "desktop"
+                              : part.name === "save_memory"
+                                ? "memory"
+                                : part.name === "ask_user"
+                                  ? "ask"
+                                  : part.name === "update_plan"
+                                    ? "plan"
+                                    : Schema.is(SkillToolName)(part.name)
+                                      ? "skill"
+                                      : Schema.is(KnowledgeToolName)(part.name)
+                                        ? "knowledge"
+                                        : part.name === "web_search" || part.name === "read_url"
+                                          ? "web"
+                                          : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1383,6 +1431,24 @@ export class StreamEngine extends Context.Service<
                                     textOffset,
                                   },
                             );
+                            return;
+                          }
+                          if (family === "desktop") {
+                            // Before the page is told, not after: it may answer
+                            // faster than the handler a step behind it starts
+                            // waiting. Closed with the generation's own scope.
+                            yield* external.open(rowId);
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as DesktopToolName,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                              args,
+                            });
                             return;
                           }
                           if (family === "agent-draft") {
@@ -1488,6 +1554,46 @@ export class StreamEngine extends Context.Service<
                               name: part.name,
                               ...activity,
                               ...(reason ? { reason } : {}),
+                            });
+                            return;
+                          }
+                          if (Schema.is(DesktopToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(DesktopToolResult)(
+                              part.result,
+                            );
+                            // The result crossed the page, so it is untrusted
+                            // input on the way back in, not just on the way out.
+                            const result: DesktopToolResult =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : {
+                                    v: 1,
+                                    ok: false,
+                                    summary: "That did not run",
+                                    detail: "The computer did not report a usable result.",
+                                    truncated: false,
+                                  };
+                            // The model reads the full detail through the
+                            // prompt; the row and the chunk keep an excerpt.
+                            const stored = forTranscript(result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(stored),
+                              status: result.ok ? "complete" : "error",
+                              ...(result.ok
+                                ? {}
+                                : {
+                                    error: { code: "DesktopToolFailed", message: result.summary },
+                                  }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "desktop",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              result: stored,
                             });
                             return;
                           }
@@ -1791,7 +1897,9 @@ export class StreamEngine extends Context.Service<
             // Two bounded recovery stages: first reduce complete active rounds,
             // then old history. A retry remains safe only while this provider
             // call has emitted no user-visible or tool output.
-            const runProviderCall = (recoveryStage: number): Effect.Effect<void, unknown> =>
+            const runProviderCall = (
+              recoveryStage: number,
+            ): Effect.Effect<void, unknown, Scope.Scope> =>
               drain.pipe(
                 Effect.catch((error) =>
                   Effect.gen(function* () {

@@ -96,6 +96,26 @@ export const useFolder = (conversationId: string): FolderState | null => {
   return { status, busy, ...actions };
 };
 
+export interface AttachedFolder {
+  /** Name only: the server stores no path, so another machine can differ. */
+  readonly desktopFolder: string;
+  /** False while this machine cannot sandbox, which withholds run_command. */
+  readonly desktopCommands: boolean;
+}
+
+/**
+ * What each message reports about the machine it was sent from, or null in a
+ * browser, which is what withholds the local tools there.
+ */
+export const useAttachedFolder = (conversationId: string): AttachedFolder | null => {
+  const folder = useFolder(conversationId);
+  if (folder?.status.kind !== "attached") return null;
+  return {
+    desktopFolder: folder.status.name,
+    desktopCommands: folder.status.sandbox.kind === "ready",
+  };
+};
+
 /**
  * Carries a folder picked before the first message onto the conversation that
  * message created. A no-op in a browser, and harmless when nothing was picked.

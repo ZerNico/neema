@@ -15,6 +15,7 @@ import {
 } from "~/db/schema/index.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -117,6 +118,7 @@ beforeAll(async () => {
         FakeBlobStore,
         FakeDocumentParser,
         FakeMemoryService,
+        ExternalCompletion.layer,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),

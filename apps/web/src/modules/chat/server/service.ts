@@ -48,6 +48,9 @@ import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./titl
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
     searchEnabled: boolean;
+    /** Folder attached on the machine this send came from, by name. */
+    desktopFolder?: string | undefined;
+    desktopCommands?: boolean | undefined;
     timeZone?: string | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
@@ -288,6 +291,9 @@ function makeChatService() {
           searchAvailable: boolean;
           collectionIds?: ReadonlyArray<string> | undefined;
           skillIds?: ReadonlyArray<string> | undefined;
+          /** Folder the sending machine reported; retry has no submission. */
+          desktopFolder?: string | undefined;
+          desktopCommands?: boolean | undefined;
         } & (
           | { attempt: "retry"; searchEnabled?: never }
           | { attempt: "send" | "edit"; searchEnabled: boolean }
@@ -303,6 +309,17 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
+          // Same rule as search: a retry reuses what the attempt ran with,
+          // because it has no submission of its own, while a send or an edit
+          // reports the folder attached on the machine it came from.
+          const desktopFolder =
+            input.attempt === "retry"
+              ? (continuation?.desktopFolder ?? null)
+              : (input.desktopFolder ?? null);
+          const desktopCommands =
+            input.attempt === "retry"
+              ? (continuation?.desktopCommands ?? false)
+              : (input.desktopCommands ?? false);
           // An edit that submits a selection is changing it, so it cannot take the
           // replay shortcut below: new collections need a rebuilt manifest.
           const editing = input.attempt === "edit";
@@ -325,6 +342,8 @@ function makeChatService() {
                 [],
               ),
               searchEnabled,
+              desktopFolder,
+              desktopCommands,
             };
           }
           const agent = defaults.agent
@@ -348,6 +367,8 @@ function makeChatService() {
               ? (editedSkills ?? continuation?.standaloneSkillIds)
               : (continuation?.standaloneSkillIds ?? input.skillIds),
             searchEnabled,
+            desktopFolder,
+            desktopCommands,
             model: input.model,
             searchAvailable: input.searchAvailable,
           });
@@ -395,6 +416,10 @@ function makeChatService() {
           attempt: "send",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
+          ...(input.desktopFolder !== undefined ? { desktopFolder: input.desktopFolder } : {}),
+          ...(input.desktopCommands !== undefined
+            ? { desktopCommands: input.desktopCommands }
+            : {}),
           model,
           searchAvailable,
           collectionIds: input.collectionIds,
@@ -457,6 +482,8 @@ function makeChatService() {
         messageId: string;
         attachmentIds: ReadonlyArray<string>;
         searchEnabled: boolean;
+        desktopFolder?: string | undefined;
+        desktopCommands?: boolean | undefined;
         skillIds?: ReadonlyArray<string> | undefined;
         collectionIds?: ReadonlyArray<string> | undefined;
       };
@@ -480,6 +507,12 @@ function makeChatService() {
               ? {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
+                  ...(input.edit.desktopFolder !== undefined
+                    ? { desktopFolder: input.edit.desktopFolder }
+                    : {}),
+                  ...(input.edit.desktopCommands !== undefined
+                    ? { desktopCommands: input.edit.desktopCommands }
+                    : {}),
                   ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
                   ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
                 }
@@ -720,6 +753,9 @@ function makeChatService() {
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        /** Folder attached on the machine this edit came from, by name. */
+        desktopFolder?: string | undefined;
+        desktopCommands?: boolean | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -815,6 +851,10 @@ function makeChatService() {
           attempt: "edit",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
+          ...(input.desktopFolder !== undefined ? { desktopFolder: input.desktopFolder } : {}),
+          ...(input.desktopCommands !== undefined
+            ? { desktopCommands: input.desktopCommands }
+            : {}),
           model,
           searchAvailable,
           ...(input.skillIds ? { skillIds: input.skillIds } : {}),

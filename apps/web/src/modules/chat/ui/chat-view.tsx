@@ -42,7 +42,14 @@ import {
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
-import { rebindDraftFolder } from "~/modules/desktop/client/bridge.ts";
+import {
+  DRAFT_CONVERSATION,
+  rebindDraftFolder,
+  useAttachedFolder,
+} from "~/modules/desktop/client/bridge.ts";
+import { useDesktopTools } from "~/modules/desktop/client/use-desktop-tools.ts";
+import { useDesktopApprovals, type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
+import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { agentIcon } from "./context-picker.tsx";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
@@ -197,6 +204,26 @@ export function toActivity(row: {
     };
   }
 
+  if (Schema.is(DesktopToolName)(row.toolName)) {
+    // The persisted row holds the summary only, never the file contents or
+    // command output that the live envelope carried, so a reload shows the
+    // row without its disclosure rather than inventing a body for it.
+    const stored = Option.getOrNull(Schema.decodeUnknownOption(DesktopToolResult)(row.result));
+    return {
+      family: "desktop",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...(row.arguments && typeof row.arguments === "object"
+        ? { args: row.arguments as Record<string, unknown> }
+        : {}),
+      ...(stored ? { result: stored } : {}),
+    };
+  }
+
   const args = (row.arguments ?? {}) as { queries?: string[]; urls?: string[] };
   const result = (row.result ?? {}) as {
     targets?: string[];
@@ -286,6 +313,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Bumped on retry/edit: the assistant id usually stays the same, so the
   // stream hook needs a separate signal to resubscribe from seq 0.
   const [retryEpoch, setRetryEpoch] = useState(0);
+  const attachedFolder = useAttachedFolder(conversationId);
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
@@ -378,6 +406,22 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (activity.family === "agent-draft" && activity.result) mine(activity.result);
     return ids;
   }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
+  // Runs the model's local tool calls on this machine and reports back, once
+  // the reader has allowed anything that changes it.
+  const desktopApprovals = useDesktopApprovals();
+  useDesktopTools(conversationId, stream.tools, desktopApprovals);
+  // Handed to every message; the card is found by call id, so only the message
+  // holding that call renders one.
+  const desktopApprovalRequests = useMemo(
+    () =>
+      new Map(
+        [...desktopApprovals.pending].map(([callId, kind]) => [
+          callId,
+          { kind, decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice) },
+        ]),
+      ),
+    [desktopApprovals],
+  );
   // Retry/edit can remove every reference before the refreshed loader sees the
   // retained draft, so ids accumulate while this conversation is mounted. A
   // discarded draft is removed again: nothing on the server can reintroduce it.
@@ -461,6 +505,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           modelId: effectiveModelId!,
           content: input.content,
           searchEnabled,
+          ...attachedFolder,
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
@@ -508,6 +553,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           modelId: effectiveModelId!,
           searchEnabled,
+          ...attachedFolder,
           timeZone: browserTimeZone(),
         },
       }),
@@ -967,6 +1013,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               },
             }
           : {}),
+        ...(desktopApprovalRequests.size > 0 ? { desktopApprovals: desktopApprovalRequests } : {}),
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
@@ -1011,6 +1058,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     attachmentsByMessage,
     branchAt,
     compactionsByMessage,
+    desktopApprovalRequests,
     effectiveModelId,
     respondToQuestion,
     tailMessageId,
@@ -1279,6 +1327,9 @@ export function NewChatView({
   }, [selectedAgentId, selectedAgent.data]);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
+  // No conversation yet, so a folder picked here hangs on the draft key until
+  // the first message creates one to rebind it onto.
+  const attachedFolder = useAttachedFolder(DRAFT_CONVERSATION);
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
@@ -1309,6 +1360,7 @@ export function NewChatView({
           modelId: modelId!,
           content: input.content,
           searchEnabled,
+          ...attachedFolder,
           timeZone: browserTimeZone(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),

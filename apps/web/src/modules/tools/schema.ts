@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AgentDraftToolEnvelope } from "~/modules/agents/tool-schema.ts";
+import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
@@ -155,10 +156,34 @@ const planEnvelopeFields = {
   callId: Schema.String,
   name: Schema.Literals(["update_plan"]),
 };
+/**
+ * Tools the page runs on the user's own machine. `start` carries the arguments
+ * because the page is the executor, not just a spectator: it needs the path or
+ * command to act on, which no other family's start event has to say.
+ */
+const desktopEnvelopeFields = {
+  v: Schema.Literals([1]),
+  family: Schema.Literals(["desktop"]),
+  callId: Schema.String,
+  name: DesktopToolName,
+};
 export const ToolChunkEnvelope = Schema.Union([
   AgentDraftToolEnvelope,
   KnowledgeToolEnvelope,
   SkillToolEnvelope,
+  Schema.Struct({
+    ...desktopEnvelopeFields,
+    phase: Schema.Literals(["start"]),
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int),
+    args: Schema.Record(Schema.String, Schema.Unknown),
+  }),
+  Schema.Struct({
+    ...desktopEnvelopeFields,
+    phase: Schema.Literals(["result"]),
+    result: DesktopToolResult,
+  }),
   Schema.Struct({
     ...planEnvelopeFields,
     phase: Schema.Literals(["start"]),

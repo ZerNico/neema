@@ -27,6 +27,7 @@ import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillService } from "~/modules/skills/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
@@ -61,6 +62,7 @@ const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.lay
 const CoreLayer = Layer.mergeAll(
   AiGateway.layer,
   SyncBus.layer,
+  ExternalCompletion.layer,
   ToolsLayer,
   AttachmentService.layer,
   DocumentParser.layer,

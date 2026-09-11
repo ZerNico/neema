@@ -32,6 +32,7 @@ import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
+import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
@@ -151,6 +152,8 @@ export interface DisplayMessage {
   toolActivities: ToolActivity[];
   status: string;
   questionActions?: QuestionActions | undefined;
+  /** Decisions this message is waiting on, by tool-call id. */
+  desktopApprovals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /**
@@ -534,6 +537,16 @@ const AssistantBody = memo(function AssistantBody({
       return <AgentDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
+    }
+    if (part.activity.family === "desktop") {
+      const approval = message.desktopApprovals?.get(part.activity.callId);
+      return (
+        <DesktopActivityBlock
+          key={part.key}
+          activity={part.activity}
+          {...(approval ? { approval } : {})}
+        />
+      );
     }
     return (
       <AskUserBlock

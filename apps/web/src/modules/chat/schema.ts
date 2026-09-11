@@ -17,6 +17,14 @@ const generationFields = {
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
+  /**
+   * The folder attached on the machine this message was sent from, by name
+   * only. The server stores no path: the same conversation opened elsewhere
+   * simply reports a different folder, or none.
+   */
+  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  /** False when that machine cannot sandbox, which withholds the command tool. */
+  desktopCommands: Schema.optionalKey(Schema.Boolean),
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
   /**
@@ -42,6 +50,14 @@ export const AnswerQuestionInput = Schema.Struct({
   response: QuestionResponse,
   modelId: Schema.String,
   searchEnabled: Schema.Boolean,
+  /**
+   * The folder attached on the machine this message was sent from, by name
+   * only. The server stores no path: the same conversation opened elsewhere
+   * simply reports a different folder, or none.
+   */
+  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  /** False when that machine cannot sandbox, which withholds the command tool. */
+  desktopCommands: Schema.optionalKey(Schema.Boolean),
   timeZone: TimeZone,
 });
 
@@ -97,6 +113,14 @@ export const EditMessageInput = Schema.Union([
     messageId: Schema.String,
     modelId: Schema.String,
     searchEnabled: Schema.Boolean,
+    /**
+     * The folder attached on the machine this message was sent from, by name
+     * only. The server stores no path: the same conversation opened elsewhere
+     * simply reports a different folder, or none.
+     */
+    desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+    /** False when that machine cannot sandbox, which withholds the command tool. */
+    desktopCommands: Schema.optionalKey(Schema.Boolean),
     timeZone: TimeZone,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,

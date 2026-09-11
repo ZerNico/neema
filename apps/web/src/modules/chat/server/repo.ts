@@ -84,6 +84,10 @@ export interface GenerationConfig {
   readonly knowledgeMode: "none" | "context" | "retrieval";
   readonly searchEnabled: boolean;
   readonly planEnabled: boolean;
+  /** Folder name when this attempt could reach a machine; null when it could not. */
+  readonly desktopFolder?: string | null;
+  /** Whether that machine could sandbox a command at the time. */
+  readonly desktopCommands?: boolean;
 }
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
@@ -310,6 +314,8 @@ const toConfig = (
   knowledgeMode: row.knowledgeMode,
   searchEnabled: row.searchEnabled,
   planEnabled: row.planEnabled,
+  desktopFolder: row.desktopFolder,
+  desktopCommands: row.desktopCommands,
 });
 
 const readDefaults = Effect.fn("chat.readDefaults")(function* (
@@ -384,6 +390,8 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       knowledgeMode: config.knowledgeMode,
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
+      desktopFolder: config.desktopFolder ?? null,
+      desktopCommands: config.desktopCommands ?? false,
       collectionIds: [...config.collectionIds],
     })
     .pipe(Effect.orDie);

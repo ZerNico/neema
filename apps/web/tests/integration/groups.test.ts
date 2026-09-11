@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -118,6 +119,7 @@ beforeAll(async () => {
         FakeBlobStore,
         FakeDocumentParser,
         FakeMemoryService,
+        ExternalCompletion.layer,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),

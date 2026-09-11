@@ -3,7 +3,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
-import { Deferred, Duration, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect";
 import { uuidv7 } from "uuidv7";
 import { Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { eq, sql } from "drizzle-orm";
@@ -38,6 +49,8 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
 import { askUserTool } from "~/modules/tools/server/ask-user.ts";
+import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { FakeDocumentParser, FakeWebSearch, FakeUrlReader } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
@@ -67,7 +80,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | SyncBus
   | Db
   | AttachmentRepo
-  | AttachmentService,
+  | AttachmentService
+  | ExternalCompletion,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */
@@ -259,6 +273,7 @@ beforeAll(async () => {
     ImageBlobStore,
     FakeDocumentParser,
     FakeMemoryService,
+    ExternalCompletion.layer,
     SyncBus.layer,
   ).pipe(Layer.provideMerge(ReposLayer));
   const EngineLayer = StreamEngine.layer.pipe(
@@ -2671,3 +2686,247 @@ for (const presented of [true, false]) {
     }
   });
 }
+
+describe("local tools on the user's machine", () => {
+  const folder = "acme-site";
+  const desktopChat = Effect.gen(function* () {
+    const seed = yield* setupConversation;
+    const conversation = yield* (yield* ChatRepo).createConversation({
+      userId: seed.userId,
+      modelId: textModelId,
+    });
+    return { ...seed, conversation };
+  });
+
+  const send = (seed: Effect.Success<typeof desktopChat>, desktopCommands = false) =>
+    Effect.flatMap(ChatService, (service) =>
+      service.sendMessage({
+        userId: seed.userId,
+        conversationId: seed.conversation.id,
+        modelId: textModelId,
+        content: "What is in the readme?",
+        searchEnabled: false,
+        attachmentIds: [],
+        desktopFolder: folder,
+        desktopCommands,
+      }),
+    );
+
+  /**
+   * Stands in for the page: subscribes to the same stream the browser does,
+   * and answers each call it is told about. Deliberately learns about calls the
+   * way the real client does rather than by reading the database, because the
+   * start envelope carrying the arguments is the seam most likely to rot.
+   */
+  interface DesktopCall {
+    readonly name: string;
+    readonly args: Record<string, unknown>;
+  }
+  const fakeBridge = (messageId: string, answer: (call: DesktopCall) => unknown) =>
+    Effect.gen(function* () {
+      const external = yield* ExternalCompletion;
+      const engine = yield* StreamEngine;
+      const seen: Array<DesktopCall> = [];
+      // Lets a test act at the moment the page would, without polling for it.
+      const first = yield* Deferred.make<DesktopCall>();
+      const fiber = yield* Effect.forkChild(
+        engine.subscribe(messageId, 0).pipe(
+          Stream.runForEach((event) =>
+            Effect.gen(function* () {
+              if (event.kind !== "chunk" || event.chunkKind !== "tool") return;
+              const envelope = Option.getOrNull(
+                Schema.decodeUnknownOption(ToolChunkEnvelope)(JSON.parse(event.delta)),
+              );
+              if (!envelope || envelope.family !== "desktop" || envelope.phase !== "start") return;
+              const call = { name: envelope.name, args: { ...envelope.args } };
+              seen.push(call);
+              yield* Deferred.succeed(first, call);
+              const reply = answer(call);
+              if (reply !== null) yield* external.complete(envelope.callId, reply);
+            }),
+          ),
+        ),
+        { startImmediately: true },
+      );
+      return { fiber, seen, first };
+    });
+
+  // Longer than the excerpt the transcript keeps, so what is kept and what is
+  // dropped are both observable. The tail is only ever in the prompt.
+  const fileBody = `${"MACHINE_FILE_BODY ".repeat(200)}FILE_TAIL_MARKER`;
+
+  it("folds a machine's answer into the next turn and keeps the body off the row", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "read_local_file", { path: "README.md" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "It describes the site." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const sent = await runtime.runPromise(send(seed));
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, (call) => ({
+            v: 1,
+            ok: true,
+            summary: `Read ${call.args.path}`,
+            detail: fileBody,
+            truncated: false,
+          }));
+          yield* Fiber.join(bridge.fiber);
+          return {
+            seen: bridge.seen,
+            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
+            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+          };
+        }),
+      );
+
+      // The page was told the tool name and its arguments, which is all it
+      // needs to act; nothing else reaches it before the call is answered.
+      expect(result.seen).toEqual([{ name: "read_local_file", args: { path: "README.md" } }]);
+      // The answer came back through the handler and into the second turn, so
+      // the model read the file without the server ever touching it.
+      expect(prompts).toHaveLength(2);
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
+      // The folder's name reaches the prompt; its path never existed here.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder);
+
+      const call = result.detail.toolCalls.at(-1)!;
+      expect(call.toolName).toBe("read_local_file");
+      expect(call.status).toBe("complete");
+      expect(call.result).toMatchObject({ summary: "Read README.md", ok: true, truncated: true });
+      const last = result.detail.messages.at(-1)!;
+      expect(last.status).toBe("complete");
+      expect(last.content).toContain("It describes the site.");
+      // Same rule web tools follow: the whole body reaches the model through
+      // the prompt, and only an excerpt of it outlives the generation.
+      expect(JSON.stringify(call.result)).not.toContain("FILE_TAIL_MARKER");
+      expect(JSON.stringify(result.chunks)).not.toContain("FILE_TAIL_MARKER");
+      expect(result.chunks.some((chunk) => chunk.delta.includes('"family":"desktop"'))).toBe(true);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
+    try {
+      const sent = await runtime.runPromise(send(seed, true));
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const external = yield* ExternalCompletion;
+          const engine = yield* StreamEngine;
+          // Answering is what the bridge does not do here: null leaves the
+          // handler parked exactly as a closed desktop app would.
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => null);
+          const waited = yield* Deferred.await(bridge.first);
+          const running = yield* ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId));
+          const stopped = yield* engine.stopGeneration(
+            sent.assistantMessageId,
+            running?.generationId ?? undefined,
+          );
+          yield* Fiber.join(bridge.fiber);
+          const detail = yield* loadConversationDetail(seed.userId, seed.conversation.id);
+          const callId = detail.toolCalls.at(-1)!.id;
+          return {
+            waited,
+            stopped,
+            detail,
+            // Nobody is parked on it any more, so an answer from a page that
+            // did not notice the stop has nowhere to be written.
+            late: yield* external.complete(callId, {
+              v: 1,
+              ok: true,
+              summary: "Ran pnpm test",
+              detail: "LATE_ANSWER",
+              truncated: false,
+            }),
+          };
+        }),
+      );
+
+      expect(result.waited).toEqual({ name: "run_command", args: { command: "pnpm test" } });
+      expect(result.stopped).toBe(true);
+      expect(result.late).toBe(false);
+      const call = result.detail.toolCalls.at(-1)!;
+      expect(call.toolName).toBe("run_command");
+      expect(call.status).toBe("error");
+      expect(result.detail.messages.at(-1)?.status).toBe("aborted");
+      expect(JSON.stringify(result.detail)).not.toContain("LATE_ANSWER");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("withholds only the command tool when the machine cannot sandbox", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "I will read it instead." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const sent = await runtime.runPromise(send(seed));
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
+        ),
+      );
+      // A missing shell prerequisite costs the command tool, never the folder.
+      const offered = Object.keys(prompts[0]!.toolkit?.tools ?? {});
+      expect(offered).toContain("read_local_file");
+      expect(offered).toContain("write_local_file");
+      expect(offered).not.toContain("run_command");
+      // And the model is told, rather than left to discover it by trying.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain("Running commands is unavailable");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("withholds the tools when no folder is attached", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "I cannot reach your files." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            modelId: textModelId,
+            content: "Read my readme.",
+            searchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
+        ),
+      );
+      // A browser tab never sees these names, which is what keeps the model
+      // from proposing work it has no way to do.
+      expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+});
