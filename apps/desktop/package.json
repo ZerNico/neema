@@ -2,12 +2,12 @@
   "name": "@chat/desktop",
   "private": true,
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/main.cjs",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "pnpm exec vitest run",
     "build": "node build.mjs",
-    "start": "pnpm build && electron dist/main.js"
+    "start": "pnpm build && electron dist/main.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.75",

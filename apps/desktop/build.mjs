@@ -16,6 +16,9 @@ await build({
   platform: "node",
   target: "node24",
   format: "cjs",
+  // The package is `type: module`, so a `.js` file here would be loaded as
+  // ESM and `require` would be undefined. The output really is CommonJS.
+  outExtension: { ".js": ".cjs" },
   sourcemap: true,
   external: ["electron", "@anthropic-ai/sandbox-runtime"],
 });

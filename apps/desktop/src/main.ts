@@ -52,7 +52,7 @@ const openConnectWindow = () => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: join(here, "connect-preload.js"),
+      preload: join(here, "connect-preload.cjs"),
     },
   });
   void window.loadFile(join(here, "..", "static", "connect.html"));
@@ -67,7 +67,7 @@ const openMainWindow = (origin: string) => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: join(here, "preload.js"),
+      preload: join(here, "preload.cjs"),
     },
   });
 
