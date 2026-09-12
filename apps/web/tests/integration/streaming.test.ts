@@ -1886,7 +1886,7 @@ describe("resumable streaming pipeline", () => {
     });
   }, 60_000);
 
-  it("renews the lease while a generation is alive and never reaps it", async () => {
+  it("renews the lease while a generation is alive and never reaps it", async ({ signal }) => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
         const engine = yield* StreamEngine;
@@ -1896,6 +1896,11 @@ describe("resumable streaming pipeline", () => {
         const reached = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
         hold = { after: 3, reached, release };
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            hold = null;
+          }).pipe(Effect.andThen(Deferred.interrupt(release))),
+        );
         yield* engine.startGeneration({
           generationId: assistant.generationId ?? undefined,
           userId,
@@ -1915,19 +1920,28 @@ describe("resumable streaming pipeline", () => {
           // buffer: two land, not three.
           { until: (rows) => rows.length === 2 },
         );
-        // Held mid-stream with nothing left to write, so only the empty-batch
-        // heartbeat can move this lease back into the future.
-        yield* db
-          .update(messages)
-          .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 hour'` })
+        // Only an empty-batch heartbeat can advance this lease now. Expiring it
+        // artificially would race the real background reaper, not test renewal.
+        const [baseline] = yield* db
+          .select({ lease: sql<string>`${messages.generationLeaseUntil}::text` })
+          .from(messages)
           .where(eq(messages.id, assistant.id));
+        // Preserve Postgres microseconds; a JS Date truncates them and would
+        // make an unchanged lease appear newer than the baseline.
+        expect(baseline?.lease).toBeTypeOf("string");
         yield* Effect.repeat(
           db
-            .select({ lease: messages.generationLeaseUntil })
+            .select({
+              status: messages.status,
+              renewed: sql<boolean>`${messages.generationLeaseUntil} > ${baseline!.lease} and ${messages.generationLeaseUntil} > clock_timestamp()`,
+            })
             .from(messages)
             .where(eq(messages.id, assistant.id))
-            .pipe(Effect.delay(Duration.millis(10))),
-          { until: (rows) => (rows[0]?.lease?.getTime() ?? 0) > Date.now() },
+            .pipe(
+              Effect.tap((rows) => Effect.sync(() => expect(rows[0]?.status).toBe("streaming"))),
+              Effect.delay(Duration.millis(10)),
+            ),
+          { until: (rows) => rows[0]?.renewed === true },
         );
         yield* engine.reapOrphans;
         const during = yield* repo.getMessage(assistant.id);
@@ -1935,7 +1949,8 @@ describe("resumable streaming pipeline", () => {
         hold = null;
         const collected = yield* engine.subscribe(assistant.id, 0).pipe(Stream.runCollect);
         return { during, last: Array.from(collected).at(-1) };
-      }),
+      }).pipe(Effect.scoped),
+      { signal },
     );
     expect(result.during?.status).toBe("streaming");
     expect(result.last).toMatchObject({ kind: "done", status: "complete" });
