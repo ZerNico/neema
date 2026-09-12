@@ -127,8 +127,9 @@ function ApprovalCard({
 }) {
   const what = argText(activity);
   return (
-    <Card className="mb-2">
-      <CardContent className="flex flex-col gap-3 px-4">
+    // Same rhythm as the clarification card: py-4 on the shell, px-4 inside.
+    <Card className="mb-3 gap-0 py-4">
+      <CardContent className="flex min-w-0 flex-col gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <HugeiconsIcon
             icon={ICONS[activity.name]}
@@ -139,7 +140,7 @@ function ApprovalCard({
           <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind)}</span>
         </div>
         {what ? (
-          <pre className="bg-muted overflow-x-auto rounded-xl p-2 text-xs whitespace-pre-wrap">
+          <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
             {what}
           </pre>
         ) : null}
@@ -183,27 +184,51 @@ export function DesktopActivityBlock({
   const violations = activity.result?.violations ?? [];
   const label = activity.result?.summary ?? runningLabel(activity);
 
+  // A command or a long path must never widen the column: the row truncates
+  // and the body wraps, so the transcript stays as wide as the chat.
   if (running || detail.length === 0) {
     return (
-      <div className={cn(activityRowClassName, "mb-2", failed && "text-destructive")}>
-        <HugeiconsIcon icon={ICONS[activity.name]} strokeWidth={2} className="size-4" aria-hidden />
+      <div
+        className={cn(
+          activityRowClassName,
+          "mb-2 min-w-0 max-w-full",
+          failed && "text-destructive",
+        )}
+      >
+        <HugeiconsIcon
+          icon={ICONS[activity.name]}
+          strokeWidth={2}
+          className="size-4 shrink-0"
+          aria-hidden
+        />
         <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
       </div>
     );
   }
 
   return (
-    <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
-      <DisclosureTrigger className={cn(disclosureTriggerClassName, failed && "text-destructive")}>
-        <HugeiconsIcon icon={ICONS[activity.name]} strokeWidth={2} className="size-4" aria-hidden />
+    <Disclosure open={open} onOpenChange={setOpen} className="mb-2 min-w-0 max-w-full">
+      <DisclosureTrigger
+        className={cn(
+          disclosureTriggerClassName,
+          "min-w-0 max-w-full",
+          failed && "text-destructive",
+        )}
+      >
+        <HugeiconsIcon
+          icon={ICONS[activity.name]}
+          strokeWidth={2}
+          className="size-4 shrink-0"
+          aria-hidden
+        />
         <span className="min-w-0 truncate">{label}</span>
       </DisclosureTrigger>
       <DisclosureContent>
-        <div className={cn(disclosureBodyRailClassName, "flex flex-col gap-2")}>
+        <div className={cn(disclosureBodyRailClassName, "flex min-w-0 flex-col gap-2")}>
           {violations.length > 0 ? (
             <p className="text-warning text-xs">{violations.join("\n")}</p>
           ) : null}
-          <pre className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap">
+          <pre className="bg-muted max-h-64 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
             {detail}
           </pre>
           {activity.result?.truncated ? (
