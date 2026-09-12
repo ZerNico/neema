@@ -38,14 +38,10 @@ export type { PermissionLevel };
 /** What a card may be asking about: a change kind, or a read under `manual`. */
 export type PendingKind = ApprovalKind | "read";
 
-export const PERMISSION_LEVELS: ReadonlyArray<{
-  value: PermissionLevel;
-  label: string;
-  description: string;
-}> = [
-  { value: "manual", label: "Ask each time", description: "Every read, change and command." },
-  { value: "auto", label: "Ask before changes", description: "Reads run on their own." },
-  { value: "skip", label: "Don’t ask", description: "Everything runs. Deletes still ask." },
+export const PERMISSION_LEVELS: ReadonlyArray<{ value: PermissionLevel; label: string }> = [
+  { value: "manual", label: "Manually approve" },
+  { value: "auto", label: "Automatically approve" },
+  { value: "skip", label: "Skip all approval" },
 ];
 
 export interface DesktopApprovals {

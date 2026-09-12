@@ -1,7 +1,7 @@
-import { Alert01Icon, Folder01Icon, Globe02Icon, Shield01Icon } from "@hugeicons/core-free-icons";
+import { Alert01Icon, Folder01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SandboxAvailability } from "@chat/desktop-rpc";
-import type { NetworkLevel, PermissionLevel } from "~/modules/chat/schema.ts";
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,14 +15,15 @@ import { cn } from "~/ui/utils";
 import { PERMISSION_LEVELS } from "../client/approvals.ts";
 import { desktopBuild, type FolderState } from "../client/bridge.ts";
 
-/** The chat's work policy, held server-side; the strip is where it is changed. */
+/**
+ * The chat's approval policy, held server-side; the strip is where it is
+ * changed. The network level is deliberately not here: how far a command may
+ * reach is a trust decision about the account, not a choice per task, so it
+ * belongs in settings rather than beside the folder.
+ */
 export interface WorkSettingsControl {
   readonly permissionLevel: PermissionLevel;
-  readonly networkLevel: NetworkLevel;
-  readonly onChange: (patch: {
-    permissionLevel?: PermissionLevel;
-    networkLevel?: NetworkLevel;
-  }) => void;
+  readonly onChange: (patch: { permissionLevel?: PermissionLevel }) => void;
 }
 
 /**
@@ -101,12 +102,6 @@ export function FolderStrip({
               </DropdownMenuContent>
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
-            {settings && status.sandbox.kind === "ready" ? (
-              <NetworkPicker
-                level={settings.networkLevel}
-                onChange={(networkLevel) => settings.onChange({ networkLevel })}
-              />
-            ) : null}
             {settings ? (
               <PermissionPicker
                 level={settings.permissionLevel}
@@ -194,69 +189,7 @@ function PermissionPicker({
         >
           {PERMISSION_LEVELS.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
-              <span className="flex flex-col">
-                <span>{option.label}</span>
-                <span className="text-muted-foreground text-xs">{option.description}</span>
-              </span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-const NETWORK_LEVELS: ReadonlyArray<{ value: NetworkLevel; label: string; description: string }> = [
-  { value: "none", label: "No internet", description: "Commands cannot reach the network." },
-  {
-    value: "packages",
-    label: "Package registries",
-    description: "npm, PyPI, crates, Go, GitHub. The default.",
-  },
-  { value: "all", label: "Any website", description: "Commands may reach anything." },
-];
-
-/**
- * How far a command may reach. The same three levels Claude Cowork offers,
- * for the same reason: a build needs registries, an API script needs more, and
- * which one this chat is doing is not something the app can guess.
- */
-function NetworkPicker({
-  level,
-  onChange,
-}: {
-  level: NetworkLevel;
-  onChange: (level: NetworkLevel) => void;
-}) {
-  const current = NETWORK_LEVELS.find((option) => option.value === level)!;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
-            aria-label={`Network: ${current.label}`}
-          />
-        }
-      >
-        <HugeiconsIcon icon={Globe02Icon} strokeWidth={2} className="size-3.5" />
-        <span className="truncate">{current.label}</span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup
-          value={level}
-          onValueChange={(value) => {
-            if (value === "none" || value === "packages" || value === "all") onChange(value);
-          }}
-        >
-          {NETWORK_LEVELS.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
-              <span className="flex flex-col">
-                <span>{option.label}</span>
-                <span className="text-muted-foreground text-xs">{option.description}</span>
-              </span>
+              {option.label}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

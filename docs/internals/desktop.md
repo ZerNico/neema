@@ -78,9 +78,10 @@ default; `manual`, `skip`) are facts about the chat, not about a device, so
 they live on the server like `mode` and every machine honours the same choice.
 The page carries the network level down with each command; the desktop stores
 nothing but `conversationId → path` in `folders.json`, the one thing that
-genuinely differs per machine. The same three network levels Claude Cowork
-offers; Cowork defaults to _all_ on personal plans, this app to _packages_,
-because a reader who never opens the picker should get the narrower policy.
+genuinely differs per machine. Only the approval level is offered in the
+folder strip. The network level is a trust decision about the account rather
+than a choice per task, which is why Cowork keeps it in settings; it has no
+UI yet and stays at `packages`.
 
 ## Search uses ripgrep when the machine has it
 

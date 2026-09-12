@@ -1250,7 +1250,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               mode={{ kind: "fixed", value: data.conversation.mode }}
               settings={{
                 permissionLevel: data.conversation.permissionLevel,
-                networkLevel: data.conversation.networkLevel,
                 onChange: (patch) => workSettingsMutation.mutate(patch),
               }}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
