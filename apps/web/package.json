@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
-    "build": "vite build && node scripts/check-production-build.mjs",
-    "start": "node .output/server/index.mjs",
+    "build": "vite build && node scripts/check-production-build.mjs && node scripts/check-production-start.mjs",
+    "start": "node scripts/start.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

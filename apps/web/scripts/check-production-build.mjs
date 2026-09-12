@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 const serverDirectory = resolve(".output/server");
@@ -49,4 +49,16 @@ for (const modulePath of modules) {
   }
 }
 
-console.log(`Checked ${modules.length} production server modules.`);
+const publicDirectory = resolve(".output/public");
+const shell = await readFile(resolve(publicDirectory, "_shell.html"), "utf8");
+if (!shell.includes("Loading Chat…") || !shell.includes('id="desktop-titlebar-content"')) {
+  throw new Error("The production SPA shell is missing its startup frame.");
+}
+const assets = new Set(
+  Array.from(shell.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)[^"]*"/g), (match) => match[1]),
+);
+if (assets.size === 0) throw new Error("The production SPA shell has no application assets.");
+await Promise.all(Array.from(assets, (asset) => access(resolve(publicDirectory, `.${asset}`))));
+console.log(
+  `Checked ${modules.length} production server modules and the SPA shell (${assets.size} assets).`,
+);

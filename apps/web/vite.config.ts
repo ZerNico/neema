@@ -30,5 +30,11 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  plugins: [apiRoutesAreNeverAssets(), tanstackStart(), nitro(), viteReact(), tailwindcss()],
+  plugins: [
+    apiRoutesAreNeverAssets(),
+    tanstackStart({ spa: { enabled: true } }),
+    nitro(),
+    viteReact(),
+    tailwindcss(),
+  ],
 });

@@ -89,4 +89,10 @@ pnpm db:generate    # drizzle-kit generate from schema changes
 pnpm db:migrate
 ```
 
+The browser and Electron use the same SPA frontend. `pnpm start` enables Start’s
+shell mode before loading the Nitro server. Deployments invoking
+`apps/web/.output/server/index.mjs` directly must set `TSS_SHELL=true`; the backend
+still serves authentication, server functions, API routes and SSE. `pnpm build`
+checks the emitted shell and production deep links with database access disabled.
+
 \* integration tests start a disposable Postgres via Testcontainers (Docker required).

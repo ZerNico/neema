@@ -13,6 +13,18 @@ require the same configured origin, main window and main frame as Work calls.
 Electron owns the overlay palette and follows the requested light/dark/system
 appearance; state and OS appearance changes use events, not polling.
 
+Browser and Electron load the same SPA. The document shell owns a permanent
+native-control row and portal target, revealed before paint only on capable
+shells. The row is at least 48px high, including unauthenticated and route-error
+screens. Live desktop UI mounts inside a client-only boundary, so hydration does
+not first present browser defaults. Authenticated header controls portal into
+the existing target without moving their providers. Sidebar and viewport-height content
+reserve the row once; native-control clearance uses overlay geometry with platform
+fallbacks. Interactive controls are not draggable. Native fullscreen keeps the app
+row but releases unused button gutters. Browsers and older shells retain the
+original layout; an updated shell needs the updated site for integrated layout.
+Linux decoration still depends on the desktop/window manager.
+
 Connection and initial-load recovery are bundled local pages with their own drag
 strips. Their preloads expose no Work surface, and local actions require the exact
 bundled document, window and main frame. Recovery can retry only the configured
