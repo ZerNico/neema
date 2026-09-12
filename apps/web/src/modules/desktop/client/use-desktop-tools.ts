@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { useEffect, useRef } from "react";
-import type { DesktopClient, DesktopError } from "@chat/desktop-rpc";
+import type { DesktopClient, DesktopError, NetworkLevel } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { submitDesktopToolResult } from "../server/functions.ts";
 import { DesktopToolResult, desktopFailure } from "../tool-schema.ts";
@@ -70,6 +70,7 @@ const refusalSummary = (reason: string) => {
 const execute = (
   client: DesktopClient,
   conversationId: string,
+  network: NetworkLevel,
   activity: Extract<ToolActivity, { family: "desktop" }>,
 ): Effect.Effect<DesktopToolResult> => {
   const args = activity.args ?? {};
@@ -194,6 +195,7 @@ const execute = (
             callId: activity.callId,
             command,
             timeoutMs: 300_000,
+            network,
           }),
           (output) => ({
             v: 1 as const,
@@ -222,9 +224,15 @@ export const useDesktopTools = (
   conversationId: string,
   activities: ReadonlyArray<ToolActivity>,
   approvals: DesktopApprovals,
+  network: NetworkLevel,
 ): void => {
   const client = useDesktop();
   const { ask } = approvals;
+  // Read when the call runs, not when the effect was scheduled.
+  const networkRef = useRef(network);
+  useEffect(() => {
+    networkRef.current = network;
+  }, [network]);
   // Survives re-renders and stream replays; a call runs once per page load.
   const handled = useRef(new Set<string>());
   useEffect(() => {
@@ -242,12 +250,14 @@ export const useDesktopTools = (
         .then((permitted) =>
           Effect.runPromise(
             permitted
-              ? Effect.flatMap(execute(client, conversationId, activity), (result) =>
-                  Effect.promise(() =>
-                    submitDesktopToolResult({
-                      data: { conversationId, callId: activity.callId, result },
-                    }),
-                  ),
+              ? Effect.flatMap(
+                  execute(client, conversationId, networkRef.current, activity),
+                  (result) =>
+                    Effect.promise(() =>
+                      submitDesktopToolResult({
+                        data: { conversationId, callId: activity.callId, result },
+                      }),
+                    ),
                 )
               : Effect.promise(() =>
                   submitDesktopToolResult({

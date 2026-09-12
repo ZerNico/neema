@@ -56,7 +56,7 @@ the only writable path. Proven against the real sandbox: `pip download` through
 the proxy succeeds, an off-allowlist host gets `403`, `~/.ssh` and a write
 outside the folder get `Operation not permitted`.
 
-The proxy that answers CONNECTs reads the manager's *global* config, while the
+The proxy that answers CONNECTs reads the manager's _global_ config, while the
 per-call `customConfig` only shapes the Seatbelt profile. The network level
 therefore goes through `updateConfig` before each run as well as into the
 per-call override, or the two disagree and the level does nothing.
@@ -70,14 +70,26 @@ and `search_files` walk without following symlinks for the same reason. Commands
 run through `@anthropic-ai/sandbox-runtime` with the folder as the only writable
 path, and the containment check has already happened before `run` is called.
 
-## The network level lives with the folder
+## Policy is the chat's; only the path is the machine's
 
-`packages` (registries: npm, PyPI, crates, Go, GitHub), `none`, or `all`, per
-conversation, stored in `folders.json` beside the path. The same three levels
-Claude Cowork offers, for the same reason: a build needs registries, an API
-script needs more, and which one this chat is doing is not something the app
-can guess. Cowork's default is *all* on personal plans; ours is *packages*,
+`conversations.network_level` (`packages` by default: npm, PyPI, crates, Go,
+GitHub; or `none`, `all`) and `conversations.permission_level` (`auto` by
+default; `manual`, `skip`) are facts about the chat, not about a device, so
+they live on the server like `mode` and every machine honours the same choice.
+The page carries the network level down with each command; the desktop stores
+nothing but `conversationId → path` in `folders.json`, the one thing that
+genuinely differs per machine. The same three network levels Claude Cowork
+offers; Cowork defaults to _all_ on personal plans, this app to _packages_,
 because a reader who never opens the picker should get the narrower policy.
+
+## Search uses ripgrep when the machine has it
+
+Bundling `rg` means a native binary per platform that macOS will not run
+unsigned, which drags in packaging. So `ripgrep.ts` shells out to whatever
+`rg` is on `PATH` and `walk.ts` answers otherwise. Both honour `.gitignore`
+even outside a git checkout (`--no-require-git`), skip `.git`, never follow
+symlinks and skip binaries in search; the handler tests run against both
+backends so a result never depends on which one answered.
 
 ## Consent lives in the page
 

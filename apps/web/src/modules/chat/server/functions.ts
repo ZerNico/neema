@@ -12,6 +12,7 @@ import {
   ListConversationsInput,
   MessageIdInput,
   RenameConversationInput,
+  UpdateWorkSettingsInput,
   RetryMessageInput,
   SendMessageInput,
 } from "../schema.ts";
@@ -296,6 +297,27 @@ export const deleteConversation = createServerFn({ method: "POST" })
         chat.deleteConversation({
           userId: context.session.user.id,
           conversationId: data.conversationId,
+        }),
+      ),
+    ),
+  );
+
+export const updateWorkSettings = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(UpdateWorkSettingsInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.updateWorkSettings({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          networkLevel: data.networkLevel,
+          permissionLevel: data.permissionLevel,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
         }),
       ),
     ),

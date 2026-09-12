@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import { type ApprovalKind, approvalKind } from "../tool-schema.ts";
 
 /**
@@ -27,8 +28,12 @@ export type ApprovalChoice = "allow" | "deny" | "allow-rest";
  *
  * A delete is asked about at every level. It is the one change nothing can
  * undo, and the same rule the desktop assistants this mirrors keep.
+ *
+ * The level is the chat's, held by the server like its mode, so every device
+ * honours the same choice. Only the decision itself is made here, because the
+ * page is what executes the call.
  */
-export type PermissionLevel = "manual" | "auto" | "skip";
+export type { PermissionLevel };
 
 /** What a card may be asking about: a change kind, or a read under `manual`. */
 export type PendingKind = ApprovalKind | "read";
@@ -43,21 +48,11 @@ export const PERMISSION_LEVELS: ReadonlyArray<{
   { value: "skip", label: "Don’t ask", description: "Everything runs. Deletes still ask." },
 ];
 
-const KEY_PREFIX = "desktop.permissions.";
-
-const readLevel = (conversationId: string): PermissionLevel => {
-  if (typeof window === "undefined") return "auto";
-  const stored = window.localStorage.getItem(KEY_PREFIX + conversationId);
-  return stored === "manual" || stored === "skip" ? stored : "auto";
-};
-
 export interface DesktopApprovals {
   /** What each waiting call is asking permission to do, by call id. */
   readonly pending: ReadonlyMap<string, PendingKind>;
   /** Kinds already allowed for the rest of this conversation. */
   readonly blanket: Readonly<Record<ApprovalKind, boolean>>;
-  readonly level: PermissionLevel;
-  readonly setLevel: (level: PermissionLevel) => void;
   /**
    * Resolves once a decision is made, immediately when the level or a blanket
    * grant already answers it. `kind` null is a read, asked about only under
@@ -69,25 +64,19 @@ export interface DesktopApprovals {
   readonly forget: (callId: string) => void;
 }
 
-export const useDesktopApprovals = (conversationId: string): DesktopApprovals => {
+export const useDesktopApprovals = (level: PermissionLevel): DesktopApprovals => {
   const [pending, setPending] = useState<ReadonlyMap<string, PendingKind>>(new Map());
   const [blanket, setBlanket] = useState<Record<ApprovalKind, boolean>>({
     edit: false,
     delete: false,
     command: false,
   });
-  // Remembered per conversation on this machine, beside the folder itself:
-  // the server has no say in what this computer asks its owner.
-  const [level, setLevelState] = useState<PermissionLevel>(() => readLevel(conversationId));
+  // Read at ask time, so a level changed while a call is in flight applies to
+  // the next call rather than to a render that already happened.
   const levelRef = useRef(level);
-  const setLevel = useCallback(
-    (next: PermissionLevel) => {
-      levelRef.current = next;
-      setLevelState(next);
-      window.localStorage.setItem(KEY_PREFIX + conversationId, next);
-    },
-    [conversationId],
-  );
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
   // Resolvers cannot live in state: deciding must not depend on a render
   // having happened, and a re-render must not lose the parked promise.
   const waiting = useRef(new Map<string, (allowed: boolean) => void>());
@@ -146,7 +135,7 @@ export const useDesktopApprovals = (conversationId: string): DesktopApprovals =>
   const forget = useCallback((callId: string) => settle(callId, false), [settle]);
 
   return useMemo(
-    () => ({ pending, blanket, level, setLevel, ask, decide, forget }),
-    [pending, blanket, level, setLevel, ask, decide, forget],
+    () => ({ pending, blanket, ask, decide, forget }),
+    [pending, blanket, ask, decide, forget],
   );
 };

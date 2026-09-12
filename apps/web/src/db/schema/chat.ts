@@ -42,6 +42,15 @@ export const conversations = pgTable(
     mode: text({ enum: ["chat", "work"] })
       .notNull()
       .default("chat"),
+    // Work-chat policy. Policy is a fact about the chat, not the machine, so
+    // it lives here and every device honours the same choice; the folder path
+    // is the one thing that stays on the machine.
+    networkLevel: text("network_level", { enum: ["none", "packages", "all"] })
+      .notNull()
+      .default("packages"),
+    permissionLevel: text("permission_level", { enum: ["manual", "auto", "skip"] })
+      .notNull()
+      .default("auto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),

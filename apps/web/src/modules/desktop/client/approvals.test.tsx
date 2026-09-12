@@ -1,6 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import { useDesktopApprovals } from "./approvals.ts";
+
+const hook = (level: PermissionLevel = "auto") =>
+  renderHook((props: { level: PermissionLevel }) => useDesktopApprovals(props.level), {
+    initialProps: { level },
+  });
 
 // The level and the blanket grants are the two things that decide whether a
 // call waits on the reader. Each rule below is one a reader would notice
@@ -14,22 +20,16 @@ const settled = async (promise: Promise<boolean>) => {
   return outcome;
 };
 
-beforeEach(() => {
-  window.localStorage.clear();
-});
-
 describe("useDesktopApprovals", () => {
   it("defaults to asking before changes, and runs reads on its own", async () => {
-    const { result } = renderHook(() => useDesktopApprovals("c1"));
-    expect(result.current.level).toBe("auto");
+    const { result } = hook();
     expect(await settled(result.current.ask("r1", null))).toBe(true);
     expect(await settled(result.current.ask("e1", "edit"))).toBe("pending");
     expect(result.current.pending.get("e1")).toBe("edit");
   });
 
   it("asks about reads too under manual, and offers no blanket for them", async () => {
-    const { result } = renderHook(() => useDesktopApprovals("c1"));
-    act(() => result.current.setLevel("manual"));
+    const { result } = hook("manual");
     const read = result.current.ask("r1", null);
     expect(await settled(read)).toBe("pending");
     expect(result.current.pending.get("r1")).toBe("read");
@@ -40,15 +40,14 @@ describe("useDesktopApprovals", () => {
   });
 
   it("runs everything under skip, except a delete", async () => {
-    const { result } = renderHook(() => useDesktopApprovals("c1"));
-    act(() => result.current.setLevel("skip"));
+    const { result } = hook("skip");
     expect(await settled(result.current.ask("e1", "edit"))).toBe(true);
     expect(await settled(result.current.ask("x1", "command"))).toBe(true);
     expect(await settled(result.current.ask("d1", "delete"))).toBe("pending");
   });
 
   it("keeps a blanket edit grant from covering commands or deletes", async () => {
-    const { result } = renderHook(() => useDesktopApprovals("c1"));
+    const { result } = hook();
     const first = result.current.ask("e1", "edit");
     await settled(first);
     act(() => result.current.decide("e1", "allow-rest"));
@@ -58,17 +57,14 @@ describe("useDesktopApprovals", () => {
     expect(await settled(result.current.ask("d1", "delete"))).toBe("pending");
   });
 
-  it("answers a deny as false and remembers the level per conversation", async () => {
-    const { result } = renderHook(() => useDesktopApprovals("c1"));
+  it("answers a deny as false, and applies a changed level to the next call", async () => {
+    const { result, rerender } = hook();
     const ask = result.current.ask("e1", "edit");
     await settled(ask);
     act(() => result.current.decide("e1", "deny"));
     expect(await settled(ask)).toBe(false);
 
-    act(() => result.current.setLevel("skip"));
-    const again = renderHook(() => useDesktopApprovals("c1"));
-    expect(again.result.current.level).toBe("skip");
-    const other = renderHook(() => useDesktopApprovals("c2"));
-    expect(other.result.current.level).toBe("auto");
+    rerender({ level: "skip" });
+    expect(await settled(result.current.ask("e2", "edit"))).toBe(true);
   });
 });

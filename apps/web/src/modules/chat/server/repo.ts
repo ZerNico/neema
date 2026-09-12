@@ -506,7 +506,13 @@ export class ChatRepo extends Context.Service<
     >;
     updateConversation(
       conversationId: string,
-      patch: Partial<{ title: string; modelId: string; lastMessageAt: Date }>,
+      patch: Partial<{
+        title: string;
+        modelId: string;
+        lastMessageAt: Date;
+        networkLevel: "none" | "packages" | "all";
+        permissionLevel: "manual" | "auto" | "skip";
+      }>,
     ): Effect.Effect<void>;
     /**
      * Resolves a pending title. False when the row is gone or already titled —

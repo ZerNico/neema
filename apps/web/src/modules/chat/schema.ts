@@ -133,6 +133,18 @@ export const EditMessageInput = Schema.Union([
   }),
 ]);
 
+export const NetworkLevel = Schema.Literals(["none", "packages", "all"]);
+export type NetworkLevel = typeof NetworkLevel.Type;
+export const PermissionLevel = Schema.Literals(["manual", "auto", "skip"]);
+export type PermissionLevel = typeof PermissionLevel.Type;
+
+/** Either field alone is a valid update; omitted keeps the current value. */
+export const UpdateWorkSettingsInput = Schema.Struct({
+  conversationId: Schema.String,
+  networkLevel: Schema.optionalKey(NetworkLevel),
+  permissionLevel: Schema.optionalKey(PermissionLevel),
+});
+
 export const RenameConversationInput = Schema.Struct({
   conversationId: Schema.String,
   title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),

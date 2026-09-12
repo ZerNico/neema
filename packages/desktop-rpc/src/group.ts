@@ -144,15 +144,11 @@ export const DesktopRpcs = RpcGroup.make(
       callId: Schema.String,
       command: Schema.String,
       timeoutMs: Schema.Int,
+      /** The chat's policy, held server-side; the page carries it down per call. */
+      network: NetworkLevel,
     },
     success: CommandOutput,
     error: DesktopError,
-  }),
-
-  /** Sets how far this chat's commands may reach. Returns the new status. */
-  Rpc.make("setNetworkLevel", {
-    payload: { conversationId: Schema.String, level: NetworkLevel },
-    success: FolderStatus,
   }),
 
   /** Whether commands can run at all, and whether `setUpSandbox` could help. */

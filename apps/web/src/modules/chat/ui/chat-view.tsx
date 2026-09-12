@@ -39,9 +39,10 @@ import {
   retryMessage,
   sendMessage,
   stopGeneration,
+  updateWorkSettings,
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
-import type { ConversationMode } from "../schema.ts";
+import type { ConversationMode, NetworkLevel, PermissionLevel } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
   DRAFT_CONVERSATION,
@@ -411,8 +412,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
   // Runs the model's local tool calls on this machine and reports back, once
   // the reader has allowed anything that changes it.
-  const desktopApprovals = useDesktopApprovals(conversationId);
-  useDesktopTools(conversationId, stream.tools, desktopApprovals);
+  const desktopApprovals = useDesktopApprovals(data.conversation.permissionLevel);
+  useDesktopTools(conversationId, stream.tools, desktopApprovals, data.conversation.networkLevel);
+  const workSettingsMutation = useMutation({
+    mutationFn: (patch: { permissionLevel?: PermissionLevel; networkLevel?: NetworkLevel }) =>
+      updateWorkSettings({ data: { conversationId, ...patch } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+  });
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
   const desktopApprovalRequests = useMemo(
@@ -1242,9 +1248,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               ref={composer}
               conversationId={conversationId}
               mode={{ kind: "fixed", value: data.conversation.mode }}
-              permissions={{
-                level: desktopApprovals.level,
-                onLevelChange: desktopApprovals.setLevel,
+              settings={{
+                permissionLevel: data.conversation.permissionLevel,
+                networkLevel: data.conversation.networkLevel,
+                onChange: (patch) => workSettingsMutation.mutate(patch),
               }}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
                 sendMutation.mutateAsync({

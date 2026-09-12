@@ -1,6 +1,7 @@
 import { Alert01Icon, Folder01Icon, Globe02Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { NetworkLevel, SandboxAvailability } from "@chat/desktop-rpc";
+import type { SandboxAvailability } from "@chat/desktop-rpc";
+import type { NetworkLevel, PermissionLevel } from "~/modules/chat/schema.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,12 +12,17 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import { PERMISSION_LEVELS, type PermissionLevel } from "../client/approvals.ts";
+import { PERMISSION_LEVELS } from "../client/approvals.ts";
 import type { FolderState } from "../client/bridge.ts";
 
-export interface PermissionControl {
-  readonly level: PermissionLevel;
-  readonly onLevelChange: (level: PermissionLevel) => void;
+/** The chat's work policy, held server-side; the strip is where it is changed. */
+export interface WorkSettingsControl {
+  readonly permissionLevel: PermissionLevel;
+  readonly networkLevel: NetworkLevel;
+  readonly onChange: (patch: {
+    permissionLevel?: PermissionLevel;
+    networkLevel?: NetworkLevel;
+  }) => void;
 }
 
 /**
@@ -34,11 +40,11 @@ export interface PermissionControl {
  */
 export function FolderStrip({
   folder,
-  permissions,
+  settings,
 }: {
   folder: FolderState;
-  /** Absent before the conversation exists: there is nothing to ask about yet. */
-  permissions?: PermissionControl | undefined;
+  /** Absent before the conversation exists: there is nothing to govern yet. */
+  settings?: WorkSettingsControl | undefined;
 }) {
   const { status, busy } = folder;
   // No folder is the same problem as a lost one: nothing to work on yet.
@@ -94,10 +100,18 @@ export function FolderStrip({
               </DropdownMenuContent>
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
-            {status.sandbox.kind === "ready" ? (
-              <NetworkPicker level={status.network} busy={busy} onChange={folder.setNetwork} />
+            {settings && status.sandbox.kind === "ready" ? (
+              <NetworkPicker
+                level={settings.networkLevel}
+                onChange={(networkLevel) => settings.onChange({ networkLevel })}
+              />
             ) : null}
-            {permissions ? <PermissionPicker {...permissions} /> : null}
+            {settings ? (
+              <PermissionPicker
+                level={settings.permissionLevel}
+                onChange={(permissionLevel) => settings.onChange({ permissionLevel })}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -147,7 +161,13 @@ function SandboxNotice({
  * property of the folder relationship, not of the composer: the same setting
  * a reader would look for beside the folder name.
  */
-function PermissionPicker({ level, onLevelChange }: PermissionControl) {
+function PermissionPicker({
+  level,
+  onChange,
+}: {
+  level: PermissionLevel;
+  onChange: (level: PermissionLevel) => void;
+}) {
   const current = PERMISSION_LEVELS.find((option) => option.value === level)!;
   return (
     <DropdownMenu>
@@ -168,7 +188,7 @@ function PermissionPicker({ level, onLevelChange }: PermissionControl) {
         <DropdownMenuRadioGroup
           value={level}
           onValueChange={(value) => {
-            if (value === "manual" || value === "auto" || value === "skip") onLevelChange(value);
+            if (value === "manual" || value === "auto" || value === "skip") onChange(value);
           }}
         >
           {PERMISSION_LEVELS.map((option) => (
@@ -202,11 +222,9 @@ const NETWORK_LEVELS: ReadonlyArray<{ value: NetworkLevel; label: string; descri
  */
 function NetworkPicker({
   level,
-  busy,
   onChange,
 }: {
   level: NetworkLevel;
-  busy: boolean;
   onChange: (level: NetworkLevel) => void;
 }) {
   const current = NETWORK_LEVELS.find((option) => option.value === level)!;
@@ -217,7 +235,6 @@ function NetworkPicker({
           <Button
             variant="ghost"
             size="sm"
-            disabled={busy}
             className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
             aria-label={`Network: ${current.label}`}
           />

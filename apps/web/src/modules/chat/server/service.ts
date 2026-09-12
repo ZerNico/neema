@@ -157,6 +157,13 @@ export class ChatService extends Context.Service<
       messageId: string;
     }): Effect.Effect<{ stopped: boolean }, ConversationNotFound | MessageNotFound>;
     deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
+    /** Work-chat policy. Refused on a plain chat, where there is nothing to govern. */
+    updateWorkSettings(input: {
+      userId: string;
+      conversationId: string;
+      networkLevel?: "none" | "packages" | "all" | undefined;
+      permissionLevel?: "manual" | "auto" | "skip" | undefined;
+    }): Effect.Effect<void, ConversationNotFound | InvalidMessage>;
     renameConversation(input: {
       userId: string;
       conversationId: string;
@@ -950,6 +957,25 @@ function makeChatService() {
       });
     });
 
+    const updateWorkSettings = Effect.fn("ChatService.updateWorkSettings")(function* (input: {
+      userId: string;
+      conversationId: string;
+      networkLevel?: "none" | "packages" | "all" | undefined;
+      permissionLevel?: "manual" | "auto" | "skip" | undefined;
+    }) {
+      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
+      if (conversation.mode !== "work")
+        return yield* new InvalidMessage({ reason: "only a work chat has work settings" });
+      yield* repo.updateConversation(input.conversationId, {
+        ...(input.networkLevel ? { networkLevel: input.networkLevel } : {}),
+        ...(input.permissionLevel ? { permissionLevel: input.permissionLevel } : {}),
+      });
+      yield* sync.publish(input.userId, {
+        type: "conversation.updated",
+        conversationId: input.conversationId,
+      });
+    });
+
     const renameConversation = Effect.fn("ChatService.renameConversation")(function* (input: {
       userId: string;
       conversationId: string;
@@ -972,6 +998,7 @@ function makeChatService() {
       editMessage,
       stopGeneration,
       deleteConversation,
+      updateWorkSettings,
       renameConversation,
     });
   });

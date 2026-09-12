@@ -6,7 +6,6 @@ import {
   readDesktopChannel,
   type DesktopClient,
   type FolderStatus,
-  type NetworkLevel,
 } from "@chat/desktop-rpc";
 
 /**
@@ -52,7 +51,6 @@ export interface FolderState {
   choose: () => void;
   detach: () => void;
   setUpSandbox: () => void;
-  setNetwork: (level: NetworkLevel) => void;
 }
 
 const NONE: FolderStatus = { kind: "none" };
@@ -88,7 +86,6 @@ export const useFolder = (conversationId: string): FolderState | null => {
       },
       setUpSandbox: () =>
         run(Effect.flatMap(client.setUpSandbox(), () => client.folderStatus({ conversationId }))),
-      setNetwork: (level: NetworkLevel) => run(client.setNetworkLevel({ conversationId, level })),
     };
   }, [client, conversationId]);
 

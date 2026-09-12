@@ -1,4 +1,16 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { vi } from "vitest";
+
+// Whether `rg` answers is decided per test, so both backends are proven
+// against the same folder and the same expectations.
+const ripgrep = vi.hoisted(() => ({ present: true }));
+vi.mock("./ripgrep.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./ripgrep.ts")>();
+  return {
+    ...original,
+    ripgrepAvailable: () => original.ripgrepAvailable().then((real) => real && ripgrep.present),
+  };
+});
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect, Layer } from "effect";
@@ -93,6 +105,7 @@ describe("before a folder is attached", () => {
           callId: "c",
           command: "echo hi",
           timeoutMs: 1000,
+          network: "packages",
         }),
       ),
     ).toBe("no-folder");
@@ -247,27 +260,31 @@ describe("once a folder is attached", () => {
     );
   });
 
-  it("finds by glob and searches by regex, ignoring what git ignores", async () => {
-    await writeFile(join(root, ".gitignore"), "ignored/\n");
-    await mkdir(join(root, "ignored"), { recursive: true });
-    await writeFile(join(root, "ignored", "noise.ts"), "needle");
-    await writeFile(join(root, "src", "hay.ts"), "no\nneedle here\nno");
+  it.each([true, false])(
+    "finds by glob and searches by regex, ignoring what git ignores (ripgrep: %s)",
+    async (withRipgrep) => {
+      ripgrep.present = withRipgrep;
+      await writeFile(join(root, ".gitignore"), "ignored/\n");
+      await mkdir(join(root, "ignored"), { recursive: true });
+      await writeFile(join(root, "ignored", "noise.ts"), "needle");
+      await writeFile(join(root, "src", "hay.ts"), "no\nneedle here\nno");
 
-    const found = await Effect.runPromise(
-      handlers.findFiles({ conversationId: CONVERSATION, pattern: "*.ts" }),
-    );
-    expect(found.paths).toContain("src/hay.ts");
-    expect(found.paths).not.toContain("ignored/noise.ts");
+      const found = await Effect.runPromise(
+        handlers.findFiles({ conversationId: CONVERSATION, pattern: "*.ts" }),
+      );
+      expect(found.paths).toContain("src/hay.ts");
+      expect(found.paths).not.toContain("ignored/noise.ts");
 
-    const hits = await Effect.runPromise(
-      handlers.searchFiles({ conversationId: CONVERSATION, pattern: "needle", glob: "src/**" }),
-    );
-    expect(hits.matches).toEqual([{ path: "src/hay.ts", line: 2, text: "needle here" }]);
-    expect(hits.filesSearched).toBeGreaterThan(0);
-    expect(
-      await failureOf(handlers.searchFiles({ conversationId: CONVERSATION, pattern: "(" })),
-    ).toBe("bad-pattern");
-  });
+      const hits = await Effect.runPromise(
+        handlers.searchFiles({ conversationId: CONVERSATION, pattern: "needle", glob: "src/**" }),
+      );
+      expect(hits.matches).toEqual([{ path: "src/hay.ts", line: 2, text: "needle here" }]);
+      expect(hits.filesSearched).toBeGreaterThan(0);
+      expect(
+        await failureOf(handlers.searchFiles({ conversationId: CONVERSATION, pattern: "(" })),
+      ).toBe("bad-pattern");
+    },
+  );
 
   it("refuses to read or write through a symlink that leaves it", async () => {
     expect(
@@ -307,29 +324,14 @@ describe("once a folder is attached", () => {
         callId: "call-1",
         command: "echo hi",
         timeoutMs: 1000,
+        network: "packages",
       }),
     );
 
     expect(ran).toHaveLength(1);
     expect(ran[0]?.cwd).toBe(await Effect.runPromise(realRoot()));
-    // Package registries by default; the level is the chat's to change.
+    // The level is the chat's, carried down per call; the desktop stores none.
     expect(ran[0]?.network).toBe("packages");
-    const widened = await Effect.runPromise(
-      handlers.setNetworkLevel({ conversationId: CONVERSATION, level: "all" }),
-    );
-    expect(widened.kind === "attached" && widened.network).toBe("all");
-    await Effect.runPromise(
-      handlers.runCommand({
-        conversationId: CONVERSATION,
-        callId: "call-2",
-        command: "echo hi",
-        timeoutMs: 1000,
-      }),
-    );
-    expect(ran[1]?.network).toBe("all");
-    await Effect.runPromise(
-      handlers.setNetworkLevel({ conversationId: CONVERSATION, level: "packages" }),
-    );
   });
 
   it("forgets the folder on request", async () => {
