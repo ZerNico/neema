@@ -363,6 +363,12 @@ describe("once a folder is attached", () => {
       handlers.listDirectory({ conversationId: CONVERSATION, path: "." }),
     );
     expect(top.entries.map((entry) => entry.name)).toEqual(["workspace", "elsewhere"]);
+    // A plain file carries its size, so an empty extensionless file is not
+    // mistaken for a folder.
+    const inside = await Effect.runPromise(
+      handlers.listDirectory({ conversationId: CONVERSATION, path: "elsewhere" }),
+    );
+    expect(inside.entries).toContainEqual({ name: "secrets.txt", kind: "file", size: 6 });
 
     // Each folder answers under its own name, and neither can see the other
     // except by name.

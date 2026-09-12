@@ -67,6 +67,37 @@ const refusalSummary = (reason: string) => {
   }
 };
 
+/**
+ * One line per entry, the way `ls -F` and a size column would show it: a
+ * folder ends in `/`, a symlink in `@`, a file carries its size. A bare name
+ * with no extension is otherwise a guess the model has to spend a call on.
+ */
+const describeEntry = (entry: {
+  readonly name: string;
+  readonly kind: "file" | "directory" | "symlink" | "other";
+  readonly size?: number;
+}) => {
+  switch (entry.kind) {
+    case "directory":
+      return `${entry.name}/`;
+    case "symlink":
+      return `${entry.name}@`;
+    case "file":
+      return entry.size === undefined ? entry.name : `${entry.name}  (${formatSize(entry.size)})`;
+    default:
+      return entry.name;
+  }
+};
+
+const formatSize = (bytes: number) =>
+  bytes === 0
+    ? "empty"
+    : bytes < 1024
+      ? `${bytes} B`
+      : bytes < 1024 * 1024
+        ? `${Math.round(bytes / 1024)} KB`
+        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
 const execute = (
   client: DesktopClient,
   conversationId: string,
@@ -152,9 +183,7 @@ const execute = (
           detail:
             listing.entries.length === 0
               ? "(empty)"
-              : listing.entries
-                  .map((entry) => (entry.kind === "directory" ? `${entry.name}/` : entry.name))
-                  .join("\n"),
+              : listing.entries.map(describeEntry).join("\n"),
           truncated: listing.truncated,
         }));
       case "read_local_file":

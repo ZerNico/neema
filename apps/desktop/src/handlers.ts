@@ -1,5 +1,5 @@
 import { readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, extname } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { Effect } from "effect";
 import {
   DesktopError,
@@ -154,16 +154,27 @@ export const makeHandlers = (shell: Shell) =>
               }),
           });
           const kept = found.slice(0, LIMITS.entries);
-          const entries: DirectoryEntry[] = kept.map((entry) => ({
-            name: entry.name,
-            kind: entry.isDirectory()
-              ? ("directory" as const)
-              : entry.isSymbolicLink()
-                ? ("symlink" as const)
-                : entry.isFile()
-                  ? ("file" as const)
-                  : ("other" as const),
-          }));
+          // A size beside every plain file is what lets the model tell an
+          // empty file from a folder without a second call to find out.
+          const entries: DirectoryEntry[] = yield* Effect.forEach(kept, (entry) =>
+            Effect.gen(function* () {
+              const kind = entry.isDirectory()
+                ? ("directory" as const)
+                : entry.isSymbolicLink()
+                  ? ("symlink" as const)
+                  : entry.isFile()
+                    ? ("file" as const)
+                    : ("other" as const);
+              if (kind !== "file") return { name: entry.name, kind };
+              const size = yield* Effect.promise(() =>
+                stat(join(target.absolute, entry.name)).then(
+                  (info) => info.size,
+                  () => null,
+                ),
+              );
+              return size === null ? { name: entry.name, kind } : { name: entry.name, kind, size };
+            }),
+          );
           return {
             path: target.relative,
             entries,
