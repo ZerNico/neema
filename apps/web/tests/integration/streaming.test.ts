@@ -2885,7 +2885,8 @@ describe("local tools on the user's machine", () => {
 
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
-    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
+    authoringScript = (input) =>
+      authoringTool(input, "run_command", { command: "pnpm test", folder });
     try {
       const sent = await runtime.runPromise(send(seed, true));
       const result = await runtime.runPromise(
@@ -2921,7 +2922,10 @@ describe("local tools on the user's machine", () => {
         }),
       );
 
-      expect(result.waited).toEqual({ name: "run_command", args: { command: "pnpm test" } });
+      expect(result.waited).toEqual({
+        name: "run_command",
+        args: { command: "pnpm test", folder },
+      });
       expect(result.stopped).toBe(true);
       expect(result.late).toBe(false);
       const call = result.detail.toolCalls.at(-1)!;

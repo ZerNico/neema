@@ -30,7 +30,7 @@ let outsideDir: string;
 let handlers: DesktopHandlers;
 let picked: string | null;
 let revealed: string[];
-let ran: { command: string; cwd: string; network: string }[];
+let ran: { command: string; cwd: string; network: string; allowWrite: string[] }[];
 
 const CONVERSATION = "conv-1";
 
@@ -40,9 +40,9 @@ const stubSandbox = Layer.succeed(
   Sandbox.of({
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
-    run: ({ command, cwd, network }) =>
+    run: ({ command, cwd, network, allowWrite }) =>
       Effect.sync(() => {
-        ran.push({ command, cwd, network });
+        ran.push({ command, cwd, network, allowWrite: [...allowWrite] });
         return { exitCode: 0, output: "", truncated: false, violations: [] };
       }),
   }),
@@ -93,7 +93,7 @@ describe("before a folder is attached", () => {
   it("refuses every request that would touch disk", async () => {
     const fresh = "conv-untouched";
     expect(
-      await failureOf(handlers.readFile({ conversationId: fresh, path: "src/index.ts" })),
+      await failureOf(handlers.readFile({ conversationId: fresh, path: "workspace/src/index.ts" })),
     ).toBe("no-folder");
     expect(await failureOf(handlers.listDirectory({ conversationId: fresh, path: "." }))).toBe(
       "no-folder",
@@ -104,6 +104,7 @@ describe("before a folder is attached", () => {
           conversationId: fresh,
           callId: "c",
           command: "echo hi",
+          folder: "workspace",
           timeoutMs: 1000,
           network: "packages",
         }),
@@ -115,7 +116,7 @@ describe("before a folder is attached", () => {
     const state = await Effect.runPromise(
       handlers.folderStatus({ conversationId: "conv-untouched" }),
     );
-    expect(state.kind).toBe("none");
+    expect(state.folders).toEqual([]);
   });
 });
 
@@ -125,22 +126,20 @@ describe("once a folder is attached", () => {
   it("reports the folder by name, never by path", async () => {
     const state = await Effect.runPromise(handlers.folderStatus({ conversationId: CONVERSATION }));
 
-    expect(state.kind).toBe("attached");
-    if (state.kind !== "attached") return;
-    expect(state.name).toBe("workspace");
+    expect(state.folders).toEqual([{ name: "workspace", alive: true }]);
     expect(JSON.stringify(state)).not.toContain(root);
   });
 
   it("reads and writes inside it", async () => {
     const contents = await Effect.runPromise(
-      handlers.readFile({ conversationId: CONVERSATION, path: "src/index.ts" }),
+      handlers.readFile({ conversationId: CONVERSATION, path: "workspace/src/index.ts" }),
     );
     expect(contents.text).toBe("export {}\n");
 
     const receipt = await Effect.runPromise(
       handlers.writeFile({
         conversationId: CONVERSATION,
-        path: "src/new/note.md",
+        path: "workspace/src/new/note.md",
         text: "hello",
       }),
     );
@@ -154,18 +153,22 @@ describe("once a folder is attached", () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a]),
     );
     expect(
-      await failureOf(handlers.readFile({ conversationId: CONVERSATION, path: "src/logo.png" })),
+      await failureOf(
+        handlers.readFile({ conversationId: CONVERSATION, path: "workspace/src/logo.png" }),
+      ),
     ).toBe("not-text");
   });
 
   it("reads an image as bytes and refuses anything else", async () => {
     const image = await Effect.runPromise(
-      handlers.readBinary({ conversationId: CONVERSATION, path: "src/logo.png" }),
+      handlers.readBinary({ conversationId: CONVERSATION, path: "workspace/src/logo.png" }),
     );
     expect(image.mediaType).toBe("image/png");
     expect(Buffer.from(image.base64, "base64")[0]).toBe(0x89);
     expect(
-      await failureOf(handlers.readBinary({ conversationId: CONVERSATION, path: "src/index.ts" })),
+      await failureOf(
+        handlers.readBinary({ conversationId: CONVERSATION, path: "workspace/src/index.ts" }),
+      ),
     ).toBe("not-binary");
   });
 
@@ -175,7 +178,7 @@ describe("once a folder is attached", () => {
       await failureOf(
         handlers.editFile({
           conversationId: CONVERSATION,
-          path: "src/edit.ts",
+          path: "workspace/src/edit.ts",
           old: "= 1;",
           new: "= 9;",
           all: false,
@@ -186,7 +189,7 @@ describe("once a folder is attached", () => {
       await failureOf(
         handlers.editFile({
           conversationId: CONVERSATION,
-          path: "src/edit.ts",
+          path: "workspace/src/edit.ts",
           old: "const z",
           new: "x",
           all: false,
@@ -197,7 +200,7 @@ describe("once a folder is attached", () => {
     const receipt = await Effect.runPromise(
       handlers.editFile({
         conversationId: CONVERSATION,
-        path: "src/edit.ts",
+        path: "workspace/src/edit.ts",
         old: "const c = 2;",
         new: "const c = 3;",
         all: false,
@@ -212,7 +215,7 @@ describe("once a folder is attached", () => {
     const every = await Effect.runPromise(
       handlers.editFile({
         conversationId: CONVERSATION,
-        path: "src/edit.ts",
+        path: "workspace/src/edit.ts",
         old: "= 1;",
         new: "= 0;",
         all: true,
@@ -228,36 +231,42 @@ describe("once a folder is attached", () => {
       await failureOf(
         handlers.movePath({
           conversationId: CONVERSATION,
-          from: "src/old.txt",
-          to: "src/taken.txt",
+          from: "workspace/src/old.txt",
+          to: "workspace/src/taken.txt",
         }),
       ),
     ).toBe("already-exists");
     expect(
       await failureOf(
-        handlers.movePath({ conversationId: CONVERSATION, from: "src/old.txt", to: "../away.txt" }),
+        handlers.movePath({
+          conversationId: CONVERSATION,
+          from: "workspace/src/old.txt",
+          to: "workspace/../away.txt",
+        }),
       ),
     ).toBe("outside-folder");
     const moved = await Effect.runPromise(
       handlers.movePath({
         conversationId: CONVERSATION,
-        from: "src/old.txt",
-        to: "src/sub/new.txt",
+        from: "workspace/src/old.txt",
+        to: "workspace/src/sub/new.txt",
       }),
     );
-    expect(moved).toEqual({ from: "src/old.txt", to: "src/sub/new.txt" });
+    expect(moved).toEqual({ from: "workspace/src/old.txt", to: "workspace/src/sub/new.txt" });
     expect(await readFile(join(root, "src", "sub", "new.txt"), "utf8")).toBe("x");
 
     const gone = await Effect.runPromise(
-      handlers.deletePath({ conversationId: CONVERSATION, path: "src/sub" }),
+      handlers.deletePath({ conversationId: CONVERSATION, path: "workspace/src/sub" }),
     );
     expect(gone.kind).toBe("directory");
     expect(
-      await failureOf(handlers.readFile({ conversationId: CONVERSATION, path: "src/sub/new.txt" })),
+      await failureOf(
+        handlers.readFile({ conversationId: CONVERSATION, path: "workspace/src/sub/new.txt" }),
+      ),
     ).toBe("not-found");
-    expect(await failureOf(handlers.deletePath({ conversationId: CONVERSATION, path: "." }))).toBe(
-      "outside-folder",
-    );
+    expect(
+      await failureOf(handlers.deletePath({ conversationId: CONVERSATION, path: "workspace" })),
+    ).toBe("outside-folder");
   });
 
   it.each([true, false])(
@@ -272,13 +281,19 @@ describe("once a folder is attached", () => {
       const found = await Effect.runPromise(
         handlers.findFiles({ conversationId: CONVERSATION, pattern: "*.ts" }),
       );
-      expect(found.paths).toContain("src/hay.ts");
-      expect(found.paths).not.toContain("ignored/noise.ts");
+      expect(found.paths).toContain("workspace/src/hay.ts");
+      expect(found.paths).not.toContain("workspace/ignored/noise.ts");
 
       const hits = await Effect.runPromise(
-        handlers.searchFiles({ conversationId: CONVERSATION, pattern: "needle", glob: "src/**" }),
+        handlers.searchFiles({
+          conversationId: CONVERSATION,
+          pattern: "needle",
+          glob: "workspace/src/**",
+        }),
       );
-      expect(hits.matches).toEqual([{ path: "src/hay.ts", line: 2, text: "needle here" }]);
+      expect(hits.matches).toEqual([
+        { path: "workspace/src/hay.ts", line: 2, text: "needle here" },
+      ]);
       expect(hits.filesSearched).toBeGreaterThan(0);
       expect(
         await failureOf(handlers.searchFiles({ conversationId: CONVERSATION, pattern: "(" })),
@@ -289,14 +304,14 @@ describe("once a folder is attached", () => {
   it("refuses to read or write through a symlink that leaves it", async () => {
     expect(
       await failureOf(
-        handlers.readFile({ conversationId: CONVERSATION, path: "escape/secrets.txt" }),
+        handlers.readFile({ conversationId: CONVERSATION, path: "workspace/escape/secrets.txt" }),
       ),
     ).toBe("outside-folder");
     expect(
       await failureOf(
         handlers.writeFile({
           conversationId: CONVERSATION,
-          path: "escape/planted.txt",
+          path: "workspace/escape/planted.txt",
           text: "x",
         }),
       ),
@@ -306,7 +321,10 @@ describe("once a folder is attached", () => {
   it("refuses a traversal and an absolute path", async () => {
     expect(
       await failureOf(
-        handlers.readFile({ conversationId: CONVERSATION, path: "../elsewhere/secrets.txt" }),
+        handlers.readFile({
+          conversationId: CONVERSATION,
+          path: "workspace/../elsewhere/secrets.txt",
+        }),
       ),
     ).toBe("outside-folder");
     expect(
@@ -323,6 +341,7 @@ describe("once a folder is attached", () => {
         conversationId: CONVERSATION,
         callId: "call-1",
         command: "echo hi",
+        folder: "workspace",
         timeoutMs: 1000,
         network: "packages",
       }),
@@ -334,11 +353,68 @@ describe("once a folder is attached", () => {
     expect(ran[0]?.network).toBe("packages");
   });
 
+  it("attaches a second folder, addresses both by name, and refuses a name clash", async () => {
+    picked = outsideDir;
+    const two = await Effect.runPromise(handlers.chooseFolder({ conversationId: CONVERSATION }));
+    expect(two.folders.map((folder) => folder.name)).toEqual(["workspace", "elsewhere"]);
+
+    // The root of the model's world is the list of folders.
+    const top = await Effect.runPromise(
+      handlers.listDirectory({ conversationId: CONVERSATION, path: "." }),
+    );
+    expect(top.entries.map((entry) => entry.name)).toEqual(["workspace", "elsewhere"]);
+
+    // Each folder answers under its own name, and neither can see the other
+    // except by name.
+    const secret = await Effect.runPromise(
+      handlers.readFile({ conversationId: CONVERSATION, path: "elsewhere/secrets.txt" }),
+    );
+    expect(secret.text).toBe("token\n");
+    expect(
+      await failureOf(
+        handlers.readFile({
+          conversationId: CONVERSATION,
+          path: "workspace/../elsewhere/secrets.txt",
+        }),
+      ),
+    ).toBe("outside-folder");
+
+    // A command runs in the named folder and may write to every attached one.
+    ran = [];
+    await Effect.runPromise(
+      handlers.runCommand({
+        conversationId: CONVERSATION,
+        callId: "call-3",
+        command: "echo hi",
+        folder: "elsewhere",
+        timeoutMs: 1000,
+        network: "packages",
+      }),
+    );
+    expect(ran[0]?.cwd.endsWith("elsewhere")).toBe(true);
+    expect(ran[0]?.allowWrite).toHaveLength(2);
+
+    // A different folder with the same name would be unaddressable.
+    const clashDir = join(root, "..", "clash", "elsewhere");
+    await mkdir(clashDir, { recursive: true });
+    picked = clashDir;
+    expect(await failureOf(handlers.chooseFolder({ conversationId: CONVERSATION }))).toBe(
+      "already-exists",
+    );
+
+    await Effect.runPromise(
+      handlers.detachFolder({ conversationId: CONVERSATION, name: "elsewhere" }),
+    );
+    picked = root;
+  });
+
   it("forgets the folder on request", async () => {
-    await Effect.runPromise(handlers.detachFolder({ conversationId: CONVERSATION }));
+    await Effect.runPromise(
+      handlers.detachFolder({ conversationId: CONVERSATION, name: "workspace" }),
+    );
 
     const state = await Effect.runPromise(handlers.folderStatus({ conversationId: CONVERSATION }));
-    expect(state.kind).toBe("none");
+    expect(state.folders).toEqual([]);
     await attach();
   });
 });

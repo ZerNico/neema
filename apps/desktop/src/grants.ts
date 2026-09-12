@@ -3,7 +3,7 @@ import { dirname, join, basename } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
 /**
- * Which folder belongs to which conversation, on this machine.
+ * Which folders belong to which conversation, on this machine.
  *
  * Deliberately not on the server. The same conversation opened on a second
  * machine has no entry here and asks for a folder, which is the correct answer
@@ -15,35 +15,46 @@ import { Context, Effect, Layer } from "effect";
  * again.
  */
 export interface Grants {
-  /** Absolute path, or null when this machine has never been told one. */
-  lookup(conversationId: string): Effect.Effect<string | null>;
+  /** Absolute paths, in the order they were attached. Empty when never told one. */
+  lookup(conversationId: string): Effect.Effect<ReadonlyArray<string>>;
+  /** Appends; a path already present is left where it is. */
   remember(conversationId: string, folder: string): Effect.Effect<void>;
-  forget(conversationId: string): Effect.Effect<void>;
+  /** Removes one path. */
+  forget(conversationId: string, folder: string): Effect.Effect<void>;
+  /** Removes every path under a key. */
+  forgetAll(conversationId: string): Effect.Effect<void>;
 }
 
-/** Reads the current `{ id: path }` shape and the short-lived `{ id: { folder } }` one. */
-const parseFolder = (value: unknown): string | null => {
-  if (typeof value === "string") return value;
-  if (!value || typeof value !== "object") return null;
+/**
+ * Reads the current `{ id: [path] }` shape and the two earlier single-folder
+ * ones, `{ id: path }` and `{ id: { folder } }`.
+ */
+const parseFolders = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (!value || typeof value !== "object") return [];
   const folder = (value as { folder?: unknown }).folder;
-  return typeof folder === "string" ? folder : null;
+  return typeof folder === "string" ? [folder] : [];
 };
+
+const withFolder = (folders: ReadonlyArray<string>, folder: string) =>
+  folders.includes(folder) ? folders : [...folders, folder];
 
 export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/GrantStore") {
   static readonly layerAt = (file: string) =>
     Layer.effect(
       GrantStore,
       Effect.gen(function* () {
-        const read = Effect.promise(async (): Promise<Array<[string, string]>> => {
+        const read = Effect.promise(async (): Promise<Array<[string, string[]]>> => {
           try {
             const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
             if (!parsed || typeof parsed !== "object") return [];
             // Only paths survive: a hand-edited or corrupted file must not put
             // a non-path into the containment check.
-            const entries: Array<[string, string]> = [];
+            const entries: Array<[string, string[]]> = [];
             for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-              const folder = parseFolder(value);
-              if (folder) entries.push([id, folder]);
+              const folders = parseFolders(value);
+              if (folders.length > 0) entries.push([id, folders]);
             }
             return entries;
           } catch {
@@ -51,7 +62,7 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
           }
         });
 
-        const state = new Map<string, string>(yield* read);
+        const state = new Map<string, ReadonlyArray<string>>(yield* read);
 
         const persist = Effect.promise(async () => {
           await mkdir(dirname(file), { recursive: true });
@@ -59,13 +70,20 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
         });
 
         return GrantStore.of({
-          lookup: (conversationId) => Effect.sync(() => state.get(conversationId) ?? null),
+          lookup: (conversationId) => Effect.sync(() => state.get(conversationId) ?? []),
           remember: (conversationId, folder) =>
             Effect.suspend(() => {
-              state.set(conversationId, folder);
+              state.set(conversationId, withFolder(state.get(conversationId) ?? [], folder));
               return persist;
             }),
-          forget: (conversationId) =>
+          forget: (conversationId, folder) =>
+            Effect.suspend(() => {
+              const rest = (state.get(conversationId) ?? []).filter((item) => item !== folder);
+              if (rest.length === 0) state.delete(conversationId);
+              else state.set(conversationId, rest);
+              return persist;
+            }),
+          forgetAll: (conversationId) =>
             Effect.suspend(() => {
               state.delete(conversationId);
               return persist;
@@ -78,11 +96,18 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
   static readonly layerEphemeral = Layer.effect(
     GrantStore,
     Effect.sync(() => {
-      const state = new Map<string, string>();
+      const state = new Map<string, ReadonlyArray<string>>();
       return GrantStore.of({
-        lookup: (id) => Effect.sync(() => state.get(id) ?? null),
-        remember: (id, folder) => Effect.sync(() => void state.set(id, folder)),
-        forget: (id) => Effect.sync(() => void state.delete(id)),
+        lookup: (id) => Effect.sync(() => state.get(id) ?? []),
+        remember: (id, folder) =>
+          Effect.sync(() => void state.set(id, withFolder(state.get(id) ?? [], folder))),
+        forget: (id, folder) =>
+          Effect.sync(() => {
+            const rest = (state.get(id) ?? []).filter((item) => item !== folder);
+            if (rest.length === 0) state.delete(id);
+            else state.set(id, rest);
+          }),
+        forgetAll: (id) => Effect.sync(() => void state.delete(id)),
       });
     }),
   );

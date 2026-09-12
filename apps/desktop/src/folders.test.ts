@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { resolveInFolder } from "./folders.ts";
+import { resolveAcross, resolveInFolder } from "./folders.ts";
 
 /**
  * Real directories and real symlinks. A fake fs would let the containment check
@@ -107,5 +107,43 @@ describe("resolving a path inside the chosen folder", () => {
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag !== "Failure") return;
     expect(outcome.failure.reason).toBe("no-folder");
+  });
+});
+
+describe("resolving a path across several attached folders", () => {
+  const across = (requested: string) =>
+    Effect.runPromise(Effect.result(resolveAcross([root, outsideDir], requested)));
+
+  it("routes by the first segment and names the result with the prefix", async () => {
+    const outcome = await across("workspace/src/index.ts");
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.folder).toBe("workspace");
+    expect(outcome.success.relative).toBe("workspace/src/index.ts");
+    expect(outcome.success.absolute.endsWith(join("src", "index.ts"))).toBe(true);
+    expect(outcome.success.root.endsWith("workspace")).toBe(true);
+  });
+
+  it("resolves a bare folder name to its root", async () => {
+    const outcome = await across("elsewhere");
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.relative).toBe("elsewhere");
+    expect(outcome.success.absolute).toBe(outcome.success.root);
+  });
+
+  it("refuses a path that names no attached folder", async () => {
+    const outcome = await across("src/index.ts");
+    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("not-found");
+  });
+
+  it("still refuses an escape through a symlink inside a named folder", async () => {
+    const outcome = await across("workspace/escape/secrets.txt");
+    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
+  });
+
+  it("refuses crossing from one folder into another with ..", async () => {
+    const outcome = await across("workspace/../elsewhere/secrets.txt");
+    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
   });
 });

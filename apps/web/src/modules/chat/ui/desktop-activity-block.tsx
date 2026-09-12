@@ -44,7 +44,7 @@ const argText = (activity: DesktopToolActivity) => {
   const args = activity.args ?? {};
   switch (activity.name) {
     case "run_command":
-      return text(args.command);
+      return text(args.folder) ? `${text(args.folder)}: ${text(args.command)}` : text(args.command);
     case "find_files":
     case "search_files":
       return text(args.pattern);

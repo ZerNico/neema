@@ -5,8 +5,10 @@ import {
   makeDesktopClient,
   readDesktopChannel,
   type DesktopClient,
+  type DesktopError,
   type FolderStatus,
 } from "@chat/desktop-rpc";
+import { joinFolderNames } from "../tool-schema.ts";
 
 /**
  * The site's side of the desktop bridge.
@@ -50,13 +52,16 @@ export const useDesktop = (): DesktopClient | null =>
 export interface FolderState {
   readonly status: FolderStatus;
   readonly busy: boolean;
+  /** Why the last choice was refused, if it was: a name already attached. */
+  readonly refusal: string | null;
   refresh: () => void;
+  /** Opens the picker and adds the choice beside the folders already attached. */
   choose: () => void;
-  detach: () => void;
+  detach: (name: string) => void;
   setUpSandbox: () => void;
 }
 
-const NONE: FolderStatus = { kind: "none" };
+const NONE: FolderStatus = { folders: [], sandbox: { kind: "unsupported", reason: "" } };
 
 /**
  * Folder state for one conversation. Re-reads whenever the window regains
@@ -67,26 +72,23 @@ export const useFolder = (conversationId: string): FolderState | null => {
   const client = useDesktop();
   const [status, setStatus] = useState<FolderStatus>(NONE);
   const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const actions = useMemo(() => {
     if (!client) return null;
-    const run = (effect: Effect.Effect<FolderStatus, unknown>) => {
+    const run = (effect: Effect.Effect<FolderStatus, DesktopError>) => {
       setBusy(true);
+      setRefusal(null);
       void Effect.runPromise(Effect.result(effect)).then((outcome) => {
         setBusy(false);
         if (outcome._tag === "Success") setStatus(outcome.success);
+        else if (outcome.failure.reason === "already-exists") setRefusal(outcome.failure.message);
       });
     };
     return {
       refresh: () => run(client.folderStatus({ conversationId })),
       choose: () => run(client.chooseFolder({ conversationId })),
-      detach: () => {
-        setBusy(true);
-        void Effect.runPromise(Effect.result(client.detachFolder({ conversationId }))).then(() => {
-          setBusy(false);
-          setStatus(NONE);
-        });
-      },
+      detach: (name: string) => run(client.detachFolder({ conversationId, name })),
       setUpSandbox: () =>
         run(Effect.flatMap(client.setUpSandbox(), () => client.folderStatus({ conversationId }))),
     };
@@ -101,13 +103,13 @@ export const useFolder = (conversationId: string): FolderState | null => {
   }, [actions]);
 
   if (!actions) return null;
-  return { status, busy, ...actions };
+  return { status, busy, refusal, ...actions };
 };
 
 export interface DesktopSendFields {
   /** Proves the send came from the desktop app; a work chat refuses one without it. */
   readonly fromDesktop: true;
-  /** Name only, when attached: the server stores no path, so another machine can differ. */
+  /** The attached folders' names, joined; the server stores no path. */
   readonly desktopFolder?: string;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
@@ -116,16 +118,17 @@ export interface DesktopSendFields {
 /**
  * What each message reports about the machine it was sent from, or null in a
  * browser. A folder is not required: without one the desktop is still there,
- * and the folder tools are simply withheld until one is attached.
+ * and the folder tools are simply withheld until one is attached. A folder
+ * that has gone missing is left out, since the model could not reach it.
  */
 export const useDesktopSendFields = (conversationId: string): DesktopSendFields | null => {
   const folder = useFolder(conversationId);
   if (!folder) return null;
-  const attached = folder.status.kind === "attached" ? folder.status : null;
+  const names = folder.status.folders.filter((item) => item.alive).map((item) => item.name);
   return {
     fromDesktop: true,
-    ...(attached ? { desktopFolder: attached.name } : {}),
-    desktopCommands: attached?.sandbox.kind === "ready",
+    ...(names.length > 0 ? { desktopFolder: joinFolderNames(names) } : {}),
+    desktopCommands: names.length > 0 && folder.status.sandbox.kind === "ready",
   };
 };
 

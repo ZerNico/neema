@@ -157,7 +157,7 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
     /** An edit's old text was not found, or was found more than once. */
     "no-match",
     "ambiguous-match",
-    /** A move's destination already exists. */
+    /** A move's destination already exists, or a folder with that name is already attached. */
     "already-exists",
     /** The pattern could not be compiled. */
     "bad-pattern",
@@ -197,21 +197,24 @@ export const SandboxAvailability = Schema.Union([
 export type SandboxAvailability = typeof SandboxAvailability.Type;
 
 /**
- * What the site is told about the attached folder. The absolute path never
- * crosses: the site shows a name and the server stores nothing, so the same
- * conversation on another machine simply resolves to a different folder.
+ * One attached folder as the site sees it. The absolute path never crosses:
+ * the site shows a name and the server stores nothing, so the same
+ * conversation on another machine simply resolves to different folders.
+ *
+ * The name is the folder's basename and doubles as the first segment of every
+ * path the model uses (`site/src/index.ts`), which is why two folders with the
+ * same name cannot both be attached.
  */
-export const FolderStatus = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literals(["attached"]),
-    name: Schema.String,
-    sandbox: SandboxAvailability,
-  }),
-  Schema.Struct({ kind: Schema.Literals(["none"]) }),
-  Schema.Struct({
-    kind: Schema.Literals(["unresolved"]),
-    /** Last known name, so the prompt to re-pick can say which folder is missing. */
-    name: Schema.optionalKey(Schema.String),
-  }),
-]);
+export const AttachedFolder = Schema.Struct({
+  name: Schema.String,
+  /** False when the remembered folder has been moved, renamed or deleted since. */
+  alive: Schema.Boolean,
+});
+export type AttachedFolder = typeof AttachedFolder.Type;
+
+/** What the composer strip renders. An empty list is an invitation, not a fault. */
+export const FolderStatus = Schema.Struct({
+  folders: Schema.Array(AttachedFolder),
+  sandbox: SandboxAvailability,
+});
 export type FolderStatus = typeof FolderStatus.Type;

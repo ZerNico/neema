@@ -23,20 +23,25 @@ import {
  * Two rules hold for every procedure here and are enforced on the desktop side,
  * never assumed from the caller:
  *
- * - Paths are relative to the attached folder. An absolute path, a `..` escape
- *   or a symlink leading outside resolves to `outside-folder`. The site names a
+ * - A path starts with the name of an attached folder (`site/src/index.ts`),
+ *   or is `.` for the list of folders. An absolute path, a `..` escape or a
+ *   symlink leading outside resolves to `outside-folder`. The site names a
  *   path; the desktop decides whether it is reachable.
- * - The conversation id selects which folder applies, because a folder is
+ * - The conversation id selects which folders apply, because folders are
  *   attached per conversation and the mapping lives only on this machine.
  */
 export const DesktopRpcs = RpcGroup.make(
-  /** What the composer strip renders: attached, missing, or never picked. */
+  /** What the composer strip renders: every attached folder and whether it is still there. */
   Rpc.make("folderStatus", {
     payload: { conversationId: Schema.String },
     success: FolderStatus,
   }),
 
-  /** Opens the native directory dialog. Cancelling yields `none`, not an error. */
+  /**
+   * Opens the native directory dialog and adds the choice. Cancelling changes
+   * nothing. A folder whose name is already attached is refused with
+   * `already-exists`, since the name is how the model addresses it.
+   */
   Rpc.make("chooseFolder", {
     payload: { conversationId: Schema.String },
     success: FolderStatus,
@@ -44,14 +49,14 @@ export const DesktopRpcs = RpcGroup.make(
   }),
 
   Rpc.make("detachFolder", {
-    payload: { conversationId: Schema.String },
-    success: Schema.Void,
+    payload: { conversationId: Schema.String, name: Schema.String },
+    success: FolderStatus,
   }),
 
   /**
-   * Moves a grant from one key to another, which is how a folder picked before
-   * the first message survives: a new chat has no id yet, so the strip attaches
-   * under a draft key and rebinds once the conversation exists.
+   * Moves the grants from one key to another, which is how folders picked
+   * before the first message survive: a new chat has no id yet, so the strip
+   * attaches under a draft key and rebinds once the conversation exists.
    */
   Rpc.make("rebindFolder", {
     payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
@@ -143,6 +148,8 @@ export const DesktopRpcs = RpcGroup.make(
       /** Correlates the sandbox violation record with the tool call. */
       callId: Schema.String,
       command: Schema.String,
+      /** Which attached folder is the working directory. */
+      folder: Schema.String,
       timeoutMs: Schema.Int,
       /** The chat's policy, held server-side; the page carries it down per call. */
       network: NetworkLevel,

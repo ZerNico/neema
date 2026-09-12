@@ -24,8 +24,8 @@ const Path = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)
 
 export const listFolderTool = Tool.make("list_folder", {
   description:
-    "List the entries of a folder on the user's computer. Paths are relative to the attached " +
-    'folder; use "." for its root. You cannot reach anything outside it.',
+    'List a folder on the user\'s computer. "." lists the attached folders; every other path ' +
+    'starts with one of their names, like "site/src". You cannot reach anything outside them.',
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -33,7 +33,7 @@ export const listFolderTool = Tool.make("list_folder", {
 
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a file on the user's computer, relative to the attached folder. Text comes back as " +
+    "Read a file on the user's computer, starting with an attached folder's name. Text comes back as " +
     "text, truncated when long; an image or PDF comes back for you to look at when you can take " +
     "it, otherwise as extracted text or a note that you cannot.",
   parameters: Schema.Struct({ path: Path }),
@@ -43,7 +43,7 @@ export const readLocalFileTool = Tool.make("read_local_file", {
 
 export const findFilesTool = Tool.make("find_files", {
   description:
-    "Find files in the attached folder by glob, newest first: `*.ts` at any depth, " +
+    "Find files across the attached folders by glob, newest first: `*.ts` at any depth, " +
     "`src/**/*.test.ts`, `{a,b}.md`. Skips what .gitignore skips. Capped, so narrow the pattern " +
     "if the result says it was truncated.",
   parameters: Schema.Struct({
@@ -55,7 +55,7 @@ export const findFilesTool = Tool.make("find_files", {
 
 export const searchFilesTool = Tool.make("search_files", {
   description:
-    "Search file contents in the attached folder with a regular expression. Returns matching " +
+    "Search file contents across the attached folders with a regular expression. Returns matching " +
     "lines with their file and line number; skips binary files and what .gitignore skips. Pass " +
     "a glob to narrow which files are searched.",
   parameters: Schema.Struct({
@@ -83,7 +83,7 @@ export const editLocalFileTool = Tool.make("edit_local_file", {
 
 export const moveLocalFileTool = Tool.make("move_local_file", {
   description:
-    "Rename or move a file or folder within the attached folder. Never overwrites an existing " +
+    "Rename or move a file or folder within the attached folders. Never overwrites an existing " +
     "path. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ from: Path, to: Path }),
   success: DesktopToolResult,
@@ -92,7 +92,7 @@ export const moveLocalFileTool = Tool.make("move_local_file", {
 
 export const deleteLocalFileTool = Tool.make("delete_local_file", {
   description:
-    "Delete a file, or a folder and everything inside it, within the attached folder. This " +
+    "Delete a file, or a folder and everything inside it, within the attached folders. This " +
     "cannot be undone. The user is always asked first and may refuse.",
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,
@@ -101,7 +101,7 @@ export const deleteLocalFileTool = Tool.make("delete_local_file", {
 
 export const writeLocalFileTool = Tool.make("write_local_file", {
   description:
-    "Create or replace a text file on the user's computer, relative to the attached folder. " +
+    "Create or replace a text file on the user's computer, starting with an attached folder's name. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
     "creating it. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ path: Path, text: Schema.String }),
@@ -111,11 +111,14 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
 
 export const runCommandTool = Tool.make("run_command", {
   description:
-    "Run a shell command in the attached folder on the user's computer. It runs sandboxed: it " +
-    "may write only inside that folder and reach only package registries. The user is asked " +
-    "before it happens and may refuse. Prefer reading files over running commands to inspect them.",
+    "Run a shell command on the user's computer, inside one of the attached folders. It runs " +
+    "sandboxed: it may write only inside the attached folders and reach only package " +
+    "registries. The user is asked before it happens and may refuse. Prefer the file tools " +
+    "over commands to inspect or change files.",
   parameters: Schema.Struct({
     command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),
+    /** The attached folder to run in, by name. */
+    folder: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
   }),
   success: DesktopToolResult,
   failureMode: "return",

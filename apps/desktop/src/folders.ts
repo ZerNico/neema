@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access, realpath } from "node:fs/promises";
-import { isAbsolute, join, parse, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { DesktopError } from "@chat/desktop-rpc";
 
@@ -109,4 +109,51 @@ export const resolveInFolder = (
 
     const relative = absolute === realRoot ? "." : absolute.slice(realRoot.length + 1);
     return { absolute, relative };
+  });
+
+/** What the strip shows for a folder, and the first segment of every path into it. */
+export const folderName = (folder: string) => basename(folder) || folder;
+
+export interface LocatedPath extends ResolvedPath {
+  /** Which attached folder the path fell in, by name. */
+  readonly folder: string;
+  /** The folder's root, absolute and real. */
+  readonly root: string;
+}
+
+const notFound = (path: string) =>
+  new DesktopError({
+    reason: "not-found",
+    message: `${path} does not start with the name of an attached folder.`,
+  });
+
+/**
+ * Resolves a model-supplied path whose first segment names one of several
+ * attached folders (`site/src/index.ts`). Everything after the name goes
+ * through `resolveInFolder` against that folder's root, so the containment
+ * proof is the same one a single folder gets. The result names the path the
+ * way the model will see it back, prefix included.
+ */
+export const resolveAcross = (
+  folders: ReadonlyArray<string>,
+  requested: string,
+): Effect.Effect<LocatedPath, DesktopError> =>
+  Effect.gen(function* () {
+    if (isAbsolute(requested)) return yield* Effect.fail(outside(requested));
+    const normalised = requested.replaceAll("\\", "/").replace(/^\.\//, "");
+    const [head, ...rest] = normalised.split("/");
+    const root = folders.find((folder) => folderName(folder) === head);
+    if (!head || head === "." || head === ".." || root === undefined)
+      return yield* Effect.fail(notFound(requested));
+    const inner = rest.join("/");
+    const resolved = yield* resolveInFolder(root, inner === "" ? "." : inner);
+    return {
+      folder: head,
+      root:
+        resolved.relative === "."
+          ? resolved.absolute
+          : resolved.absolute.slice(0, -resolved.relative.length - 1),
+      absolute: resolved.absolute,
+      relative: resolved.relative === "." ? head : `${head}/${resolved.relative}`,
+    };
   });

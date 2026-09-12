@@ -64,14 +64,34 @@ per-call `customConfig` only shapes the Seatbelt profile. The network level
 therefore goes through `updateConfig` before each run as well as into the
 per-call override, or the two disagree and the level does nothing.
 
+## Several folders, one address space
+
+A chat may attach any number of folders. The model addresses everything by a
+path whose first segment is a folder's basename (`site/src/index.ts`), and
+`list_folder "."` lists the folders. This is what Claude Code (real absolute
+paths) and Cowork (`~/mnt/<name>/…`) both converge on: one address space,
+no `folder` argument the model has to keep consistent per call. The only
+exception is `run_command`, which names its working folder, since a shell
+has exactly one cwd and the command text does not say which. Every attached
+folder is writable to a command, so a script in one can reach another by
+its prefixed path.
+
+The name is therefore load-bearing: two folders with the same basename cannot
+both be attached to one chat, and `chooseFolder` refuses the second with
+`already-exists`. `desktop_folder` on the attempt carries the names joined
+with `/`, which cannot appear in a basename.
+
 ## Containment is the desktop's job; the sandbox is the second fence
 
-Every path the site names goes through `resolveInFolder` (`apps/desktop/src/folders.ts`):
-absolute paths refused outright, the nearest existing ancestor `realpath`-ed,
-containment checked on the real path. A move checks both ends. `find_files`
-and `search_files` walk without following symlinks for the same reason. Commands
-run through `@anthropic-ai/sandbox-runtime` with the folder as the only writable
-path, and the containment check has already happened before `run` is called.
+Every path the site names goes through `resolveAcross`
+(`apps/desktop/src/folders.ts`): the first segment picks the folder, the rest
+goes through `resolveInFolder` against that root, where absolute paths are
+refused outright, the nearest existing ancestor is `realpath`-ed and
+containment is checked on the real path. A move checks both ends.
+`find_files` and `search_files` walk without following symlinks for the same
+reason. Commands run through `@anthropic-ai/sandbox-runtime` with the attached
+folders as the only writable paths, and the containment check has already
+happened before `run` is called.
 
 ## Policy is the chat's; only the path is the machine's
 

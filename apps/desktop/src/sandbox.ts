@@ -98,8 +98,10 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export interface SandboxRun {
   readonly callId: string;
   readonly command: string;
-  /** Already resolved and proven inside the folder by `resolveInFolder`. */
+  /** Already resolved and proven inside a folder by `resolveInFolder`. */
   readonly cwd: string;
+  /** Every attached folder's real root: the only places a command may write. */
+  readonly allowWrite: ReadonlyArray<string>;
   readonly timeoutMs: number;
   readonly network: NetworkLevel;
 }
@@ -239,7 +241,7 @@ export class Sandbox extends Context.Service<
                 {
                   filesystem: {
                     denyRead: GLOBAL_POLICY.filesystem.denyRead,
-                    allowWrite: [input.cwd],
+                    allowWrite: [...input.allowWrite],
                     denyWrite: [],
                   },
                   network: networkFor(input.network),

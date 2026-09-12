@@ -25,9 +25,10 @@ vi.mock("~/modules/attachments/server/functions.ts", () => ({
 
 // The bridge is what tells the page whether a machine is behind it. Faked at
 // the hook so a test can be a browser tab or the desktop app, with any folder.
+const NONE: FolderStatus = { folders: [], sandbox: { kind: "ready" } };
 const bridge = vi.hoisted(() => ({
   desktop: false as boolean,
-  status: { kind: "none" } as FolderStatus,
+  status: { folders: [], sandbox: { kind: "ready" } } as FolderStatus,
   choose: vi.fn(),
 }));
 vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
@@ -41,6 +42,7 @@ vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
         ? {
             status: bridge.status,
             busy: false,
+            refusal: null,
             refresh: vi.fn(),
             choose: bridge.choose,
             detach: vi.fn(),
@@ -128,7 +130,7 @@ const sendButton = () => screen.getByRole("button", { name: "Send" });
 
 beforeEach(() => {
   bridge.desktop = false;
-  bridge.status = { kind: "none" };
+  bridge.status = NONE;
   bridge.choose.mockClear();
 });
 
@@ -160,7 +162,7 @@ describe("work mode", () => {
 
   it("sends once a folder is attached", async () => {
     bridge.desktop = true;
-    bridge.status = { kind: "attached", name: "site", sandbox: { kind: "ready" } };
+    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<NewChat onSend={onSend} />);
     await userEvent.click(screen.getByRole("button", { name: "Work with a folder" }));
@@ -185,18 +187,20 @@ describe("work mode", () => {
 
   it("asks a work chat on a new machine to pick its folder again, without blocking", async () => {
     bridge.desktop = true;
-    bridge.status = { kind: "unresolved", name: "site" };
+    bridge.status = { folders: [{ name: "site", alive: false }], sandbox: { kind: "ready" } };
     render(<ExistingChat mode="work" onSend={vi.fn().mockResolvedValue(undefined)} />);
-    expect(
-      screen.getByRole("button", { name: /Choose site again to continue/ }),
-    ).toBeInTheDocument();
+    // The lost folder is still listed, marked, and can be chosen again.
+    expect(screen.getByRole("button", { name: /site/ })).toHaveAttribute(
+      "title",
+      "This folder is no longer where it was.",
+    );
     await type("hello");
     expect(sendButton()).toBeEnabled();
   });
 
   it("never shows a folder on a plain chat, even in the desktop app", () => {
     bridge.desktop = true;
-    bridge.status = { kind: "attached", name: "site", sandbox: { kind: "ready" } };
+    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
     render(<ExistingChat mode="chat" onSend={vi.fn()} />);
     expect(screen.queryByText("site")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

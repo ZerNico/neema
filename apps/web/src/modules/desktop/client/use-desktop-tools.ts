@@ -194,6 +194,7 @@ const execute = (
             conversationId,
             callId: activity.callId,
             command,
+            folder: str(args.folder),
             timeoutMs: 300_000,
             network,
           }),

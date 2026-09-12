@@ -89,6 +89,7 @@ import {
   DesktopToolResult,
   desktopToolsSystemHint,
   forTranscript,
+  splitFolderNames,
 } from "~/modules/desktop/tool-schema.ts";
 import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
@@ -894,7 +895,7 @@ export class StreamEngine extends Context.Service<
                   {
                     role: "system" as const,
                     content: desktopToolsSystemHint(
-                      config.desktopFolder,
+                      splitFolderNames(config.desktopFolder),
                       config.desktopCommands ?? false,
                     ),
                   },

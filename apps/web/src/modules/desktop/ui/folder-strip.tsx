@@ -1,4 +1,4 @@
-import { Alert01Icon, Folder01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
+import { Alert01Icon, Folder01Icon, FolderAddIcon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SandboxAvailability } from "@chat/desktop-rpc";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
@@ -47,63 +47,71 @@ export function FolderStrip({
   /** Absent before the conversation exists: there is nothing to govern yet. */
   settings?: WorkSettingsControl | undefined;
 }) {
-  const { status, busy } = folder;
+  const { status, busy, refusal } = folder;
   // A lost folder deserves attention; none yet is just an invitation.
-  const attention = status.kind === "unresolved";
+  const lost = status.folders.filter((item) => !item.alive);
+  const attention = lost.length > 0 || refusal !== null;
 
   return (
     <div className="mx-3 -mt-3 flex">
       <div
         className={cn(
-          "bg-muted/60 text-muted-foreground flex min-w-0 flex-1 items-center gap-1",
+          "bg-muted/60 text-muted-foreground flex min-w-0 flex-1 flex-wrap items-center gap-1",
           "rounded-b-[1.375rem] border border-t-0 px-3 pt-4 pb-1.5 text-xs",
           attention && "text-foreground border-warning/50 bg-warning/10",
         )}
       >
-        {status.kind !== "attached" ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className={cn(
-              "h-6 gap-1.5 px-1.5 text-xs",
-              !attention && "text-muted-foreground hover:text-foreground",
-            )}
-            disabled={busy}
-            onClick={folder.choose}
-          >
-            <HugeiconsIcon
-              icon={status.kind === "unresolved" ? Alert01Icon : Folder01Icon}
-              strokeWidth={2}
-              className="size-3.5"
-            />
-            {status.kind === "unresolved" && status.name
-              ? `Choose ${status.name} again to continue`
-              : "Add a folder from this computer"}
-          </Button>
-        ) : (
+        {status.folders.map((item) => (
+          <DropdownMenu key={item.name}>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  className={cn(
+                    "h-6 min-w-0 gap-1.5 px-1.5 text-xs",
+                    item.alive && "text-muted-foreground hover:text-foreground",
+                  )}
+                  title={item.alive ? undefined : "This folder is no longer where it was."}
+                />
+              }
+            >
+              <HugeiconsIcon
+                icon={item.alive ? Folder01Icon : Alert01Icon}
+                strokeWidth={2}
+                className="size-3.5"
+              />
+              <span className="truncate">{item.name}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {item.alive ? null : (
+                <DropdownMenuItem onClick={folder.choose}>Choose it again</DropdownMenuItem>
+              )}
+              <DropdownMenuItem variant="destructive" onClick={() => folder.detach(item.name)}>
+                Detach {item.name}
+              </DropdownMenuItem>
+              <BuildStamp />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ))}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground hover:text-foreground h-6 gap-1.5 px-1.5 text-xs"
+          disabled={busy}
+          onClick={folder.choose}
+        >
+          <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} className="size-3.5" />
+          {status.folders.length === 0 ? "Add a folder from this computer" : "Add another"}
+        </Button>
+        {refusal ? (
+          <span role="status" className="min-w-0 truncate">
+            {refusal}
+          </span>
+        ) : null}
+        {status.folders.length > 0 ? (
           <>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    className="text-muted-foreground hover:text-foreground h-6 min-w-0 gap-1.5 px-1.5 text-xs"
-                  />
-                }
-              >
-                <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-3.5" />
-                <span className="truncate">{status.name}</span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={folder.choose}>Change folder</DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" onClick={folder.detach}>
-                  Detach folder
-                </DropdownMenuItem>
-                <BuildStamp />
-              </DropdownMenuContent>
-            </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
             {settings ? (
               <PermissionPicker
@@ -112,7 +120,7 @@ export function FolderStrip({
               />
             ) : null}
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -175,7 +183,7 @@ function PermissionPicker({
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground hover:text-foreground h-6 min-w-0 gap-1.5 px-1.5 text-xs"
+            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
             aria-label={`Permissions: ${current.label}`}
           />
         }
