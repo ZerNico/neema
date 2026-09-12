@@ -3,7 +3,12 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { Context, Effect, Layer } from "effect";
-import { DesktopError, LIMITS, type SandboxAvailability } from "@chat/desktop-rpc";
+import {
+  DesktopError,
+  LIMITS,
+  type NetworkLevel,
+  type SandboxAvailability,
+} from "@chat/desktop-rpc";
 
 /**
  * Everything a command may never touch, whatever folder is attached.
@@ -33,8 +38,8 @@ const GLOBAL_POLICY: SandboxRuntimeConfig = {
     denyWrite: [],
   },
   network: {
-    // Allow-only. Package registries are what a build actually needs; anything
-    // else is a request the user did not make.
+    // The `packages` level, and the baseline `initialize` is given. `none`
+    // and `all` are per-call overrides in `run`.
     allowedDomains: [
       "registry.npmjs.org",
       "*.npmjs.org",
@@ -53,13 +58,63 @@ const GLOBAL_POLICY: SandboxRuntimeConfig = {
   },
 };
 
+/**
+ * Two things srt gets wrong for real tools on macOS, fixed on the argv it
+ * hands back. That argv is `bash -c "env VAR=... sandbox-exec ... <cmd>"`,
+ * one shell string, so the rewrite is over the assignments in that string.
+ *
+ * srt hands the child `HTTPS_PROXY=http://localhost:PORT`, but its Seatbelt
+ * profile denies the resolver lookup that `getaddrinfo("localhost")` needs,
+ * so anything resolving the name properly (Python's urllib3, so pip) fails
+ * with "nodename nor servname provided" before it ever reaches the proxy.
+ * curl and npm happen to special-case the name. The numeric loopback address
+ * needs no lookup and is what the profile actually allows.
+ *
+ * And pip's cache lives under `~/Library/Caches`, outside the only writable
+ * path, so every install warns and then retries the network for nothing.
+ * Pointing the cache inside the folder keeps installs quiet and fast.
+ */
+const PROXY_URL_VAR =
+  /\b((?:[A-Z_]*_PROXY|[a-z_]*_proxy)=[a-z0-9+]+:\/\/(?:[^@\s]*@)?)localhost(?=:\d)/g;
+const PROXY_HOST_VAR = /\b(CLOUDSDK_PROXY_ADDRESS=|RSYNC_PROXY=)localhost\b/g;
+
+export const forSandboxedChild = (argv: readonly string[], cwd: string): string[] =>
+  argv.map((arg, index) => {
+    // Only the `env ...` script is rewritten, never the user's command inside
+    // it; the command is the last argument of the inner `bash -c`, which the
+    // proxy patterns cannot match because they anchor on a VAR= prefix.
+    if (index === 0 || !arg.startsWith("env ")) return arg;
+    const rewritten = arg
+      .replaceAll(PROXY_URL_VAR, "$1127.0.0.1")
+      .replaceAll(PROXY_HOST_VAR, "$1127.0.0.1");
+    return rewritten.includes(" PIP_CACHE_DIR=")
+      ? rewritten
+      : rewritten.replace(/^env /, `env PIP_CACHE_DIR=${shellQuote(join(cwd, ".cache", "pip"))} `);
+  });
+
+/** Single-quoted for the `bash -c` string; a folder name may hold anything. */
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
 export interface SandboxRun {
   readonly callId: string;
   readonly command: string;
   /** Already resolved and proven inside the folder by `resolveInFolder`. */
   readonly cwd: string;
   readonly timeoutMs: number;
+  readonly network: NetworkLevel;
 }
+
+/**
+ * What each level hands srt per call. `all` is spelled as a wildcard rather
+ * than an absent allowlist, because an absent one falls back to the global
+ * `packages` policy field by field.
+ */
+const networkFor = (level: NetworkLevel): SandboxRuntimeConfig["network"] =>
+  level === "none"
+    ? { allowedDomains: [], deniedDomains: [] }
+    : level === "all"
+      ? { allowedDomains: ["*"], deniedDomains: [] }
+      : GLOBAL_POLICY.network;
 
 export interface SandboxResult {
   readonly exitCode: number;
@@ -165,6 +220,12 @@ export class Sandbox extends Context.Service<
             );
           }
           yield* ensureStarted;
+          // The per-call override below shapes the Seatbelt profile, but the
+          // proxy that answers CONNECTs reads the manager's own config. Both
+          // have to agree, so the level is applied there first.
+          yield* Effect.sync(() =>
+            SandboxManager.updateConfig({ ...GLOBAL_POLICY, network: networkFor(input.network) }),
+          );
 
           const { argv, env } = yield* Effect.tryPromise({
             try: () =>
@@ -181,6 +242,7 @@ export class Sandbox extends Context.Service<
                     allowWrite: [input.cwd],
                     denyWrite: [],
                   },
+                  network: networkFor(input.network),
                 },
                 undefined,
                 input.cwd,
@@ -196,7 +258,7 @@ export class Sandbox extends Context.Service<
               }),
           });
 
-          const [program, ...args] = argv;
+          const [program, ...args] = forSandboxedChild(argv, input.cwd);
           if (!program) {
             return yield* Effect.fail(
               new DesktopError({ reason: "failed", message: "The command was empty." }),
