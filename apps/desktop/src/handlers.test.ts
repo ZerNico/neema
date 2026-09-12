@@ -18,7 +18,7 @@ let outsideDir: string;
 let handlers: DesktopHandlers;
 let picked: string | null;
 let revealed: string[];
-let ran: { command: string; cwd: string }[];
+let ran: { command: string; cwd: string; network: string }[];
 
 const CONVERSATION = "conv-1";
 
@@ -28,9 +28,9 @@ const stubSandbox = Layer.succeed(
   Sandbox.of({
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
-    run: ({ command, cwd }) =>
+    run: ({ command, cwd, network }) =>
       Effect.sync(() => {
-        ran.push({ command, cwd });
+        ran.push({ command, cwd, network });
         return { exitCode: 0, output: "", truncated: false, violations: [] };
       }),
   }),
@@ -312,6 +312,24 @@ describe("once a folder is attached", () => {
 
     expect(ran).toHaveLength(1);
     expect(ran[0]?.cwd).toBe(await Effect.runPromise(realRoot()));
+    // Package registries by default; the level is the chat's to change.
+    expect(ran[0]?.network).toBe("packages");
+    const widened = await Effect.runPromise(
+      handlers.setNetworkLevel({ conversationId: CONVERSATION, level: "all" }),
+    );
+    expect(widened.kind === "attached" && widened.network).toBe("all");
+    await Effect.runPromise(
+      handlers.runCommand({
+        conversationId: CONVERSATION,
+        callId: "call-2",
+        command: "echo hi",
+        timeoutMs: 1000,
+      }),
+    );
+    expect(ran[1]?.network).toBe("all");
+    await Effect.runPromise(
+      handlers.setNetworkLevel({ conversationId: CONVERSATION, level: "packages" }),
+    );
   });
 
   it("forgets the folder on request", async () => {

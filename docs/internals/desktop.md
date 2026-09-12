@@ -44,6 +44,23 @@ makes the same chat correct on a second machine: it has no mapping, so it asks
 for a folder, rather than trusting a path that means nothing there. A browser
 tab reads a work chat and cannot continue it.
 
+## Two srt quirks the wrapper corrects on macOS
+
+`SandboxManager.wrapWithSandboxArgv` returns `bash -c "env HTTPS_PROXY=http://localhost:PORT … sandbox-exec …"`,
+but the Seatbelt profile it generates denies the resolver lookup that
+`getaddrinfo("localhost")` needs. curl and npm special-case the name; Python's
+urllib3 does not, so `pip` fails with "nodename nor servname provided" before
+it reaches the proxy. `forSandboxedChild` rewrites every proxy variable in that
+script to `127.0.0.1` and points `PIP_CACHE_DIR` inside the folder, which is
+the only writable path. Proven against the real sandbox: `pip download` through
+the proxy succeeds, an off-allowlist host gets `403`, `~/.ssh` and a write
+outside the folder get `Operation not permitted`.
+
+The proxy that answers CONNECTs reads the manager's *global* config, while the
+per-call `customConfig` only shapes the Seatbelt profile. The network level
+therefore goes through `updateConfig` before each run as well as into the
+per-call override, or the two disagree and the level does nothing.
+
 ## Containment is the desktop's job; the sandbox is the second fence
 
 Every path the site names goes through `resolveInFolder` (`apps/desktop/src/folders.ts`):
@@ -52,6 +69,15 @@ containment checked on the real path. A move checks both ends. `find_files`
 and `search_files` walk without following symlinks for the same reason. Commands
 run through `@anthropic-ai/sandbox-runtime` with the folder as the only writable
 path, and the containment check has already happened before `run` is called.
+
+## The network level lives with the folder
+
+`packages` (registries: npm, PyPI, crates, Go, GitHub), `none`, or `all`, per
+conversation, stored in `folders.json` beside the path. The same three levels
+Claude Cowork offers, for the same reason: a build needs registries, an API
+script needs more, and which one this chat is doing is not something the app
+can guess. Cowork's default is *all* on personal plans; ours is *packages*,
+because a reader who never opens the picker should get the narrower policy.
 
 ## Consent lives in the page
 

@@ -53,29 +53,30 @@ export const makeHandlers = (shell: Shell) =>
     const grants = yield* GrantStore;
     const sandbox = yield* Sandbox;
 
-    /** The attached folder, or a refusal. Used by everything that touches disk. */
-    const folderFor = (conversationId: string) =>
-      Effect.flatMap(grants.lookup(conversationId), (folder) =>
-        folder === null ? Effect.fail(noFolder) : Effect.succeed(folder),
+    /** The grant, or a refusal. Used by everything that touches disk. */
+    const grantFor = (conversationId: string) =>
+      Effect.flatMap(grants.lookup(conversationId), (grant) =>
+        grant === null ? Effect.fail(noFolder) : Effect.succeed(grant),
       );
 
     const locate = (conversationId: string, path: string) =>
-      Effect.flatMap(folderFor(conversationId), (folder) => resolveInFolder(folder, path));
+      Effect.flatMap(grantFor(conversationId), (grant) => resolveInFolder(grant.folder, path));
 
     const status = (conversationId: string): Effect.Effect<FolderStatus> =>
       Effect.gen(function* () {
-        const folder = yield* grants.lookup(conversationId);
-        if (folder === null) return { kind: "none" } as const;
+        const grant = yield* grants.lookup(conversationId);
+        if (grant === null) return { kind: "none" } as const;
         // A remembered folder can have been moved, renamed or deleted since.
         // Resolving its own root is the cheapest proof that it is still there.
-        const alive = yield* resolveInFolder(folder, ".").pipe(Effect.result);
+        const alive = yield* resolveInFolder(grant.folder, ".").pipe(Effect.result);
         if (alive._tag === "Failure") {
-          return { kind: "unresolved", name: folderLabel(folder) } as const;
+          return { kind: "unresolved", name: folderLabel(grant.folder) } as const;
         }
         return {
           kind: "attached",
-          name: folderLabel(folder),
+          name: folderLabel(grant.folder),
           sandbox: yield* sandbox.availability(),
+          network: grant.network,
         } as const;
       });
 
@@ -99,15 +100,19 @@ export const makeHandlers = (shell: Shell) =>
 
       rebindFolder: ({ fromConversationId, toConversationId }) =>
         Effect.gen(function* () {
-          const folder = yield* grants.lookup(fromConversationId);
+          const grant = yield* grants.lookup(fromConversationId);
           // Nothing under the draft key is the ordinary case: the chat was
           // started without picking a folder first.
-          if (folder !== null) {
-            yield* grants.remember(toConversationId, folder);
+          if (grant !== null) {
+            yield* grants.remember(toConversationId, grant.folder);
+            yield* grants.setNetwork(toConversationId, grant.network);
             yield* grants.forget(fromConversationId);
           }
           return yield* status(toConversationId);
         }),
+
+      setNetworkLevel: ({ conversationId, level }) =>
+        Effect.flatMap(grants.setNetwork(conversationId, level), () => status(conversationId)),
 
       listDirectory: ({ conversationId, path }) =>
         Effect.gen(function* () {
@@ -481,11 +486,17 @@ export const makeHandlers = (shell: Shell) =>
 
       runCommand: ({ conversationId, callId, command, timeoutMs }) =>
         Effect.gen(function* () {
-          const folder = yield* folderFor(conversationId);
+          const grant = yield* grantFor(conversationId);
           // The folder root is the cwd, and the only writable path the sandbox
           // is given for this call.
-          const root = yield* resolveInFolder(folder, ".");
-          return yield* sandbox.run({ callId, command, cwd: root.absolute, timeoutMs });
+          const root = yield* resolveInFolder(grant.folder, ".");
+          return yield* sandbox.run({
+            callId,
+            command,
+            cwd: root.absolute,
+            timeoutMs,
+            network: grant.network,
+          });
         }),
 
       sandboxAvailability: () => sandbox.availability(),

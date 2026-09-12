@@ -35,6 +35,7 @@ vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
   return {
     ...original,
     useDesktop: () => (bridge.desktop ? {} : null),
+    useDesktopOutdated: () => false,
     useFolder: () =>
       bridge.desktop
         ? {
@@ -44,6 +45,7 @@ vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
             choose: bridge.choose,
             detach: vi.fn(),
             setUpSandbox: vi.fn(),
+            setNetwork: vi.fn(),
           }
         : null,
   };
@@ -164,7 +166,12 @@ describe("work mode", () => {
 
   it("sends once a folder is attached", async () => {
     bridge.desktop = true;
-    bridge.status = { kind: "attached", name: "site", sandbox: { kind: "ready" } };
+    bridge.status = {
+      kind: "attached",
+      name: "site",
+      sandbox: { kind: "ready" },
+      network: "packages",
+    };
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<NewChat onSend={onSend} />);
     await userEvent.click(screen.getByRole("button", { name: "Work with a folder" }));
@@ -199,7 +206,12 @@ describe("work mode", () => {
 
   it("never shows a folder on a plain chat, even in the desktop app", () => {
     bridge.desktop = true;
-    bridge.status = { kind: "attached", name: "site", sandbox: { kind: "ready" } };
+    bridge.status = {
+      kind: "attached",
+      name: "site",
+      sandbox: { kind: "ready" },
+      network: "packages",
+    };
     render(<ExistingChat mode="chat" onSend={vi.fn()} />);
     expect(screen.queryByText("site")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

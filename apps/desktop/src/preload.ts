@@ -15,7 +15,7 @@ import { contextBridge, ipcRenderer } from "electron";
  */
 
 const REQUEST_CHANNEL = "chat-desktop:request";
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const BRIDGE_KEY = "__chatDesktop";
 
 contextBridge.exposeInMainWorld(BRIDGE_KEY, {

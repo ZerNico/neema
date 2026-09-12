@@ -1,10 +1,12 @@
 import { Effect } from "effect";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
+  desktopShellOutdated,
   makeDesktopClient,
   readDesktopChannel,
   type DesktopClient,
   type FolderStatus,
+  type NetworkLevel,
 } from "@chat/desktop-rpc";
 
 /**
@@ -33,6 +35,10 @@ export const desktopClient = (): DesktopClient | null => {
 /** Never changes: the channel is injected before any script runs, or never. */
 const subscribeToNothing = () => () => {};
 
+/** True inside a desktop app older than this site. Never true in a browser. */
+export const useDesktopOutdated = (): boolean =>
+  useSyncExternalStore(subscribeToNothing, desktopShellOutdated, () => false);
+
 export const useDesktop = (): DesktopClient | null =>
   // The server has no channel and the desktop shell does, so the two snapshots
   // genuinely differ. That is what the third argument is for; reading it during
@@ -46,6 +52,7 @@ export interface FolderState {
   choose: () => void;
   detach: () => void;
   setUpSandbox: () => void;
+  setNetwork: (level: NetworkLevel) => void;
 }
 
 const NONE: FolderStatus = { kind: "none" };
@@ -81,6 +88,7 @@ export const useFolder = (conversationId: string): FolderState | null => {
       },
       setUpSandbox: () =>
         run(Effect.flatMap(client.setUpSandbox(), () => client.folderStatus({ conversationId }))),
+      setNetwork: (level: NetworkLevel) => run(client.setNetworkLevel({ conversationId, level })),
     };
   }, [client, conversationId]);
 

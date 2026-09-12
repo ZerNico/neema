@@ -6,7 +6,12 @@ import type { ComposerContext } from "./context-picker.tsx";
 import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
-import { DRAFT_CONVERSATION, useDesktop, useFolder } from "~/modules/desktop/client/bridge.ts";
+import {
+  DRAFT_CONVERSATION,
+  useDesktop,
+  useDesktopOutdated,
+  useFolder,
+} from "~/modules/desktop/client/bridge.ts";
 import { FolderStrip, type PermissionControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -76,17 +81,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   ref,
 ) {
   const desktop = useDesktop();
+  const outdated = useDesktopOutdated();
   const folderKey = conversationId ?? DRAFT_CONVERSATION;
   const folder = useFolder(folderKey);
   const working = mode?.value === "work";
   // The reason is the nudge: sending stays blocked until it is gone.
   const blockedReason = !working
     ? null
-    : !desktop
-      ? "This is a work chat. Open it in the desktop app to continue."
-      : folder?.status.kind !== "attached"
-        ? "Choose a folder from this computer to continue."
-        : null;
+    : outdated
+      ? "This desktop app is out of date. Update it to continue this work chat."
+      : !desktop
+        ? "This is a work chat. Open it in the desktop app to continue."
+        : folder?.status.kind !== "attached"
+          ? "Choose a folder from this computer to continue."
+          : null;
   const skills = useQuery(skillsQuery);
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],

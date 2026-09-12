@@ -171,6 +171,14 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
   message: Schema.String,
 }) {}
 
+/**
+ * How far a command may reach. Package managers are what a build needs and
+ * the default; everything else is a request the user did not make until they
+ * say otherwise, here, for this chat. Kept on the machine with the folder.
+ */
+export const NetworkLevel = Schema.Literals(["none", "packages", "all"]);
+export type NetworkLevel = typeof NetworkLevel.Type;
+
 /** Whether commands can run, and if not, whether the app itself can fix it. */
 export const SandboxAvailability = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["ready"]) }),
@@ -198,6 +206,7 @@ export const FolderStatus = Schema.Union([
     kind: Schema.Literals(["attached"]),
     name: Schema.String,
     sandbox: SandboxAvailability,
+    network: NetworkLevel,
   }),
   Schema.Struct({ kind: Schema.Literals(["none"]) }),
   Schema.Struct({

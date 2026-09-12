@@ -26,7 +26,7 @@ export type BridgeReply =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: unknown };
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** The key `contextBridge` exposes on `window` inside the desktop shell. */
 export const BRIDGE_KEY = "__chatDesktop" as const;
@@ -163,4 +163,16 @@ export const readDesktopChannel = (): DesktopChannel | null => {
   if (typeof channel.request !== "function") return null;
   if (channel.protocolVersion !== PROTOCOL_VERSION) return null;
   return channel as DesktopChannel;
+};
+
+/**
+ * A shell is present but speaks another version. Distinct from no shell at
+ * all: the reader is inside the desktop app and should be told to update it,
+ * rather than shown a browser's "open this in the desktop app".
+ */
+export const desktopShellOutdated = (): boolean => {
+  const candidate = (globalThis as Record<string, unknown>)[BRIDGE_KEY];
+  if (!candidate || typeof candidate !== "object") return false;
+  const channel = candidate as Partial<DesktopChannel>;
+  return typeof channel.request === "function" && channel.protocolVersion !== PROTOCOL_VERSION;
 };

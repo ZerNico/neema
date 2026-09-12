@@ -1,6 +1,6 @@
-import { Alert01Icon, Folder01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
+import { Alert01Icon, Folder01Icon, Globe02Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { SandboxAvailability } from "@chat/desktop-rpc";
+import type { NetworkLevel, SandboxAvailability } from "@chat/desktop-rpc";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -94,6 +94,9 @@ export function FolderStrip({
               </DropdownMenuContent>
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
+            {status.sandbox.kind === "ready" ? (
+              <NetworkPicker level={status.network} busy={busy} onChange={folder.setNetwork} />
+            ) : null}
             {permissions ? <PermissionPicker {...permissions} /> : null}
           </>
         )}
@@ -153,7 +156,7 @@ function PermissionPicker({ level, onLevelChange }: PermissionControl) {
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
+            className="text-muted-foreground hover:text-foreground h-6 min-w-0 gap-1.5 px-1.5 text-xs"
             aria-label={`Permissions: ${current.label}`}
           />
         }
@@ -169,6 +172,68 @@ function PermissionPicker({ level, onLevelChange }: PermissionControl) {
           }}
         >
           {PERMISSION_LEVELS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              <span className="flex flex-col">
+                <span>{option.label}</span>
+                <span className="text-muted-foreground text-xs">{option.description}</span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const NETWORK_LEVELS: ReadonlyArray<{ value: NetworkLevel; label: string; description: string }> = [
+  { value: "none", label: "No internet", description: "Commands cannot reach the network." },
+  {
+    value: "packages",
+    label: "Package registries",
+    description: "npm, PyPI, crates, Go, GitHub. The default.",
+  },
+  { value: "all", label: "Any website", description: "Commands may reach anything." },
+];
+
+/**
+ * How far a command may reach. The same three levels Claude Cowork offers,
+ * for the same reason: a build needs registries, an API script needs more, and
+ * which one this chat is doing is not something the app can guess.
+ */
+function NetworkPicker({
+  level,
+  busy,
+  onChange,
+}: {
+  level: NetworkLevel;
+  busy: boolean;
+  onChange: (level: NetworkLevel) => void;
+}) {
+  const current = NETWORK_LEVELS.find((option) => option.value === level)!;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
+            aria-label={`Network: ${current.label}`}
+          />
+        }
+      >
+        <HugeiconsIcon icon={Globe02Icon} strokeWidth={2} className="size-3.5" />
+        <span className="truncate">{current.label}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup
+          value={level}
+          onValueChange={(value) => {
+            if (value === "none" || value === "packages" || value === "all") onChange(value);
+          }}
+        >
+          {NETWORK_LEVELS.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
               <span className="flex flex-col">
                 <span>{option.label}</span>
