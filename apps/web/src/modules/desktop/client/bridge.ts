@@ -36,9 +36,6 @@ export const desktopClient = (): DesktopClient | null => {
 /** Never changes: the channel is injected before any script runs, or never. */
 const subscribeToNothing = () => () => {};
 
-/** The shell's build stamp, or null outside it. Shown so a stale build is visible. */
-export const desktopBuild = (): string | null => readDesktopChannel()?.build ?? null;
-
 /** True inside a desktop app older than this site. Never true in a browser. */
 export const useDesktopOutdated = (): boolean =>
   useSyncExternalStore(subscribeToNothing, desktopShellOutdated, () => false);
