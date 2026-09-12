@@ -107,10 +107,8 @@ skipped one on purpose.
   never on untouched code. It rejects em dashes, comments over 50 words, inflated
   vocabulary in comments, chained type assertions, trivial wrappers and static-only
   classes. Fix the line; do not widen the window or disable the rule for the file.
-  It is on `uncommitted` (baseline `HEAD`) rather than the usual `recent-changes`
-  (baseline `HEAD~5`) because slop resolves its baseline by path and cannot see a
-  rename, so the monorepo move reads as 499 newly written lines. Put it back to
-  `recent-changes` once that move is more than five commits old.
+  It uses `recent-changes` (baseline `HEAD~5`). The temporary monorepo-rename
+  exception has ended now that the move is outside that window.
 - Lint config is `oxlint.config.ts`, typed through `defineConfig` and checked by
   `pnpm typecheck`, so a misspelled rule or plugin name fails there instead of
   being silently ignored. Adding `.oxlintrc.json` beside it is a hard error.
