@@ -77,7 +77,9 @@ the ways to hurt yourself, what to check before finishing, and how to verify.
 ## Commands
 
 ```sh
-pnpm dev            # dev server on :3000
+pnpm dev            # web on :3000 and the desktop shell, rebuilt and relaunched on change
+pnpm dev:web        # the web app alone
+pnpm dev:desktop    # the shell alone, pointed at localhost:3000 (CHAT_DESKTOP_SERVER to change)
 pnpm build          # production build (nitro) -> .output/
 pnpm start          # run production server
 pnpm test           # all vitest projects (unit, integration*, ui)

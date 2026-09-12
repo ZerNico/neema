@@ -20,6 +20,8 @@ const BRIDGE_KEY = "__chatDesktop";
 
 contextBridge.exposeInMainWorld(BRIDGE_KEY, {
   protocolVersion: PROTOCOL_VERSION,
+  /** Which build this is, so the site can show it and a stale one is obvious. */
+  build: __BUILD_STAMP__,
   request: (tag: unknown, payload: unknown) =>
     ipcRenderer.invoke(REQUEST_CHANNEL, { tag, payload }),
 });

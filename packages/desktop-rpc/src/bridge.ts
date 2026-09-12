@@ -19,6 +19,8 @@ import { DesktopError } from "./schema.ts";
 export interface DesktopChannel {
   /** Bumped when the contract changes shape, so an old shell fails loudly. */
   readonly protocolVersion: number;
+  /** Short git sha and build time of the shell, for the reader and for bug reports. */
+  readonly build?: string;
   request(tag: string, payload: unknown): Promise<BridgeReply>;
 }
 

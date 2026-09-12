@@ -13,7 +13,7 @@ import {
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 import { PERMISSION_LEVELS } from "../client/approvals.ts";
-import type { FolderState } from "../client/bridge.ts";
+import { desktopBuild, type FolderState } from "../client/bridge.ts";
 
 /** The chat's work policy, held server-side; the strip is where it is changed. */
 export interface WorkSettingsControl {
@@ -97,6 +97,7 @@ export function FolderStrip({
                 <DropdownMenuItem variant="destructive" onClick={folder.detach}>
                   Detach folder
                 </DropdownMenuItem>
+                <BuildStamp />
               </DropdownMenuContent>
             </DropdownMenu>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
@@ -261,5 +262,16 @@ function NetworkPicker({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Which desktop build this is. The answer to "is it running my change?". */
+function BuildStamp() {
+  const build = desktopBuild();
+  if (!build) return null;
+  return (
+    <p className="text-muted-foreground px-2 pt-1.5 pb-1 text-xs tabular-nums">
+      Desktop app {build}
+    </p>
   );
 }

@@ -92,9 +92,12 @@ skipped one on purpose.
 
 ## Running and verifying
 
-- `docker compose up -d` for Postgres, `pnpm dev` on `:3000`. Server module edits
-  hot-swap the Effect runtime; no restart. Sign in at `/login`; the first
-  registered user is admin.
+- `docker compose up -d` for Postgres, `pnpm dev` for the web app on `:3000`
+  and the desktop shell together (`dev:web`, `dev:desktop` for one). Server
+  module edits hot-swap the Effect runtime; no restart. The shell has no HMR:
+  `dev:desktop` rebuilds and relaunches Electron on every change, and the
+  folder menu in a work chat shows the build stamp, so "is it running my
+  change" has an answer. Sign in at `/login`; the first registered user is admin.
 - Smallest proof first: the one test file you touched, with the right `--project`.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,

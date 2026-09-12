@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "pnpm exec vitest run",
+    "dev": "node dev.mjs",
     "build": "node build.mjs",
     "start": "pnpm build && electron dist/main.cjs"
   },

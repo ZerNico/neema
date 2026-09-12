@@ -89,6 +89,17 @@ const openMainWindow = (origin: string) => {
 };
 
 const start = async () => {
+  console.log(`[desktop] build ${__BUILD_STAMP__}`);
+  // A developer points the shell at a dev server without going through the
+  // connect window or touching the stored choice, which stays the real one.
+  const devOrigin = process.env.CHAT_DESKTOP_SERVER
+    ? toOrigin(process.env.CHAT_DESKTOP_SERVER)
+    : null;
+  if (devOrigin) {
+    serverOrigin = devOrigin;
+    mainWindow = openMainWindow(devOrigin);
+    return;
+  }
   const file = configFile(app.getPath("userData"));
   const config = await readConfig(file);
 
