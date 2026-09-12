@@ -58,7 +58,7 @@ import {
   MessageNotFound,
   InvalidMessage,
   QuestionUnavailable,
-  WorkFolderRequired,
+  WorkDesktopRequired,
 } from "../errors.ts";
 
 export type TurnContent =
@@ -100,7 +100,7 @@ export interface ConversationDefaults {
 }
 export type ResolveError =
   | AgentNotAvailable
-  | WorkFolderRequired
+  | WorkDesktopRequired
   | SkillNotAvailable
   | SkillRejected
   | KnowledgeNotAvailable

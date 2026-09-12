@@ -52,10 +52,11 @@ export class ConversationBusy extends Schema.TaggedError<ConversationBusy>()("Co
   conversationId: Schema.String,
 }) {}
 
-// A work chat runs against a folder on the user's machine. A send without one,
-// from a browser tab or before a folder is chosen, is refused rather than run
-// as a plain chat the model cannot explain.
-export class WorkFolderRequired extends Schema.TaggedError<WorkFolderRequired>()(
-  "WorkFolderRequired",
+// A work chat acts on the user's machine, which only the desktop app can
+// reach. A send from a browser tab is refused rather than run as a plain chat
+// the model cannot explain. A folder is not required: the chat can start
+// without one and attach it later.
+export class WorkDesktopRequired extends Schema.TaggedError<WorkDesktopRequired>()(
+  "WorkDesktopRequired",
   {},
 ) {}

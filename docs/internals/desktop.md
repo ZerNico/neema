@@ -33,9 +33,12 @@ Three consequences that are easy to break:
 ## Mode is fixed at creation; the folder lives on the machine
 
 `conversations.mode` is `chat | work`, chosen when the chat starts, inherited
-by a branch, never changed. A work chat sent to without a folder is refused
-inside the turn (`WorkFolderRequired`) before any row is written, so the rule
-holds even when the composer is bypassed.
+by a branch, never changed. A work chat needs the desktop app, not a folder:
+a send without `fromDesktop` is refused inside the turn (`WorkDesktopRequired`)
+before any row is written, so the rule holds even when the composer is
+bypassed, while a chat may start with no folder and attach one later. The
+folder tools are offered only once a folder name arrives with a send; until
+then the desktop is present for whatever else it can do.
 
 The server stores only the folder's _name_ per attempt
 (`message_generation_config.desktop_folder`), never a path. The path-to-

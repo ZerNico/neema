@@ -2963,7 +2963,7 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
-  it("refuses to continue a work chat without a folder, and stays a work chat", async () => {
+  it("refuses a work chat from a browser, allows it without a folder, and stays a work chat", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = () =>
       Stream.make(AiResponse.makePart("text-delta", { id: "t", delta: "Hi." }), authoringFinish());
@@ -2979,6 +2979,7 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             attachmentIds: [],
             mode: "work",
+            fromDesktop: true,
             desktopFolder: folder,
           }),
         ),
@@ -2993,8 +2994,8 @@ describe("local tools on the user's machine", () => {
       );
       expect(detail.conversation.mode).toBe("work");
 
-      // A browser tab, or the desktop app before a folder is chosen, sends
-      // nothing about a folder. That is refused rather than run as plain chat.
+      // A browser tab cannot say it is the desktop app. That is refused rather
+      // than run as a plain chat.
       const refused = await runtime.runPromise(
         Effect.result(
           Effect.flatMap(ChatService, (service) =>
@@ -3009,12 +3010,42 @@ describe("local tools on the user's machine", () => {
           ),
         ),
       );
-      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkFolderRequired");
+      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkDesktopRequired");
       // Nothing was written: the refusal happened inside the turn, before rows.
       const after = await runtime.runPromise(
         loadConversationDetail(seed.userId, created.conversationId),
       );
       expect(after.messages).toHaveLength(detail.messages.length);
+
+      // The desktop app without a folder is allowed; the folder tools wait.
+      const prompts: GatewayInput[] = [];
+      authoringScript = (input) => {
+        prompts.push(input);
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Attach a folder and I can look." }),
+          authoringFinish(),
+        );
+      };
+      const bare = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId: created.conversationId,
+            modelId: textModelId,
+            content: "Keep going.",
+            searchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopCommands: false,
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(bare.assistantMessageId, 0)),
+        ),
+      );
+      expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
 
       // A later send cannot change the mode; a plain chat stays plain.
       const plain = await runtime.runPromise(

@@ -104,23 +104,28 @@ export const useFolder = (conversationId: string): FolderState | null => {
   return { status, busy, ...actions };
 };
 
-export interface AttachedFolder {
-  /** Name only: the server stores no path, so another machine can differ. */
-  readonly desktopFolder: string;
+export interface DesktopSendFields {
+  /** Proves the send came from the desktop app; a work chat refuses one without it. */
+  readonly fromDesktop: true;
+  /** Name only, when attached: the server stores no path, so another machine can differ. */
+  readonly desktopFolder?: string;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
 }
 
 /**
  * What each message reports about the machine it was sent from, or null in a
- * browser, which is what withholds the local tools there.
+ * browser. A folder is not required: without one the desktop is still there,
+ * and the folder tools are simply withheld until one is attached.
  */
-export const useAttachedFolder = (conversationId: string): AttachedFolder | null => {
+export const useDesktopSendFields = (conversationId: string): DesktopSendFields | null => {
   const folder = useFolder(conversationId);
-  if (folder?.status.kind !== "attached") return null;
+  if (!folder) return null;
+  const attached = folder.status.kind === "attached" ? folder.status : null;
   return {
-    desktopFolder: folder.status.name,
-    desktopCommands: folder.status.sandbox.kind === "ready",
+    fromDesktop: true,
+    ...(attached ? { desktopFolder: attached.name } : {}),
+    desktopCommands: attached?.sandbox.kind === "ready",
   };
 };
 

@@ -47,7 +47,7 @@ import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
   DRAFT_CONVERSATION,
   rebindDraftFolder,
-  useAttachedFolder,
+  useDesktopSendFields,
 } from "~/modules/desktop/client/bridge.ts";
 import { useDesktopTools } from "~/modules/desktop/client/use-desktop-tools.ts";
 import { useDesktopApprovals, type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
@@ -315,9 +315,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Bumped on retry/edit: the assistant id usually stays the same, so the
   // stream hook needs a separate signal to resubscribe from seq 0.
   const [retryEpoch, setRetryEpoch] = useState(0);
-  // Only a work chat reports its folder; a plain chat never offers the tools.
-  const folder = useAttachedFolder(conversationId);
-  const attachedFolder = data.conversation.mode === "work" ? folder : null;
+  // Only a work chat reports the machine; a plain chat never offers the tools.
+  const desktopFields = useDesktopSendFields(conversationId);
+  const attachedFolder = data.conversation.mode === "work" ? desktopFields : null;
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
@@ -1343,9 +1343,9 @@ export function NewChatView({
   const composer = useRef<ComposerHandle>(null);
   // No conversation yet, so a folder picked here hangs on the draft key until
   // the first message creates one to rebind it onto.
-  const draftFolder = useAttachedFolder(DRAFT_CONVERSATION);
+  const draftFields = useDesktopSendFields(DRAFT_CONVERSATION);
   const [mode, setMode] = useState<ConversationMode>("chat");
-  const attachedFolder = mode === "work" ? draftFolder : null;
+  const attachedFolder = mode === "work" ? draftFields : null;
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);

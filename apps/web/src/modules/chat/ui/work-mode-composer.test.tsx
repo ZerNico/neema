@@ -139,28 +139,23 @@ describe("work mode", () => {
     expect(screen.queryByText(/folder from this computer/)).not.toBeInTheDocument();
   });
 
-  it("reveals the folder strip and blocks sending until a folder is chosen", async () => {
+  it("reveals the folder strip and sends without a folder", async () => {
     bridge.desktop = true;
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<NewChat onSend={onSend} />);
     // A plain chat shows nothing about folders, so the choice reads as a choice.
     expect(screen.queryByText(/folder from this computer/)).not.toBeInTheDocument();
-    await type("hello");
-    expect(sendButton()).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Work with a folder" }));
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Choose a folder from this computer to continue.",
-    );
-    expect(sendButton()).toBeDisabled();
-    // The nudge is the strip itself: pressing it opens the native picker.
-    await userEvent.click(
-      screen.getByRole("button", { name: /Choose a folder from this computer/ }),
-    );
+    // The strip invites a folder rather than demanding one: work needs the
+    // desktop app, and a folder can come later.
+    await userEvent.click(screen.getByRole("button", { name: /Add a folder from this computer/ }));
     expect(bridge.choose).toHaveBeenCalled();
-    // Enter must not slip past the disabled button either.
-    await userEvent.keyboard("{Enter}");
-    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await type("hello");
+    expect(sendButton()).toBeEnabled();
+    await userEvent.click(sendButton());
+    expect(onSend).toHaveBeenCalledOnce();
   });
 
   it("sends once a folder is attached", async () => {
@@ -188,14 +183,15 @@ describe("work mode", () => {
     expect(sendButton()).toBeDisabled();
   });
 
-  it("asks a work chat on a new machine to pick its folder again", () => {
+  it("asks a work chat on a new machine to pick its folder again, without blocking", async () => {
     bridge.desktop = true;
     bridge.status = { kind: "unresolved", name: "site" };
-    render(<ExistingChat mode="work" onSend={vi.fn()} />);
+    render(<ExistingChat mode="work" onSend={vi.fn().mockResolvedValue(undefined)} />);
     expect(
       screen.getByRole("button", { name: /Choose site again to continue/ }),
     ).toBeInTheDocument();
-    expect(sendButton()).toBeDisabled();
+    await type("hello");
+    expect(sendButton()).toBeEnabled();
   });
 
   it("never shows a folder on a plain chat, even in the desktop app", () => {

@@ -81,6 +81,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           searchEnabled: data.searchEnabled,
           desktopFolder: data.desktopFolder,
           desktopCommands: data.desktopCommands,
+          fromDesktop: data.fromDesktop,
           mode: data.mode,
           timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
@@ -92,9 +93,11 @@ export const sendMessage = createServerFn({ method: "POST" })
         Effect.catchTags({
           AgentNotAvailable: () =>
             Effect.die(new Response("The selected agent is not available", { status: 404 })),
-          WorkFolderRequired: () =>
+          WorkDesktopRequired: () =>
             Effect.die(
-              new Response("This chat needs a folder from the desktop app", { status: 409 }),
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
             ),
           KnowledgeNotAvailable: () =>
             Effect.die(new Response("A selected collection is not available", { status: 404 })),
@@ -129,6 +132,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           searchEnabled: data.searchEnabled,
           desktopFolder: data.desktopFolder,
           desktopCommands: data.desktopCommands,
+          fromDesktop: data.fromDesktop,
           timeZone: data.timeZone,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
@@ -137,9 +141,11 @@ export const answerQuestion = createServerFn({ method: "POST" })
         Effect.catchTags({
           AgentNotAvailable: () =>
             Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkFolderRequired: () =>
+          WorkDesktopRequired: () =>
             Effect.die(
-              new Response("This chat needs a folder from the desktop app", { status: 409 }),
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
             ),
           KnowledgeNotAvailable: () =>
             Effect.die(
@@ -193,9 +199,11 @@ export const retryMessage = createServerFn({ method: "POST" })
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
           AgentNotAvailable: () =>
             Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkFolderRequired: () =>
+          WorkDesktopRequired: () =>
             Effect.die(
-              new Response("This chat needs a folder from the desktop app", { status: 409 }),
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
             ),
           KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           KnowledgeNotAvailable: () =>
@@ -263,9 +271,11 @@ export const editMessage = createServerFn({ method: "POST" })
         Effect.catchTags({
           AgentNotAvailable: () =>
             Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkFolderRequired: () =>
+          WorkDesktopRequired: () =>
             Effect.die(
-              new Response("This chat needs a folder from the desktop app", { status: 409 }),
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
             ),
           KnowledgeNotAvailable: () =>
             Effect.die(

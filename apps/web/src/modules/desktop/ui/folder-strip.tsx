@@ -48,8 +48,8 @@ export function FolderStrip({
   settings?: WorkSettingsControl | undefined;
 }) {
   const { status, busy } = folder;
-  // No folder is the same problem as a lost one: nothing to work on yet.
-  const attention = status.kind !== "attached";
+  // A lost folder deserves attention; none yet is just an invitation.
+  const attention = status.kind === "unresolved";
 
   return (
     <div className="mx-3 -mt-3 flex">
@@ -64,7 +64,10 @@ export function FolderStrip({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 gap-1.5 px-1.5 text-xs"
+            className={cn(
+              "h-6 gap-1.5 px-1.5 text-xs",
+              !attention && "text-muted-foreground hover:text-foreground",
+            )}
             disabled={busy}
             onClick={folder.choose}
           >
@@ -75,7 +78,7 @@ export function FolderStrip({
             />
             {status.kind === "unresolved" && status.name
               ? `Choose ${status.name} again to continue`
-              : "Choose a folder from this computer"}
+              : "Add a folder from this computer"}
           </Button>
         ) : (
           <>

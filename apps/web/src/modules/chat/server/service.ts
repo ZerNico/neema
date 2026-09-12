@@ -10,7 +10,7 @@ import {
   ModelNotFound,
   RetryNotAllowed,
   QuestionUnavailable,
-  WorkFolderRequired,
+  WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
@@ -52,6 +52,7 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     /** Folder attached on the machine this send came from, by name. */
     desktopFolder?: string | undefined;
     desktopCommands?: boolean | undefined;
+    fromDesktop?: boolean | undefined;
     timeZone?: string | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
@@ -74,7 +75,7 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
-      | WorkFolderRequired
+      | WorkDesktopRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -96,7 +97,7 @@ export class ChatService extends Context.Service<
       | ModelNotFound
       | RetryNotAllowed
       | AgentNotAvailable
-      | WorkFolderRequired
+      | WorkDesktopRequired
       | KnowledgeRejected
       | InvalidMessage
       | AttachmentNotAvailable
@@ -124,6 +125,7 @@ export class ChatService extends Context.Service<
         searchEnabled: boolean;
         desktopFolder?: string | undefined;
         desktopCommands?: boolean | undefined;
+        fromDesktop?: boolean | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -141,7 +143,7 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
-      | WorkFolderRequired
+      | WorkDesktopRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -307,6 +309,7 @@ function makeChatService() {
           /** Folder the sending machine reported; retry has no submission. */
           desktopFolder?: string | undefined;
           desktopCommands?: boolean | undefined;
+          fromDesktop?: boolean | undefined;
         } & (
           | { attempt: "retry"; searchEnabled?: never }
           | { attempt: "send" | "edit"; searchEnabled: boolean }
@@ -333,10 +336,11 @@ function makeChatService() {
             input.attempt === "retry"
               ? (continuation?.desktopCommands ?? false)
               : (input.desktopCommands ?? false);
-          // The whole point of a work chat is the folder. A send with none
-          // would run as a plain chat whose history the model cannot act on,
-          // so it is refused here, inside the turn, before any row is written.
-          if (defaults.mode === "work" && !desktopFolder) return yield* new WorkFolderRequired();
+          // Only the desktop app can act on the machine, so a browser send
+          // to a work chat is refused inside the turn, before any row is
+          // written. A retry has no submission and replays its attempt.
+          if (defaults.mode === "work" && input.attempt !== "retry" && !input.fromDesktop)
+            return yield* new WorkDesktopRequired();
           // An edit that submits a selection is changing it, so it cannot take the
           // replay shortcut below: new collections need a rebuilt manifest.
           const editing = input.attempt === "edit";
@@ -437,6 +441,7 @@ function makeChatService() {
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
+          ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
           model,
           searchAvailable,
           collectionIds: input.collectionIds,
@@ -501,6 +506,7 @@ function makeChatService() {
         searchEnabled: boolean;
         desktopFolder?: string | undefined;
         desktopCommands?: boolean | undefined;
+        fromDesktop?: boolean | undefined;
         skillIds?: ReadonlyArray<string> | undefined;
         collectionIds?: ReadonlyArray<string> | undefined;
       };
@@ -529,6 +535,9 @@ function makeChatService() {
                     : {}),
                   ...(input.edit.desktopCommands !== undefined
                     ? { desktopCommands: input.edit.desktopCommands }
+                    : {}),
+                  ...(input.edit.fromDesktop !== undefined
+                    ? { fromDesktop: input.edit.fromDesktop }
                     : {}),
                   ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
                   ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
@@ -773,6 +782,7 @@ function makeChatService() {
         /** Folder attached on the machine this edit came from, by name. */
         desktopFolder?: string | undefined;
         desktopCommands?: boolean | undefined;
+        fromDesktop?: boolean | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -872,6 +882,7 @@ function makeChatService() {
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
+          ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
           model,
           searchAvailable,
           ...(input.skillIds ? { skillIds: input.skillIds } : {}),

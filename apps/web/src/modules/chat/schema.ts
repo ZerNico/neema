@@ -25,6 +25,8 @@ const generationFields = {
   desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   /** False when that machine cannot sandbox, which withholds the command tool. */
   desktopCommands: Schema.optionalKey(Schema.Boolean),
+  /** Sent by the desktop app only. A work chat refuses a send without it. */
+  fromDesktop: Schema.optionalKey(Schema.Boolean),
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
   /**
@@ -63,6 +65,8 @@ export const AnswerQuestionInput = Schema.Struct({
   desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   /** False when that machine cannot sandbox, which withholds the command tool. */
   desktopCommands: Schema.optionalKey(Schema.Boolean),
+  /** Sent by the desktop app only. A work chat refuses a send without it. */
+  fromDesktop: Schema.optionalKey(Schema.Boolean),
   timeZone: TimeZone,
 });
 
@@ -126,6 +130,8 @@ export const EditMessageInput = Schema.Union([
     desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
     /** False when that machine cannot sandbox, which withholds the command tool. */
     desktopCommands: Schema.optionalKey(Schema.Boolean),
+    /** Sent by the desktop app only. A work chat refuses a send without it. */
+    fromDesktop: Schema.optionalKey(Schema.Boolean),
     timeZone: TimeZone,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,

@@ -50,8 +50,8 @@ interface ComposerProps {
   conversationId?: string | undefined;
   /**
    * A new chat offers the choice; an existing chat's mode is fixed at creation
-   * and passed as a value. Work needs a folder from the desktop app: without
-   * one the composer says so and refuses to send.
+   * and passed as a value. Work needs the desktop app: in a browser the
+   * composer says so and refuses to send.
    */
   mode?:
     | { kind: "choose"; value: ConversationMode; onChange: (mode: ConversationMode) => void }
@@ -85,16 +85,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const folderKey = conversationId ?? DRAFT_CONVERSATION;
   const folder = useFolder(folderKey);
   const working = mode?.value === "work";
-  // The reason is the nudge: sending stays blocked until it is gone.
+  // Work needs the desktop app, not a folder: the strip invites one, and the
+  // folder tools are withheld until it is attached.
   const blockedReason = !working
     ? null
     : outdated
       ? "This desktop app is out of date. Update it to continue this work chat."
       : !desktop
         ? "This is a work chat. Open it in the desktop app to continue."
-        : folder?.status.kind !== "attached"
-          ? "Choose a folder from this computer to continue."
-          : null;
+        : null;
   const skills = useQuery(skillsQuery);
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],
