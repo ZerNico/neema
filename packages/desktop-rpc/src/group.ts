@@ -63,14 +63,36 @@ export const DesktopRpcs = RpcGroup.make(
     success: FolderStatus,
   }),
 
+  Rpc.make("executionSession", { success: Schema.Struct({ id: Schema.String }) }),
+  Rpc.make("cancelCall", {
+    payload: { callId: Schema.String },
+    success: Schema.Boolean,
+    error: DesktopError,
+  }),
+  Rpc.make("setWorkState", {
+    payload: {
+      active: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      needsApproval: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    },
+    success: Schema.Void,
+  }),
+
   Rpc.make("listDirectory", {
-    payload: { conversationId: Schema.String, path: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: DirectoryListing,
     error: DesktopError,
   }),
 
   Rpc.make("readFile", {
-    payload: { conversationId: Schema.String, path: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: FileContents,
     error: DesktopError,
   }),
@@ -78,6 +100,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("writeFile", {
     payload: {
       conversationId: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
       path: Schema.String,
       text: Schema.String,
     },
@@ -87,7 +110,11 @@ export const DesktopRpcs = RpcGroup.make(
 
   /** The raw bytes of an image or document, for a model that can take them. */
   Rpc.make("readBinary", {
-    payload: { conversationId: Schema.String, path: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: BinaryContents,
     error: DesktopError,
   }),
@@ -100,6 +127,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("editFile", {
     payload: {
       conversationId: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
       path: Schema.String,
       old: Schema.String,
       new: Schema.String,
@@ -111,21 +139,34 @@ export const DesktopRpcs = RpcGroup.make(
 
   /** Renames or relocates within the folder. Never overwrites. */
   Rpc.make("movePath", {
-    payload: { conversationId: Schema.String, from: Schema.String, to: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      from: Schema.String,
+      to: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: MoveReceipt,
     error: DesktopError,
   }),
 
   /** Removes a file, or a directory and everything under it. */
   Rpc.make("deletePath", {
-    payload: { conversationId: Schema.String, path: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: DeleteReceipt,
     error: DesktopError,
   }),
 
   /** Files whose path matches a glob, `.gitignore` respected. */
   Rpc.make("findFiles", {
-    payload: { conversationId: Schema.String, pattern: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      pattern: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
+    },
     success: FoundPaths,
     error: DesktopError,
   }),
@@ -134,6 +175,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("searchFiles", {
     payload: {
       conversationId: Schema.String,
+      callId: Schema.optionalKey(Schema.String),
       pattern: Schema.String,
       /** Narrows to paths matching this glob; absent searches everything. */
       glob: Schema.optionalKey(Schema.String),
@@ -158,18 +200,8 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
-  /** Whether commands can run at all, and whether `setUpSandbox` could help. */
-  Rpc.make("sandboxAvailability", { success: SandboxAvailability }),
-
   /** Windows only: the one-time elevated install. Re-checks and returns the new state. */
   Rpc.make("setUpSandbox", { success: SandboxAvailability, error: DesktopError }),
-
-  /** Opens the folder in the platform file manager. */
-  Rpc.make("revealPath", {
-    payload: { conversationId: Schema.String, path: Schema.String },
-    success: Schema.Void,
-    error: DesktopError,
-  }),
 );
 
 export type DesktopRpcs = typeof DesktopRpcs;

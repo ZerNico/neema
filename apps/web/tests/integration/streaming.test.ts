@@ -16,9 +16,10 @@ import {
   Stream,
 } from "effect";
 import { uuidv7 } from "uuidv7";
-import { Response as AiResponse, type Prompt } from "effect/unstable/ai";
+import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { eq, sql } from "drizzle-orm";
 import {
+  conversations,
   attachmentBlobs,
   attachments,
   messageAttachments,
@@ -138,6 +139,7 @@ const authoringFinish = (reason: "stop" | "tool-calls" = "stop") =>
   });
 const authoringTool = (input: GatewayInput, name: string, params: unknown, hermes = false) => {
   const id = uuidv7();
+  const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
   const calls = hermes
     ? hermesToolCalls(
         Stream.make(
@@ -153,29 +155,19 @@ const authoringTool = (input: GatewayInput, name: string, params: unknown, herme
         AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
         authoringFinish("tool-calls"),
       );
-  return calls.pipe(
-    Stream.flatMap((part): Stream.Stream<ChatStreamPart, never, unknown> =>
-      part.type === "tool-call"
-        ? Stream.make(part).pipe(
-            Stream.concat(
-              Stream.unwrap(
-                input.toolkit!.handle(name, part.params, part.id).pipe(Effect.orDie),
-              ).pipe(
-                Stream.orDie,
-                Stream.map((result) =>
-                  AiResponse.toolResultPart({
-                    id: part.id,
-                    name,
-                    providerExecuted: false,
-                    ...result,
-                  }),
-                ),
-              ),
-            ),
-          )
-        : Stream.make(part),
+  // Use the SDK's concurrent dispatch, not a sequential call-then-handler fake.
+  return Stream.unwrap(
+    LanguageModel.make({
+      generateText: () => Effect.die("only streaming is used here"),
+      streamText: () =>
+        calls.pipe(
+          Stream.mapEffect((part) => encodePart(part)),
+          Stream.orDie,
+        ),
+    }).pipe(
+      Effect.map((model) => model.streamText({ prompt: input.prompt, toolkit: input.toolkit! })),
     ),
-  ) as Stream.Stream<ChatStreamPart>;
+  ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
 };
 
 // Deterministic fake AI provider: streams 5 words with a small delay.
@@ -2710,6 +2702,10 @@ describe("local tools on the user's machine", () => {
       userId: seed.userId,
       modelId: textModelId,
     });
+    yield* (yield* Db)
+      .update(conversations)
+      .set({ mode: "work" })
+      .where(eq(conversations.id, conversation.id));
     return { ...seed, conversation };
   });
 
@@ -2722,6 +2718,8 @@ describe("local tools on the user's machine", () => {
         content: "What is in the readme?",
         searchEnabled: false,
         attachmentIds: [],
+        fromDesktop: true,
+        desktopExecutorId: "desktop-test-session",
         desktopFolder: folder,
         desktopCommands,
       }),
@@ -2757,7 +2755,22 @@ describe("local tools on the user's machine", () => {
               seen.push(call);
               yield* Deferred.succeed(first, call);
               const reply = answer(call);
-              if (reply !== null) yield* external.complete(envelope.callId, reply);
+              if (reply !== null) {
+                const owned = yield* external.inspect(envelope.callId);
+                expect(owned).not.toBeNull();
+                expect(yield* (yield* ChatRepo).isDesktopAttemptLive(owned!)).toBe(true);
+                expect(
+                  yield* external.claim(envelope.callId, {
+                    ...owned!,
+                    executorId: "other-machine",
+                  }),
+                ).toBeNull();
+                const token = yield* external.claim(envelope.callId, owned!);
+                expect(token).toBeTruthy();
+                expect(yield* external.completeClaim(envelope.callId, owned!, token!, reply)).toBe(
+                  true,
+                );
+              }
             }),
           ),
         ),
@@ -2770,64 +2783,229 @@ describe("local tools on the user's machine", () => {
   // dropped are both observable. The tail is only ever in the prompt.
   const fileBody = `${"MACHINE_FILE_BODY ".repeat(200)}FILE_TAIL_MARKER`;
 
-  it("folds a machine's answer into the next turn and keeps the body off the row", async () => {
+  it.each(["existing assistant", "missing assistant"])(
+    "preserves current Work authority for structured answers and %s edits",
+    async (path) => {
+      authoringScript = () =>
+        Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+          authoringFinish(),
+        );
+      try {
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const seed = yield* setupQuestion;
+            const repo = yield* ChatRepo;
+            const service = yield* ChatService;
+            const engine = yield* StreamEngine;
+            yield* (yield* Db)
+              .update(conversations)
+              .set({ mode: "work" })
+              .where(eq(conversations.id, seed.conversation.id));
+            const sent = yield* service.sendMessage({
+              ...answerInput(seed),
+              searchEnabled: false,
+              fromDesktop: true,
+              desktopExecutorId: "answer-session",
+              desktopFolder: "answer-folder",
+              desktopCommands: false,
+            });
+            yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
+            expect((yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolder).toBe(
+              "answer-folder",
+            );
+            const rows = yield* repo.listMessages(seed.conversation.id);
+            const answer = rows.find((row) => row.questionResponse)!;
+            if (path === "missing assistant") yield* repo.deleteMessages([sent.assistantMessageId]);
+            const edited = yield* service.editMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: answer.id,
+              modelId: textModelId,
+              attachmentIds: [],
+              searchEnabled: false,
+              questionResponse: {
+                kind: "answers",
+                answers: [{ selected: [], custom: "Current choice" }],
+              },
+              fromDesktop: true,
+              desktopExecutorId: "edit-answer-session",
+              desktopFolder: "edited-folder",
+              desktopCommands: true,
+            });
+            yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
+            const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
+            expect(config?.desktopFolder).toBe("edited-folder");
+            expect(config?.desktopCommands).toBe(true);
+            const branch = yield* repo.cloneConversationPrefix({
+              userId: seed.userId,
+              sourceConversationId: seed.conversation.id,
+              throughMessageId: edited.assistantMessageId,
+            });
+            expect(branch.mode).toBe("work");
+            expect(
+              (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session"))
+                .calls,
+            ).toEqual([]);
+          }),
+        );
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
+
+  it("uses current desktop capabilities for retries and edits, refusing browser retries before reset", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];
     authoringScript = (input) => {
       prompts.push(input);
-      if (prompts.length === 1)
-        return authoringTool(input, "read_local_file", { path: "README.md" });
       return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "It describes the site." }),
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
         authoringFinish(),
       );
     };
-    try {
-      const sent = await runtime.runPromise(send(seed));
-      const result = await runtime.runPromise(
-        Effect.gen(function* () {
-          const bridge = yield* fakeBridge(sent.assistantMessageId, (call) => ({
-            v: 1,
-            ok: true,
-            summary: `Read ${call.args.path}`,
-            detail: fileBody,
-            truncated: false,
-          }));
-          yield* Fiber.join(bridge.fiber);
-          return {
-            seen: bridge.seen,
-            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
-            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
-          };
-        }),
+    const settle = (messageId: string) =>
+      runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) => Stream.runDrain(engine.subscribe(messageId, 0))),
       );
-
-      // The page was told the tool name and its arguments, which is all it
-      // needs to act; nothing else reaches it before the call is answered.
-      expect(result.seen).toEqual([{ name: "read_local_file", args: { path: "README.md" } }]);
-      // The answer came back through the handler and into the second turn, so
-      // the model read the file without the server ever touching it.
-      expect(prompts).toHaveLength(2);
-      expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
-      // The folder's name reaches the prompt; its path never existed here.
-      expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder);
-
-      const call = result.detail.toolCalls.at(-1)!;
-      expect(call.toolName).toBe("read_local_file");
-      expect(call.status).toBe("complete");
-      expect(call.result).toMatchObject({ summary: "Read README.md", ok: true, truncated: true });
-      const last = result.detail.messages.at(-1)!;
-      expect(last.status).toBe("complete");
-      expect(last.content).toContain("It describes the site.");
-      // Same rule web tools follow: the whole body reaches the model through
-      // the prompt, and only an excerpt of it outlives the generation.
-      expect(JSON.stringify(call.result)).not.toContain("FILE_TAIL_MARKER");
-      expect(JSON.stringify(result.chunks)).not.toContain("FILE_TAIL_MARKER");
-      expect(result.chunks.some((chunk) => chunk.delta.includes('"family":"desktop"'))).toBe(true);
+    try {
+      const sent = await runtime.runPromise(send(seed, true));
+      await settle(sent.assistantMessageId);
+      const before = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+      );
+      const refused = await runtime.runPromise(
+        Effect.result(
+          ChatService.use((service) =>
+            service.retryMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: sent.assistantMessageId,
+            }),
+          ),
+        ),
+      );
+      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkDesktopRequired");
+      expect(
+        await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId))),
+      ).toEqual(before);
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: sent.assistantMessageId,
+            fromDesktop: true,
+            desktopExecutorId: "another-current-session",
+            desktopCommands: false,
+          }),
+        ),
+      );
+      await settle(sent.assistantMessageId);
+      const retried = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
+      );
+      expect(retried?.desktopFolder).toBeNull();
+      expect(retried?.desktopCommands).toBe(false);
+      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).not.toContain("read_local_file");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      const userMessage = detail.messages.find((m) => m.role === "user")!;
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.editMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: userMessage.id,
+            modelId: textModelId,
+            content: "Edited instruction",
+            searchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "current-edit-session",
+            desktopFolder: "current-folder",
+            desktopCommands: true,
+          }),
+        ),
+      );
+      await settle(sent.assistantMessageId);
+      const edited = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
+      );
+      expect(edited?.desktopFolder).toBe("current-folder");
+      expect(edited?.desktopCommands).toBe(true);
+      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).toContain("run_command");
     } finally {
       authoringScript = null;
     }
   }, 60_000);
+
+  it.each([false, true])(
+    "folds local results into the next turn without persisting the body (Hermes: %s)",
+    async (hermes) => {
+      const seed = await runtime.runPromise(desktopChat);
+      const prompts: GatewayInput[] = [];
+      authoringScript = (input) => {
+        prompts.push(input);
+        if (prompts.length === 1)
+          return authoringTool(input, "read_local_file", { path: "README.md" }, hermes);
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "It describes the site." }),
+          authoringFinish(),
+        );
+      };
+      try {
+        const sent = await runtime.runPromise(send(seed));
+        const result = await runtime.runPromise(
+          Effect.gen(function* () {
+            const bridge = yield* fakeBridge(sent.assistantMessageId, (call) => ({
+              v: 1,
+              ok: true,
+              summary: `Read ${call.args.path}`,
+              detail: fileBody,
+              truncated: false,
+            }));
+            yield* Fiber.join(bridge.fiber);
+            return {
+              seen: bridge.seen,
+              detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
+              chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+            };
+          }),
+        );
+
+        // The page was told the tool name and its arguments, which is all it
+        // needs to act; nothing else reaches it before the call is answered.
+        expect(result.seen).toEqual([{ name: "read_local_file", args: { path: "README.md" } }]);
+        // The answer came back through the handler and into the second turn, so
+        // the model read the file without the server ever touching it.
+        expect(prompts).toHaveLength(2);
+        expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
+        // The folder's name reaches the prompt; its path never existed here.
+        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder);
+
+        const call = result.detail.toolCalls.at(-1)!;
+        expect(call.toolName).toBe("read_local_file");
+        expect(call.status).toBe("complete");
+        expect(call.result).toMatchObject({ summary: "Read README.md", ok: true, truncated: true });
+        const last = result.detail.messages.at(-1)!;
+        expect(last.status).toBe("complete");
+        expect(last.content).toContain("It describes the site.");
+        // Same rule web tools follow: the whole body reaches the model through
+        // the prompt, and only an excerpt of it outlives the generation.
+        expect(JSON.stringify(call.result)).not.toContain("FILE_TAIL_MARKER");
+        expect(JSON.stringify(result.chunks)).not.toContain("FILE_TAIL_MARKER");
+        expect(result.chunks.some((chunk) => chunk.delta.includes('"family":"desktop"'))).toBe(
+          true,
+        );
+      } finally {
+        authoringScript = null;
+      }
+    },
+    60_000,
+  );
 
   it("hands an image to a vision model as a file part, never as text in the row", async () => {
     const seed = await runtime.runPromise(desktopChat);
@@ -2852,6 +3030,8 @@ describe("local tools on the user's machine", () => {
             content: "What is in the logo?",
             searchEnabled: false,
             attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
             desktopFolder: folder,
           }),
         ),
@@ -2999,6 +3179,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             mode: "work",
             fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
             desktopFolder: folder,
           }),
         ),
@@ -3055,6 +3236,7 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             attachmentIds: [],
             fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
             desktopCommands: false,
           }),
         ),
@@ -3067,16 +3249,25 @@ describe("local tools on the user's machine", () => {
       expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
 
       // A later send cannot change the mode; a plain chat stays plain.
+      const plainConversation = await runtime.runPromise(
+        ChatRepo.use((repo) =>
+          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+        ),
+      );
       const plain = await runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversationId: plainConversation.id,
             modelId: textModelId,
             content: "Hello.",
             searchEnabled: false,
             attachmentIds: [],
             mode: "work",
+            fromDesktop: true,
+            desktopExecutorId: "ignored-session",
+            desktopFolder: "ignored-folder",
+            desktopCommands: true,
           }),
         ),
       );
@@ -3086,9 +3277,10 @@ describe("local tools on the user's machine", () => {
         ),
       );
       expect(
-        (await runtime.runPromise(loadConversationDetail(seed.userId, seed.conversation.id)))
+        (await runtime.runPromise(loadConversationDetail(seed.userId, plainConversation.id)))
           .conversation.mode,
       ).toBe("chat");
+      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).not.toContain("read_local_file");
     } finally {
       authoringScript = null;
     }
@@ -3112,6 +3304,8 @@ describe("local tools on the user's machine", () => {
             conversationId: seed.conversation.id,
             modelId: textModelId,
             content: "Read my readme.",
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
             searchEnabled: false,
             attachmentIds: [],
           }),

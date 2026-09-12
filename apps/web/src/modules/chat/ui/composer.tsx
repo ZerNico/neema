@@ -7,10 +7,9 @@ import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
 import {
-  DRAFT_CONVERSATION,
   useDesktop,
   useDesktopOutdated,
-  useFolder,
+  type FolderState,
 } from "~/modules/desktop/client/bridge.ts";
 import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
@@ -44,11 +43,6 @@ interface ComposerProps {
   context?: ComposerContext | undefined;
   initialSkillId?: string | null | undefined;
   /**
-   * Which conversation the folder attaches to. A new chat has no id yet, so it
-   * uses the draft key and rebinds after the first message creates one.
-   */
-  conversationId?: string | undefined;
-  /**
    * A new chat offers the choice; an existing chat's mode is fixed at creation
    * and passed as a value. Work needs the desktop app: in a browser the
    * composer says so and refuses to send.
@@ -59,6 +53,11 @@ interface ComposerProps {
     | undefined;
   /** A work chat's policy: how much it asks, how far commands reach. */
   settings?: WorkSettingsControl | undefined;
+  /**
+   * The view's folder state, shared with the send so the strip and the
+   * message agree. Null in a browser.
+   */
+  folder?: FolderState | null | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -74,16 +73,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     controlsDisabled,
     context,
     initialSkillId,
-    conversationId,
     mode,
     settings,
+    folder = null,
   },
   ref,
 ) {
   const desktop = useDesktop();
   const outdated = useDesktopOutdated();
-  const folderKey = conversationId ?? DRAFT_CONVERSATION;
-  const folder = useFolder(folderKey);
   const working = mode?.value === "work";
   // Work needs the desktop app, not a folder: the strip invites one, and the
   // folder tools are withheld until it is attached.
@@ -94,6 +91,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       : !desktop
         ? "This is a work chat. Open it in the desktop app to continue."
         : null;
+  const folderBlocked = working && (folder?.readiness !== "ready" || folder.busy);
+  const sendDisabled = disabled || folderBlocked;
   const skills = useQuery(skillsQuery);
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],
@@ -125,16 +124,33 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   );
 
   // Text and selections stay editable while uploads settle; dispatch the current request.
-  const requestRef = useRef({ draft, researchEnabled, skillIds, onSend });
+  const requestRef = useRef({
+    draft,
+    researchEnabled,
+    skillIds,
+    onSend,
+    blockedReason,
+    disabled: sendDisabled,
+    modelId,
+  });
   useEffect(() => {
-    requestRef.current = { draft, researchEnabled, skillIds, onSend };
+    requestRef.current = {
+      draft,
+      researchEnabled,
+      skillIds,
+      onSend,
+      blockedReason,
+      disabled: sendDisabled,
+      modelId,
+    };
   });
 
   const send = () => {
-    if (disabled || !modelId || blockedReason) return;
+    if (sendDisabled || !modelId || blockedReason) return;
     touched.current = true;
     attachments.submit((attachmentIds) => {
       const current = requestRef.current;
+      if (current.blockedReason || current.disabled || !current.modelId) return;
       const content = current.draft.trim();
       if (!content && attachmentIds.length === 0) return;
       const request = current.onSend(
@@ -169,9 +185,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }}
         onSubmit={send}
         {...(onStop ? { onStop } : {})}
-        disabled={disabled}
-        textareaDisabled={textareaDisabled}
-        {...(controlsDisabled !== undefined ? { controlsDisabled } : {})}
+        disabled={sendDisabled}
+        textareaDisabled={textareaDisabled ?? disabled}
+        controlsDisabled={controlsDisabled ?? disabled}
         modelId={modelId}
         onModelChange={onModelChange}
         searchEnabled={searchEnabled}

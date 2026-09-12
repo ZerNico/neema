@@ -1,3 +1,4 @@
+import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration } from "./generation-fence.ts";
 import {
@@ -543,6 +544,7 @@ export class ChatRepo extends Context.Service<
       content?: string;
       modelId?: string;
     }): Effect.Effect<MessageRow>;
+    isDesktopAttemptLive(owner: ExternalOwner): Effect.Effect<boolean>;
     getMessage(messageId: string): Effect.Effect<MessageRow | null>;
     appendChunks(
       messageId: string,
@@ -1400,6 +1402,25 @@ export class ChatRepo extends Context.Service<
               }),
             )
             .pipe(Effect.orDie);
+        }),
+
+        isDesktopAttemptLive: Effect.fn("ChatRepo.isDesktopAttemptLive")(function* (owner) {
+          const rows = yield* db
+            .select({ id: messages.id })
+            .from(messages)
+            .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+            .where(
+              and(
+                eq(conversations.userId, owner.userId),
+                eq(conversations.id, owner.conversationId),
+                eq(messages.id, owner.messageId),
+                eq(messages.generationId, owner.generationId),
+                eq(messages.status, "streaming"),
+                sql`${messages.generationLeaseUntil} > clock_timestamp()`,
+              ),
+            )
+            .pipe(Effect.orDie);
+          return rows.length > 0;
         }),
 
         getMessage: Effect.fn("ChatRepo.getMessage")(function* (messageId) {

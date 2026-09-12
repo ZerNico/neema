@@ -7,26 +7,67 @@ import { runtime } from "~/server/runtime.ts";
 import { DesktopToolResult } from "../tool-schema.ts";
 
 const standard = Schema.toStandardSchemaV1;
-
+const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
+const ownerFields = { conversationId: Id, messageId: Id, generationId: Id, executorId: Id };
+const CallInput = Schema.Struct({ ...ownerFields, callId: Id });
 export const SubmitDesktopToolResultInput = Schema.Struct({
-  conversationId: Schema.String.check(Schema.isMinLength(1)),
-  /** The durable `message_tool_calls` row id the start envelope carried. */
-  callId: Schema.String.check(Schema.isMinLength(1)),
+  ...ownerFields,
+  callId: Id,
+  token: Id,
   result: DesktopToolResult,
 });
 
-/**
- * Where a tool that ran on the user's machine reports back.
- *
- * The waiting handler is keyed by call id alone, so ownership is checked here
- * rather than taken on trust: a signed-in user must own the conversation the
- * call belongs to before their answer is allowed to unblock it.
- *
- * `accepted: false` is an ordinary outcome, not an error. By the time an answer
- * arrives the generation may have been stopped, timed out or failed, and the
- * registration is gone with it. Refusing loudly would turn a race the design
- * expects into a visible failure.
- */
+export const desktopWorkSnapshot = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(Schema.Struct({ executorId: Id })))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const external = yield* ExternalCompletion;
+        const repo = yield* ChatRepo;
+        const userId = context.session.user.id;
+        const snapshot = yield* external.snapshot(userId, data.executorId);
+        for (const attempt of snapshot.attempts) {
+          if (!(yield* repo.isDesktopAttemptLive(attempt))) yield* external.cancelAttempt(attempt);
+        }
+        const live = yield* external.snapshot(userId, data.executorId);
+        const settings = [];
+        for (const conversationId of new Set(live.attempts.map((a) => a.conversationId))) {
+          const conversation = yield* repo.getConversation(userId, conversationId);
+          if (conversation)
+            settings.push({
+              conversationId,
+              title: conversation.title,
+              approval: conversation.permissionLevel,
+              network: conversation.networkLevel,
+            });
+        }
+        return {
+          ...live,
+          calls: live.calls.map((call) => ({ ...call, args: JSON.stringify(call.args) })),
+          settings,
+        };
+      }),
+    ),
+  );
+
+export const claimDesktopTool = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(CallInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const external = yield* ExternalCompletion;
+        const repo = yield* ChatRepo;
+        const owner = { ...data, userId: context.session.user.id };
+        if (!(yield* repo.isDesktopAttemptLive(owner))) return { token: null };
+        return { token: yield* external.claim(data.callId, owner) };
+      }),
+    ),
+  );
+
+// The in-process claim is rechecked after the database read. A late answer is
+// refused even if the generation was live when the request first arrived.
 export const submitDesktopToolResult = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SubmitDesktopToolResultInput))
@@ -34,14 +75,12 @@ export const submitDesktopToolResult = createServerFn({ method: "POST" })
     runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
-        const conversation = yield* repo.getConversation(
-          context.session.user.id,
-          data.conversationId,
-        );
-        if (!conversation) return { accepted: false as const };
         const external = yield* ExternalCompletion;
-        const accepted = yield* external.complete(data.callId, data.result);
-        return { accepted };
+        const owner = { ...data, userId: context.session.user.id };
+        if (!(yield* repo.isDesktopAttemptLive(owner))) return { accepted: false };
+        return {
+          accepted: yield* external.completeClaim(data.callId, owner, data.token, data.result),
+        };
       }),
     ),
   );

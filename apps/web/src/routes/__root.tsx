@@ -1,9 +1,20 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { HeadContent, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
+import {
+  ClientOnly,
+  HeadContent,
+  Scripts,
+  createRootRouteWithContext,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import appCss from "~/styles/app.css?url";
 import { Toaster } from "~/ui/primitives/sonner";
 import { themeInitScript } from "~/ui/theme.tsx";
+import {
+  DesktopChromeFrame,
+  DesktopChromeProvider,
+  desktopChromeInitScript,
+} from "~/ui/desktop-chrome.tsx";
+import { StartupPending } from "~/ui/startup-pending.tsx";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -27,11 +38,17 @@ function RootDocument({ children }: { children: ReactNode }) {
       <head>
         {/* Applies the stored theme before first paint to avoid flashing */}
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: desktopChromeInitScript }} />
         <HeadContent />
       </head>
       <body>
-        {children}
-        <Toaster position="bottom-right" />
+        <DesktopChromeFrame />
+        <ClientOnly fallback={<StartupPending />}>
+          <DesktopChromeProvider>
+            {children}
+            <Toaster position="bottom-right" />
+          </DesktopChromeProvider>
+        </ClientOnly>
         <Scripts />
       </body>
     </html>

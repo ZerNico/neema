@@ -1,4 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PROTOCOL_VERSION, type BridgeReply } from "@chat/desktop-rpc";
+import type { ConversationMode } from "../schema.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -331,6 +333,7 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     id: "c1",
     userId: "u1",
     title: "Current chat",
+    mode: "chat" as ConversationMode,
     modelId: "m1",
     branchedFrom: branchedFrom?.conversationId ?? null,
     createdAt: BASE,
@@ -469,8 +472,15 @@ const renderView = (
   };
 };
 
+const desktopRequest = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
 beforeEach(() => {
   vi.clearAllMocks();
+  desktopRequest.mockReset();
+  desktopRequest.mockResolvedValue({
+    ok: true,
+    value: { folders: [], sandbox: { kind: "ready" } },
+  });
+  vi.stubGlobal("__chatDesktop", { protocolVersion: PROTOCOL_VERSION, request: desktopRequest });
   liveDraft.tools = [];
   liveDraft.status = "complete";
   FakeEventSource.instances = [];
@@ -580,6 +590,35 @@ const askRow = {
   callIndex: 2,
   error: null,
 };
+
+it("guards Work initiation while folder IPC is unresolved, then enables ready-empty actions", async () => {
+  let resolve!: (reply: BridgeReply) => void;
+  const pending = new Promise<BridgeReply>((done) => {
+    resolve = done;
+  });
+  desktopRequest.mockReturnValue(pending);
+  const data = basePayload(null);
+  renderView(null, { conversation: { ...data.conversation, mode: "work" }, toolCalls: [askRow] });
+  expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Edit m-user" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Branch off m-answer" })).toBeEnabled();
+  // The composer test double bypasses UI gating, so this exercises the view's handler.
+  fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Wait for the folder check before continuing this work chat.",
+    ),
+  );
+  expect(sendMock).not.toHaveBeenCalled();
+  expect(retryMock).not.toHaveBeenCalled();
+  expect(editMessage).not.toHaveBeenCalled();
+  expect(answerQuestion).not.toHaveBeenCalled();
+  expect(desktopRequest).not.toHaveBeenCalledWith("executionSession", expect.anything());
+  await act(async () => resolve({ ok: true, value: { folders: [], sandbox: { kind: "ready" } } }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Edit m-user" })).toBeEnabled();
+});
 
 const answerMock = vi.mocked(answerQuestion);
 const editMock = vi.mocked(editMessage);

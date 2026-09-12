@@ -1,5 +1,4 @@
-import { constants } from "node:fs";
-import { access, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { DesktopError } from "@chat/desktop-rpc";
@@ -26,12 +25,17 @@ const outside = (path: string) =>
     message: `${path} is outside the folder you chose.`,
   });
 
-const exists = (path: string) =>
+export const exists = (path: string) =>
   Effect.tryPromise({
     try: () =>
-      access(path, constants.F_OK)
-        .then(() => true)
-        .catch(() => false),
+      lstat(path).then(
+        () => true,
+        (cause: unknown) => {
+          // A dangling link exists and must reach realpath, never the missing tail.
+          if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return false;
+          throw cause;
+        },
+      ),
     catch: () => new DesktopError({ reason: "failed", message: "Could not read that path." }),
   });
 
@@ -115,9 +119,7 @@ export const resolveInFolder = (
 export const folderName = (folder: string) => basename(folder) || folder;
 
 export interface LocatedPath extends ResolvedPath {
-  /** Which attached folder the path fell in, by name. */
-  readonly folder: string;
-  /** The folder's root, absolute and real. */
+  /** The root of the attached folder the path fell in, absolute and real. */
   readonly root: string;
 }
 
@@ -148,7 +150,6 @@ export const resolveAcross = (
     const inner = rest.join("/");
     const resolved = yield* resolveInFolder(root, inner === "" ? "." : inner);
     return {
-      folder: head,
       root:
         resolved.relative === "."
           ? resolved.absolute

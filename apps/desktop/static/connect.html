@@ -11,12 +11,47 @@
       :root {
         color-scheme: light dark;
         font-family: system-ui, sans-serif;
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --titlebar-height: max(48px, env(titlebar-area-height, 0px));
+        --titlebar-left: 0px;
+        --titlebar-right: 160px;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0a0a0a;
+          --foreground: #fafafa;
+        }
+      }
+      :root[data-platform="darwin"] {
+        --titlebar-left: 96px;
+        --titlebar-right: 0px;
+      }
+      :root[data-fullscreen="true"] {
+        --titlebar-height: 0px;
+      }
+      :root[data-fullscreen="true"] .titlebar {
+        display: none;
+      }
+      .titlebar {
+        position: fixed;
+        top: 0;
+        left: env(titlebar-area-x, var(--titlebar-left));
+        right: var(--titlebar-right);
+        width: env(titlebar-area-width, auto);
+        height: var(--titlebar-height);
+        -webkit-app-region: drag;
+        user-select: none;
       }
       body {
         margin: 0;
         display: grid;
         place-items: center;
         height: 100vh;
+        box-sizing: border-box;
+        padding-top: var(--titlebar-height);
       }
       form {
         display: flex;
@@ -63,6 +98,7 @@
     </style>
   </head>
   <body>
+    <div class="titlebar" aria-hidden="true"></div>
     <form id="form">
       <h1>Connect to your chat server</h1>
       <p>The address you use in the browser. This app will only share files with that server.</p>
@@ -71,6 +107,23 @@
       <button id="submit" type="submit">Connect</button>
     </form>
     <script>
+      const chrome = window.__chatConnect.chrome;
+      document.documentElement.dataset.platform = chrome.platform;
+      let stateReceived = false;
+      const applyState = (state) => {
+        document.documentElement.dataset.fullscreen = String(state.fullscreen);
+      };
+      const unsubscribe = chrome.onState((state) => {
+        stateReceived = true;
+        applyState(state);
+      });
+      chrome
+        .getState()
+        .then((state) => {
+          if (!stateReceived) applyState(state);
+        })
+        .catch(() => {});
+      window.addEventListener("pagehide", unsubscribe, { once: true });
       const form = document.getElementById("form");
       const url = document.getElementById("url");
       const error = document.getElementById("error");
@@ -79,9 +132,14 @@
         event.preventDefault();
         error.textContent = "";
         submit.disabled = true;
-        const result = await window.__chatConnect.connect(url.value);
-        if (!result.ok) {
-          error.textContent = result.message;
+        try {
+          const result = await window.__chatConnect.connect(url.value);
+          if (!result.ok) {
+            error.textContent = result.message;
+            submit.disabled = false;
+          }
+        } catch {
+          error.textContent = "Couldn’t connect. Please try again.";
           submit.disabled = false;
         }
       });

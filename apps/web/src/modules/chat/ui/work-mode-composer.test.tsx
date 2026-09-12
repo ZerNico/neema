@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FolderStatus } from "@chat/desktop-rpc";
+import { desktopSendFields, type FolderState } from "~/modules/desktop/client/bridge.ts";
 import { Composer } from "./composer.tsx";
 import type { ConversationMode } from "../schema.ts";
 
@@ -12,7 +13,9 @@ vi.mock("../server/functions.ts", () => ({
   listConversations: vi.fn(),
   getConversationWithMessages: vi.fn(),
 }));
-vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: vi.fn() }));
+vi.mock("~/modules/skills/server/functions.ts", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+}));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: vi.fn(),
   getResearchAvailability: vi.fn(),
@@ -37,20 +40,23 @@ vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
     ...original,
     useDesktop: () => (bridge.desktop ? {} : null),
     useDesktopOutdated: () => false,
-    useFolder: () =>
-      bridge.desktop
-        ? {
-            status: bridge.status,
-            busy: false,
-            refusal: null,
-            refresh: vi.fn(),
-            choose: bridge.choose,
-            detach: vi.fn(),
-            setUpSandbox: vi.fn(),
-          }
-        : null,
   };
 });
+
+/** The folder state a view would own and hand to the composer. */
+const folderState = () =>
+  bridge.desktop
+    ? {
+        readiness: "ready" as const,
+        status: bridge.status,
+        busy: false,
+        refusal: null,
+        refresh: vi.fn(),
+        choose: bridge.choose,
+        detach: vi.fn(),
+        setUpSandbox: vi.fn(),
+      }
+    : null;
 
 const model = {
   id: "m1",
@@ -95,6 +101,7 @@ function NewChat({ onSend }: { onSend: React.ComponentProps<typeof Composer>["on
         searchEnabled={false}
         onSearchEnabledChange={vi.fn()}
         mode={{ kind: "choose", value: mode, onChange: setMode }}
+        folder={folderState()}
       />
     </QueryClientProvider>
   );
@@ -110,7 +117,6 @@ function ExistingChat({
   return (
     <QueryClientProvider client={client()}>
       <Composer
-        conversationId="c1"
         onSend={onSend}
         disabled={false}
         modelId="m1"
@@ -118,6 +124,7 @@ function ExistingChat({
         searchEnabled={false}
         onSearchEnabledChange={vi.fn()}
         mode={{ kind: "fixed", value: mode }}
+        folder={folderState()}
       />
     </QueryClientProvider>
   );
@@ -135,6 +142,55 @@ beforeEach(() => {
 });
 
 describe("work mode", () => {
+  it("uses the strip's attached and detached folders for the very next submission", async () => {
+    bridge.desktop = true;
+    const sent = vi.fn();
+    function SharedFolderChat() {
+      const [status, setStatus] = useState<FolderStatus>(NONE);
+      const [queryClient] = useState(client);
+      const folder: FolderState = {
+        readiness: "ready",
+        status,
+        busy: false,
+        refusal: null,
+        refresh: () => {},
+        setUpSandbox: () => {},
+        choose: () =>
+          setStatus({ folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } }),
+        detach: () => setStatus(NONE),
+      };
+      return (
+        <QueryClientProvider client={queryClient}>
+          <Composer
+            onSend={async () => {
+              sent(desktopSendFields(folder));
+            }}
+            disabled={false}
+            modelId="m1"
+            onModelChange={vi.fn()}
+            searchEnabled={false}
+            onSearchEnabledChange={vi.fn()}
+            mode={{ kind: "fixed", value: "work" }}
+            folder={folder}
+          />
+        </QueryClientProvider>
+      );
+    }
+    render(<SharedFolderChat />);
+    await userEvent.click(screen.getByRole("button", { name: /Add a folder from this computer/ }));
+    await type("Use this folder");
+    await userEvent.click(sendButton());
+    expect(sent).toHaveBeenLastCalledWith({
+      fromDesktop: true,
+      desktopFolder: "site",
+      desktopCommands: true,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "site" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Detach site" }));
+    await type("Continue without files");
+    await userEvent.click(sendButton());
+    expect(sent).toHaveBeenLastCalledWith({ fromDesktop: true, desktopCommands: false });
+  });
   it("is not offered in a browser, where it could not be honoured", () => {
     render(<NewChat onSend={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "Work with a folder" })).not.toBeInTheDocument();

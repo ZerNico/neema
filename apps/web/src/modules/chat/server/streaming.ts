@@ -1,3 +1,5 @@
+import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
+import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -191,6 +193,7 @@ export class StreamEngine extends Context.Service<
       searchEnabled: boolean;
       researchRunId?: string | undefined;
       generationId?: string | undefined;
+      desktopExecutorId?: string | undefined;
       timeZone?: string | undefined;
     }): Effect.Effect<void>;
     // Winds a running generation down early, keeping whatever it has already
@@ -253,7 +256,7 @@ export class StreamEngine extends Context.Service<
       // gets a `done`. Interrupting the fiber from outside would skip both.
       const inFlight = new Map<
         string,
-        { abort: Deferred.Deferred<void>; runId?: string | undefined }
+        { abort: Deferred.Deferred<void>; runId?: string | undefined; owner: ExternalOwner | null }
       >();
       const runtimeScope = yield* Effect.scope;
       // A generation whose process died stays "streaming" forever unless
@@ -307,6 +310,7 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         researchRunId?: string | undefined;
         generationId?: string | undefined;
+        desktopExecutorId?: string | undefined;
         timeZone?: string | undefined;
         abort: Deferred.Deferred<void>;
       }) {
@@ -697,12 +701,21 @@ export class StreamEngine extends Context.Service<
           const askTools = prepareAskUserTool();
           // Replaced each turn, because a provider call id is unique only
           // within one and a handler only ever runs inside one.
-          const turnCallRows = { rows: new Map<string, string>() };
+          const turnCallRows = new Map<string, Deferred.Deferred<string | undefined>>();
+          const desktopCallReady = (providerCallId: string) => {
+            let ready = turnCallRows.get(providerCallId);
+            if (!ready) {
+              ready = Deferred.makeUnsafe<string | undefined>();
+              turnCallRows.set(providerCallId, ready);
+            }
+            return ready;
+          };
           // Offered only when the machine that sent this message said a folder
           // was attached, so a browser tab never sees these names.
           const desktopTools = config.desktopFolder
             ? prepareDesktopTools({
-                rowIdFor: (providerCallId) => turnCallRows.rows.get(providerCallId),
+                rowIdFor: (providerCallId) =>
+                  Effect.suspend(() => Deferred.await(desktopCallReady(providerCallId))),
                 commands: config.desktopCommands ?? false,
               })
             : null;
@@ -1266,7 +1279,7 @@ export class StreamEngine extends Context.Service<
             const turnStartOffset = assembled.length;
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
-            turnCallRows.rows = callRowIds;
+            turnCallRows.clear();
             let providerOutputStarted = false;
             const currentReminderPrompt = () => reminderPrompt(!toolRoundsLeft);
             const requestPrompt = () => {
@@ -1454,10 +1467,26 @@ export class StreamEngine extends Context.Service<
                             return;
                           }
                           if (family === "desktop") {
-                            // Before the page is told, not after: it may answer
-                            // faster than the handler a step behind it starts
-                            // waiting. Closed with the generation's own scope.
-                            yield* external.open(rowId);
+                            // SDK handlers run concurrently with this observer.
+                            // Release them only after the owned registration exists.
+                            const ready = desktopCallReady(part.id);
+                            if (!input.desktopExecutorId || !input.generationId) {
+                              yield* Deferred.succeed(ready, undefined);
+                              return;
+                            }
+                            yield* external.open(rowId, {
+                              userId: input.userId,
+                              conversationId: input.conversationId,
+                              messageId: input.messageId,
+                              generationId: input.generationId,
+                              executorId: input.desktopExecutorId,
+                              name: part.name,
+                              args,
+                              timeoutMs: approvalKind(part.name as DesktopToolName)
+                                ? DESKTOP_TIMEOUTS.command
+                                : DESKTOP_TIMEOUTS.quick,
+                            });
+                            yield* Deferred.succeed(ready, rowId);
                             yield* pushToolChunk({
                               v: 1,
                               family,
@@ -2118,6 +2147,7 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         researchRunId?: string | undefined;
         generationId?: string | undefined;
+        desktopExecutorId?: string | undefined;
         timeZone?: string | undefined;
       }) {
         const abort = yield* Deferred.make<void>();
@@ -2136,11 +2166,29 @@ export class StreamEngine extends Context.Service<
                 generationId: input.generationId,
               }
             : null;
-        const registration = { abort, runId: input.researchRunId ?? fence?.generationId };
+        const owner: ExternalOwner | null =
+          input.desktopExecutorId && input.generationId
+            ? {
+                userId: input.userId,
+                conversationId: input.conversationId,
+                messageId: input.messageId,
+                generationId: input.generationId,
+                executorId: input.desktopExecutorId,
+              }
+            : null;
+        const registration = { abort, runId: input.researchRunId ?? fence?.generationId, owner };
         inFlight.set(input.messageId, registration);
         // Detached from the request fiber: survives the HTTP response ending.
         yield* Effect.forkIn(
-          runGeneration({ ...input, abort }).pipe(
+          Effect.gen(function* () {
+            if (owner)
+              yield* external.track(
+                owner,
+                sync.publish(input.userId, { type: "desktop.work.changed" }),
+              );
+            yield* runGeneration({ ...input, abort });
+          }).pipe(
+            Effect.scoped,
             Effect.provideService(GenerationFence, fence),
             Effect.ensuring(
               Effect.sync(() => {
@@ -2159,7 +2207,11 @@ export class StreamEngine extends Context.Service<
         Effect.suspend(() => {
           const registration = inFlight.get(messageId);
           if (!registration || registration.runId !== expectedRunId) return Effect.succeed(false);
-          return Deferred.succeed(registration.abort, undefined);
+          return Deferred.succeed(registration.abort, undefined).pipe(
+            Effect.tap(() =>
+              registration.owner ? external.cancelAttempt(registration.owner) : Effect.void,
+            ),
+          );
         });
 
       const subscribe = (

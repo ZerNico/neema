@@ -1,97 +1,219 @@
-import { Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
-
-/**
- * Lets one tool handler block until something outside this process answers it.
- *
- * This is the only place a chat generation is allowed to wait on the world.
- * Everything about that wait is dangerous in a specific way, so it is all here
- * rather than repeated per tool:
- *
- * - **It must be bounded.** The chunk flusher renews `generation_lease_until`
- *   every 250 ms whether or not anything is happening, by design, so a slow
- *   first token is never reaped. A handler blocked forever therefore renews
- *   forever and the row becomes unreapable. The timeout is what ends it, and it
- *   resolves as a value the model can read rather than an exception.
- * - **A late answer must land nowhere.** Registration is scoped: when the
- *   waiting handler ends for any reason, Stop and timeout included, the entry
- *   goes with it. `complete` on an id nobody is waiting for is a no-op.
- * - **It is in-process**, exactly like the in-flight generation map and the live
- *   chunk tail. One Node process is the deployment; a restart mid-wait strands
- *   the call until its timeout, which is why the timeout is not optional.
- *
- * Kept free of any knowledge of the desktop so deep research can sit behind the
- * same primitive when its runner moves into a tool handler.
- */
+import { randomUUID } from "node:crypto";
+import { Clock, Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
 
 export interface ExternalWait<A> {
-  /** What the model is told when nobody answers in time. */
   readonly onTimeout: () => A;
   readonly timeout: Duration.Duration;
+  readonly requireOpen?: boolean;
 }
 
+/** Execution authority is scoped to an attempt, not a page or a saved conversation. */
+export interface ExternalOwner {
+  readonly userId: string;
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly generationId: string;
+  readonly executorId: string;
+}
+
+export interface ExternalOperation extends ExternalOwner {
+  readonly callId: string;
+  readonly name: string;
+  readonly args: Record<string, unknown>;
+  readonly expiresAt: number;
+  readonly claimed: boolean;
+}
+
+interface Registration {
+  readonly owner: ExternalOwner;
+  readonly changed: Effect.Effect<void>;
+}
+
+interface Slot {
+  readonly deferred: Deferred.Deferred<unknown>;
+  operation?: ExternalOperation;
+  token?: string;
+  answered: boolean;
+}
+
+const sameOwner = (a: ExternalOwner, b: ExternalOwner) =>
+  a.userId === b.userId &&
+  a.conversationId === b.conversationId &&
+  a.messageId === b.messageId &&
+  a.generationId === b.generationId &&
+  a.executorId === b.executorId;
+
+/**
+ * Bounded, scoped waits for externally executed tools. The optional owner and
+ * claim bind side effects to the initiating executor. Completed results stay
+ * available for a handler that starts waiting after a fast reply arrives.
+ */
 export class ExternalCompletion extends Context.Service<
   ExternalCompletion,
   {
-    /**
-     * Opens a slot before the call is announced.
-     *
-     * Announcing and waiting are separate moments: the loop tells the page
-     * about a call as soon as it writes the row, and the handler only starts
-     * waiting a step later. Without a slot open across that gap, an answer
-     * from a fast machine would arrive with nobody registered and be dropped,
-     * which reads as a hang rather than as the race it is. The slot is closed
-     * with the caller's scope.
-     */
-    open(callId: string): Effect.Effect<void, never, Scope.Scope>;
-    /**
-     * Waits for `complete` and gives up after the timeout. Takes over whatever
-     * slot `open` left, answer included, and closes it however the wait ends.
-     */
+    track(
+      owner: ExternalOwner,
+      changed: Effect.Effect<void>,
+    ): Effect.Effect<void, never, Scope.Scope>;
+    open(
+      callId: string,
+      operation?: Omit<ExternalOperation, "callId" | "expiresAt" | "claimed"> & {
+        timeoutMs: number;
+      },
+    ): Effect.Effect<void, never, Scope.Scope>;
     await<A>(callId: string, wait: ExternalWait<A>): Effect.Effect<A>;
-    /** Answers a waiting call. Unknown ids are dropped, never an error. */
     complete(callId: string, value: unknown): Effect.Effect<boolean>;
-    /** Whether a slot for this id is currently open. */
     pending(callId: string): Effect.Effect<boolean>;
+    inspect(callId: string): Effect.Effect<ExternalOperation | null>;
+    snapshot(
+      userId: string,
+      executorId: string,
+    ): Effect.Effect<{
+      attempts: ExternalOwner[];
+      calls: ExternalOperation[];
+    }>;
+    claim(callId: string, owner: ExternalOwner): Effect.Effect<string | null>;
+    completeClaim(
+      callId: string,
+      owner: ExternalOwner,
+      token: string,
+      value: unknown,
+    ): Effect.Effect<boolean>;
+    cancelAttempt(owner: ExternalOwner): Effect.Effect<void>;
   }
 >()("chat/tools/ExternalCompletion") {
   static readonly layer = Layer.effect(
     ExternalCompletion,
     Effect.sync(() => {
-      const waiting = new Map<string, Deferred.Deferred<unknown>>();
+      const waiting = new Map<string, Slot>();
+      const attempts = new Map<string, Registration>();
+      const changed = (owner?: ExternalOwner) =>
+        owner ? (attempts.get(owner.generationId)?.changed ?? Effect.void) : Effect.void;
+      const close = (callId: string, slot: Slot) =>
+        Effect.suspend(() => {
+          if (waiting.get(callId) !== slot) return Effect.void;
+          waiting.delete(callId);
+          return changed(slot.operation);
+        });
       const slotFor = Effect.fnUntraced(function* (callId: string) {
         const existing = waiting.get(callId);
         if (existing) return existing;
-        const slot = yield* Deferred.make<unknown>();
+        const slot: Slot = { deferred: yield* Deferred.make<unknown>(), answered: false };
         waiting.set(callId, slot);
         return slot;
       });
-
+      const inspect = (callId: string) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const slot = waiting.get(callId);
+          const op = slot?.operation;
+          return slot && !slot.answered && op && op.expiresAt > now && attempts.has(op.generationId)
+            ? op
+            : null;
+        });
+      const complete = (callId: string, value: unknown) =>
+        Effect.gen(function* () {
+          const slot = waiting.get(callId);
+          if (!slot || slot.answered) return false;
+          slot.answered = true;
+          const accepted = yield* Deferred.succeed(slot.deferred, value);
+          yield* changed(slot.operation);
+          return accepted;
+        });
+      const cancelAttempt = (owner: ExternalOwner) =>
+        Effect.gen(function* () {
+          const current = attempts.get(owner.generationId);
+          if (!current || !sameOwner(current.owner, owner)) return;
+          attempts.delete(owner.generationId);
+          for (const slot of waiting.values()) {
+            if (slot.operation && sameOwner(slot.operation, owner)) {
+              slot.answered = true;
+              yield* Deferred.interrupt(slot.deferred);
+            }
+          }
+          yield* current.changed;
+        });
       return ExternalCompletion.of({
-        open: (callId) =>
+        track: (owner, notify) =>
           Effect.gen(function* () {
-            yield* slotFor(callId);
-            yield* Effect.addFinalizer(() => Effect.sync(() => void waiting.delete(callId)));
+            attempts.set(owner.generationId, { owner, changed: notify });
+            yield* Effect.addFinalizer(() => cancelAttempt(owner));
+            yield* notify;
           }),
-
-        await: <A>(callId: string, wait: ExternalWait<A>) =>
+        open: (callId, operation) =>
           Effect.gen(function* () {
             const slot = yield* slotFor(callId);
-            // Removed however the wait ends, even when `open` holds a longer
-            // scope. A result arriving after Stop or a timeout then finds no
-            // entry, which keeps it off a row already marked terminal.
-            yield* Effect.addFinalizer(() => Effect.sync(() => void waiting.delete(callId)));
-            const answered = yield* Deferred.await(slot).pipe(Effect.timeoutOption(wait.timeout));
+            if (operation && !slot.operation) {
+              const { timeoutMs, ...fields } = operation;
+              slot.operation = {
+                ...fields,
+                callId,
+                claimed: false,
+                expiresAt: (yield* Clock.currentTimeMillis) + timeoutMs,
+              };
+            }
+            yield* Effect.addFinalizer(() => close(callId, slot));
+            yield* changed(slot.operation);
+          }),
+        await: <A>(callId: string, wait: ExternalWait<A>) =>
+          Effect.gen(function* () {
+            if (wait.requireOpen && !waiting.has(callId)) return wait.onTimeout();
+            const slot = yield* slotFor(callId);
+            yield* Effect.addFinalizer(() => close(callId, slot));
+            const timeout = slot.operation
+              ? Duration.millis(
+                  Math.max(
+                    0,
+                    Math.min(
+                      Duration.toMillis(wait.timeout),
+                      slot.operation.expiresAt - (yield* Clock.currentTimeMillis),
+                    ),
+                  ),
+                )
+              : wait.timeout;
+            const answered = yield* Deferred.await(slot.deferred).pipe(
+              Effect.timeoutOption(timeout),
+            );
             return answered._tag === "Some" ? (answered.value as A) : wait.onTimeout();
           }).pipe(Effect.scoped),
-
-        complete: (callId, value) =>
-          Effect.suspend(() => {
-            const slot = waiting.get(callId);
-            if (!slot) return Effect.succeed(false);
-            return Effect.as(Deferred.succeed(slot, value), true);
-          }),
-
+        complete,
         pending: (callId) => Effect.sync(() => waiting.has(callId)),
+        inspect,
+        snapshot: (userId, executorId) =>
+          Effect.gen(function* () {
+            const owned = [...attempts.values()].filter(
+              ({ owner }) => owner.userId === userId && owner.executorId === executorId,
+            );
+            const calls: ExternalOperation[] = [];
+            for (const id of waiting.keys()) {
+              const op = yield* inspect(id);
+              if (op?.userId === userId && op.executorId === executorId) calls.push(op);
+            }
+            return { attempts: owned.map(({ owner }) => owner), calls };
+          }),
+        claim: (callId, owner) =>
+          Effect.gen(function* () {
+            const op = yield* inspect(callId);
+            if (!op || !sameOwner(op, owner)) return null;
+            const slot = waiting.get(callId);
+            if (
+              !slot ||
+              slot.operation !== op ||
+              slot.answered ||
+              !attempts.has(owner.generationId)
+            )
+              return null;
+            slot.token ??= randomUUID();
+            slot.operation = { ...op, claimed: true };
+            return slot.token;
+          }),
+        completeClaim: (callId, owner, token, value) =>
+          Effect.gen(function* () {
+            const op = yield* inspect(callId);
+            if (!op || !sameOwner(op, owner) || waiting.get(callId)?.token !== token) return false;
+            return yield* complete(callId, value);
+          }),
+        cancelAttempt,
       });
     }),
   );

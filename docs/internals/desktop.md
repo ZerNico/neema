@@ -1,135 +1,207 @@
 # Work chats and the desktop shell
 
-The site can act on the user's own machine, but only from inside the desktop
-app (`apps/desktop`), which loads the deployed site and lends it a folder over
-`contextBridge`. This page records the decisions that cross the three
-packages: the shell, the shared contract (`packages/desktop-rpc`) and the web
-app. Field lists and control flow live beside the code.
+The Electron shell loads the deployed site and exposes an origin-checked,
+schema-derived bridge. The web application owns authentication; Electron owns
+folder grants, sandboxed local execution and native window controls. Absolute
+folder paths stay in the desktop profile, not in the server database.
 
-## The server never touches the machine
+The window uses `hiddenInset` on macOS and `hidden` with Window Controls Overlay
+on Windows/Linux, retaining standard controls rather than web replacements.
+An optional presentation capability, independent of the Work protocol version,
+provides platform, fullscreen state and a validated theme preference. Theme writes
+require the same configured origin, main window and main frame as Work calls.
+Electron owns the overlay palette and follows the requested light/dark/system
+appearance; state and OS appearance changes use events, not polling.
 
-A desktop tool handler does not do the work. It registers the call with
-`ExternalCompletion` (`apps/web/src/modules/tools/server/external-completion.ts`),
-the loop announces the call on the message stream the page already subscribes
-to, the page runs it through the bridge and reports back through
-`submitDesktopToolResult`. `streaming.ts` sees an ordinary `tool-call` and an
-ordinary `tool-result`; the multi-turn loop, prompt folding and the Hermes
-polyfill never learn where the work happened.
+Connection and initial-load recovery are bundled local pages with their own drag
+strips. Their preloads expose no Work surface, and local actions require the exact
+bundled document, window and main frame. Recovery can retry only the configured
+server. Aborted/subframe failures are ignored, and an established Work renderer
+is not replaced merely because later network activity fails.
 
-Three consequences that are easy to break:
+## Execution belongs to the authenticated app, not a chat route
 
-- **The wait is bounded because the lease cannot end it.** The flusher renews
-  `generation_lease_until` every 250 ms whether or not anything is happening,
-  so a handler blocked forever renews forever and the row becomes unreapable.
-  `DESKTOP_TIMEOUTS` resolves as a value the model can read, never an exception.
-- **The slot opens when the row is written, not when the handler waits.** A
-  fast machine answers before the handler a step behind it starts waiting; an
-  answer with no slot is dropped and reads as a hang.
-- **Bytes never persist.** `forTranscript` keeps an excerpt of the detail and
-  drops a `file` outright. An image or PDF a read produced becomes a user file
-  part on the next round (the same path an attachment takes in `prompt.ts`) and
-  is stripped from the tool result the model sees, the row and every chunk.
+`DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.
+Its controller watches the authenticated Work snapshot, refreshed by id-only
+sync notifications and background reconciliation. Message SSE is for display,
+not execution authority. Opening chat B or settings does not stop chat A, reset
+its approvals, or replay its calls. Each conversation has independent consent.
+Off-route approvals use the shared Sonner notifications with a Review action,
+not a blocking dialog. Each pending call is announced once while it remains
+pending; refreshes and dismissal do not repeat it. A persistent approval-count
+menu opens any waiting conversation even after its toast is dismissed. Returning
+to the conversation dismisses its toast, and resolved requests or host teardown
+clear their notifications. Allow and Deny stay in the transcript.
 
-## Mode is fixed at creation; the folder lives on the machine
+Closing the Electron window hides it, preserving the renderer and its execution
+host. Minimizing and backgrounding also leave it running; background throttling
+is disabled. The tray, application menu and Dock can reopen the window. Explicit
+Quit asks for confirmation when Work is active, then awaits cancellation and
+owned-process cleanup. Closing is not quitting. Development rebuilds deliberately
+interrupt Work: the supervisor owns the actual Electron binary, requests cleanup
+through a private process channel, and waits for the old child to close before
+starting another. This path skips the interactive Quit question, not cleanup.
+A stalled shutdown is reported before escalation; failure to observe exit refuses
+a replacement rather than accumulating desktop instances.
 
-`conversations.mode` is `chat | work`, chosen when the chat starts, inherited
-by a branch, never changed. A work chat needs the desktop app, not a folder:
-a send without `fromDesktop` is refused inside the turn (`WorkDesktopRequired`)
-before any row is written, so the rule holds even when the composer is
-bypassed, while a chat may start with no folder and attach one later. The
-folder tools are offered only once a folder name arrives with a send; until
-then the desktop is present for whatever else it can do.
+## An attempt owns its local calls
 
-The server stores only the folder's _name_ per attempt
-(`message_generation_config.desktop_folder`), never a path. The path-to-
-conversation mapping is `folders.json` in the desktop profile. This is what
-makes the same chat correct on a second machine: it has no mapping, so it asks
-for a folder, rather than trusting a path that means nothing there. A browser
-tab reads a work chat and cannot continue it.
+A Work submission carries the current main-process execution session ID. That
+ID is random for each app lifetime, not a stored device identifier. The server
+binds each active attempt and call to user, conversation, message, generation
+and executor. This authority is runtime-only: it is neither copied by branching
+nor restored from a saved message configuration.
 
-## Two srt quirks the wrapper corrects on macOS
+Before local dispatch, the web host claims the call. Before accepting a result,
+the server checks the same tuple and claim token again. Both endpoints check
+streaming status and the generation lease using the database clock, then recheck
+the in-process registration. An owned conversation alone does not authorize an
+unrelated call ID. A second device can observe progress but cannot claim work
+started by the first. A server restart loses authority and fails closed.
 
-`SandboxManager.wrapWithSandboxArgv` returns `bash -c "env HTTPS_PROXY=http://localhost:PORT … sandbox-exec …"`,
-but the Seatbelt profile it generates denies the resolver lookup that
-`getaddrinfo("localhost")` needs. curl and npm special-case the name; Python's
-urllib3 does not, so `pip` fails with "nodename nor servname provided" before
-it reaches the proxy. `forSandboxedChild` rewrites every proxy variable in that
-script to `127.0.0.1` and points `PIP_CACHE_DIR` inside the folder, which is
-the only writable path. Proven against the real sandbox: `pip download` through
-the proxy succeeds, an off-allowlist host gets `403`, `~/.ssh` and a write
-outside the folder get `Operation not permitted`.
+The initiating session is a binding mechanism, not cryptographic attestation.
+`fromDesktop` is caller-supplied policy information. The origin-authorized page
+already has bridge authority; page approval is not a hardened boundary against
+a compromised authorized page.
 
-The proxy that answers CONNECTs reads the manager's _global_ config, while the
-per-call `customConfig` only shapes the Seatbelt profile. The network level
-therefore goes through `updateConfig` before each run as well as into the
-per-call override, or the two disagree and the level does nothing.
+## Bounded waits and cancellation
 
-## Several folders, one address space
+Desktop handlers block on `ExternalCompletion` inside the normal tool loop.
+The SDK starts handlers concurrently with consumption of its stream: seeing a
+provider call ID does not mean the tool row or external registration exists yet.
+A per-turn readiness Deferred releases the handler only after both exist; Stop
+or stream failure interrupts the wait. Registration also precedes the public tool
+announcement, so a fast result can arrive before the handler starts waiting.
+Native and Hermes calls share this handoff and the normal prompt-folding loop.
 
-A chat may attach any number of folders. The model addresses everything by a
-path whose first segment is a folder's basename (`site/src/index.ts`), and
-`list_folder "."` lists the folders. This is what Claude Code (real absolute
-paths) and Cowork (`~/mnt/<name>/…`) both converge on: one address space,
-no `folder` argument the model has to keep consistent per call. The only
-exception is `run_command`, which names its working folder, since a shell
-has exactly one cwd and the command text does not say which. Every attached
-folder is writable to a command, so a script in one can reach another by
-its prefixed path.
+The wait must have its own deadline: the ordinary generation flusher renews the
+lease even when idle. Reads get two minutes; changes and commands get ten.
+The registration and handler share that deadline. Expired or terminal calls
+cannot be newly claimed. Stop revokes the attempt, and generation scope cleanup
+removes authority on completion, failure or interruption.
 
-The name is therefore load-bearing: two folders with the same basename cannot
-both be attached to one chat, and `chooseFolder` refuses the second with
-`already-exists`. `desktop_folder` on the attempt carries the names joined
-with `/`, which cannot appear in a basename.
+The host removes stale approvals before applying blanket decisions and rechecks
+liveness after asynchronous claims. Navigation never cancels. Stop, deadline,
+identity teardown and document teardown cancel pending/queued calls and request
+cancellation of running local operations. A document reload can therefore fail
+an interrupted call safely rather than resume it. Abrupt renderer loss may leave
+an operation in Electron; an identical request can recover its retained result.
+Completed filesystem changes cannot be rolled back.
 
-## Containment is the desktop's job; the sandbox is the second fence
+## Replay is bounded, not distributed exactly-once execution
 
-Every path the site names goes through `resolveAcross`
-(`apps/desktop/src/folders.ts`): the first segment picks the folder, the rest
-goes through `resolveInFolder` against that root, where absolute paths are
-refused outright, the nearest existing ancestor is `realpath`-ed and
-containment is checked on the real path. A move checks both ends.
-`find_files` and `search_files` walk without following symlinks for the same
-reason. Commands run through `@anthropic-ai/sandbox-runtime` with the attached
-folders as the only writable paths, and the containment check has already
-happened before `run` is called.
+Every model-operation RPC includes its call ID, including reads. Main-process
+replay keys include the RPC tag and a canonical payload fingerprint. An identical
+request joins the original operation or returns its cached reply; changed payloads
+are refused. Separate `readFile` and `readBinary` requests may share one logical
+call ID. Cancellation installs a tombstone even before a request arrives.
 
-## Policy is the chat's; only the path is the machine's
+Replies and tombstones are held in memory for 24 hours, with entry and byte
+limits. Capacity refuses admission rather than evicting active work. An oversized
+completed reply may become an explicit unavailable-result refusal, never a reason
+to rerun the side effect. None of this persists through an app crash. A new main
+process has a new execution session and cannot silently replay an old attempt.
 
-`conversations.network_level` (`packages` by default: npm, PyPI, crates, Go,
-GitHub; or `none`, `all`) and `conversations.permission_level` (`auto` by
-default; `manual`, `skip`) are facts about the chat, not about a device, so
-they live on the server like `mode` and every machine honours the same choice.
-The page carries the network level down with each command; the desktop stores
-nothing but `conversationId → path` in `folders.json`, the one thing that
-genuinely differs per machine. Only the approval level is offered in the
-folder strip. The network level is a trust decision about the account rather
-than a choice per task, which is why Cowork keeps it in settings; it has no
-UI yet and stays at `packages`.
+The renderer retains a completed result while retrying failed delivery. It does
+not repeat the filesystem operation merely because the HTTP reply was lost.
+Before the first send, a dispatch barrier is installed; it is released only after
+the new conversation's draft-folder rebinding has been attempted. A failed or
+interrupted rebind does not authorize guessing a path.
 
-## Search uses ripgrep when the machine has it
+## Mode is fixed; capabilities are current
 
-Bundling `rg` means a native binary per platform that macOS will not run
-unsigned, which drags in packaging. So `ripgrep.ts` shells out to whatever
-`rg` is on `PATH` and `walk.ts` answers otherwise. Both honour `.gitignore`
-even outside a git checkout (`--no-require-git`), skip `.git`, never follow
-symlinks and skip binaries in search; the handler tests run against both
-backends so a result never depends on which one answered.
+`conversations.mode` is `chat | work`, fixed at creation and inherited by a
+branch. Work needs the desktop app, not a folder. Send, retry, edit and structured
+answers all submit current desktop capabilities and executor identity. Work
+attempts without them are refused before rows are created or reset. Retry never
+revives an old attached-folder or command setting. Plain chat ignores local-tool
+capability fields. Browser Work history remains readable, with continuation
+actions disabled and server policy enforced independently.
 
-## Consent lives in the page
+The server stores folder names per attempt, never paths. `folders.json` maps
+conversations to local grants. The composer strip and submission share a
+conversation-keyed local query, cleared with the authenticated identity cache.
+On capable desktops, route loaders prepare Work conversation and draft folder
+state before the composer mounts. The hook consumes that cache without an immediate
+mount refetch or automatic retry. A failed read opens the conversation with an
+inline folder retry, not a route error or empty grants. Ready-empty is valid: a new
+machine can continue Work without file tools until folders are attached there.
+Folder loading and mutation state block new attempts without opening a second,
+animated warning inside the input. Focus refresh does not remount the host.
 
-The page holds the call, so a refusal is enforced by the work never happening.
-`useDesktopApprovals` keeps a per-conversation level on this machine
-(`manual` asks for everything, `auto` asks before changes, `skip` asks for
-nothing) and per-kind blanket grants (edit, command). Two rules do not bend:
-a **delete** is asked about at every level and is never covered by a blanket,
-and a blanket for edits never covers commands. The approval card is pressable
-while the message is still `streaming`, the inverse of the clarification
-card's gate, because the generation is parked on the answer rather than ended
-by it.
+Loader preparation holds a query observer so unmounting the outgoing composer for
+route pending UI cannot cancel the read the destination still needs. It respects
+explicit cancellation, pending folder mutations and draft rebinding. Mutations
+cancel older reads and update only their original cache entry; draft rebinding
+invalidates both draft and destination state before releasing dispatch. Local
+queries are neither server-rendered nor persisted in the web backend.
 
-## Edits are strict on purpose
+## Several folders, one file-tool address space
 
-`edit_local_file` requires an exact match, unique unless `all` is set, and
-returns a unified diff. No whitespace normalisation, no first-match fallback,
-no patch format: measured across many models, a sharp refusal the model can
-widen its anchor from fails less than any of those.
+A model file path begins with an attached folder's basename, such as
+`site/src/index.ts`; `list_folder "."` lists the folders. Duplicate basenames are
+refused. This is a virtual address space for file tools, not a shell mount layout.
+`run_command` separately names its working folder. The shell sees real filesystem
+paths relative to that cwd; `other-folder/file` does not automatically resolve to
+another attached folder. Attached roots are writable under the command's sandbox
+policy, but are not remapped into virtual shell paths.
+
+## Containment and command isolation
+
+File paths pass through `resolveAcross` and `resolveInFolder`. Absolute paths are
+refused, existing ancestors are inspected with `lstat`, and `realpath` establishes
+containment. A dangling symlink is not treated as an absent ordinary path: its
+resolution fails closed. Only `ENOENT` allows walking to a parent. Moves check
+both ends. This does not claim protection against every concurrent filesystem
+replacement or hard-link alias.
+
+Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
+Its proxy reads global mutable network policy, so a semaphore covers the entire
+command lifetime: initialization, configuration, preparation, child execution,
+and cleanup. A queued command cannot alter a running command's network policy.
+Initialization is marked successful only after it succeeds.
+
+On macOS, the wrapper replaces `localhost` in leading sandbox-generated proxy
+environment assignments with `127.0.0.1`, avoiding resolver access denied by the
+sandbox. It also places the pip cache inside the granted folder. It never rewrites
+proxy-looking text inside the user's command.
+
+Owned POSIX process groups are terminated during cancellation and cleanup;
+Windows uses `taskkill /T`. Descendants that deliberately escape the process
+group, and Windows trees whose root has already exited, are not guaranteed to be
+stopped. Windows Job Objects are not implemented. Sandbox preparation must settle
+before its policy ownership can be released.
+
+## Policy is server-held; consent is local
+
+Network and permission levels belong to the conversation. The host refreshes
+them from the server and sends the network level with commands. The folder strip
+shows only the approval level: “Approve each action”, “Auto-approve reads”, or
+“Auto-approve reads and changes”, with descriptions in the picker. The stored
+values remain `manual`, `auto`, and `skip`. There is no per-chat network picker.
+
+Manual asks for reads too; automatic asks before changes and commands; skip
+allows those without another question. The dedicated delete tool always asks,
+but an allowed command can also delete files; this is not a deletion safeguard. Conversation-scoped
+blanket edit grants never cover commands or deletes, and manual reads have no
+blanket grant. These decisions outlive route changes but not the authenticated
+execution host. Approval cards remain actionable while generation is streaming,
+because the handler is waiting rather than finished.
+
+## Results, search and exact edits
+
+Full local file bytes are transient. Images and PDFs become model file parts
+where supported, with server extraction fallback; persisted tool rows and chunks
+retain only bounded summaries. Native and Hermes loops share this handling.
+Research keeps its existing server-side investigation and synthesis paths; this
+change does not add local tools to research workers or move their lifetimes into
+the desktop host.
+
+Search uses installed ripgrep when available and the JavaScript walker otherwise;
+no additional native binary is bundled. Both paths skip symlink traversal and
+apply ignore rules, though engine-specific regular expression differences remain.
+
+Edits require an exact, unique match unless `all` is set. Replacement text is
+literal, including dollar-substitution tokens. `diff` supplies a bounded unified
+preview; expensive or oversized previews are marked truncated rather than
+blocking indefinitely. A preview limit does not change the applied replacement.

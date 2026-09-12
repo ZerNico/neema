@@ -11,7 +11,7 @@ import {
 } from "@chat/desktop-rpc";
 import { unifiedDiff } from "./diff.ts";
 import { GrantStore } from "./grants.ts";
-import { folderName, resolveAcross, resolveInFolder } from "./folders.ts";
+import { exists, folderName, resolveAcross, resolveInFolder } from "./folders.ts";
 import { Sandbox } from "./sandbox.ts";
 import { findWithRipgrep, searchWithRipgrep } from "./ripgrep.ts";
 import { globToRegExp, walkFiles } from "./walk.ts";
@@ -38,10 +38,12 @@ const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
  * absolute one here.
  */
 
-/** Native dialog and file-manager reveal, injected so tests need no Electron. */
+/** The native directory dialog, injected so tests need no Electron. */
 export interface Shell {
   pickDirectory(): Promise<string | null>;
-  reveal(absolute: string): Promise<void>;
+  executionSession(): { id: string };
+  cancelCall(callId: string): boolean;
+  setWorkState(state: { active: number; needsApproval: number }): void;
 }
 
 const noFolder = new DesktopError({
@@ -83,6 +85,17 @@ export const makeHandlers = (shell: Shell) =>
       });
 
     const handlers: DesktopHandlers = {
+      executionSession: () => Effect.sync(() => shell.executionSession()),
+      cancelCall: ({ callId }) =>
+        Effect.try({
+          try: () => shell.cancelCall(callId),
+          catch: () =>
+            new DesktopError({
+              reason: "failed",
+              message: "Could not retain this cancellation. Try again after active work finishes.",
+            }),
+        }),
+      setWorkState: (state) => Effect.sync(() => shell.setWorkState(state)),
       folderStatus: ({ conversationId }) => status(conversationId),
 
       chooseFolder: ({ conversationId }) =>
@@ -333,7 +346,9 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const next = all ? text.replaceAll(before, after) : text.replace(before, after);
+          const next = all
+            ? text.replaceAll(before, () => after)
+            : text.replace(before, () => after);
           const replacements = all ? text.split(before).length - 1 : 1;
           yield* Effect.tryPromise({
             try: () => writeFile(target.absolute, next, "utf8"),
@@ -343,8 +358,9 @@ export const makeHandlers = (shell: Shell) =>
                 message: `Could not write ${target.relative}.`,
               }),
           });
-          const diff = unifiedDiff(target.relative, text, next);
-          const truncated = diff.length > LIMITS.readChars;
+          const preview = unifiedDiff(target.relative, text, next);
+          const diff = preview.diff;
+          const truncated = preview.truncated || diff.length > LIMITS.readChars;
           return {
             path: target.relative,
             replacements,
@@ -367,12 +383,7 @@ export const makeHandlers = (shell: Shell) =>
                 message: `${source.relative} does not exist.`,
               }),
           });
-          const taken = yield* Effect.promise(() =>
-            stat(destination.absolute).then(
-              () => true,
-              () => false,
-            ),
-          );
+          const taken = yield* exists(destination.absolute);
           if (taken) {
             return yield* Effect.fail(
               new DesktopError({
@@ -567,12 +578,7 @@ export const makeHandlers = (shell: Shell) =>
             );
           }
           const target = yield* locate(conversationId, path);
-          const existed = yield* Effect.promise(() =>
-            stat(target.absolute).then(
-              () => true,
-              () => false,
-            ),
-          );
+          const existed = yield* exists(target.absolute);
           yield* Effect.tryPromise({
             try: async () => {
               await mkdir(dirname(target.absolute), { recursive: true });
@@ -608,19 +614,7 @@ export const makeHandlers = (shell: Shell) =>
           });
         }),
 
-      sandboxAvailability: () => sandbox.availability(),
-
       setUpSandbox: () => sandbox.setUp(),
-
-      revealPath: ({ conversationId, path }) =>
-        Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
-          yield* Effect.tryPromise({
-            try: () => shell.reveal(target.absolute),
-            catch: () =>
-              new DesktopError({ reason: "failed", message: "Could not open that folder." }),
-          });
-        }),
     };
 
     return handlers;

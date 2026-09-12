@@ -1,3 +1,4 @@
+import type { DesktopSubmission } from "../schema.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { Context, Effect, Layer, Option } from "effect";
 import {
@@ -53,6 +54,7 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     desktopFolder?: string | undefined;
     desktopCommands?: boolean | undefined;
     fromDesktop?: boolean | undefined;
+    desktopExecutorId?: string | undefined;
     timeZone?: string | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
@@ -83,14 +85,16 @@ export class ChatService extends Context.Service<
     >;
     // Regenerates an assistant message in place (same id, fresh stream),
     // deleting every message after it — retry rewinds the conversation.
-    retryMessage(input: {
-      userId: string;
-      conversationId: string;
-      messageId: string;
-      /** Regenerate with this model instead of the one that answered before. */
-      modelId?: string | undefined;
-      timeZone?: string | undefined;
-    }): Effect.Effect<
+    retryMessage(
+      input: DesktopSubmission & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        /** Regenerate with this model instead of the one that answered before. */
+        modelId?: string | undefined;
+        timeZone?: string | undefined;
+      },
+    ): Effect.Effect<
       { assistantMessageId: string },
       | ConversationNotFound
       | MessageNotFound
@@ -126,6 +130,7 @@ export class ChatService extends Context.Service<
         desktopFolder?: string | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
+        desktopExecutorId?: string | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -310,6 +315,7 @@ function makeChatService() {
           desktopFolder?: string | undefined;
           desktopCommands?: boolean | undefined;
           fromDesktop?: boolean | undefined;
+          desktopExecutorId?: string | undefined;
         } & (
           | { attempt: "retry"; searchEnabled?: never }
           | { attempt: "send" | "edit"; searchEnabled: boolean }
@@ -325,21 +331,10 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
-          // Same rule as search: a retry reuses what the attempt ran with,
-          // because it has no submission of its own, while a send or an edit
-          // reports the folder attached on the machine it came from.
-          const desktopFolder =
-            input.attempt === "retry"
-              ? (continuation?.desktopFolder ?? null)
-              : (input.desktopFolder ?? null);
+          const desktopFolder = defaults.mode === "work" ? (input.desktopFolder ?? null) : null;
           const desktopCommands =
-            input.attempt === "retry"
-              ? (continuation?.desktopCommands ?? false)
-              : (input.desktopCommands ?? false);
-          // Only the desktop app can act on the machine, so a browser send
-          // to a work chat is refused inside the turn, before any row is
-          // written. A retry has no submission and replays its attempt.
-          if (defaults.mode === "work" && input.attempt !== "retry" && !input.fromDesktop)
+            defaults.mode === "work" && !!desktopFolder && !!input.desktopCommands;
+          if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
             return yield* new WorkDesktopRequired();
           // An edit that submits a selection is changing it, so it cannot take the
           // replay shortcut below: new collections need a rebuilt manifest.
@@ -442,6 +437,7 @@ function makeChatService() {
             ? { desktopCommands: input.desktopCommands }
             : {}),
           ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
+          desktopExecutorId: input.desktopExecutorId,
           model,
           searchAvailable,
           collectionIds: input.collectionIds,
@@ -463,6 +459,7 @@ function makeChatService() {
       });
 
       yield* engine.startGeneration({
+        desktopExecutorId: input.desktopExecutorId,
         userId: input.userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
@@ -491,26 +488,29 @@ function makeChatService() {
       return { conversationId: turn.conversation.id, assistantMessageId: turn.assistant.id };
     });
 
-    const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (input: {
-      expectedMessages: HistorySnapshot;
-      userId: string;
-      conversationId: string;
-      assistantMessageId: string;
-      modelId: string;
-      timeZone?: string | undefined;
-      deleteMessageIds: ReadonlyArray<string>;
-      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-      edit?: EditContent & {
-        messageId: string;
-        attachmentIds: ReadonlyArray<string>;
-        searchEnabled: boolean;
-        desktopFolder?: string | undefined;
-        desktopCommands?: boolean | undefined;
-        fromDesktop?: boolean | undefined;
-        skillIds?: ReadonlyArray<string> | undefined;
-        collectionIds?: ReadonlyArray<string> | undefined;
-      };
-    }) {
+    const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (
+      input: DesktopSubmission & {
+        expectedMessages: HistorySnapshot;
+        userId: string;
+        conversationId: string;
+        assistantMessageId: string;
+        modelId: string;
+        timeZone?: string | undefined;
+        deleteMessageIds: ReadonlyArray<string>;
+        invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
+        edit?: EditContent & {
+          messageId: string;
+          attachmentIds: ReadonlyArray<string>;
+          searchEnabled: boolean;
+          desktopFolder?: string | undefined;
+          desktopCommands?: boolean | undefined;
+          fromDesktop?: boolean | undefined;
+          desktopExecutorId?: string | undefined;
+          skillIds?: ReadonlyArray<string> | undefined;
+          collectionIds?: ReadonlyArray<string> | undefined;
+        };
+      },
+    ) {
       const model = yield* providers.getModel(input.modelId);
       if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
       const searchAvailable = yield* searchToolEnabled;
@@ -530,6 +530,7 @@ function makeChatService() {
               ? {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
+                  desktopExecutorId: input.desktopExecutorId,
                   ...(input.edit.desktopFolder !== undefined
                     ? { desktopFolder: input.edit.desktopFolder }
                     : {}),
@@ -542,7 +543,13 @@ function makeChatService() {
                   ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
                   ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
                 }
-              : { attempt: "retry" }),
+              : {
+                  attempt: "retry",
+                  fromDesktop: input.fromDesktop,
+                  desktopExecutorId: input.desktopExecutorId,
+                  desktopFolder: input.desktopFolder,
+                  desktopCommands: input.desktopCommands,
+                }),
           }),
           ...(input.edit
             ? {
@@ -565,6 +572,7 @@ function makeChatService() {
       });
 
       yield* engine.startGeneration({
+        desktopExecutorId: input.desktopExecutorId,
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: input.assistantMessageId,
@@ -581,13 +589,15 @@ function makeChatService() {
     // Reuses the message row so ids stay stable for subscribers and the
     // sidebar; chunks/tool calls are wiped, later messages deleted, and the
     // stream starts over.
-    const retryMessage = Effect.fn("ChatService.retryMessage")(function* (input: {
-      userId: string;
-      conversationId: string;
-      messageId: string;
-      modelId?: string | undefined;
-      timeZone?: string | undefined;
-    }) {
+    const retryMessage = Effect.fn("ChatService.retryMessage")(function* (
+      input: DesktopSubmission & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        modelId?: string | undefined;
+        timeZone?: string | undefined;
+      },
+    ) {
       yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -674,6 +684,10 @@ function makeChatService() {
         );
 
       const restarted = yield* restartAssistant({
+        desktopExecutorId: input.desktopExecutorId,
+        fromDesktop: input.fromDesktop,
+        desktopFolder: input.desktopFolder,
+        desktopCommands: input.desktopCommands,
         expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
@@ -783,6 +797,7 @@ function makeChatService() {
         desktopFolder?: string | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
+        desktopExecutorId?: string | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -835,6 +850,10 @@ function makeChatService() {
 
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
+          desktopExecutorId: input.desktopExecutorId,
+          fromDesktop: input.fromDesktop,
+          desktopFolder: input.desktopFolder,
+          desktopCommands: input.desktopCommands,
           expectedMessages: all,
           userId: input.userId,
           conversationId: input.conversationId,
@@ -850,6 +869,10 @@ function makeChatService() {
             ...edit,
             attachmentIds: input.attachmentIds,
             searchEnabled: input.searchEnabled,
+            fromDesktop: input.fromDesktop,
+            desktopExecutorId: input.desktopExecutorId,
+            desktopFolder: input.desktopFolder,
+            desktopCommands: input.desktopCommands,
             ...(input.skillIds ? { skillIds: input.skillIds } : {}),
             ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
           },
@@ -883,6 +906,7 @@ function makeChatService() {
             ? { desktopCommands: input.desktopCommands }
             : {}),
           ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
+          desktopExecutorId: input.desktopExecutorId,
           model,
           searchAvailable,
           ...(input.skillIds ? { skillIds: input.skillIds } : {}),
@@ -902,6 +926,7 @@ function makeChatService() {
         messageId: created.message.id,
       });
       yield* engine.startGeneration({
+        desktopExecutorId: input.desktopExecutorId,
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: created.message.id,

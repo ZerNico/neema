@@ -82,6 +82,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           desktopFolder: data.desktopFolder,
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
+          desktopExecutorId: data.desktopExecutorId,
           mode: data.mode,
           timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
@@ -133,6 +134,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           desktopFolder: data.desktopFolder,
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
+          desktopExecutorId: data.desktopExecutorId,
           timeZone: data.timeZone,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
@@ -180,6 +182,10 @@ export const retryMessage = createServerFn({ method: "POST" })
     runtime.runPromise(
       ChatService.use((chat) =>
         chat.retryMessage({
+          fromDesktop: data.fromDesktop,
+          desktopExecutorId: data.desktopExecutorId,
+          desktopFolder: data.desktopFolder,
+          desktopCommands: data.desktopCommands,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
@@ -243,6 +249,7 @@ export const stopGeneration = createServerFn({ method: "POST" })
     runtime.runPromise(
       ChatService.use((chat) =>
         chat.stopGeneration({
+          generationId: data.generationId,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,

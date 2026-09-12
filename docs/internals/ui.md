@@ -27,11 +27,17 @@ className={buttonVariants({...})}>`.
 - Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`, `ListCard`/`ListRow`,
   `EmptyState`, `ErrorState`), used across admin, settings, tools, agents, knowledge and the chats index.
   **`Page` is the scroll container**: the app layout's `<main>` is a fixed-height flex child that never
-  scrolls, because the chat view pins its composer/virtual list to that height, so every other route needs
-  its own scroller — never nest another `overflow-y-auto` inside `Page`. Pinned by `page-shell.test.tsx`.
+  scrolls, because the chat view pins its composer/virtual list to that height. Every other route needs
+  its own scroller; never nest another `overflow-y-auto` inside `Page`. On a capable desktop, viewport
+  shells use the available height below the document’s native-control row. Fixed sidebar and sheet
+  surfaces reserve that row once; the detail rail stays in normal flex layout. Browser sizing is
+  unchanged. Pinned by `page-shell.test.tsx` and the desktop chrome tests.
 - Loading a page's data is the **route loader's** job (`ensureQueryData`, or `prefetchQuery` + `retry:
-false`), so a page body is written against data already there. Where a loader can't cover it,
-  `ListSkeleton` (`page-shell.tsx`) is the one pending shape, never a bare `null` or `animate-pulse` div.
+false`), so a page body is written against data already there. This includes local Electron folder
+  state needed for the first Work composer render: client loaders await it in the same QueryClient
+  the view consumes. Local failures remain inline and retryable rather than failing the chat route.
+  Where a loader can't cover it, `ListSkeleton` (`page-shell.tsx`) is the one pending shape, never a
+  bare `null` or `animate-pulse` div.
 - Buttons go in exactly two places, chosen by what the button does: `Section`'s `actions` slot (top-right)
   is for "add one of these"; `FormActions` (`page-shell.tsx`) is the row under the fields, for
   Save/Apply/Reset. Skip it and a submit button that's a direct child of a `flex-col` form stretches full

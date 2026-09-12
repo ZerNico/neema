@@ -67,6 +67,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       authorized = true;
       refreshKnowledge();
       if (opened || reconcileIdentity) {
+        void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
@@ -90,6 +91,9 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       if (disposed || !authorized) return;
       const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
       switch (event.type) {
+        case "desktop.work.changed":
+          void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
+          break;
         case "agent.draft.changed":
           void queryClient.invalidateQueries({ queryKey: ["agents", "draft", event.draftId] });
           // A tool can create the draft after this chat’s loader snapshot.

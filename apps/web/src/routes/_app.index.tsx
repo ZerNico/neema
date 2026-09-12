@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { readChatPrefill } from "~/modules/agents/authoring.ts";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import { NewChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { DRAFT_CONVERSATION, prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import {
   chatModelsQuery,
   researchAvailabilityQuery,
@@ -20,8 +21,9 @@ export const Route = createFileRoute("/_app/")({
       ? { skill: search["skill"] }
       : {}),
   }),
-  loader: async ({ context }) => {
+  loader: async ({ context, abortController }) => {
     await Promise.all([
+      prepareWorkFolder(context.queryClient, DRAFT_CONVERSATION, abortController.signal),
       context.queryClient.ensureQueryData(chatModelsQuery),
       context.queryClient.prefetchQuery(agentsQuery),
       // Optional: a search-config failure must not prevent opening a chat.

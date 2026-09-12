@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { DesktopHandlers } from "@chat/desktop-rpc";
+import { makeDesktopResponder, type DesktopHandlers } from "@chat/desktop-rpc";
+import { makeExecutions } from "./executions.ts";
 import { GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -29,7 +30,6 @@ let root: string;
 let outsideDir: string;
 let handlers: DesktopHandlers;
 let picked: string | null;
-let revealed: string[];
 let ran: { command: string; cwd: string; network: string; allowWrite: string[] }[];
 
 const CONVERSATION = "conv-1";
@@ -60,7 +60,9 @@ beforeAll(async () => {
 
   const shell: Shell = {
     pickDirectory: async () => picked,
-    reveal: async (absolute) => void revealed.push(absolute),
+    executionSession: () => ({ id: "test-session" }),
+    cancelCall: () => false,
+    setWorkState: () => {},
   };
 
   handlers = await Effect.runPromise(
@@ -85,7 +87,6 @@ const failureOf = async <A>(effect: Effect.Effect<A, { reason: string }>) => {
 };
 
 beforeAll(() => {
-  revealed = [];
   ran = [];
 });
 
@@ -316,6 +317,74 @@ describe("once a folder is attached", () => {
         }),
       ),
     ).toBe("outside-folder");
+  });
+
+  it("never writes an outside target through a dangling symlink", async () => {
+    const target = join(outsideDir, "not-created.txt");
+    await symlink(target, join(root, "dangling"));
+    expect(
+      await failureOf(
+        handlers.writeFile({
+          conversationId: CONVERSATION,
+          path: "workspace/dangling",
+          text: "escaped",
+        }),
+      ),
+    ).toBe("not-found");
+    await expect(readFile(target)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await symlink(join(outsideDir, "missing-directory"), join(root, "dangling-dir"));
+    expect(
+      await failureOf(
+        handlers.writeFile({
+          conversationId: CONVERSATION,
+          path: "workspace/dangling-dir/nested.txt",
+          text: "escaped",
+        }),
+      ),
+    ).toBe("not-found");
+    await expect(
+      readFile(join(outsideDir, "missing-directory", "nested.txt")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([false, true])("inserts replacement metacharacters literally (all: %s)", async (all) => {
+    const text = all ? "left TARGET middle TARGET right" : "left TARGET right";
+    const replacement = "$& $$ $` $' $1";
+    await writeFile(join(root, "literal.txt"), text);
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        path: "workspace/literal.txt",
+        old: "TARGET",
+        new: replacement,
+        all,
+      }),
+    );
+    expect(await readFile(join(root, "literal.txt"), "utf8")).toBe(
+      text.split("TARGET").join(replacement),
+    );
+  });
+
+  it("replays a real edit after renderer replacement without editing the file again", async () => {
+    await writeFile(join(root, "replay.txt"), "original");
+    const respond = makeDesktopResponder(handlers);
+    const executions = makeExecutions((tag, payload, signal) =>
+      Effect.runPromise(respond(tag, payload), { signal }),
+    );
+    const payload = {
+      callId: "replay-edit",
+      conversationId: CONVERSATION,
+      path: "workspace/replay.txt",
+      old: "original",
+      new: "changed",
+      all: false,
+    };
+    const first = await executions.request("editFile", payload);
+    expect(first).toMatchObject({ ok: true, value: { replacements: 1 } });
+    expect(await executions.request("editFile", payload)).toEqual(first);
+    expect(await readFile(join(root, "replay.txt"), "utf8")).toBe("changed");
+    await executions.dispose();
   });
 
   it("refuses a traversal and an absolute path", async () => {

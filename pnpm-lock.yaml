@@ -154,6 +154,9 @@ importers:
       '@chat/desktop-rpc':
         specifier: workspace:*
         version: link:../../packages/desktop-rpc
+      diff:
+        specifier: 9.0.0
+        version: 9.0.0
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.112

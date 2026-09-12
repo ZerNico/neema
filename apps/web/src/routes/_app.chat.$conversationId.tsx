@@ -7,6 +7,7 @@ import {
   researchAvailabilityQuery,
 } from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import { EmptyState } from "~/ui/page-shell.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
@@ -17,18 +18,25 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
   // Nothing is returned: the view reads from the query cache, and the
   // SSR query integration already dehydrates them — returning the payload
   // would serialize the whole conversation into the document a second time.
-  loader: async ({ context, params }) => {
-    const [detail] = await Promise.all([
-      context.queryClient.ensureQueryData(conversationQuery(params.conversationId)),
+  loader: async ({ context, params, abortController }) => {
+    await Promise.all([
+      context.queryClient
+        .ensureQueryData(conversationQuery(params.conversationId))
+        .then(async (detail) => {
+          // Guard cached results too, before the view dereferences the conversation.
+          if (!detail?.conversation) throw notFound();
+          if (detail.conversation.mode === "work")
+            await prepareWorkFolder(
+              context.queryClient,
+              params.conversationId,
+              abortController.signal,
+            );
+        }),
       context.queryClient.ensureQueryData(chatModelsQuery),
       // Prefetch keeps optional search-config failures out of the route error boundary.
       context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
       context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),
     ]);
-    // The server function normally throws `notFound()`. Keep this runtime guard
-    // too: a stale or malformed cached result must never reach ChatView, whose
-    // title and messages require a real conversation.
-    if (!detail?.conversation) throw notFound();
   },
   component: ChatPage,
   notFoundComponent: ChatNotFound,

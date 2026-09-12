@@ -13,21 +13,27 @@ import { DesktopError } from "./schema.ts";
 const unimplemented = (tag: string) => () =>
   Effect.fail(new DesktopError({ reason: "failed", message: `${tag} not part of this test` }));
 
-const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers =>
-  ({
-    folderStatus: unimplemented("folderStatus"),
-    chooseFolder: unimplemented("chooseFolder"),
-    detachFolder: unimplemented("detachFolder"),
-    rebindFolder: unimplemented("rebindFolder"),
-    listDirectory: unimplemented("listDirectory"),
-    readFile: unimplemented("readFile"),
-    writeFile: unimplemented("writeFile"),
-    runCommand: unimplemented("runCommand"),
-    sandboxAvailability: unimplemented("sandboxAvailability"),
-    setUpSandbox: unimplemented("setUpSandbox"),
-    revealPath: unimplemented("revealPath"),
-    ...overrides,
-  }) as DesktopHandlers;
+const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
+  executionSession: unimplemented("executionSession"),
+  cancelCall: unimplemented("cancelCall"),
+  setWorkState: unimplemented("setWorkState"),
+  readBinary: unimplemented("readBinary"),
+  editFile: unimplemented("editFile"),
+  movePath: unimplemented("movePath"),
+  deletePath: unimplemented("deletePath"),
+  findFiles: unimplemented("findFiles"),
+  searchFiles: unimplemented("searchFiles"),
+  folderStatus: unimplemented("folderStatus"),
+  chooseFolder: unimplemented("chooseFolder"),
+  detachFolder: unimplemented("detachFolder"),
+  rebindFolder: unimplemented("rebindFolder"),
+  listDirectory: unimplemented("listDirectory"),
+  readFile: unimplemented("readFile"),
+  writeFile: unimplemented("writeFile"),
+  runCommand: unimplemented("runCommand"),
+  setUpSandbox: unimplemented("setUpSandbox"),
+  ...overrides,
+});
 
 /** Stands in for contextBridge: the only thing crossing is what survives JSON. */
 const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
@@ -107,6 +113,34 @@ describe("the desktop channel", () => {
 
     expect(reply.ok).toBe(false);
     expect(ran).toBe(false);
+  });
+
+  it("carries call ids and lifecycle requests through the schema-derived client", async () => {
+    let receivedId: string | undefined;
+    let work = { active: 0, needsApproval: 0 };
+    const client = makeDesktopClient(
+      connect({
+        executionSession: () => Effect.succeed({ id: "session" }),
+        cancelCall: ({ callId }) => Effect.succeed(callId === "call"),
+        setWorkState: (state) =>
+          Effect.sync(() => {
+            work = state;
+          }),
+        readFile: ({ callId, path }) =>
+          Effect.sync(() => {
+            receivedId = callId;
+            return { path, text: "hello", truncated: false };
+          }),
+      }),
+    );
+    expect(await Effect.runPromise(client.executionSession(undefined))).toEqual({ id: "session" });
+    expect(await Effect.runPromise(client.cancelCall({ callId: "call" }))).toBe(true);
+    await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1 }));
+    expect(work).toEqual({ active: 2, needsApproval: 1 });
+    await Effect.runPromise(
+      client.readFile({ callId: "call", conversationId: "c", path: "work/file" }),
+    );
+    expect(receivedId).toBe("call");
   });
 
   it("ignores a shell speaking a different protocol version", () => {

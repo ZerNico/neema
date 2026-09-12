@@ -176,7 +176,7 @@ function MobilePanel() {
       <SheetContent
         side="bottom"
         className={cn(
-          "max-h-[80svh]",
+          "detail-panel-sheet max-h-[80svh]",
           reducedMotion && "!transition-none !transform-none !translate-none",
         )}
         aria-hidden={!open || undefined}

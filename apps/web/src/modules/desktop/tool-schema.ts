@@ -47,9 +47,6 @@ export const approvalKind = (name: DesktopToolName): ApprovalKind | null => {
   }
 };
 
-/** Commands and writes change the machine, so they are the ones worth asking about. */
-export const changesTheMachine = (name: DesktopToolName) => approvalKind(name) !== null;
-
 /**
  * What the page sends back. Deliberately one shape for every tool: the loop
  * persists a summary and the model reads prose, so a per-tool result type would

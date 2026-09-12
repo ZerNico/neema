@@ -47,6 +47,26 @@ export function FolderStrip({
   /** Absent before the conversation exists: there is nothing to govern yet. */
   settings?: WorkSettingsControl | undefined;
 }) {
+  if (folder.readiness !== "ready") {
+    return (
+      <div className="bg-muted/60 text-muted-foreground mx-3 -mt-3 flex items-center gap-2 rounded-b-[1.375rem] border border-t-0 px-3 pt-4 pb-1.5 text-xs">
+        <span role="status" className="flex min-h-6 items-center">
+          {folder.readiness === "loading" ? "Checking folders…" : "Could not check folders."}
+        </span>
+        {folder.readiness === "error" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs"
+            onClick={folder.refresh}
+            disabled={folder.busy}
+          >
+            Retry folder check
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
   const { status, busy, refusal } = folder;
   // A lost folder deserves attention; none yet is just an invitation.
   const lost = status.folders.filter((item) => !item.alive);
@@ -190,7 +210,7 @@ function PermissionPicker({
         <HugeiconsIcon icon={Shield01Icon} strokeWidth={2} className="size-3.5" />
         <span className="truncate">{current.label}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         <DropdownMenuRadioGroup
           value={level}
           onValueChange={(value) => {
@@ -198,11 +218,27 @@ function PermissionPicker({
           }}
         >
           {PERMISSION_LEVELS.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
-              {option.label}
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              aria-label={option.label}
+              aria-describedby={`permission-${option.value}-description`}
+            >
+              <span className="flex min-w-0 flex-col gap-1">
+                <span>{option.label}</span>
+                <span
+                  id={`permission-${option.value}-description`}
+                  className="text-muted-foreground text-xs font-normal"
+                >
+                  {option.description}
+                </span>
+              </span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <p className="text-muted-foreground px-3 py-2 text-xs">
+          The delete tool always asks. An allowed command can still delete files.
+        </p>
       </DropdownMenuContent>
     </DropdownMenu>
   );

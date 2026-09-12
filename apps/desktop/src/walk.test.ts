@@ -85,7 +85,7 @@ describe("unifiedDiff", () => {
   it("shows the change with context and correct hunk ranges", () => {
     const before = ["a", "b", "c", "d", "e", "f", "g", "h"].join("\n");
     const after = ["a", "b", "c", "d", "X", "f", "g", "h"].join("\n");
-    expect(unifiedDiff("f.txt", before, after)).toBe(
+    expect(unifiedDiff("f.txt", before, after).diff).toBe(
       [
         "--- a/f.txt",
         "+++ b/f.txt",
@@ -98,6 +98,8 @@ describe("unifiedDiff", () => {
         " f",
         " g",
         " h",
+        "\\ No newline at end of file",
+        "",
       ].join("\n"),
     );
   });
@@ -105,7 +107,7 @@ describe("unifiedDiff", () => {
   it("splits far-apart changes into separate hunks", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `l${i}`);
     const after = lines.map((line) => (line === "l2" || line === "l17" ? `${line}!` : line));
-    const diff = unifiedDiff("f.txt", lines.join("\n"), after.join("\n"));
+    const { diff } = unifiedDiff("f.txt", lines.join("\n"), after.join("\n"));
     expect(diff.match(/^@@/gm)).toHaveLength(2);
     expect(diff).toContain("-l2\n+l2!");
     expect(diff).toContain("-l17\n+l17!");

@@ -1,3 +1,4 @@
+import { DesktopWorkProvider, WorkAttention } from "~/modules/desktop/client/work-host.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { IdentityBoundary, useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
@@ -12,6 +13,7 @@ import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
+import { AppHeader } from "~/ui/desktop-chrome.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
@@ -54,28 +56,31 @@ function AuthenticatedLayout({
   useSync(boundary?.reconcile);
 
   return (
-    <AppMotionProvider>
-      <ConfirmProvider>
-        <SidebarProvider>
-          <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
-          <SidebarInset className="h-svh overflow-hidden">
-            <DetailPanelProvider>
-              <header className="border-border flex h-12 shrink-0 items-center gap-2 border-b px-3">
-                <SidebarTrigger />
-              </header>
-              {/* The detail rail is a sibling of the content, not an overlay:
+    <DesktopWorkProvider userId={identity.userId}>
+      <AppMotionProvider>
+        <ConfirmProvider>
+          <SidebarProvider>
+            <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
+            <SidebarInset className="h-svh overflow-hidden">
+              <DetailPanelProvider>
+                <AppHeader>
+                  <SidebarTrigger />
+                  <WorkAttention />
+                </AppHeader>
+                {/* The detail rail is a sibling of the content, not an overlay:
                 opening it shrinks the chat column instead of covering it. */}
-              <div className="flex min-h-0 flex-1">
-                <main className="min-w-0 flex-1">
-                  <Outlet />
-                </main>
-                <DetailPanelRail />
-              </div>
-            </DetailPanelProvider>
-          </SidebarInset>
-        </SidebarProvider>
-      </ConfirmProvider>
-    </AppMotionProvider>
+                <div className="flex min-h-0 flex-1">
+                  <main className="min-w-0 flex-1">
+                    <Outlet />
+                  </main>
+                  <DetailPanelRail />
+                </div>
+              </DetailPanelProvider>
+            </SidebarInset>
+          </SidebarProvider>
+        </ConfirmProvider>
+      </AppMotionProvider>
+    </DesktopWorkProvider>
   );
 }
 

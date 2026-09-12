@@ -11,22 +11,24 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
+export const desktopSubmissionFields = {
+  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+  desktopCommands: Schema.optionalKey(Schema.Boolean),
+  fromDesktop: Schema.optionalKey(Schema.Boolean),
+  desktopExecutorId: Schema.optionalKey(ResourceId),
+};
+const DesktopSubmission = Schema.Struct(desktopSubmissionFields);
+export type DesktopSubmission = {
+  [K in keyof typeof DesktopSubmission.Type]?: (typeof DesktopSubmission.Type)[K] | undefined;
+};
+
 const generationFields = {
   generationMode: Schema.optionalKey(GenerationMode),
   timeZone: TimeZone,
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
-  /**
-   * The folder attached on the machine this message was sent from, by name
-   * only. The server stores no path: the same conversation opened elsewhere
-   * simply reports a different folder, or none.
-   */
-  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-  /** False when that machine cannot sandbox, which withholds the command tool. */
-  desktopCommands: Schema.optionalKey(Schema.Boolean),
-  /** Sent by the desktop app only. A work chat refuses a send without it. */
-  fromDesktop: Schema.optionalKey(Schema.Boolean),
+  ...desktopSubmissionFields,
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
   /**
@@ -57,16 +59,7 @@ export const AnswerQuestionInput = Schema.Struct({
   response: QuestionResponse,
   modelId: Schema.String,
   searchEnabled: Schema.Boolean,
-  /**
-   * The folder attached on the machine this message was sent from, by name
-   * only. The server stores no path: the same conversation opened elsewhere
-   * simply reports a different folder, or none.
-   */
-  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-  /** False when that machine cannot sandbox, which withholds the command tool. */
-  desktopCommands: Schema.optionalKey(Schema.Boolean),
-  /** Sent by the desktop app only. A work chat refuses a send without it. */
-  fromDesktop: Schema.optionalKey(Schema.Boolean),
+  ...desktopSubmissionFields,
   timeZone: TimeZone,
 });
 
@@ -98,6 +91,7 @@ export const MessageIdInput = Schema.Struct({
 // Omitting `modelId` regenerates with whatever model produced the answer;
 // sending one switches models for the new attempt ("retry with").
 export const RetryMessageInput = Schema.Struct({
+  ...desktopSubmissionFields,
   conversationId: Schema.String,
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
@@ -122,16 +116,7 @@ export const EditMessageInput = Schema.Union([
     messageId: Schema.String,
     modelId: Schema.String,
     searchEnabled: Schema.Boolean,
-    /**
-     * The folder attached on the machine this message was sent from, by name
-     * only. The server stores no path: the same conversation opened elsewhere
-     * simply reports a different folder, or none.
-     */
-    desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-    /** False when that machine cannot sandbox, which withholds the command tool. */
-    desktopCommands: Schema.optionalKey(Schema.Boolean),
-    /** Sent by the desktop app only. A work chat refuses a send without it. */
-    fromDesktop: Schema.optionalKey(Schema.Boolean),
+    ...desktopSubmissionFields,
     timeZone: TimeZone,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,

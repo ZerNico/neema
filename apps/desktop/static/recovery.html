@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Chat</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --titlebar-height: max(48px, env(titlebar-area-height, 0px));
+        --titlebar-left: 0px;
+        --titlebar-right: 160px;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0a0a0a;
+          --foreground: #fafafa;
+        }
+      }
+      :root[data-platform="darwin"] {
+        --titlebar-left: 96px;
+        --titlebar-right: 0px;
+      }
+      :root[data-fullscreen="true"] {
+        --titlebar-height: 0px;
+      }
+      :root[data-fullscreen="true"] .titlebar {
+        display: none;
+      }
+      .titlebar {
+        position: fixed;
+        top: 0;
+        left: env(titlebar-area-x, var(--titlebar-left));
+        right: var(--titlebar-right);
+        width: env(titlebar-area-width, auto);
+        height: var(--titlebar-height);
+        -webkit-app-region: drag;
+        user-select: none;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        box-sizing: border-box;
+        padding: var(--titlebar-height) 24px 0;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        max-width: 360px;
+        display: grid;
+        gap: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 17px;
+      }
+      p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.5;
+        opacity: 0.7;
+      }
+      button {
+        justify-self: start;
+        margin-top: 4px;
+        padding: 8px 16px;
+        font: inherit;
+        color: inherit;
+        border: 0;
+        border-radius: 10px;
+        background: rgb(120 120 128 / 0.24);
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar" aria-hidden="true"></div>
+    <main>
+      <h1>Couldn’t reach your chat server</h1>
+      <p>
+        Check your connection and make sure your server is running. Your saved server address hasn’t
+        changed.
+      </p>
+      <button id="retry" type="button">Retry</button>
+      <p id="status" role="status"></p>
+    </main>
+    <script>
+      const chrome = window.__chatRecovery.chrome;
+      document.documentElement.dataset.platform = chrome.platform;
+      let stateReceived = false;
+      const applyState = (state) => {
+        document.documentElement.dataset.fullscreen = String(state.fullscreen);
+      };
+      const unsubscribe = chrome.onState((state) => {
+        stateReceived = true;
+        applyState(state);
+      });
+      chrome
+        .getState()
+        .then((state) => {
+          if (!stateReceived) applyState(state);
+        })
+        .catch(() => {});
+      window.addEventListener("pagehide", unsubscribe, { once: true });
+      const retry = document.getElementById("retry");
+      const status = document.getElementById("status");
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        status.textContent = "Connecting…";
+        try {
+          await window.__chatRecovery.retry();
+          status.textContent = "Still unable to connect. You can try again.";
+        } catch {
+          status.textContent = "Couldn’t reconnect. Please try again.";
+        } finally {
+          retry.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

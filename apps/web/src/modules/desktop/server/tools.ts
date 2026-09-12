@@ -2,18 +2,13 @@ import { Duration, Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import {
-  DESKTOP_TIMEOUTS,
-  DesktopToolResult,
-  changesTheMachine,
-  desktopFailure,
-} from "../tool-schema.ts";
+import { DESKTOP_TIMEOUTS, DesktopToolResult, desktopFailure } from "../tool-schema.ts";
 
 /**
  * Tools that run on the user's machine instead of the server.
  *
- * The handler does not do the work: it publishes the call and blocks on
- * `ExternalCompletion` until the page reports back. That keeps the whole
+ * The handler does not do the work: it waits for the loop's registration, then
+ * blocks on `ExternalCompletion` until the page reports back. That keeps the whole
  * agentic loop where it already is. `streaming.ts` sees an ordinary
  * `tool-call` and an ordinary `tool-result`, folds them into the transcript
  * with `Prompt.fromResponseParts` like any other pair, and never learns that
@@ -125,15 +120,8 @@ export const runCommandTool = Tool.make("run_command", {
 });
 
 export interface DesktopToolDeps {
-  /**
-   * Resolves the durable row id for a provider call id.
-   *
-   * The page is told about the call by the loop's own `start` envelope, which
-   * already carries the arguments and the real turn and call index. So a
-   * handler does not announce anything: by the time it runs, the row exists and
-   * the page has been asked. All it does is wait for the answer.
-   */
-  readonly rowIdFor: (providerCallId: string) => string | undefined;
+  /** Waits for the durable row and its owned external registration to exist. */
+  readonly rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
   /**
    * Whether the machine could sandbox a command when the message was sent.
    * False withholds `run_command` alone: the folder still attaches and reads
@@ -162,9 +150,9 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     (_params: Record<string, unknown>, ctx: { toolCallId: string }) =>
       Effect.gen(function* () {
         const external = yield* ExternalCompletion;
-        // The transcript row is created by the loop when it sees the call, so
-        // the durable id exists by the time a handler runs.
-        const callId = deps.rowIdFor(ctx.toolCallId);
+        // The SDK may start us while the observer is still inserting the row.
+        // This wait is interrupted with the model stream on Stop or failure.
+        const callId = yield* deps.rowIdFor(ctx.toolCallId);
         if (!callId) {
           return desktopFailure(
             "That could not be sent to the computer",
@@ -172,6 +160,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
           );
         }
         return yield* external.await(callId, {
+          requireOpen: true,
           timeout: Duration.millis(timeoutMs),
           onTimeout: () => timedOut(name),
         });
@@ -203,5 +192,3 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     },
   };
 };
-
-export { changesTheMachine };

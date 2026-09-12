@@ -17,7 +17,95 @@ const withService = <A, E>(
 const start = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.forkChild(effect, { startImmediately: true });
 
+const owner = {
+  userId: "u",
+  conversationId: "c",
+  messageId: "m",
+  generationId: "g",
+  executorId: "e",
+};
+const operation = {
+  ...owner,
+  name: "write_local_file",
+  args: { path: "site/a", text: "hello" },
+  timeoutMs: 5000,
+};
+
 describe("ExternalCompletion", () => {
+  it.effect("binds claims and results to every part of the initiating identity", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        yield* external.track(owner, Effect.void);
+        yield* external.open("owned", operation);
+        for (const key of [
+          "userId",
+          "conversationId",
+          "messageId",
+          "generationId",
+          "executorId",
+        ] as const)
+          expect(yield* external.claim("owned", { ...owner, [key]: "foreign" })).toBeNull();
+        expect((yield* external.snapshot("other-user", "e")).calls).toEqual([]);
+        expect((yield* external.snapshot("u", "other-machine")).calls).toEqual([]);
+        const tokens = yield* Effect.all(
+          [external.claim("owned", owner), external.claim("owned", owner)],
+          { concurrency: 2 },
+        );
+        expect(tokens[0]).toBeTruthy();
+        expect(tokens[1]).toBe(tokens[0]);
+        expect(yield* external.completeClaim("owned", owner, "wrong-token", "bad")).toBe(false);
+        expect(yield* external.completeClaim("owned", owner, tokens[0]!, "good")).toBe(true);
+        expect(yield* external.completeClaim("owned", owner, tokens[0]!, "duplicate")).toBe(false);
+        expect(
+          yield* external.await("owned", {
+            timeout: Duration.seconds(5),
+            onTimeout: () => "timeout",
+          }),
+        ).toBe("good");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("revokes authority at expiry before a delayed handler starts waiting", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        yield* external.track(owner, Effect.void);
+        yield* external.open("expired", operation);
+        const token = yield* external.claim("expired", owner);
+        yield* TestClock.adjust(Duration.seconds(5));
+        expect(yield* external.claim("expired", owner)).toBeNull();
+        expect(yield* external.completeClaim("expired", owner, token!, "late")).toBe(false);
+        expect(
+          yield* external.await("expired", {
+            timeout: Duration.minutes(10),
+            onTimeout: () => "timeout",
+          }),
+        ).toBe("timeout");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("Stop cancels ownership and rejects every later claim or result", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        yield* external.track(owner, Effect.void);
+        yield* external.open("stopped", operation);
+        const token = yield* external.claim("stopped", owner);
+        yield* external.cancelAttempt(owner);
+        expect(yield* external.claim("stopped", owner)).toBeNull();
+        expect(yield* external.completeClaim("stopped", owner, token!, "late")).toBe(false);
+        expect((yield* external.snapshot("u", "e")).attempts).toEqual([]);
+        expect(
+          yield* external.await("unregistered", {
+            requireOpen: true,
+            timeout: Duration.minutes(10),
+            onTimeout: () => "cancelled",
+          }),
+        ).toBe("cancelled");
+        expect(yield* external.pending("unregistered")).toBe(false);
+      }).pipe(Effect.scoped),
+    ),
+  );
   it.effect("returns the answer it was given", () =>
     withService((external) =>
       Effect.gen(function* () {

@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
 import { Effect } from "effect";
+import { runOwnedProcess } from "./process.ts";
 import type { SearchMatch } from "@chat/desktop-rpc";
 import { LIMITS } from "@chat/desktop-rpc";
 
@@ -23,22 +23,32 @@ const OUTPUT_BYTES = 8 * 1024 * 1024;
 let available: Promise<boolean> | undefined;
 
 export const ripgrepAvailable = (): Promise<boolean> => {
-  available ??= new Promise((resolve) => {
-    execFile("rg", ["--version"], { timeout: 3_000 }, (error) => resolve(error === null));
-  });
+  available ??= Effect.runPromise(
+    runOwnedProcess({
+      program: "rg",
+      args: ["--version"],
+      cwd: process.cwd(),
+      env: process.env,
+      timeoutMs: 3_000,
+    }),
+  ).then(
+    (result) => result.code === 0,
+    () => false,
+  );
   return available;
 };
 
 const rg = (args: readonly string[], cwd: string) =>
-  Effect.promise(
-    () =>
-      new Promise<{ code: number; stdout: string }>((resolve) => {
-        execFile("rg", args, { cwd, maxBuffer: OUTPUT_BYTES, timeout: 30_000 }, (error, stdout) => {
-          // rg exits 1 for "no matches", which is an answer, not a fault.
-          const code = error && "code" in error && typeof error.code === "number" ? error.code : 0;
-          resolve({ code, stdout: typeof stdout === "string" ? stdout : "" });
-        });
-      }),
+  runOwnedProcess({
+    program: "rg",
+    args: [...args],
+    cwd,
+    env: process.env,
+    timeoutMs: 30_000,
+    outputChars: OUTPUT_BYTES,
+  }).pipe(
+    Effect.map(({ code, stdout }) => ({ code, stdout })),
+    Effect.catch(() => Effect.succeed({ code: 2, stdout: "" })),
   );
 
 /** Paths under `root` matching a glob, newest first. `null` when rg is not present. */

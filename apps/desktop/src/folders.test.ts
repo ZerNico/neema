@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { resolveAcross, resolveInFolder } from "./folders.ts";
+import { exists, resolveAcross, resolveInFolder } from "./folders.ts";
 
 /**
  * Real directories and real symlinks. A fake fs would let the containment check
@@ -40,6 +40,14 @@ describe("resolving a path inside the chosen folder", () => {
     if (outcome._tag !== "Success") return;
     expect(outcome.success.relative).toBe(join("src", "index.ts"));
     expect(outcome.success.absolute.endsWith(join("src", "index.ts"))).toBe(true);
+  });
+
+  it("treats only ENOENT as missing, not an unreadable path", async () => {
+    expect(await Effect.runPromise(exists(join(root, "missing")))).toBe(false);
+    const outcome = await Effect.runPromise(
+      Effect.result(exists(join(root, "src", "index.ts", "child"))),
+    );
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { reason: "failed" } });
   });
 
   it("accepts the folder itself", async () => {
@@ -118,7 +126,6 @@ describe("resolving a path across several attached folders", () => {
     const outcome = await across("workspace/src/index.ts");
     expect(outcome._tag).toBe("Success");
     if (outcome._tag !== "Success") return;
-    expect(outcome.success.folder).toBe("workspace");
     expect(outcome.success.relative).toBe("workspace/src/index.ts");
     expect(outcome.success.absolute.endsWith(join("src", "index.ts"))).toBe(true);
     expect(outcome.success.root.endsWith("workspace")).toBe(true);

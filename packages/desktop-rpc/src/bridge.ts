@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import type { RpcGroup } from "effect/unstable/rpc";
 import { DesktopRpcs } from "./group.ts";
 import { DesktopError } from "./schema.ts";
+import type { DesktopChrome } from "./chrome.ts";
 
 /**
  * The transport is a promise-based request/response channel, because that is
@@ -21,6 +22,7 @@ export interface DesktopChannel {
   readonly protocolVersion: number;
   /** Short git sha and build time of the shell, for the reader and for bug reports. */
   readonly build?: string;
+  readonly chrome?: DesktopChrome;
   request(tag: string, payload: unknown): Promise<BridgeReply>;
 }
 
@@ -28,7 +30,7 @@ export type BridgeReply =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: unknown };
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** The key `contextBridge` exposes on `window` inside the desktop shell. */
 export const BRIDGE_KEY = "__chatDesktop" as const;
@@ -120,36 +122,29 @@ export const makeDesktopClient = (channel: DesktopChannel): DesktopClient => {
  * The desktop side of the same contract: decode, run, encode. Returns a reply
  * rather than throwing, so a handler failure crosses as data.
  */
+/** The wire form of a refusal, so the shell and the responder spell it once. */
+export const refusalReply = (reason: DesktopError["reason"], message: string): BridgeReply => ({
+  ok: false,
+  error: { _tag: "DesktopError", reason, message },
+});
+
 export const makeDesktopResponder =
   (handlers: DesktopHandlers) =>
   (tag: string, payload: unknown): Effect.Effect<BridgeReply> =>
     Effect.gen(function* () {
       const rpc = DesktopRpcs.requests.get(tag);
-      if (!rpc) {
-        return {
-          ok: false,
-          error: { _tag: "DesktopError", reason: "failed", message: `Unknown request: ${tag}` },
-        } as const;
-      }
+      if (!rpc) return refusalReply("failed", `Unknown request: ${tag}`);
       const decoded = yield* Schema.decodeUnknownEffect(rpc.payloadSchema)(payload).pipe(
         Effect.result,
       );
-      if (decoded._tag === "Failure") {
-        return {
-          ok: false,
-          error: { _tag: "DesktopError", reason: "failed", message: "Malformed request." },
-        } as const;
-      }
+      if (decoded._tag === "Failure") return refusalReply("failed", "Malformed request.");
       const handler = handlers[tag as DesktopTag] as (
         input: unknown,
       ) => Effect.Effect<unknown, DesktopError>;
       const outcome = yield* handler(decoded.success).pipe(Effect.result);
       if (outcome._tag === "Failure") {
         const failure = asDesktopError(outcome.failure);
-        return {
-          ok: false,
-          error: { _tag: "DesktopError", reason: failure.reason, message: failure.message },
-        } as const;
+        return refusalReply(failure.reason, failure.message);
       }
       const encoded = yield* Schema.encodeEffect(rpc.successSchema)(outcome.success as never).pipe(
         Effect.orDie,

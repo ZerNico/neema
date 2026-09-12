@@ -38,6 +38,16 @@ describe("forSandboxedChild", () => {
     expect(already[2]).toBe("env PIP_CACHE_DIR=/x true");
   });
 
+  it("preserves the executable and user command suffix byte-for-byte", () => {
+    const suffix =
+      "/usr/bin/sandbox-exec -p 'HTTP_PROXY=http://localhost:90' bash -c 'HTTPS_PROXY=http://localhost:8000 curl x; printf \"PIP_CACHE_DIR=mine\"'";
+    const prefix = "env HTTPS_PROXY=http://localhost:3128 OTHER='has spaces' ";
+    const out = forSandboxedChild(["bash", "-c", prefix + suffix], "/tmp")[2]!;
+    expect(out.endsWith(suffix)).toBe(true);
+    expect(out).toContain("HTTPS_PROXY=http://127.0.0.1:3128");
+    expect(out).toContain("PIP_CACHE_DIR='/tmp/.cache/pip'");
+  });
+
   it("leaves anything that is not the env script alone", () => {
     expect(forSandboxedChild(["/bin/bash", "-c", "echo localhost"], "/tmp")).toEqual([
       "/bin/bash",
