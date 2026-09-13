@@ -8,6 +8,7 @@ const child = spawn(process.execPath, [fileURLToPath(new URL("./start.mjs", impo
   env: {
     ...process.env,
     DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/disabled",
+    NODE_ENV: "production",
     NITRO_HOST: "127.0.0.1",
     NITRO_PORT: "0",
     NO_COLOR: "1",
@@ -55,6 +56,10 @@ try {
       path === "/unknown-startup-page" ? 404 : 200,
       `${path}: ${html.slice(0, 200)}`,
     );
+    const csp = response.headers.get("content-security-policy") ?? "";
+    assert.match(csp, /default-src 'self'/);
+    assert.match(csp, /script-src 'self' 'sha256-/);
+    assert.doesNotMatch(csp, /script-src [^;]*'unsafe-inline'/);
     assert.match(html, /Loading Chat…/);
     assert.match(html, /id="desktop-titlebar-content"/);
     console.log(`Shell: ${path}`);

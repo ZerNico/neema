@@ -1,12 +1,10 @@
 import { useSyncExternalStore } from "react";
+import { THEME_STORAGE_KEY, themeInitScript } from "./boot-scripts.ts";
 
 export type Theme = "light" | "dark" | "system";
+export { themeInitScript };
 
-const STORAGE_KEY = "theme";
-
-// Runs before paint in __root to avoid a flash of the wrong theme. Kept as a
-// string so it can be inlined; must stay in sync with applyTheme below.
-export const themeInitScript = `(function(){try{var t=localStorage.getItem("${STORAGE_KEY}");var d=t==="dark"||((!t||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d)}catch(e){}})()`;
+const STORAGE_KEY = THEME_STORAGE_KEY;
 
 function readTheme(): Theme {
   if (typeof window === "undefined") return "system";

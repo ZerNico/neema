@@ -27,8 +27,10 @@ className={buttonVariants({...})}>`.
 - Browser and Electron share a client-rendered SPA. The root document is a generic shell, not a
   personalized SSR page. Early scripts apply theme and native-control clearance before paint; one
   permanent titlebar target survives hydration. A client-only boundary mounts desktop detection and
-  theme-dependent UI before the application, so controls do not first render browser defaults. Auth
-  checks and route loaders still use authorized server functions. Startup shows `StartupPending`;
+  theme-dependent UI before the application, so controls do not first render browser defaults. The
+  document response sets a Content-Security-Policy: production hashes those two boot scripts,
+  development leaves Vite's inline preamble and HMR socket room. Auth checks and route loaders
+  still use authorized server functions. Startup shows `StartupPending`;
   route loading must not replace the authenticated background Work host.
 - Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`, `ListCard`/`ListRow`,
   `EmptyState`, `ErrorState`), used across admin, settings, tools, agents, knowledge and the chats index.

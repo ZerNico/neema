@@ -9,10 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { desktopChromeInitScript } from "./boot-scripts.ts";
 import { useTheme } from "./theme.tsx";
 
-// Reserve space before hydration; capability detection mirrors readDesktopChrome.
-export const desktopChromeInitScript = `(function(){var c=window.__chatDesktop&&window.__chatDesktop.chrome;if(c&&["darwin","win32","linux"].includes(c.platform)&&typeof c.getState==="function"&&typeof c.onState==="function"&&typeof c.setTheme==="function")document.documentElement.dataset.desktopChrome=c.platform})()`;
+export { desktopChromeInitScript };
 
 const subscribeToNothing = () => () => {};
 const ChromeContext = createContext<{

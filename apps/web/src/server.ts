@@ -1,4 +1,5 @@
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
+import { DOCUMENT_CSP } from "./server/csp.ts";
 
 export default {
   fetch: createStartHandler((context) => {
@@ -8,6 +9,15 @@ export default {
     if (/^\/(?:api|assets|_serverFn)(?:\/|$)/.test(path)) {
       return new Response("Not found", { status: 404 });
     }
-    return defaultStreamHandler(context);
+    return Promise.resolve(defaultStreamHandler(context)).then((result) => {
+      const response = result instanceof Response ? result : result.response;
+      const headers = new Headers(response.headers);
+      headers.set("Content-Security-Policy", DOCUMENT_CSP);
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    });
   }),
 };
