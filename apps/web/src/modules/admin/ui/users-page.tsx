@@ -2,7 +2,7 @@ import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { authClient } from "~/modules/auth/client.ts";
+import { authClient, sessionIdentityQuery } from "~/modules/auth/client.ts";
 import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { membershipsQuery } from "./groups-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -36,7 +36,9 @@ export function UsersPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const boundary = useIdentityBoundary();
-  const session = authClient.useSession();
+  // The identity the boundary already pinned for this tree, not a second
+  // session read: impersonating swaps it, and both must agree on who "you" is.
+  const { data: identity } = useQuery(sessionIdentityQuery);
   // Read-only here; membership is edited on the group detail pages.
   const memberships = useQuery(membershipsQuery);
 
@@ -101,7 +103,7 @@ export function UsersPage() {
         <Section title="Accounts">
           <ListCard>
             {users.data?.map((user) => {
-              const isSelf = user.id === session.data?.user.id;
+              const isSelf = user.id === identity?.userId;
               const isAdmin = user.role?.split(",").includes("admin") ?? false;
               const groupNames = (memberships.data ?? [])
                 .filter((membership) => membership.userId === user.id)
@@ -152,7 +154,7 @@ export function UsersPage() {
                       {!isSelf &&
                         !isAdmin &&
                         !user.banned &&
-                        !session.data?.session.impersonatedBy && (
+                        !identity?.impersonatedBy && (
                           <DropdownMenuItem
                             disabled={impersonate.isPending}
                             onClick={async () => {

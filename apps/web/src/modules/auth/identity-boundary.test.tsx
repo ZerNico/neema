@@ -60,9 +60,14 @@ vi.mock("./client.ts", () => ({
         },
       },
     },
-    useSession: () => ({ data: { user: { id: "admin" }, session: { impersonatedBy: null } } }),
     admin: { impersonateUser: mocks.start, stopImpersonating: mocks.stop, listUsers: mocks.list },
     signOut: mocks.signOut,
+  },
+  // The users page reads who "you" are from the same identity the boundary
+  // pins, so impersonation controls and the boundary cannot disagree.
+  sessionIdentityQuery: {
+    queryKey: ["session-identity"],
+    queryFn: async () => ({ userId: "admin", impersonatedBy: null }),
   },
 }));
 vi.mock("~/modules/admin/ui/groups-page.tsx", () => ({
