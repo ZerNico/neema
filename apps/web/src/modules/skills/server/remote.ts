@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { assertPublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
+import { fetchPinned, resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
 import {
   decodeSkillText,
   SKILL_LIMITS,
@@ -57,7 +57,7 @@ const object = (input: unknown): Record<string, unknown> => {
   return input as Record<string, unknown>;
 };
 
-/** Fixed hosts plus the existing DNS/redirect SSRF guard. No credentials or ambient authorization. */
+/** Fixed hosts plus DNS-pinned public fetches. No credentials or ambient authorization. */
 export async function fetchSkillBytes(
   rawUrl: string,
   limit: number,
@@ -73,11 +73,9 @@ export async function fetchSkillBytes(
     const parsed = new URL(current);
     if (parsed.protocol !== "https:" || parsed.port || !allowedHosts.has(parsed.hostname))
       throw new SkillRemoteError("Unsupported upstream host.");
-    await Effect.runPromise(assertPublicHttpUrl(current), { signal: combined });
-    const response = await fetch(current, {
+    const target = await Effect.runPromise(resolvePublicHttpUrl(current), { signal: combined });
+    const response = await fetchPinned(target, {
       signal: combined,
-      redirect: "manual",
-      credentials: "omit",
       headers: {
         Accept:
           parsed.hostname === "api.github.com"

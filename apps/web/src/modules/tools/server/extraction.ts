@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
-import { assertPublicHttpUrl } from "./url-safety.ts";
+import { fetchPinned, resolvePublicHttpUrl } from "./url-safety.ts";
 
 export class PageExtractionError extends Schema.TaggedError<PageExtractionError>()(
   "PageExtractionError",
@@ -19,9 +19,7 @@ export interface ExtractedPage {
   readonly truncated: boolean;
 }
 
-// Fetches a search-result page and extracts readable Markdown with defuddle.
-// SSRF-guarded: public http(s) only, every redirect hop re-validated, byte and
-// time caps, no script execution (linkedom only parses).
+/** Fetches a search-result page as Markdown. Public http(s) only; each hop is re-validated and DNS-pinned. */
 export class PageExtractor extends Context.Service<
   PageExtractor,
   {
@@ -37,29 +35,32 @@ export class PageExtractor extends Context.Service<
       extract: Effect.fn("PageExtractor.extract")(function* (input) {
         const fail = (message: string) => new PageExtractionError({ url: input.url, message });
 
-        // Follow redirects manually so each hop is re-validated.
+        // Follow redirects manually so each hop is re-validated and pinned.
         let current = input.url;
         let response: Response | null = null;
         for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-          const safeUrl = yield* assertPublicHttpUrl(current).pipe(
+          const target = yield* resolvePublicHttpUrl(current).pipe(
             Effect.mapError((e) => fail(e.reason)),
           );
           const res = yield* Effect.tryPromise({
             try: () =>
-              fetch(safeUrl, {
-                redirect: "manual",
+              fetchPinned(target, {
                 signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
                 headers: { accept: "text/html,application/xhtml+xml" },
               }),
             catch: (e) => fail(`fetch failed: ${String(e)}`),
           });
           if (res.status >= 300 && res.status < 400) {
+            void res.body?.cancel();
             const location = res.headers.get("location");
             if (!location) return yield* fail(`redirect without location (${res.status})`);
-            current = new URL(location, safeUrl).toString();
+            current = new URL(location, target.url).toString();
             continue;
           }
-          if (!res.ok) return yield* fail(`HTTP ${res.status}`);
+          if (!res.ok) {
+            void res.body?.cancel();
+            return yield* fail(`HTTP ${res.status}`);
+          }
           response = res;
           break;
         }

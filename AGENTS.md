@@ -228,7 +228,8 @@ Differs from most Effect 3 material online.
 - Every web tool returns `WebToolResult`, so persistence, envelopes and the
   citations UI are written once. `read_url` is the only path through
   `PageExtractor`; `url-safety.ts` is the SSRF boundary and the SearXNG base URL
-  is exempt by design.
+  is exempt by design. After that check, callers must `fetchPinned` the returned
+  addresses: a second DNS lookup would reopen rebinding.
 - `web_search` caches per generation by query, time range and language; failures
   are evicted. Research shares `RESEARCH_LIMITS.externalOps` (3) permits, and
   SearXNG fans each query to every enabled engine, so that is the burst upstreams

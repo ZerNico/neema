@@ -6,7 +6,14 @@ import {
   parseSkillUrl,
   reviewGitHubSkill,
 } from "./remote.ts";
-vi.mock("~/modules/tools/server/url-safety.ts", () => ({ assertPublicHttpUrl: () => Effect.void }));
+vi.mock("~/modules/tools/server/url-safety.ts", () => ({
+  resolvePublicHttpUrl: (url: string) =>
+    Effect.succeed({
+      url: new URL(url),
+      addresses: [{ address: "1.1.1.1", family: 4 }],
+    }),
+  fetchPinned: (target: { url: URL }, init?: RequestInit) => fetch(target.url.href, init),
+}));
 afterEach(() => vi.unstubAllGlobals());
 const root = "---\nname: review\ndescription: Review carefully\n---\nGuidance";
 const response = (value: unknown) => new Response(JSON.stringify(value));
@@ -89,7 +96,7 @@ describe("bounded portable skill remote adapter", () => {
       "Unsupported upstream host",
     );
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ credentials: "omit", redirect: "manual" });
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ signal: expect.any(AbortSignal) });
   });
   it("honors cancellation before starting an upstream request", async () => {
     const fetch = vi.fn();
