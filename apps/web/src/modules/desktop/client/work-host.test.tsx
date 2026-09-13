@@ -16,7 +16,14 @@ import {
 } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { DesktopWorkProvider, useWorkApprovals, WorkAttention } from "./work-host.tsx";
+import {
+  DesktopWorkProvider,
+  useWorkApprovals,
+  WorkAttention,
+  WorkConnectionNotice,
+} from "./work-host.tsx";
+
+const PAUSED = /work on this computer is paused/;
 
 const api = vi.hoisted(() => ({
   snapshot: vi.fn(),
@@ -36,7 +43,7 @@ vi.mock("./bridge.ts", () => ({
   waitForDraftBinding: async () => {},
 }));
 vi.mock("~/modules/auth/identity-boundary.tsx", () => ({ useIdentityBoundary: () => null }));
-const client = {
+const shell = {
   executionSession: () => Effect.succeed({ id: "executor" }),
   cancelCall: (input: unknown) =>
     Effect.sync(() => {
@@ -49,6 +56,8 @@ const client = {
     }),
   writeFile: (input: unknown) => Effect.promise(() => api.write(input)),
 };
+// A browser has no bridge at all, which the provider must survive.
+let client: typeof shell | null = shell;
 const owner = {
   userId: "user",
   conversationId: "a",
@@ -69,6 +78,7 @@ const settings = [
 ];
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
+  client = shell;
   render(<DesktopChromeFrame />);
   vi.stubGlobal("__chatDesktop", {
     chrome: {
@@ -132,12 +142,13 @@ it.each([false, true])(
     });
     await waitFor(() => expect(api.complete).toHaveBeenCalledTimes(1));
     if (loseResult) {
-      await screen.findByText(/Work is waiting for a connection/);
+      await screen.findByText(PAUSED);
       // The server snapshot is unchanged; only its freshness advances.
       await act(async () => {
         await queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
       });
-      await waitFor(() => expect(api.complete).toHaveBeenCalledTimes(2));
+      // Redelivery is the controller's own one-second backoff, past the default budget.
+      await waitFor(() => expect(api.complete).toHaveBeenCalledTimes(2), { timeout: 3000 });
     }
     calls = [call("two")];
     await act(async () => {
@@ -210,6 +221,51 @@ it("notifies for separate chats and clears notifications when the host goes away
   expect(api.cancel).toHaveBeenCalledWith({ callId: "two" });
 });
 
+it("stays quiet when the last known snapshot held no work", async () => {
+  api.snapshot.mockResolvedValueOnce({ attempts: [], calls: [], settings: [] });
+  api.snapshot.mockRejectedValue(new Error("Server unreachable"));
+  const { queryClient } = renderHost("/settings");
+  await waitFor(() => expect(api.snapshot).toHaveBeenCalled());
+  await act(() => queryClient.invalidateQueries({ queryKey: ["desktop-work"] }));
+  await waitFor(() => expect(api.snapshot.mock.calls.length).toBeGreaterThanOrEqual(2));
+  expect(screen.queryByText(PAUSED)).not.toBeInTheDocument();
+});
+
+it("says nothing when no snapshot ever arrived", async () => {
+  api.snapshot.mockRejectedValue(new Error("Server unreachable"));
+  renderHost("/settings");
+  await waitFor(() => expect(api.snapshot).toHaveBeenCalled());
+  expect(await screen.findByText("Settings")).toBeTruthy();
+  expect(screen.queryByText(PAUSED)).not.toBeInTheDocument();
+});
+
+it("explains a paused computer and clears it on a successful retry", async () => {
+  const working = { attempts: [owner], calls: [], settings };
+  api.snapshot.mockResolvedValueOnce(working);
+  api.snapshot.mockRejectedValue(new Error("Server unreachable"));
+  const { queryClient } = renderHost("/settings");
+  await waitFor(() => expect(api.snapshot).toHaveBeenCalled());
+  await act(() => queryClient.invalidateQueries({ queryKey: ["desktop-work"] }));
+  expect((await screen.findByText(PAUSED)).getAttribute("role")).toBe("status");
+
+  api.snapshot.mockResolvedValue(working);
+  await act(async () => {
+    window.dispatchEvent(new Event("online"));
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(screen.queryByText(PAUSED)).not.toBeInTheDocument());
+});
+
+it("renders children unchanged in a browser", async () => {
+  client = null;
+  vi.stubGlobal("__chatDesktop", undefined);
+  api.snapshot.mockRejectedValue(new Error("Server unreachable"));
+  renderHost("/chat/a");
+  expect(await screen.findByText("Chat a")).toBeTruthy();
+  expect(api.snapshot).not.toHaveBeenCalled();
+  expect(screen.queryByText(PAUSED)).not.toBeInTheDocument();
+});
+
 function Chat() {
   const { conversationId = "" } = useParams({ strict: false });
   const approvals = useWorkApprovals(conversationId);
@@ -238,6 +294,7 @@ function renderHost(path: string) {
               <SidebarTrigger />
               <WorkAttention />
             </AppHeader>
+            <WorkConnectionNotice />
             <Outlet />
           </SidebarProvider>
         </DesktopWorkProvider>

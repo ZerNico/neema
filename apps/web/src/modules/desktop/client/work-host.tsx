@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, NoInternetIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { toast } from "sonner";
 import { Button } from "~/ui/primitives/button";
@@ -32,9 +32,14 @@ import { useDesktop, waitForDraftBinding } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
 import { WorkController } from "./work-controller.ts";
 
-const WorkContext = createContext<{ controller: WorkController | null; revision: number }>({
+const WorkContext = createContext<{
+  controller: WorkController | null;
+  revision: number;
+  paused: boolean;
+}>({
   controller: null,
   revision: 0,
+  paused: false,
 });
 
 export function DesktopWorkProvider({ children, userId }: { children: ReactNode; userId: string }) {
@@ -42,7 +47,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
   const boundary = useIdentityBoundary();
   const queryClient = useQueryClient();
   const [revision, setRevision] = useState(0);
-  const [failure, setFailure] = useState(false);
+  const [failedAfter, setFailedAfter] = useState<number | null>(null);
   const session = useQuery({
     queryKey: ["desktop-session"],
     enabled: !!client,
@@ -60,7 +65,8 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     if (!client || !executorId) return null;
     const report = (error: unknown) => {
       console.error("Background work connection failed", error);
-      setFailure(true);
+      // Recording which snapshot was newest lets a later one disprove this.
+      setFailedAfter(queryClient.getQueryState(["desktop-work", executorId])?.dataUpdatedAt ?? 0);
       void boundary?.reconcile();
     };
     return new WorkController({
@@ -78,7 +84,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
           : Promise.resolve(desktopFailure("That did not run", "Unknown local tool.")),
       complete: async (call, token, result) => {
         const response = await submitDesktopToolResult({ data: { ...call, token, result } });
-        setFailure(false);
+        setFailedAfter(null);
         void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
         return response.accepted;
       },
@@ -89,7 +95,45 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       error: report,
     });
   }, [client, executorId, queryClient, boundary]);
-  const host = useMemo(() => ({ controller, revision }), [controller, revision]);
+  // A snapshot that arrived after the failure disproves it, so any answered
+  // request clears this, not only a delivered result.
+  const stale = failedAfter !== null && failedAfter >= work.dataUpdatedAt;
+  const unreachable = !!client && (stale || work.isError || session.isError);
+  // Telling someone their work stopped when none was running invents a worry.
+  // The last successful snapshot is the only evidence there was any; without
+  // one, nothing is known to have been interrupted.
+  const paused =
+    unreachable && !!work.data && work.data.attempts.length + work.data.calls.length > 0;
+  const host = useMemo(() => ({ controller, revision, paused }), [controller, revision, paused]);
+
+  useEffect(() => {
+    if (!unreachable) return;
+    // Nothing polls the snapshot any more, so a failure has to fetch its own
+    // disproof. Success clears the state below and this loop stops with it.
+    const refetch = () => {
+      if (session.isError) void queryClient.refetchQueries({ queryKey: ["desktop-session"] });
+      void queryClient.refetchQueries({ queryKey: ["desktop-work"] });
+    };
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      timer = setTimeout(
+        () => {
+          schedule();
+          refetch();
+        },
+        Math.min(2000 * 2 ** attempt++, 30_000),
+      );
+    };
+    schedule();
+    window.addEventListener("online", refetch);
+    window.addEventListener("focus", refetch);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("online", refetch);
+      window.removeEventListener("focus", refetch);
+    };
+  }, [unreachable, session.isError, queryClient]);
 
   useEffect(() => {
     if (!controller || !client) return;
@@ -135,15 +179,26 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     ).catch((error) => console.error("Could not update desktop work status", error));
   }, [client, work.data, host]);
 
+  return <WorkContext value={host}>{children}</WorkContext>;
+}
+
+/** Rendered in the content column, not here: the provider sits above the sidebar. */
+export function WorkConnectionNotice() {
+  const { paused } = useContext(WorkContext);
+  if (!paused) return null;
   return (
-    <WorkContext value={host}>
-      {(failure || work.isError || session.isError) && client && (
-        <div role="status" className="bg-muted text-muted-foreground px-3 py-2 text-sm">
-          Work is waiting for a connection. Completed actions won’t be repeated.
-        </div>
-      )}
-      {children}
-    </WorkContext>
+    <div
+      role="status"
+      className="border-warning/50 bg-warning/10 flex shrink-0 items-center gap-2 border-b px-3 py-2 text-sm"
+    >
+      <HugeiconsIcon
+        icon={NoInternetIcon}
+        strokeWidth={2}
+        className="text-warning size-4 shrink-0"
+        aria-hidden
+      />
+      Can’t reach the server, so work on this computer is paused until the connection is back.
+    </div>
   );
 }
 

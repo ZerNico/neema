@@ -83,6 +83,13 @@ only for `http:` and `https:`. Other schemes are dropped rather than passed to
 ## Execution belongs to the authenticated app, not a chat route
 
 `DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.
+It therefore sits above the fixed sidebar and renders no chrome itself: the
+unreachable-server notice is a separate context consumer the layout places in
+the content column, under the header. Because no poll can disprove a failure,
+one schedules its own snapshot refetch on a bounded backoff and on `online`
+and `focus`, and any answered request clears it, not only a delivered result.
+The notice needs the last successful snapshot to have held attempts or calls,
+so a blip with nothing running, or before any snapshot arrived, stays silent.
 Its controller watches the authenticated Work snapshot, refreshed by id-only
 sync notifications, initial subscription readiness and reconnect reconciliation.
 Conversation policy/title changes and terminal message events refresh it too;

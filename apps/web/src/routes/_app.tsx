@@ -1,4 +1,8 @@
-import { DesktopWorkProvider, WorkAttention } from "~/modules/desktop/client/work-host.tsx";
+import {
+  DesktopWorkProvider,
+  WorkAttention,
+  WorkConnectionNotice,
+} from "~/modules/desktop/client/work-host.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
@@ -69,6 +73,7 @@ function AuthenticatedLayout({
                   <SidebarTrigger />
                   <WorkAttention />
                 </AppHeader>
+                <WorkConnectionNotice />
                 {/* The detail rail is a sibling of the content, not an overlay:
                 opening it shrinks the chat column instead of covering it. */}
                 <div className="flex min-h-0 flex-1">
