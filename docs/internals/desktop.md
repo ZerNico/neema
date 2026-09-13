@@ -209,6 +209,11 @@ paths relative to that cwd; `other-folder/file` does not automatically resolve t
 another attached folder. Attached roots are writable under the command's sandbox
 policy, but are not remapped into virtual shell paths.
 
+The two spaces contradict each other, so the system hint and the `run_command`
+description both spell out that a command leaves its folder's name out of its
+paths. Told only the file-tool rule, a model writes `cd site && python
+site/main.py`, which fails on both halves and costs two turns to learn.
+
 ## Containment and command isolation
 
 File paths pass through `resolveAcross` and `resolveInFolder`. Absolute paths are

@@ -106,7 +106,9 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
 
 export const runCommandTool = Tool.make("run_command", {
   description:
-    "Run a shell command on the user's computer, inside one of the attached folders. It runs " +
+    "Run a shell command on the user's computer, inside one of the attached folders. The command " +
+    "starts in the folder named here, so its paths are relative to that folder and leave the " +
+    "folder's own name out, unlike the paths the file tools take. It runs " +
     "sandboxed: it may write only inside the attached folders and reach only package " +
     "registries. The user is asked before it happens and may refuse. Prefer the file tools " +
     "over commands to inspect or change files.",
