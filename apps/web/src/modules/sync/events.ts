@@ -5,6 +5,7 @@ import { Schema } from "effect";
 // events small enough for Postgres NOTIFY (8kB limit) and avoids stale data.
 
 export const SyncEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("sync.ready") }),
   Schema.Struct({ type: Schema.Literal("desktop.work.changed") }),
   Schema.Struct({
     type: Schema.Literal("agent.draft.changed"),

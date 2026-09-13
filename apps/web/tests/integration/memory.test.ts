@@ -50,6 +50,7 @@ const FakeSync = Layer.succeed(SyncBus, {
       : Effect.sync(() => {
           published.push({ userId: "*", type: event.type });
         }),
+  signals: Stream.make({ type: "ready" } as const).pipe(Stream.concat(Stream.never)),
   subscribe: () => Stream.empty,
 });
 

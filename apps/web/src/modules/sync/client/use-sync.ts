@@ -88,8 +88,15 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
     });
 
     source.addEventListener("sync", (raw) => {
-      if (disposed || !authorized) return;
+      if (disposed) return;
       const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
+      if (event.type === "sync.ready") {
+        clearTimeout(identityRetry);
+        clearKnowledgeTimer();
+        void open(++connection);
+        return;
+      }
+      if (!authorized) return;
       switch (event.type) {
         case "desktop.work.changed":
           void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });

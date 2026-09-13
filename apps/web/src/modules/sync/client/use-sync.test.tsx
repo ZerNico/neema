@@ -32,6 +32,14 @@ afterEach(() => {
 });
 
 describe("useSync", () => {
+  it("reconciles again when the server's database listener reconnects", () => {
+    const { invalidate, source } = renderSync();
+    source.emit("open");
+    invalidate.mockClear();
+    source.emit("sync", { type: "sync.ready" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
+  });
+
   it("discovers late drafts by refreshing both settings and the conversation summary", () => {
     const { invalidate, source } = renderSync();
     source.emit("sync", { type: "agent.draft.changed", conversationId: "c1", draftId: "d1" });

@@ -113,6 +113,7 @@ const FakeSync = Layer.succeed(
       Effect.sync(() => {
         events.push(event);
       }),
+    signals: Stream.make({ type: "ready" } as const).pipe(Stream.concat(Stream.never)),
     subscribe: () => Stream.empty,
   }),
 );

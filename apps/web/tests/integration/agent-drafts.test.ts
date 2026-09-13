@@ -53,6 +53,7 @@ const TestBus = Layer.succeed(SyncBus, {
       if (publishingFails) throw new Error("notification unavailable");
       events.push({ userId: null, event });
     }),
+  signals: Stream.make({ type: "ready" } as const).pipe(Stream.concat(Stream.never)),
   subscribe: () => Stream.empty,
 });
 

@@ -2107,9 +2107,17 @@ describe("resumable streaming pipeline", () => {
       Effect.gen(function* () {
         const bus = yield* SyncBus;
         const userId = uuidv7();
-        const collect = bus.subscribe(userId).pipe(Stream.take(1), Stream.runCollect);
+        const ready = yield* Deferred.make<void>();
+        const collect = bus.subscribe(userId).pipe(
+          Stream.tap((event) =>
+            event.type === "sync.ready" ? Deferred.succeed(ready, undefined) : Effect.void,
+          ),
+          Stream.filter((event) => event.type !== "sync.ready"),
+          Stream.take(1),
+          Stream.runCollect,
+        );
         const collector = yield* Effect.forkChild(collect);
-        yield* Effect.sleep("200 millis");
+        yield* Deferred.await(ready);
         yield* bus.publish(userId, { type: "conversation.created", conversationId: "c1" });
         return Array.from(yield* Fiber.join(collector));
       }),

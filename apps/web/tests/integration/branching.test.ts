@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   attachmentBlobs,
@@ -273,16 +273,21 @@ const conversationIds = Effect.fn("test.conversationIds")(function* (userId: str
   return page.conversations.map((c) => c.id);
 });
 
-/**
- * Sync events are a NOTIFY roundtrip, so the collector has to be listening
- * before the action that publishes — hence the fork + settle.
- */
+/** Wait for LISTEN and the local subscription before publishing. */
 const listenFor = Effect.fn("test.listenFor")(function* (userId: string, count: number) {
   const bus = yield* SyncBus;
+  const ready = yield* Deferred.make<void>();
   const fiber = yield* Effect.forkChild(
-    bus.subscribe(userId).pipe(Stream.take(count), Stream.runCollect),
+    bus.subscribe(userId).pipe(
+      Stream.tap((event) =>
+        event.type === "sync.ready" ? Deferred.succeed(ready, undefined) : Effect.void,
+      ),
+      Stream.filter((event) => event.type !== "sync.ready"),
+      Stream.take(count),
+      Stream.runCollect,
+    ),
   );
-  yield* Effect.sleep("200 millis");
+  yield* Deferred.await(ready);
   return fiber;
 });
 

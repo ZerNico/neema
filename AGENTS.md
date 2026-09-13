@@ -201,7 +201,8 @@ Differs from most Effect 3 material online.
 - `Effect.result` captures typed failures only; defects and interrupts pass through.
 - Drizzle Effect client: `makeWithDefaults({ relations })` from
   `drizzle-orm/effect-postgres`, with `PgClient` provided at the composition root
-  (`src/server/runtime.ts`) so LISTEN/NOTIFY shares the pool.
+  (`src/server/runtime.ts`). Publications share that pool; the reconnectable listener
+  uses its configuration with one owned connection. See [sync](docs/internals/sync.md).
 - A toolkit captures its handlers' context when merged. To give a handler a
   service, provide it around the merge, not only around the later call.
 

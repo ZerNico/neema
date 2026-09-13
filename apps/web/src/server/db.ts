@@ -11,8 +11,8 @@ export const PgLive = PgClient.layerConfig({
 
 const makeDb = makeWithDefaults({ relations });
 
-// Note: requires PgClient — provided once at the composition root so the
-// SyncBus (LISTEN/NOTIFY) shares the same pool.
+// PgClient is provided once at the composition root. Sync publications share
+// its pool; the reconnectable listener owns one connection with the same config.
 export class Db extends Context.Service<Db, Effect.Success<typeof makeDb>>()("chat/server/Db") {
   static readonly layer: Layer.Layer<Db, never, PgClient.PgClient> = Layer.effect(Db, makeDb);
 }

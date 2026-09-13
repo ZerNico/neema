@@ -1,59 +1,98 @@
 import { PgClient } from "@effect/sql-pg";
-import { Context, Effect, Layer, PubSub, Schema, Stream } from "effect";
-import { SyncEnvelope, type SyncEvent } from "../events.ts";
+import { Context, Deferred, Duration, Effect, Layer, PubSub, Schema, Stream } from "effect";
+import { type SyncEvent } from "../events.ts";
+import { listenNotifications } from "./listener.ts";
+import { Notification, NOTIFICATION_CHANNEL, type WorkSignal } from "./signals.ts";
 
-const CHANNEL = "chat_sync";
+const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Notification));
+type Ready = { type: "ready" };
+type Relayed = Notification | Ready;
 
-const decodeEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(SyncEnvelope));
-const encodeEnvelope = Schema.encodeEffect(Schema.fromJsonString(SyncEnvelope));
-
-// User-scoped and instance-wide invalidation bus. Publishes go to Postgres
-// NOTIFY so every app instance sees them; each instance relays payloads into
-// its local PubSub, which authenticated SSE handlers filter for their user.
 export class SyncBus extends Context.Service<
   SyncBus,
   {
     publish(userId: string, event: SyncEvent): Effect.Effect<void>;
     publishGlobal(event: SyncEvent): Effect.Effect<void>;
-    subscribe(userId: string): Stream.Stream<SyncEvent>;
+    subscribe(userId: string, userOnly?: boolean): Stream.Stream<SyncEvent>;
+    signals: Stream.Stream<WorkSignal | Ready>;
   }
 >()("chat/sync/SyncBus") {
   static readonly layer = Layer.effect(
     SyncBus,
     Effect.gen(function* () {
       const pg = yield* PgClient.PgClient;
-      // Sliding: a stalled SSE consumer must not buffer events forever. Sync
-      // events are invalidation hints, so a dropped one costs a refetch at
-      // the next event, not correctness.
-      const pubsub = yield* PubSub.sliding<SyncEnvelope>(1024);
-
-      // Relay: NOTIFY -> local PubSub. Runs for the lifetime of the layer scope.
-      yield* pg.listen(CHANNEL).pipe(
-        Stream.mapEffect((payload) => decodeEnvelope(payload)),
-        Stream.mapEffect((envelope) => PubSub.publish(pubsub, envelope)),
+      const pubsub = yield* PubSub.sliding<{ sequence: number; event: Relayed }>(4096);
+      let sequence = 0;
+      const relay = (event: Relayed) =>
+        Effect.suspend(() => PubSub.publish(pubsub, { sequence: ++sequence, event }));
+      const ready = yield* Deferred.make<void>();
+      const listen = listenNotifications(pg.config).pipe(
+        Stream.mapEffect((frame) =>
+          frame.type === "ready"
+            ? relay(frame).pipe(Effect.andThen(Deferred.succeed(ready, undefined)))
+            : decode(frame.payload).pipe(
+                Effect.flatMap(relay),
+                Effect.catch(() => Effect.logWarning("Ignoring invalid sync notification")),
+              ),
+        ),
         Stream.runDrain,
-        Effect.catchCause((cause) => Effect.logError("sync relay failed", cause)),
+        Effect.catchCause((cause) => Effect.logWarning("Sync connection lost", cause)),
+        Effect.andThen(Effect.sleep(Duration.seconds(1))),
         Effect.forever,
-        Effect.forkScoped,
       );
-
-      const publish = Effect.fn("SyncBus.publish")(function* (userId: string, event: SyncEvent) {
-        const payload = yield* encodeEnvelope({ scope: "user", userId, event });
-        yield* pg.notify(CHANNEL, payload);
-      }, Effect.orDie);
-
-      const publishGlobal = Effect.fn("SyncBus.publishGlobal")(function* (event: SyncEvent) {
-        const payload = yield* encodeEnvelope({ scope: "global", event });
-        yield* pg.notify(CHANNEL, payload);
-      }, Effect.orDie);
-
-      const subscribe = (userId: string) =>
-        Stream.fromPubSub(pubsub).pipe(
-          Stream.filter((envelope) => envelope.scope === "global" || envelope.userId === userId),
-          Stream.map((envelope) => envelope.event),
+      yield* Effect.forkScoped(listen);
+      yield* Deferred.await(ready);
+      const publish = (userId: string, event: SyncEvent) =>
+        pg
+          .notify(NOTIFICATION_CHANNEL, JSON.stringify({ scope: "user", userId, event }))
+          .pipe(Effect.orDie);
+      const publishGlobal = (event: SyncEvent) =>
+        pg
+          .notify(NOTIFICATION_CHANNEL, JSON.stringify({ scope: "global", event }))
+          .pipe(Effect.orDie);
+      const events = Stream.unwrap(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(pubsub);
+          let previous = sequence;
+          return Stream.make({ type: "ready" } as const).pipe(
+            Stream.concat(
+              Stream.fromSubscription(subscription).pipe(
+                Stream.flatMap((frame) => {
+                  // A slow consumer must reconcile if the bounded local queue drops hints.
+                  const missed = frame.sequence > previous + 1;
+                  previous = frame.sequence;
+                  const frames: Relayed[] = missed
+                    ? [{ type: "ready" }, frame.event]
+                    : [frame.event];
+                  return Stream.fromIterable(frames);
+                }),
+              ),
+            ),
+          );
+        }),
+      );
+      const subscribe = (userId: string, userOnly = false) =>
+        events.pipe(
+          Stream.flatMap((envelope) => {
+            if ("type" in envelope) return Stream.make({ type: "sync.ready" as const });
+            if (
+              (!userOnly && envelope.scope === "global") ||
+              (envelope.scope === "user" && envelope.userId === userId)
+            )
+              return Stream.make(envelope.event);
+            return Stream.empty;
+          }),
         );
-
-      return SyncBus.of({ publish, publishGlobal, subscribe });
+      const signals = events.pipe(
+        Stream.flatMap((envelope): Stream.Stream<WorkSignal | Ready> =>
+          "type" in envelope
+            ? Stream.make(envelope)
+            : envelope.scope === "internal"
+              ? Stream.make(envelope.event)
+              : Stream.empty,
+        ),
+      );
+      return SyncBus.of({ publish, publishGlobal, subscribe, signals });
     }),
   );
 }

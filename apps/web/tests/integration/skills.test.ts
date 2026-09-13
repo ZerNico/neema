@@ -54,6 +54,7 @@ const QuietSync = Layer.succeed(
   SyncBus.of({
     publish: () => Effect.void,
     publishGlobal: () => Effect.void,
+    signals: Stream.make({ type: "ready" } as const).pipe(Stream.concat(Stream.never)),
     subscribe: () => Stream.empty,
   }),
 );
