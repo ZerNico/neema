@@ -1,3 +1,4 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { desc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { AUTH_SETTINGS_ID, authSettings, user, userApprovals } from "~/db/schema/index.ts";
@@ -100,9 +101,21 @@ export class SignupRepo extends Context.Service<
 
         decide: Effect.fn("SignupRepo.decide")(function* ({ userId, status, decidedBy }) {
           yield* db
-            .update(userApprovals)
-            .set({ status, decidedAt: new Date(), decidedBy })
-            .where(eq(userApprovals.userId, userId))
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const changed = yield* tx
+                  .update(userApprovals)
+                  .set({ status, decidedAt: new Date(), decidedBy })
+                  .where(eq(userApprovals.userId, userId))
+                  .returning({ userId: userApprovals.userId });
+                if (changed.length)
+                  yield* notifyOnCommit(tx, {
+                    scope: "user",
+                    userId,
+                    event: { type: "account.approval.changed" },
+                  });
+              }),
+            )
             .pipe(Effect.orDie);
         }),
       });

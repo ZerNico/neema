@@ -6,6 +6,7 @@ import { Schema } from "effect";
 
 export const SyncEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("sync.ready") }),
+  Schema.Struct({ type: Schema.Literal("account.approval.changed") }),
   Schema.Struct({ type: Schema.Literal("desktop.work.changed") }),
   Schema.Struct({
     type: Schema.Literal("agent.draft.changed"),

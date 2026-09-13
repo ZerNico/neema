@@ -98,6 +98,9 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       }
       if (!authorized) return;
       switch (event.type) {
+        case "account.approval.changed":
+          void reconcileIdentity?.();
+          break;
         case "desktop.work.changed":
           void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
           break;

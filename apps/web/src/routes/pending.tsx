@@ -1,5 +1,5 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useApprovalStatus } from "~/modules/auth/use-approval-status.ts";
 import { useEffect } from "react";
 import { approvalStatusQuery, authClient } from "~/modules/auth/client.ts";
 import { Button } from "~/ui/primitives/button";
@@ -15,14 +15,12 @@ export const Route = createFileRoute("/pending")({
 });
 
 function PendingPage() {
-  const navigate = useNavigate();
-  // An approval happens in another person's browser, so this screen has to ask
-  // rather than be told. A minute is fast enough for someone who is waiting.
-  const { data: status } = useQuery({ ...approvalStatusQuery, refetchInterval: 60_000 });
+  const { data: status } = useApprovalStatus();
 
   useEffect(() => {
-    if (status === "approved") void navigate({ to: "/" });
-  }, [status, navigate]);
+    if (status === "approved") window.location.replace("/");
+    else if (status === null) window.location.replace("/login");
+  }, [status]);
 
   const rejected = status === "rejected";
 
