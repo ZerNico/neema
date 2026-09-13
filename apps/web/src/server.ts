@@ -10,14 +10,12 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     return Promise.resolve(defaultStreamHandler(context)).then((result) => {
+      // Set the header on the response the handler built and hand that same
+      // one back. Copying its body into a new Response drops the last chunk
+      // and never closes the stream, which leaves a shell that loads forever.
       const response = result instanceof Response ? result : result.response;
-      const headers = new Headers(response.headers);
-      headers.set("Content-Security-Policy", DOCUMENT_CSP);
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
+      response.headers.set("Content-Security-Policy", DOCUMENT_CSP);
+      return result;
     });
   }),
 };
