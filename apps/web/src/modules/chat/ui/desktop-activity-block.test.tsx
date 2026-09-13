@@ -1,8 +1,16 @@
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopActivityBlock } from "./desktop-activity-block.tsx";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+// A file row offers to read the file it names, which is a mutation like any
+// other. These tests are about the row in a browser, where there is no machine
+// behind it and no conversation in context: no affordance either way.
+const show = (element: ReactNode) =>
+  render(<QueryClientProvider client={new QueryClient()}>{element}</QueryClientProvider>);
 
 const running = (over: Partial<DesktopToolActivity> = {}): DesktopToolActivity => ({
   family: "desktop",
@@ -18,7 +26,7 @@ const running = (over: Partial<DesktopToolActivity> = {}): DesktopToolActivity =
 describe("DesktopActivityBlock", () => {
   it("is pressable while the message is still streaming", async () => {
     const decide = vi.fn();
-    render(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
+    show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
     // The clarification card is disabled mid-stream because answering it ends
     // the turn. This one is the inverse: the generation is parked on it.
     await userEvent.click(screen.getByRole("button", { name: "Allow" }));
@@ -27,13 +35,13 @@ describe("DesktopActivityBlock", () => {
 
   it("offers a blanket grant naming only its own kind", async () => {
     const decide = vi.fn();
-    render(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
+    show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Allow commands for this chat" }));
     expect(decide).toHaveBeenCalledWith("allow-rest");
 
     decide.mockClear();
-    render(
+    show(
       <DesktopActivityBlock
         activity={running({
           callId: "call-2",
@@ -48,7 +56,7 @@ describe("DesktopActivityBlock", () => {
 
   it("offers no blanket grant for a delete", () => {
     const decide = vi.fn();
-    render(
+    show(
       <DesktopActivityBlock
         activity={running({ callId: "call-3", name: "delete_local_file", args: { path: "old/" } })}
         approval={{ kind: "delete", decide }}
@@ -60,7 +68,7 @@ describe("DesktopActivityBlock", () => {
   });
 
   it("shows a plain row, with no way to act, once the call is decided", () => {
-    render(
+    show(
       <DesktopActivityBlock
         activity={running({
           status: "complete",
@@ -79,7 +87,7 @@ describe("DesktopActivityBlock", () => {
   });
 
   it("reads as history in a browser, where no approval is offered", () => {
-    render(<DesktopActivityBlock activity={running()} />);
+    show(<DesktopActivityBlock activity={running()} />);
     expect(screen.getByText("Running pnpm test")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
   });

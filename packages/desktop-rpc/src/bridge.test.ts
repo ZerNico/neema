@@ -31,6 +31,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   readFile: unimplemented("readFile"),
   writeFile: unimplemented("writeFile"),
   runCommand: unimplemented("runCommand"),
+  revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),
   ...overrides,
 });
@@ -141,6 +142,41 @@ describe("the desktop channel", () => {
       client.readFile({ callId: "call", conversationId: "c", path: "work/file" }),
     );
     expect(receivedId).toBe("call");
+  });
+
+  it("round-trips a reveal, which answers with nothing at all", async () => {
+    const asked: { path: string; mode: string }[] = [];
+    const client = makeDesktopClient(
+      connect({
+        revealPath: ({ path, mode }) =>
+          Effect.sync(() => {
+            asked.push({ path, mode });
+          }),
+      }),
+    );
+
+    // Void has no JSON form, so the empty success has to survive the channel
+    // rather than decode as a missing value.
+    expect(
+      await Effect.runPromise(
+        client.revealPath({ conversationId: "c", path: "site/logo.png", mode: "reveal" }),
+      ),
+    ).toBeUndefined();
+    expect(asked).toEqual([{ path: "site/logo.png", mode: "reveal" }]);
+
+    const outcome = await Effect.runPromise(
+      Effect.result(
+        // `mode` is closed, so a site asking for something else never reaches
+        // the handler that would hand a path to the operating system.
+        client.revealPath({
+          conversationId: "c",
+          path: "site/logo.png",
+          mode: "execute" as "open",
+        }),
+      ),
+    );
+    expect(outcome._tag).toBe("Failure");
+    expect(asked).toHaveLength(1);
   });
 
   it("ignores a shell speaking a different protocol version", () => {

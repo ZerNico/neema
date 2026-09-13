@@ -1,4 +1,5 @@
 import {
+  ArrowDown01Icon,
   Delete02Icon,
   Edit02Icon,
   File01Icon,
@@ -13,6 +14,7 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import type { ApprovalChoice, PendingKind } from "~/modules/desktop/client/approvals.ts";
+import { useLocalFilePreview } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/card.tsx";
 import {
@@ -20,6 +22,7 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
+  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
@@ -52,6 +55,25 @@ const argText = (activity: DesktopToolActivity) => {
       return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
     default:
       return text(args.path);
+  }
+};
+
+/**
+ * The file a finished row leaves behind, when there is one to look at. A move
+ * names its destination: the source is the path that no longer exists.
+ */
+const previewablePath = (activity: DesktopToolActivity): string | null => {
+  if (activity.status !== "complete") return null;
+  const args = activity.args ?? {};
+  switch (activity.name) {
+    case "read_local_file":
+    case "write_local_file":
+    case "edit_local_file":
+      return text(args.path) || null;
+    case "move_local_file":
+      return text(args.to) || null;
+    default:
+      return null;
   }
 };
 
@@ -179,6 +201,9 @@ export function DesktopActivityBlock({
   const running = activity.status === "running";
   const failed = activity.status === "error";
   const [open, setOpen] = useState(false);
+  // Null in a browser, which is what keeps a Work chat readable there without
+  // offering a machine it cannot reach. Nothing is read until this is called.
+  const preview = useLocalFilePreview(previewablePath(activity));
   if (running && approval) return <ApprovalCard activity={activity} approval={approval} />;
   const detail = activity.result?.detail ?? "";
   const violations = activity.result?.violations ?? [];
@@ -186,8 +211,35 @@ export function DesktopActivityBlock({
 
   // A command or a long path must never widen the column: the row truncates
   // and the body wraps, so the transcript stays as wide as the chat.
+  const face = (
+    <>
+      <HugeiconsIcon
+        icon={ICONS[activity.name]}
+        strokeWidth={2}
+        className="size-4 shrink-0"
+        aria-hidden
+      />
+      <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
+    </>
+  );
+
   if (running || detail.length === 0) {
-    return (
+    return preview ? (
+      <>
+        <button
+          type="button"
+          onClick={preview.open}
+          className={cn(
+            disclosureTriggerClassName,
+            "mb-2 min-w-0 max-w-full text-left",
+            failed && "text-destructive",
+          )}
+        >
+          {face}
+        </button>
+        {preview.dialog}
+      </>
+    ) : (
       <div
         className={cn(
           activityRowClassName,
@@ -195,34 +247,48 @@ export function DesktopActivityBlock({
           failed && "text-destructive",
         )}
       >
-        <HugeiconsIcon
-          icon={ICONS[activity.name]}
-          strokeWidth={2}
-          className="size-4 shrink-0"
-          aria-hidden
-        />
-        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
+        {face}
       </div>
     );
   }
 
   return (
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2 min-w-0 max-w-full">
-      <DisclosureTrigger
-        className={cn(
-          disclosureTriggerClassName,
-          "min-w-0 max-w-full",
-          failed && "text-destructive",
-        )}
-      >
-        <HugeiconsIcon
-          icon={ICONS[activity.name]}
-          strokeWidth={2}
-          className="size-4 shrink-0"
-          aria-hidden
-        />
-        <span className="min-w-0 truncate">{label}</span>
-      </DisclosureTrigger>
+      {preview ? (
+        // Two targets, because the row now answers two questions: what the file
+        // holds now, and what the call did to it.
+        <div className={cn("flex min-w-0 max-w-full items-center gap-1", failed && "text-destructive")}>
+          <button
+            type="button"
+            onClick={preview.open}
+            className={cn(disclosureTriggerClassName, "min-w-0 flex-1 text-left")}
+          >
+            {face}
+          </button>
+          {preview.dialog}
+          <DisclosureTrigger
+            className={cn(disclosureTriggerClassName, "shrink-0")}
+            aria-label="Show what this call did"
+          >
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              strokeWidth={2}
+              className={cn(disclosureChevronMotionClassName, "size-3.5", open && "rotate-180")}
+              aria-hidden
+            />
+          </DisclosureTrigger>
+        </div>
+      ) : (
+        <DisclosureTrigger
+          className={cn(
+            disclosureTriggerClassName,
+            "min-w-0 max-w-full",
+            failed && "text-destructive",
+          )}
+        >
+          {face}
+        </DisclosureTrigger>
+      )}
       <DisclosureContent>
         <div className={cn(disclosureBodyRailClassName, "flex min-w-0 flex-col gap-2")}>
           {violations.length > 0 ? (

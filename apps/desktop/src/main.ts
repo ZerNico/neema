@@ -146,6 +146,15 @@ const desktopShell: Shell = {
       : dialog.showOpenDialog({ properties: ["openDirectory"] }));
     return result.canceled ? null : (result.filePaths[0] ?? null);
   },
+  // Electron's own shell, not ours. `showItemInFolder` reports nothing, and
+  // `openPath` answers with the empty string when the system took the file.
+  revealPath: async (absolute, mode) => {
+    if (mode === "reveal") {
+      shell.showItemInFolder(absolute);
+      return null;
+    }
+    return (await shell.openPath(absolute)) || null;
+  },
 };
 
 /** What the chooser prefills; null on first run. */

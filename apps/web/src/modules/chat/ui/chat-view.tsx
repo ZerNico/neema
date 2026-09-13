@@ -51,6 +51,7 @@ import {
   withDraftFolderBinding,
   useFolder,
 } from "~/modules/desktop/client/bridge.ts";
+import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
 import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
@@ -1238,19 +1239,23 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         <div className="min-h-0 flex-1">
           {/* lastSeq covers tool-activity-only updates too */}
           <ResearchPanelOwner messages={display} />
-          <VirtualMessageList
-            messages={display}
-            followKey={stream.lastSeq}
-            footer={
-              orphaned.length ? (
-                <div className="flex flex-col">
-                  {orphaned.map((draftId) => (
-                    <AgentDraftWidget key={draftId} draftId={draftId} />
-                  ))}
-                </div>
-              ) : null
-            }
-          />
+          {/* A Work row names a path; only this view knows whose folders it
+              resolves against. */}
+          <LocalFileConversationProvider conversationId={conversationId}>
+            <VirtualMessageList
+              messages={display}
+              followKey={stream.lastSeq}
+              footer={
+                orphaned.length ? (
+                  <div className="flex flex-col">
+                    {orphaned.map((draftId) => (
+                      <AgentDraftWidget key={draftId} draftId={draftId} />
+                    ))}
+                  </div>
+                ) : null
+              }
+            />
+          </LocalFileConversationProvider>
         </div>
         {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
           composer edges align exactly with message content above. No top

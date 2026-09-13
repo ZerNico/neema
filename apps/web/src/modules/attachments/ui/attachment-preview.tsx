@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { CodeViewer } from "./code-viewer.tsx";
@@ -12,6 +12,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { cn } from "~/ui/utils";
 
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
@@ -20,6 +21,12 @@ export interface AttachmentPreviewTarget {
   readonly kind: AttachmentKind;
   /** Authenticated bytes route, or an object URL for a not-yet-stored image. */
   readonly url: string;
+  /**
+   * True when `url` already holds less than the whole file. A local file is
+   * read through a capped bridge call, so the dialog cannot tell by measuring
+   * what it fetched.
+   */
+  readonly truncated?: boolean;
 }
 
 // Text files can be as large as any other attachment; the dialog is a peek,
@@ -28,10 +35,17 @@ const TEXT_PREVIEW_CHAR_CAP = 200_000;
 
 export function AttachmentPreviewDialog({
   target,
+  actions,
   open,
   onOpenChange,
 }: {
   target: AttachmentPreviewTarget;
+  /**
+   * Replaces the “Open original” link. A caller whose `url` is an object URL
+   * must pass this: a `blob:` tab inherits our origin, so following the link
+   * to a file the model wrote would run its script as us.
+   */
+  actions?: ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -39,17 +53,31 @@ export function AttachmentPreviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader className="min-w-0">
-          <DialogTitle className="truncate pr-10">{target.fileName}</DialogTitle>
+          {/* One row, so actions sit beside the name rather than under it. The
+              right padding clears the close button; the title yields first.
+              With actions the row takes that button's height and its 16px
+              offset, so the two sets of buttons sit on one line. */}
+          <div
+            className={cn("flex min-w-0 items-center gap-2 pr-10", actions ? "-mt-2 min-h-8" : "")}
+          >
+            <DialogTitle className="min-w-0 flex-1 truncate">{target.fileName}</DialogTitle>
+            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          </div>
           <DialogDescription>
-            {formatFileSize(target.size)} ·{" "}
-            <a
-              href={target.url}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-foreground underline underline-offset-2"
-            >
-              Open original
-            </a>
+            {formatFileSize(target.size)}
+            {actions ? null : (
+              <>
+                {" · "}
+                <a
+                  href={target.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-foreground underline underline-offset-2"
+                >
+                  Open original
+                </a>
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         {target.kind === "image" ? (
@@ -66,7 +94,13 @@ export function AttachmentPreviewDialog({
           />
         ) : (
           // Keyed so a different file starts back at the loading state.
-          <TextPreview key={target.url} url={target.url} language={textLanguage(target.fileName)} />
+          <TextPreview
+            key={target.url}
+            url={target.url}
+            language={textLanguage(target.fileName)}
+            shortened={target.truncated ?? false}
+            linkable={!actions}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -82,7 +116,18 @@ type TextPreviewState =
 // shown as source instead.
 const RENDER_CHAR_CAP = 100_000;
 
-function TextPreview({ url, language }: { url: string; language: string }) {
+function TextPreview({
+  url,
+  language,
+  shortened,
+  linkable,
+}: {
+  url: string;
+  language: string;
+  /** The fetched bytes are already short of the file, before this one caps it. */
+  shortened: boolean;
+  linkable: boolean;
+}) {
   const [state, setState] = useState<TextPreviewState>({ status: "loading" });
   const [rendered, setRendered] = useState(true);
 
@@ -136,9 +181,11 @@ function TextPreview({ url, language }: { url: string; language: string }) {
       ) : (
         <CodeViewer text={state.text} language={language} className="max-h-[65vh]" />
       )}
-      {state.truncated ? (
+      {state.truncated || shortened ? (
         <p className="text-muted-foreground text-xs">
-          Truncated preview — use “Open original” for the whole file.
+          {linkable
+            ? "Truncated preview. “Open original” has the whole file."
+            : "Shortened to fit."}
         </p>
       ) : null}
     </div>

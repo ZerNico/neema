@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
-import type { DesktopAuth, DesktopChrome } from "@chat/desktop-rpc";
+import { PROTOCOL_VERSION, type DesktopAuth, type DesktopChrome } from "@chat/desktop-rpc";
 import {
   CHANGE_SERVER,
   CHROME_GET_STATE,
@@ -64,7 +64,7 @@ describe("restricted bundled preloads", () => {
   it("exposes optional chrome without changing Work protocol or leaking Electron events", async () => {
     const { exposed, ipc, requireModule } = probe("preload.ts", "https:");
     const bridge = exposed.get("__chatDesktop")!;
-    expect(bridge.protocolVersion).toBe(3);
+    expect(bridge.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(bridge.request).toBeTypeOf("function");
     expect(exposed.has("__chatRecovery")).toBe(false);
     const chrome = bridge.chrome as DesktopChrome;

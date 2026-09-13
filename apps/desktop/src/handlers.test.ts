@@ -31,6 +31,9 @@ let outsideDir: string;
 let handlers: DesktopHandlers;
 let picked: string | null;
 let ran: { command: string; cwd: string; network: string; allowWrite: string[] }[];
+let revealed: { absolute: string; mode: string }[];
+/** What the operating system complained about, when the test wants it to. */
+let revealComplaint: string | null;
 
 const CONVERSATION = "conv-1";
 
@@ -60,6 +63,10 @@ beforeAll(async () => {
 
   const shell: Shell = {
     pickDirectory: async () => picked,
+    revealPath: async (absolute, mode) => {
+      revealed.push({ absolute, mode });
+      return revealComplaint;
+    },
     executionSession: () => ({ id: "test-session" }),
     cancelCall: () => false,
     setWorkState: () => {},
@@ -88,6 +95,8 @@ const failureOf = async <A>(effect: Effect.Effect<A, { reason: string }>) => {
 
 beforeAll(() => {
   ran = [];
+  revealed = [];
+  revealComplaint = null;
 });
 
 describe("before a folder is attached", () => {
@@ -385,6 +394,133 @@ describe("once a folder is attached", () => {
     expect(await executions.request("editFile", payload)).toEqual(first);
     expect(await readFile(join(root, "replay.txt"), "utf8")).toBe("changed");
     await executions.dispose();
+  });
+
+  it("hands the file manager a real path, and never one the site only named", async () => {
+    revealed = [];
+    await Effect.runPromise(
+      handlers.revealPath({
+        conversationId: CONVERSATION,
+        path: "workspace/src/index.ts",
+        mode: "reveal",
+      }),
+    );
+    const real = await Effect.runPromise(realRoot());
+    expect(revealed).toEqual([{ absolute: join(real, "src", "index.ts"), mode: "reveal" }]);
+
+    // Same containment as every other file procedure, because the click comes
+    // from the same remote page the model's calls come from.
+    for (const path of [
+      "workspace/../elsewhere/secrets.txt",
+      "workspace/escape/secrets.txt",
+      "elsewhere/secrets.txt",
+    ]) {
+      expect(
+        await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
+      ).not.toBe("unexpected success");
+    }
+    expect(
+      await failureOf(
+        handlers.revealPath({
+          conversationId: CONVERSATION,
+          path: join(outsideDir, "secrets.txt"),
+          mode: "reveal",
+        }),
+      ),
+    ).toBe("outside-folder");
+    expect(
+      await failureOf(
+        handlers.revealPath({
+          conversationId: CONVERSATION,
+          path: "workspace/src/nothing-here.txt",
+          mode: "reveal",
+        }),
+      ),
+    ).toBe("not-found");
+    // A dangling symlink resolves to nothing, so it can never be handed over.
+    expect(
+      await failureOf(
+        handlers.revealPath({
+          conversationId: CONVERSATION,
+          path: "workspace/dangling",
+          mode: "open",
+        }),
+      ),
+    ).toBe("not-found");
+    expect(revealed).toHaveLength(1);
+  });
+
+  it("will not hand a file this computer would run to its default application", async () => {
+    revealed = [];
+    await writeFile(join(root, "install.command"), "rm -rf /\n");
+    await writeFile(join(root, "drawing.svg"), "<svg onload=\"alert(1)\"></svg>");
+    await writeFile(join(root, "runme"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+    for (const path of ["workspace/install.command", "workspace/drawing.svg", "workspace/runme"]) {
+      expect(
+        await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
+      ).toBe("not-openable");
+      // Showing it in the folder is the answer offered instead, so it must work.
+      await Effect.runPromise(
+        handlers.revealPath({ conversationId: CONVERSATION, path, mode: "reveal" }),
+      );
+    }
+    expect(revealed.map((call) => call.mode)).toEqual(["reveal", "reveal", "reveal"]);
+
+    // Two causes, two sentences. The site hides Open for the extension list,
+    // so the executable one is the refusal a reader can still reach.
+    const refusalFor = async (path: string) => {
+      const outcome = await Effect.runPromise(
+        Effect.result(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
+      );
+      return outcome._tag === "Failure" ? outcome.failure.message : "unexpected success";
+    };
+    expect(await refusalFor("workspace/runme")).toBe(
+      "workspace/runme is marked executable, so opening it could run it. Show it in the folder instead.",
+    );
+    expect(await refusalFor("workspace/drawing.svg")).toBe(
+      "workspace/drawing.svg is a kind of file that can run when it is opened. Show it in the folder instead.",
+    );
+
+    await Effect.runPromise(
+      handlers.revealPath({
+        conversationId: CONVERSATION,
+        path: "workspace/src/index.ts",
+        mode: "open",
+      }),
+    );
+    expect(revealed.at(-1)?.mode).toBe("open");
+  });
+
+  it("reports the operating system's refusal instead of claiming it opened", async () => {
+    revealComplaint = "no application knows this file";
+    expect(
+      await failureOf(
+        handlers.revealPath({
+          conversationId: CONVERSATION,
+          path: "workspace/src/index.ts",
+          mode: "open",
+        }),
+      ),
+    ).toBe("failed");
+    revealComplaint = null;
+  });
+
+  it("carries reveal across the bridge and refuses an unknown mode there", async () => {
+    revealed = [];
+    const respond = makeDesktopResponder(handlers);
+    const ask = (payload: unknown) => Effect.runPromise(respond("revealPath", payload));
+    expect(
+      await ask({ conversationId: CONVERSATION, path: "workspace/src/index.ts", mode: "reveal" }),
+    ).toEqual({ ok: true, value: undefined });
+    expect(revealed).toHaveLength(1);
+
+    expect(
+      await ask({ conversationId: CONVERSATION, path: "workspace/src/index.ts", mode: "launch" }),
+    ).toMatchObject({ ok: false, error: { reason: "failed" } });
+    expect(
+      await ask({ conversationId: CONVERSATION, path: "workspace/escape/secrets.txt", mode: "open" }),
+    ).toMatchObject({ ok: false, error: { reason: "outside-folder" } });
+    expect(revealed).toHaveLength(1);
   });
 
   it("refuses a traversal and an absolute path", async () => {

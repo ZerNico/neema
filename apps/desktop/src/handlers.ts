@@ -4,9 +4,11 @@ import { Effect } from "effect";
 import {
   DesktopError,
   LIMITS,
+  UNOPENABLE_EXTENSIONS,
   type DesktopHandlers,
   type DirectoryEntry,
   type FolderStatus,
+  type RevealMode,
   type SearchMatch,
 } from "@chat/desktop-rpc";
 import { unifiedDiff } from "./diff.ts";
@@ -41,6 +43,11 @@ const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
 /** The native directory dialog, injected so tests need no Electron. */
 export interface Shell {
   pickDirectory(): Promise<string | null>;
+  /**
+   * Hands a path this module has already proven contained to the operating
+   * system. Resolves to the system's complaint, or null when it took the path.
+   */
+  revealPath(absolute: string, mode: RevealMode): Promise<string | null>;
   executionSession(): { id: string };
   cancelCall(callId: string): boolean;
   setWorkState(state: { active: number; needsApproval: number }): void;
@@ -612,6 +619,50 @@ export const makeHandlers = (shell: Shell) =>
             timeoutMs,
             network,
           });
+        }),
+
+      revealPath: ({ conversationId, path, mode }) =>
+        Effect.gen(function* () {
+          const target = yield* locate(conversationId, path);
+          // `showItemInFolder` reports nothing about a path that is not there,
+          // so the reader would get silence. Ask first and say so instead.
+          const info = yield* Effect.tryPromise({
+            try: () => stat(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${target.relative} does not exist.`,
+              }),
+          });
+          // The execute bit catches what the extension list cannot: a script
+          // with no extension, or one a command the model ran chmod-ed. The
+          // site hides its Open button for the list, so this is the case a
+          // reader actually meets.
+          const executable = info.isFile() && (info.mode & 0o111) !== 0;
+          const listed = UNOPENABLE_EXTENSIONS.has(extname(target.absolute).toLowerCase());
+          if (mode === "open" && (executable || listed)) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-openable",
+                message: executable
+                  ? `${target.relative} is marked executable, so opening it could run it. Show it in the folder instead.`
+                  : `${target.relative} is a kind of file that can run when it is opened. Show it in the folder instead.`,
+              }),
+            );
+          }
+          const complaint = yield* Effect.tryPromise({
+            try: () => shell.revealPath(target.absolute, mode),
+            catch: () =>
+              new DesktopError({
+                reason: "failed",
+                message: `Could not open ${target.relative}.`,
+              }),
+          });
+          if (complaint !== null) {
+            return yield* Effect.fail(
+              new DesktopError({ reason: "failed", message: `Could not open ${target.relative}.` }),
+            );
+          }
         }),
 
       setUpSandbox: () => sandbox.setUp(),

@@ -154,6 +154,8 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
     "not-text",
     /** The file is neither an image nor a document the model could take. */
     "not-binary",
+    /** Handing the file to its default application would run it. */
+    "not-openable",
     /** An edit's old text was not found, or was found more than once. */
     "no-match",
     "ambiguous-match",
@@ -170,6 +172,68 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
   ]),
   message: Schema.String,
 }) {}
+
+/**
+ * Extensions whose default application runs the file rather than displays it.
+ * `openPath` chooses that application by extension, so opening one would run
+ * what the model wrote. Markup is here for the same reason: an `.svg` or an
+ * `.html` handed to a browser runs its script from `file:`.
+ *
+ * Shared, so the site can hide an action the desktop would refuse rather than
+ * keep a second list that drifts from this one. The desktop still decides:
+ * a file marked executable is refused whatever it is called, and the site
+ * cannot see that bit.
+ */
+export const UNOPENABLE_EXTENSIONS = new Set([
+  ".app",
+  ".appimage",
+  ".bat",
+  ".bin",
+  ".cmd",
+  ".com",
+  ".command",
+  ".cpl",
+  ".desktop",
+  ".dll",
+  ".exe",
+  ".hta",
+  ".htm",
+  ".html",
+  ".inf",
+  ".jar",
+  ".js",
+  ".jse",
+  ".lnk",
+  ".msc",
+  ".msi",
+  ".pif",
+  ".ps1",
+  ".reg",
+  ".run",
+  ".scpt",
+  ".scr",
+  ".sh",
+  ".so",
+  ".svg",
+  ".svgz",
+  ".url",
+  ".vb",
+  ".vbe",
+  ".vbs",
+  ".workflow",
+  ".wsf",
+  ".wsh",
+  ".xht",
+  ".xhtml",
+]);
+
+/**
+ * What a reader asked the operating system to do with a file they can already
+ * see named in the transcript: show it where it lives, or hand it to whatever
+ * application owns that extension.
+ */
+export const RevealMode = Schema.Literals(["reveal", "open"]);
+export type RevealMode = typeof RevealMode.Type;
 
 /**
  * How far a command may reach. Package managers are what a build needs and

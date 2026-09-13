@@ -12,6 +12,7 @@ import {
   FoundPaths,
   MoveReceipt,
   NetworkLevel,
+  RevealMode,
   SandboxAvailability,
   SearchMatches,
   WriteReceipt,
@@ -197,6 +198,30 @@ export const DesktopRpcs = RpcGroup.make(
       network: NetworkLevel,
     },
     success: CommandOutput,
+    error: DesktopError,
+  }),
+
+  /**
+   * Shows a file where it lives, or hands it to the application that owns its
+   * extension.
+   *
+   * The only procedure here the model cannot reach: it carries no `callId`,
+   * so it is outside the replay ledger and the call deadline, and nothing it
+   * does reaches the transcript. The reader clicked a row on the authorized
+   * page. Containment is still the desktop's to prove, because that page is
+   * remote code whichever side of it named the path.
+   *
+   * `open` refuses a file this computer would execute. Choosing the handler by
+   * extension is what `openPath` does, so a `.command` the model wrote is one
+   * click from running; `reveal` answers for those instead.
+   */
+  Rpc.make("revealPath", {
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      mode: RevealMode,
+    },
+    success: Schema.Void,
     error: DesktopError,
   }),
 

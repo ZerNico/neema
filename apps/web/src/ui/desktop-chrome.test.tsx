@@ -6,7 +6,7 @@ import { runInNewContext } from "node:vm";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { DesktopChrome, DesktopChromeState } from "@chat/desktop-rpc";
+import { PROTOCOL_VERSION, type DesktopChrome, type DesktopChromeState } from "@chat/desktop-rpc";
 import { SidebarProvider, SidebarTrigger, useSidebar } from "./primitives/sidebar";
 import {
   AppHeader,
@@ -88,7 +88,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it.each([undefined, { protocolVersion: 3, request: () => {} }])(
+it.each([undefined, { protocolVersion: PROTOCOL_VERSION, request: () => {} }])(
   "keeps the original header without a chrome capability (%s)",
   (channel) => {
     vi.stubGlobal("__chatDesktop", channel);
