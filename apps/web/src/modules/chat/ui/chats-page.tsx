@@ -13,7 +13,6 @@ import { activityStamp, describeActivity } from "./timestamps.ts";
 import { EmptyState, Page, Section } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { SearchInput } from "~/ui/search-input.tsx";
-import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
 
 // Only consumer of a debounce in the repo, so it lives here rather than
@@ -38,8 +37,6 @@ export function ChatsPage() {
   });
   const actions = useConversationActions();
   const [revealRegistry] = useState(createTitleRevealRegistry);
-  // Formatting a local timestamp during SSR would use the server's timezone.
-  const hydrated = useHydrated();
 
   const conversations = useMemo(() => {
     const seen = new Set<string>();
@@ -100,7 +97,7 @@ export function ChatsPage() {
                       to="/chat/$conversationId"
                       params={{ conversationId: conversation.id }}
                       className="hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/30 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors outline-none focus-visible:ring-3"
-                      {...(hydrated ? { title: describeActivity(conversation) } : {})}
+                      title={describeActivity(conversation)}
                     >
                       <span className="flex min-w-0 flex-1 items-center">
                         <ConversationStatusTitle
@@ -112,7 +109,7 @@ export function ChatsPage() {
                         />
                       </span>
                       <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                        {hydrated ? activityStamp(conversation) : ""}
+                        {activityStamp(conversation)}
                       </span>
                     </Link>
                     <ConversationMenu

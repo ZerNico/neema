@@ -1,6 +1,6 @@
 // Local-clock labels for the message list and the sidebar. Every function here
-// reads the visitor's timezone, so none of it may run during SSR — callers
-// gate on `useHydrated`.
+// reads the visitor's timezone and clock, which the app always has: routes
+// render only in the browser, below the root shell's client-only boundary.
 
 import type { DatedConversation } from "./conversation-groups.ts";
 

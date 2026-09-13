@@ -40,7 +40,6 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { Switch } from "~/ui/primitives/switch";
-import { useHydrated } from "~/ui/use-hydrated.ts";
 
 const MemoryFormSchema = Schema.Struct({
   content: Schema.String.check(
@@ -323,7 +322,6 @@ function MemoryRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const hydrated = useHydrated();
   const userEdited = memory.editedAt !== null;
   const badge = userEdited
     ? "Edited by you"
@@ -338,7 +336,7 @@ function MemoryRow({
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{memory.content}</p>
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <Badge variant="outline">{badge}</Badge>
-          {hydrated && !Number.isNaN(updated.getTime()) ? (
+          {!Number.isNaN(updated.getTime()) ? (
             <time dateTime={memory.updatedAt} title={absoluteLabel(updated)}>
               Updated {relativeAgeLabel(updated)}
             </time>

@@ -18,7 +18,6 @@ import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { buttonVariants } from "~/ui/primitives/button";
-import { useHydrated } from "~/ui/use-hydrated.ts";
 import {
   Sidebar,
   SidebarContent,
@@ -133,9 +132,7 @@ function ConversationList() {
   const actions = useConversationActions();
   // The rows are already bucketed by recency, so an inline stamp would only
   // repeat the group heading in a 16rem column. The exact time lives in the
-  // row's tooltip instead — held back until hydration, because formatting it
-  // on the server would produce an attribute in the wrong timezone.
-  const hydrated = useHydrated();
+  // row's tooltip instead.
 
   const pages = conversationsPages.data.pages;
   // Between two page fetches a chat that just received a message can appear on
@@ -177,7 +174,7 @@ function ConversationList() {
                       conversationId={conversation.id}
                       title={conversation.title}
                       registry={revealRegistry}
-                      {...(hydrated ? { createdAt: conversation.createdAt } : {})}
+                      createdAt={conversation.createdAt}
                     />
                   </SidebarMenuButton>
                   <ConversationMenu

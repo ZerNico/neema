@@ -1,18 +1,13 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 // On mobile /settings is the nav screen itself (SectionShell hides content at
-// the root). On desktop the nav is always visible, so land on profile.
+// the root). On desktop the nav is always visible, so land on profile. The
+// loader runs in the browser (client-rendered SPA), so the viewport is known
+// before anything mounts.
 export const Route = createFileRoute("/_app/settings/")({
-  component: SettingsIndex,
+  loader: () => {
+    if (window.matchMedia("(min-width: 768px)").matches)
+      throw redirect({ to: "/settings/profile", replace: true });
+  },
+  component: () => null,
 });
-
-function SettingsIndex() {
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (window.matchMedia("(min-width: 768px)").matches) {
-      void navigate({ to: "/settings/profile", replace: true });
-    }
-  }, [navigate]);
-  return null;
-}

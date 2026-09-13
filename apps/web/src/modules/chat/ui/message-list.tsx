@@ -158,13 +158,12 @@ export interface DisplayMessage {
   error?: string | null;
   /**
    * Day heading to draw above this message. Set only on the message that opens
-   * a local calendar day, and absent entirely until hydration — the server
-   * cannot know where the visitor's days begin.
+   * a local calendar day, and absent on a message whose date will not parse.
    */
   dayLabel?: string | null;
   /** Durable and live compaction occurrences inside this assistant response. */
   compactionActivities?: CompactionActivity[];
-  /** Local send time for the action row; absent until hydration. */
+  /** Local send time for the action row; absent if its date will not parse. */
   time?: MessageTime | null;
   /** The agent this answer ran with, when one was installed. */
   agent?: { name: string; icon: string } | null;

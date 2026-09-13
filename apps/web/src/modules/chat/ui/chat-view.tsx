@@ -74,7 +74,6 @@ import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
-import { useHydrated } from "~/ui/use-hydrated.ts";
 import { cn } from "~/ui/utils";
 
 // Durable message_tool_calls row → the same family-discriminated shape used by
@@ -779,19 +778,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ),
     [data.messages, questionResponses],
   );
-  const hydrated = useHydrated();
-  const stamps = useMemo(
-    () => (hydrated ? buildMessageStamps(visibleMessages) : null),
-    [hydrated, visibleMessages],
-  );
+  const stamps = useMemo(() => buildMessageStamps(visibleMessages), [visibleMessages]);
   const answerStamps = useMemo(
     () =>
-      hydrated
-        ? buildMessageStamps(
-            data.messages.filter((message) => questionResponses.hiddenMessageIds.has(message.id)),
-          )
-        : null,
-    [hydrated, data.messages, questionResponses],
+      buildMessageStamps(
+        data.messages.filter((message) => questionResponses.hiddenMessageIds.has(message.id)),
+      ),
+    [data.messages, questionResponses],
   );
 
   const compactionsByMessage = useMemo(() => {
@@ -1012,9 +1005,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       for (const source of collectSources(toolActivities)) {
         inheritedByIndex.set(source.index, mergeSource(inheritedByIndex.get(source.index), source));
       }
-      const stamp = stamps?.get(message.id);
+      const stamp = stamps.get(message.id);
       const resolution = questionResponses.byAssistant.get(message.id);
-      const answerTime = resolution ? answerStamps?.get(resolution.messageId) : undefined;
+      const answerTime = resolution ? answerStamps.get(resolution.messageId) : undefined;
       const canRespond =
         message.role === "assistant" &&
         message.status === "complete" &&
@@ -1385,7 +1378,8 @@ export function NewChatView({
     onPrefillConsumed?.();
   }, [initialPrefill, onPrefillConsumed]);
   useEffect(() => {
-    // Hydration initially uses the server’s desktop snapshot even on a phone.
+    // matchMedia is read directly as well: `useIsMobile` reports "not mobile"
+    // wherever it is missing, and a phone must not raise the keyboard.
     if (!isMobile && !window.matchMedia?.("(max-width: 767px)").matches) composer.current?.focus();
   }, [isMobile]);
   // Flipped the moment the first message actually leaves: the composer drops

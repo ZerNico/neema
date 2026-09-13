@@ -232,7 +232,7 @@ export function MessageActions({
   onOpenSources?: (() => void) | undefined;
   content: string;
   sources: ToolSource[];
-  /** Local send time. Absent until hydration — the server has no timezone. */
+  /** Local send time. Absent when the message's date will not parse. */
   time?: MessageTime | null | undefined;
   /**
    * Leads with the time instead of closing with it. User bubbles are

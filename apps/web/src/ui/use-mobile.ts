@@ -2,11 +2,11 @@ import * as React from "react";
 
 const MOBILE_BREAKPOINT = 768;
 
-// One media-query list for every subscriber; created lazily so the module can
-// still be imported during SSR, where matchMedia does not exist.
+// One media-query list for every subscriber, created lazily so importing the
+// module never touches `window`. A jsdom test can import it with no viewport.
 let mql: MediaQueryList | undefined;
-// Undefined wherever matchMedia is missing — SSR, and a jsdom test that has no
-// reason to care about the viewport. Callers then see "not mobile".
+// Undefined wherever matchMedia is missing, which in practice is a jsdom test
+// that has no reason to care about the viewport. Callers then see "not mobile".
 const query = () =>
   (mql ??=
     typeof window === "undefined" || typeof window.matchMedia !== "function"
@@ -23,7 +23,8 @@ export function useIsMobile() {
   return React.useSyncExternalStore(
     subscribe,
     () => query()?.matches ?? false,
-    // Server snapshot: no viewport, assume desktop until hydration.
+    // Unused in the browser: routes mount below the shell's client-only
+    // boundary, so the client snapshot is what every caller actually reads.
     () => false,
   );
 }

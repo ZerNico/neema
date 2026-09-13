@@ -41,13 +41,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { useHydrated } from "~/ui/use-hydrated.ts";
 
 export function AgentsPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-  // Relative ages come from the visitor's clock, so they wait for hydration.
-  const hydrated = useHydrated();
   const agents = useQuery(agentsQuery);
   const [sharing, setSharing] = useState<AgentSummary | null>(null);
   const remove = useMutation({
@@ -62,7 +59,7 @@ export function AgentsPage() {
   // Without a description the row still says something true about the agent,
   // the way a collection row falls back to its document count.
   const detail = (agent: AgentSummary) => {
-    const age = agent.description || !hydrated ? "" : relativeAgeLabel(agent.updatedAt);
+    const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt);
     return [
       agent.description || (age ? `Updated ${age}` : null),
       agent.ownerName ? `Shared by ${agent.ownerName}` : null,
