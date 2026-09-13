@@ -26,6 +26,15 @@ export const desktopWorkSnapshot = createServerFn({ method: "POST" })
         const external = yield* ExternalCompletion;
         const repo = yield* ChatRepo;
         const userId = context.session.user.id;
+        // A restarted app checks in with a new executor id, so its own previous
+        // attempts are invisible to the snapshot below and nothing left can
+        // claim their calls. Only this device may end them, and only here,
+        // where the session proves which device is asking.
+        yield* external.cancelSuperseded({
+          userId,
+          deviceSessionId: context.session.session.id,
+          executorId: data.executorId,
+        });
         const snapshot = yield* external.snapshot(userId, data.executorId);
         for (const attempt of snapshot.attempts) {
           if (!(yield* repo.isDesktopAttemptLive(attempt))) yield* external.cancelAttempt(attempt);

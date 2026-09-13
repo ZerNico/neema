@@ -2704,17 +2704,21 @@ for (const presented of [true, false]) {
 
 describe("local tools on the user's machine", () => {
   const folder = "acme-site";
+  const workConversation = (userId: string) =>
+    Effect.gen(function* () {
+      const conversation = yield* (yield* ChatRepo).createConversation({
+        userId,
+        modelId: textModelId,
+      });
+      yield* (yield* Db)
+        .update(conversations)
+        .set({ mode: "work" })
+        .where(eq(conversations.id, conversation.id));
+      return conversation;
+    });
   const desktopChat = Effect.gen(function* () {
     const seed = yield* setupConversation;
-    const conversation = yield* (yield* ChatRepo).createConversation({
-      userId: seed.userId,
-      modelId: textModelId,
-    });
-    yield* (yield* Db)
-      .update(conversations)
-      .set({ mode: "work" })
-      .where(eq(conversations.id, conversation.id));
-    return { ...seed, conversation };
+    return { ...seed, conversation: yield* workConversation(seed.userId) };
   });
 
   const send = (seed: Effect.Success<typeof desktopChat>, desktopCommands = false) =>
@@ -3136,6 +3140,115 @@ describe("local tools on the user's machine", () => {
       expect(call.status).toBe("error");
       expect(result.detail.messages.at(-1)?.status).toBe("aborted");
       expect(JSON.stringify(result.detail)).not.toContain("LATE_ANSWER");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  /**
+   * A development rebuild relaunches the app mid-call. It comes back with a new
+   * executor id, so its own parked attempt is invisible to the snapshot and no
+   * host can ever claim the call: without this the answer sat at "Writing ..."
+   * for the whole change deadline.
+   */
+  it("ends the attempt a restarted app abandoned, sparing other devices", async () => {
+    // The first round asks for the write every generation parks on; once the
+    // handler reports the app is gone, the model answers in words, which is
+    // what abandoning is for.
+    const asked = new Set<string>();
+    authoringScript = (input) => {
+      const key = JSON.stringify(input.prompt).slice(-200);
+      if (asked.has(key))
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Your desktop app closed." }),
+          authoringFinish(),
+        );
+      asked.add(key);
+      return authoringTool(input, "write_local_file", { path: `${folder}/note.md`, text: "hi" });
+    };
+    try {
+      const outcome = await runtime.runPromise(
+        Effect.gen(function* () {
+          const external = yield* ExternalCompletion;
+          const engine = yield* StreamEngine;
+          const service = yield* ChatService;
+          const { userId } = yield* setupConversation;
+          // One user, one executor id, three device sessions: the app that
+          // restarts, a second device, and an attempt from before attempts
+          // carried a device at all.
+          const devices = ["device-1", "device-2", undefined] as const;
+          const started = yield* Effect.forEach(devices, (deviceSessionId) =>
+            Effect.gen(function* () {
+              const conversation = yield* workConversation(userId);
+              const sent = yield* service.sendMessage({
+                userId,
+                conversationId: conversation.id,
+                modelId: textModelId,
+                content: "Write the note.",
+                searchEnabled: false,
+                attachmentIds: [],
+                fromDesktop: true,
+                desktopExecutorId: "executor-1",
+                deviceSessionId,
+                desktopFolder: folder,
+              });
+              return { conversation, messageId: sent.assistantMessageId };
+            }),
+          );
+          // Nobody answers: every handler parks the way a closed app leaves it.
+          const bridges = yield* Effect.forEach(started, (attempt) =>
+            fakeBridge(attempt.messageId, () => null),
+          );
+          yield* Effect.forEach(bridges, (bridge) => Deferred.await(bridge.first));
+
+          // The same device checks in again after its restart.
+          yield* external.cancelSuperseded({
+            userId,
+            deviceSessionId: "device-1",
+            executorId: "executor-2",
+          });
+          const live = yield* external.snapshot(userId, "executor-1");
+          // Nothing is forced here: no lease is expired and no reaper is run,
+          // so finishing at all is the proof that the released handler let the
+          // generation carry on rather than dying with it.
+          yield* Fiber.join(bridges[0]!.fiber);
+          const detail = yield* loadConversationDetail(userId, started[0]!.conversation.id);
+          const survivors = yield* Effect.forEach(started.slice(1), (attempt) =>
+            ChatRepo.use((repo) => repo.getMessage(attempt.messageId)),
+          );
+          // Leaving two generations parked would outlive the suite.
+          yield* Effect.forEach(started.slice(1), (attempt, index) =>
+            Effect.gen(function* () {
+              yield* engine.stopGeneration(
+                attempt.messageId,
+                survivors[index]?.generationId ?? undefined,
+              );
+              yield* Fiber.join(bridges[index + 1]!.fiber);
+            }),
+          );
+          return { live, detail, survivors };
+        }),
+      );
+
+      // The restarted device's attempt is the only one that lost authority.
+      expect(outcome.live.attempts.map((attempt) => attempt.deviceSessionId)).toEqual([
+        "device-2",
+        undefined,
+      ]);
+      // The other device and the attempt with no device keep their deadline.
+      expect(outcome.survivors.map((message) => message?.status)).toEqual([
+        "streaming",
+        "streaming",
+      ]);
+      // The call ends as the deadline would have ended it, but in seconds, and
+      // the answer is a real one rather than an interrupted row.
+      const call = outcome.detail.toolCalls.at(-1)!;
+      expect(call.toolName).toBe("write_local_file");
+      expect(call.status).toBe("error");
+      expect(JSON.stringify(call.result)).toContain("may be closed");
+      const message = outcome.detail.messages.at(-1)!;
+      expect(message.status).toBe("complete");
+      expect(message.content).toBe("Your desktop app closed.");
     } finally {
       authoringScript = null;
     }

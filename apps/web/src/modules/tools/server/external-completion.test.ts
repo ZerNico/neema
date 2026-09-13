@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { ExternalCompletion } from "./external-completion.ts";
+import { ExternalCompletion, supersededByCheckIn } from "./external-completion.ts";
 
 // The wait is what makes a blocked handler safe, so the two properties that
 // keep it safe are asserted directly: it always ends, and an answer that
@@ -177,6 +177,123 @@ describe("ExternalCompletion", () => {
         yield* external.complete("a", "first");
         expect(yield* Fiber.join(both)).toEqual(["first", "second"]);
       }),
+    ),
+  );
+});
+
+// A desktop app that restarts checks in under a new executor id, so its own
+// abandoned attempts are the ones nothing can claim any more. These are the
+// cases that decide whether an attempt is that, or somebody else's live work.
+describe("attempts a restarted app left behind", () => {
+  const checkIn = { userId: "u", deviceSessionId: "device-1", executorId: "executor-2" };
+  const from = (deviceSessionId: string | undefined, executorId = "executor-1") => ({
+    ...owner,
+    executorId,
+    ...(deviceSessionId === undefined ? {} : { deviceSessionId }),
+  });
+
+  it("matches only the same device under an earlier executor", () => {
+    expect(supersededByCheckIn(from("device-1"), checkIn)).toBe(true);
+    // The app doing the asking: its own live attempt must survive its check-in.
+    expect(supersededByCheckIn(from("device-1", "executor-2"), checkIn)).toBe(false);
+    // Another device is still allowed to be running work of its own.
+    expect(supersededByCheckIn(from("device-2"), checkIn)).toBe(false);
+    // Started before attempts carried a device: only its deadline can end it.
+    expect(supersededByCheckIn(from(undefined), checkIn)).toBe(false);
+    // Session ids are unique, but the user is checked rather than assumed.
+    expect(supersededByCheckIn({ ...from("device-1"), userId: "other" }, checkIn)).toBe(false);
+  });
+
+  it.effect("ends that attempt's authority and leaves every other attempt alone", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        const attempts = {
+          restarted: { ...from("device-1"), generationId: "g-restarted" },
+          otherDevice: { ...from("device-2"), generationId: "g-other" },
+          legacy: { ...from(undefined), generationId: "g-legacy" },
+        };
+        for (const [callId, attempt] of Object.entries(attempts)) {
+          yield* external.track(attempt, Effect.void);
+          yield* external.open(callId, { ...operation, ...attempt });
+        }
+        yield* external.cancelSuperseded(checkIn);
+
+        expect(yield* external.inspect("restarted")).toBeNull();
+        expect(yield* external.claim("restarted", attempts.restarted)).toBeNull();
+        expect(yield* external.inspect("otherDevice")).not.toBeNull();
+        expect(yield* external.inspect("legacy")).not.toBeNull();
+        expect((yield* external.snapshot("u", "executor-1")).attempts).toEqual([
+          attempts.otherDevice,
+          attempts.legacy,
+        ]);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("releases the parked handler with its own failure, not an interrupt", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        const attempt = from("device-1");
+        yield* external.track(attempt, Effect.void);
+        yield* external.open("parked", { ...operation, ...attempt });
+        const waiting = yield* start(
+          external.await("parked", {
+            requireOpen: true,
+            timeout: Duration.minutes(10),
+            onTimeout: () => "app closed",
+          }),
+        );
+        yield* Effect.repeat(external.pending("parked"), { until: (present) => present });
+
+        yield* external.cancelSuperseded(checkIn);
+
+        // No clock is moved: the ten minutes are what this used to cost.
+        expect(yield* Fiber.join(waiting)).toBe("app closed");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("fails a later call of the same attempt instead of parking it again", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        const attempt = from("device-1");
+        yield* external.track(attempt, Effect.void);
+        yield* external.cancelSuperseded(checkIn);
+        // The generation runs on and may call another tool; that call has no
+        // host either, so it must not buy itself a second deadline.
+        yield* external.open("after", { ...operation, ...attempt });
+        expect(
+          yield* external.await("after", {
+            requireOpen: true,
+            timeout: Duration.minutes(10),
+            onTimeout: () => "app closed",
+          }),
+        ).toBe("app closed");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("still interrupts the handler when the attempt is cancelled outright", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        const attempt = from("device-1");
+        yield* external.track(attempt, Effect.void);
+        yield* external.open("stopped", { ...operation, ...attempt });
+        const waiting = yield* start(
+          external.await("stopped", {
+            requireOpen: true,
+            timeout: Duration.minutes(10),
+            onTimeout: () => "app closed",
+          }),
+        );
+        yield* Effect.repeat(external.pending("stopped"), { until: (present) => present });
+
+        yield* external.cancelAttempt(attempt);
+
+        // Stop ends the generation, so its handler must not return a value it
+        // could answer with.
+        expect(yield* Fiber.await(waiting)).toMatchObject({ _tag: "Failure" });
+      }).pipe(Effect.scoped),
     ),
   );
 });

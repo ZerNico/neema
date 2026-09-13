@@ -83,6 +83,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          deviceSessionId: context.session.session.id,
           mode: data.mode,
           timeZone: data.timeZone,
           attachmentIds: data.attachmentIds,
@@ -135,6 +136,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
@@ -184,6 +186,7 @@ export const retryMessage = createServerFn({ method: "POST" })
         chat.retryMessage({
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          deviceSessionId: context.session.session.id,
           desktopFolder: data.desktopFolder,
           desktopCommands: data.desktopCommands,
           userId: context.session.user.id,
@@ -273,6 +276,7 @@ export const editMessage = createServerFn({ method: "POST" })
         chat.editMessage({
           ...data,
           userId: context.session.user.id,
+          deviceSessionId: context.session.session.id,
         }),
       ).pipe(
         Effect.catchTags({

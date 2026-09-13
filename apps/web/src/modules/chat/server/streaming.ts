@@ -195,6 +195,8 @@ export class StreamEngine extends Context.Service<
       researchRunId?: string | undefined;
       generationId?: string | undefined;
       desktopExecutorId?: string | undefined;
+      /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
+      deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
     }): Effect.Effect<void>;
     // Winds a running generation down early, keeping whatever it has already
@@ -315,6 +317,7 @@ export class StreamEngine extends Context.Service<
         researchRunId?: string | undefined;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         abort: Deferred.Deferred<void>;
       }) {
@@ -1502,6 +1505,7 @@ export class StreamEngine extends Context.Service<
                               messageId: input.messageId,
                               generationId: input.generationId,
                               executorId: input.desktopExecutorId,
+                              deviceSessionId: input.deviceSessionId,
                               name: part.name,
                               args,
                               timeoutMs: approvalKind(part.name as DesktopToolName)
@@ -2170,6 +2174,7 @@ export class StreamEngine extends Context.Service<
         researchRunId?: string | undefined;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
       }) {
         const abort = yield* Deferred.make<void>();
@@ -2196,6 +2201,7 @@ export class StreamEngine extends Context.Service<
                 messageId: input.messageId,
                 generationId: input.generationId,
                 executorId: input.desktopExecutorId,
+                deviceSessionId: input.deviceSessionId,
               }
             : null;
         const registration = { abort, runId: input.researchRunId ?? fence?.generationId, owner };

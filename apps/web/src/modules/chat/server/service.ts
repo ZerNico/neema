@@ -55,6 +55,8 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     desktopCommands?: boolean | undefined;
     fromDesktop?: boolean | undefined;
     desktopExecutorId?: string | undefined;
+    /** See `ExternalOwner.deviceSessionId`; read from the session, never the body. */
+    deviceSessionId?: string | undefined;
     timeZone?: string | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
@@ -92,6 +94,7 @@ export class ChatService extends Context.Service<
         messageId: string;
         /** Regenerate with this model instead of the one that answered before. */
         modelId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
       },
     ): Effect.Effect<
@@ -131,6 +134,7 @@ export class ChatService extends Context.Service<
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -460,6 +464,7 @@ function makeChatService() {
 
       yield* engine.startGeneration({
         desktopExecutorId: input.desktopExecutorId,
+        deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
@@ -491,6 +496,7 @@ function makeChatService() {
     const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (
       input: DesktopSubmission & {
         expectedMessages: HistorySnapshot;
+        deviceSessionId?: string | undefined;
         userId: string;
         conversationId: string;
         assistantMessageId: string;
@@ -573,6 +579,7 @@ function makeChatService() {
 
       yield* engine.startGeneration({
         desktopExecutorId: input.desktopExecutorId,
+        deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: input.assistantMessageId,
@@ -595,6 +602,7 @@ function makeChatService() {
         conversationId: string;
         messageId: string;
         modelId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
       },
     ) {
@@ -685,6 +693,7 @@ function makeChatService() {
 
       const restarted = yield* restartAssistant({
         desktopExecutorId: input.desktopExecutorId,
+        deviceSessionId: input.deviceSessionId,
         fromDesktop: input.fromDesktop,
         desktopFolder: input.desktopFolder,
         desktopCommands: input.desktopCommands,
@@ -798,6 +807,7 @@ function makeChatService() {
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
+        deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
@@ -851,6 +861,7 @@ function makeChatService() {
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
           desktopExecutorId: input.desktopExecutorId,
+          deviceSessionId: input.deviceSessionId,
           fromDesktop: input.fromDesktop,
           desktopFolder: input.desktopFolder,
           desktopCommands: input.desktopCommands,
@@ -927,6 +938,7 @@ function makeChatService() {
       });
       yield* engine.startGeneration({
         desktopExecutorId: input.desktopExecutorId,
+        deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: created.message.id,

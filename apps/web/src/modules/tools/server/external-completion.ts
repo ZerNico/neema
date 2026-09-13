@@ -14,6 +14,13 @@ export interface ExternalOwner {
   readonly messageId: string;
   readonly generationId: string;
   readonly executorId: string;
+  /**
+   * The device's own session, read from the authenticated request rather than
+   * sent by it. Unlike the executor it survives a restart of the app, which is
+   * what lets a fresh executor recognise its predecessor. Absent on attempts
+   * started before this binding existed.
+   */
+  readonly deviceSessionId?: string | undefined;
 }
 
 export interface ExternalOperation extends ExternalOwner {
@@ -29,6 +36,9 @@ interface Registration {
   readonly changed: Effect.Effect<void>;
 }
 
+/** Resolves a parked wait into its own timeout result rather than a value. */
+const ABANDONED = Symbol("external-completion/abandoned");
+
 interface Slot {
   readonly deferred: Deferred.Deferred<unknown>;
   operation?: ExternalOperation;
@@ -36,12 +46,35 @@ interface Slot {
   answered: boolean;
 }
 
+// The device session is deliberately not part of attempt identity: a claim
+// carries the client's own owner fields, so requiring it would mean trusting a
+// wire field, or refusing every attempt that predates it. The executor already
+// tells two devices apart, which is what a claim has to enforce.
 const sameOwner = (a: ExternalOwner, b: ExternalOwner) =>
   a.userId === b.userId &&
   a.conversationId === b.conversationId &&
   a.messageId === b.messageId &&
   a.generationId === b.generationId &&
   a.executorId === b.executorId;
+
+/** What the server knows about a host checking in, every field server-derived. */
+export interface ExternalCheckIn {
+  readonly userId: string;
+  readonly deviceSessionId: string;
+  readonly executorId: string;
+}
+
+/**
+ * Same device, earlier app lifetime. That executor is gone for good, so nothing
+ * can ever claim the attempt's calls and only the deadline would end them.
+ * Another device's attempt is left alone, so a second device still cannot take
+ * work from the first, and an attempt with no device session keeps its deadline.
+ */
+export const supersededByCheckIn = (owner: ExternalOwner, checkIn: ExternalCheckIn) =>
+  owner.userId === checkIn.userId &&
+  owner.deviceSessionId !== undefined &&
+  owner.deviceSessionId === checkIn.deviceSessionId &&
+  owner.executorId !== checkIn.executorId;
 
 /**
  * Bounded, scoped waits for externally executed tools. The optional owner and
@@ -81,6 +114,8 @@ export class ExternalCompletion extends Context.Service<
       value: unknown,
     ): Effect.Effect<boolean>;
     cancelAttempt(owner: ExternalOwner): Effect.Effect<void>;
+    /** See `supersededByCheckIn`: ends this device's abandoned attempts. */
+    cancelSuperseded(checkIn: ExternalCheckIn): Effect.Effect<void>;
   }
 >()("chat/tools/ExternalCompletion") {
   static readonly layer = Layer.effect(
@@ -121,7 +156,13 @@ export class ExternalCompletion extends Context.Service<
           yield* changed(slot.operation);
           return accepted;
         });
-      const cancelAttempt = (owner: ExternalOwner) =>
+      /**
+       * Ends an attempt. Interrupting takes the generation with it, which is
+       * right when the generation is already over. Abandoning instead wakes
+       * each parked wait as its own deadline would, so the handler returns its
+       * failure and the model can still answer.
+       */
+      const endAttempt = (owner: ExternalOwner, abandon: boolean) =>
         Effect.gen(function* () {
           const current = attempts.get(owner.generationId);
           if (!current || !sameOwner(current.owner, owner)) return;
@@ -129,11 +170,14 @@ export class ExternalCompletion extends Context.Service<
           for (const slot of waiting.values()) {
             if (slot.operation && sameOwner(slot.operation, owner)) {
               slot.answered = true;
-              yield* Deferred.interrupt(slot.deferred);
+              yield* abandon
+                ? Deferred.succeed(slot.deferred, ABANDONED)
+                : Deferred.interrupt(slot.deferred);
             }
           }
           yield* current.changed;
         });
+      const cancelAttempt = (owner: ExternalOwner) => endAttempt(owner, false);
       return ExternalCompletion.of({
         track: (owner, notify) =>
           Effect.gen(function* () {
@@ -160,6 +204,10 @@ export class ExternalCompletion extends Context.Service<
           Effect.gen(function* () {
             if (wait.requireOpen && !waiting.has(callId)) return wait.onTimeout();
             const slot = yield* slotFor(callId);
+            // The attempt behind this call is gone, so no host can ever claim
+            // it. Report what the deadline would report, without the wait.
+            if (slot.operation && !attempts.has(slot.operation.generationId))
+              return wait.onTimeout();
             yield* Effect.addFinalizer(() => close(callId, slot));
             const timeout = slot.operation
               ? Duration.millis(
@@ -175,7 +223,9 @@ export class ExternalCompletion extends Context.Service<
             const answered = yield* Deferred.await(slot.deferred).pipe(
               Effect.timeoutOption(timeout),
             );
-            return answered._tag === "Some" ? (answered.value as A) : wait.onTimeout();
+            return answered._tag === "Some" && answered.value !== ABANDONED
+              ? (answered.value as A)
+              : wait.onTimeout();
           }).pipe(Effect.scoped),
         complete,
         pending: (callId) => Effect.sync(() => waiting.has(callId)),
@@ -216,6 +266,17 @@ export class ExternalCompletion extends Context.Service<
             return yield* complete(callId, value);
           }),
         cancelAttempt,
+        // Read the registry into an array first: cancelling removes entries.
+        cancelSuperseded: (checkIn) =>
+          Effect.forEach(
+            [...attempts.values()]
+              .map(({ owner }) => owner)
+              .filter((owner) => supersededByCheckIn(owner, checkIn)),
+            // Abandon rather than interrupt: the generation is still alive and
+            // can say the app closed, instead of dying at its lease.
+            (owner) => endAttempt(owner, true),
+            { discard: true },
+          ),
       });
     }),
   );
