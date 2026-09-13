@@ -1,3 +1,4 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -158,6 +159,10 @@ export class EmbeddingSpace extends Context.Service<
                 .pipe(Effect.orDie);
               // Approval never bulk-submits old corpora. Owners explicitly reindex
               // unfinished work; compatible ready vectors remain usable.
+              yield* notifyOnCommit(tx, {
+                scope: "internal",
+                event: { type: "knowledge.work", stage: "embedding" },
+              });
               return config;
             }),
           );
@@ -182,6 +187,10 @@ export class EmbeddingSpace extends Context.Service<
                 .set({ enabled: false, config, updatedAt: new Date() })
                 .where(eq(tools.name, "knowledge_search"))
                 .pipe(Effect.orDie);
+              yield* notifyOnCommit(tx, {
+                scope: "internal",
+                event: { type: "knowledge.work", stage: "embedding" },
+              });
               return config;
             }),
           );

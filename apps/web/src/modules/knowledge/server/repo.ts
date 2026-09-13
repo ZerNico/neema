@@ -1,3 +1,4 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { and, asc, count, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
@@ -716,6 +717,10 @@ export class KnowledgeRepo extends Context.Service<
                   spaceId: target.spaceId,
                   connectionRevision: target.connectionRevision,
                 });
+              yield* notifyOnCommit(tx, {
+                scope: "internal",
+                event: { type: "knowledge.work", stage: "extraction" },
+              });
               return { documentId, versionId };
             }),
           )
@@ -967,6 +972,10 @@ export class KnowledgeRepo extends Context.Service<
                   ),
                 );
 
+              yield* notifyOnCommit(tx, {
+                scope: "internal",
+                event: { type: "knowledge.work", stage: "embedding" },
+              });
               return true;
             }),
           )
@@ -1018,6 +1027,11 @@ export class KnowledgeRepo extends Context.Service<
                   status: knowledgeDocumentVersions.status,
                 });
               const failed = updated[0];
+              if (failed?.status === "queued")
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "extraction" },
+                });
               if (!failed || failed.status !== "failed") return;
               // A first ingestion that failed still has to be visible as
               // failed. A failed *replacement* must not become current: the
@@ -1238,23 +1252,35 @@ export class KnowledgeRepo extends Context.Service<
         retryable: boolean;
       }) {
         yield* db
-          .update(knowledgeEmbeddingJobs)
-          .set({
-            status: input.retryable
-              ? sql`case when ${knowledgeEmbeddingJobs.attempts} >= ${MAX_ATTEMPTS} then 'failed' else 'queued' end`
-              : "failed",
-            error: input.error,
-            leaseToken: null,
-            leaseUntil: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(knowledgeEmbeddingJobs.versionId, input.versionId),
-              eq(knowledgeEmbeddingJobs.leaseToken, input.leaseToken),
-              eq(knowledgeEmbeddingJobs.status, "running"),
-              sql`${knowledgeEmbeddingJobs.leaseUntil} > now()`,
-            ),
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const updated = yield* tx
+                .update(knowledgeEmbeddingJobs)
+                .set({
+                  status: input.retryable
+                    ? sql`case when ${knowledgeEmbeddingJobs.attempts} >= ${MAX_ATTEMPTS} then 'failed' else 'queued' end`
+                    : "failed",
+                  error: input.error,
+                  leaseToken: null,
+                  leaseUntil: null,
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(knowledgeEmbeddingJobs.versionId, input.versionId),
+                    eq(knowledgeEmbeddingJobs.leaseToken, input.leaseToken),
+                    eq(knowledgeEmbeddingJobs.status, "running"),
+                    sql`${knowledgeEmbeddingJobs.leaseUntil} > now()`,
+                  ),
+                )
+                .returning({ status: knowledgeEmbeddingJobs.status })
+                .pipe(Effect.orDie);
+              if (updated[0]?.status === "queued")
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "embedding" },
+                });
+            }),
           )
           .pipe(Effect.orDie);
       });
@@ -1351,6 +1377,10 @@ export class KnowledgeRepo extends Context.Service<
                       connectionRevision: target.connectionRevision,
                     });
                 }
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "extraction" },
+                });
                 return stale.length;
               }),
             )
@@ -1446,6 +1476,11 @@ export class KnowledgeRepo extends Context.Service<
                     },
                   });
               }
+              if (versions.length)
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "embedding" },
+                });
               return versions.length;
             }),
           )
@@ -1907,6 +1942,11 @@ export class KnowledgeRepo extends Context.Service<
                     ),
                   )
                   .returning({ id: knowledgeDocumentVersions.id });
+                if (retried.length)
+                  yield* notifyOnCommit(tx, {
+                    scope: "internal",
+                    event: { type: "knowledge.work", stage: "extraction" },
+                  });
                 return retried.length > 0;
               }),
             )

@@ -152,6 +152,14 @@ whatever agent the conversation is associated with.
   client coalesces these into knowledge-only refreshes and schedules one follow-up for events
   arriving meanwhile; first SSE open also reconciles knowledge, since completion can land
   between the initial fetch and subscription.
+- Workers subscribe before the startup drain, then sleep until a stage-specific committed
+  work notification. Enqueue, extraction completion, retry, rebuild/reindex and embedding
+  configuration/provider/model changes wake the relevant stage. One pending wake survives
+  a concurrent drain; claims still use their existing fences and `SKIP LOCKED`.
+  Reconnect also drains. A thirty-second recovery scan remains because lease expiry needs
+  no database write to make a job claimable; one process-scoped sweep fails exhausted jobs.
+  Unexpected step failures retry after five seconds, independently of idle recovery.
+  See [notification recovery](sync.md).
 - Owners see one repair, Rebuild index (`rebuildIndex`): re-extract stale documents, then
   re-embed only versions not indexed for the current model, safe to run on any doubt.
   `rebuildContent`/`reindex` stay separate services internally — don't resurface them as

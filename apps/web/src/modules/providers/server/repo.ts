@@ -3,6 +3,7 @@ import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { DefaultModelIds, InvalidDefaultModelOrder, markDefaultModel } from "../default-models.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
 import { normalizeModelSettings, type ModelSettings } from "../model-config.ts";
 import { KeyCipher } from "./crypto.ts";
@@ -133,13 +134,22 @@ export class ProviderRepo extends Context.Service<
           const { apiKey, ...rest } = patch;
           const apiKeyCiphertext = apiKey ? yield* cipher.encrypt(apiKey) : undefined;
           yield* db
-            .update(providers)
-            .set({
-              ...rest,
-              ...(apiKeyCiphertext ? { apiKeyCiphertext } : {}),
-              updatedAt: new Date(),
-            })
-            .where(eq(providers.id, providerId))
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* tx
+                  .update(providers)
+                  .set({
+                    ...rest,
+                    ...(apiKeyCiphertext ? { apiKeyCiphertext } : {}),
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(providers.id, providerId));
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "embedding" },
+                });
+              }),
+            )
             .pipe(Effect.orDie);
         }),
 
@@ -340,6 +350,10 @@ export class ProviderRepo extends Context.Service<
                     .insert(modelGroupAccess)
                     .values(groupIds.map((groupId) => ({ modelId, groupId })));
                 }
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "knowledge.work", stage: "embedding" },
+                });
               }),
             )
             .pipe(Effect.orDie);

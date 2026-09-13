@@ -1,4 +1,5 @@
-import { Context, Duration, Effect, Layer } from "effect";
+import { wakeOn } from "~/modules/sync/server/wakeup.ts";
+import { Context, Duration, Effect, Layer, Stream } from "effect";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import {
@@ -12,8 +13,9 @@ import { chunkDocument } from "./chunking.ts";
 import { EmbeddingSpace } from "./embedding-space.ts";
 import { KnowledgeRepo } from "./repo.ts";
 
-/** How long the workers wait after finding nothing to do. */
-const IDLE_INTERVAL = Duration.seconds(5);
+// Expired leases become claimable without a write or notification.
+const RECOVERY_INTERVAL = Duration.seconds(30);
+const FAILURE_BACKOFF = Duration.seconds(5);
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -321,25 +323,44 @@ export class KnowledgeIndexer extends Context.Service<
   static readonly workers = Layer.effectDiscard(
     Effect.gen(function* () {
       const indexer = yield* KnowledgeIndexer;
-      const loop = (step: Effect.Effect<boolean>) =>
-        step.pipe(
-          Effect.flatMap((worked) => (worked ? Effect.void : Effect.sleep(IDLE_INTERVAL))),
-          Effect.catchCause((cause) =>
-            Effect.logError("knowledge indexing step failed", cause).pipe(
-              Effect.andThen(Effect.sleep(IDLE_INTERVAL)),
+      const sync = yield* SyncBus;
+      const loop = (stage: "extraction" | "embedding", step: Effect.Effect<boolean>) =>
+        Effect.gen(function* () {
+          const wake = yield* wakeOn(
+            sync.signals.pipe(
+              Stream.filter(
+                (event) =>
+                  event.type === "ready" ||
+                  (event.type === "knowledge.work" && event.stage === stage),
+              ),
             ),
-          ),
-          Effect.forever,
-        );
-      // Recovery is process-scoped, not multiplied by every active/idle worker.
-      yield* loop(indexer.recoverExpiredJobs().pipe(Effect.as(false))).pipe(Effect.forkScoped);
-      yield* loop(indexer.runExtraction()).pipe(Effect.forkScoped);
-      for (let worker = 0; worker < KNOWLEDGE_LIMITS.embeddingConcurrency; worker++) {
-        yield* Effect.sleep(Duration.seconds(worker)).pipe(
-          Effect.andThen(loop(indexer.runEmbedding())),
-          Effect.forkScoped,
-        );
-      }
+          );
+          return yield* Effect.gen(function* () {
+            yield* wake.pipe(Effect.timeoutOption(RECOVERY_INTERVAL));
+            // A failed step retries after backoff, not after another idle interval.
+            while (
+              yield* step.pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("knowledge indexing step failed", cause).pipe(
+                    Effect.andThen(Effect.sleep(FAILURE_BACKOFF)),
+                    Effect.as(true),
+                  ),
+                ),
+              )
+            ) {
+              /* Drain before waiting again. */
+            }
+          }).pipe(Effect.forever);
+        });
+      yield* indexer.recoverExpiredJobs().pipe(
+        Effect.catchCause((cause) => Effect.logError("knowledge recovery failed", cause)),
+        Effect.andThen(Effect.sleep(RECOVERY_INTERVAL)),
+        Effect.forever,
+        Effect.forkScoped,
+      );
+      yield* loop("extraction", indexer.runExtraction()).pipe(Effect.forkScoped);
+      for (let worker = 0; worker < KNOWLEDGE_LIMITS.embeddingConcurrency; worker++)
+        yield* loop("embedding", indexer.runEmbedding()).pipe(Effect.forkScoped);
     }),
   );
 }
