@@ -8,11 +8,18 @@ import { toast } from "sonner";
 
 vi.mock("~/modules/auth/client.ts", () => ({
   authClient: {
-    useSession: vi.fn(),
     updateUser: vi.fn(),
     changePassword: vi.fn(),
   },
-  sessionUserQuery: { queryKey: ["session-user"] },
+  // The page reads the session the app shell already loaded, so every render
+  // here seeds that cache. Fetching instead would mean it found nothing.
+  sessionUserQuery: {
+    queryKey: ["session-user"],
+    staleTime: Infinity,
+    queryFn: () => {
+      throw new Error("ProfilePage must read the seeded session, not refetch it");
+    },
+  },
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -25,7 +32,6 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-const useSessionMock = vi.mocked(authClient.useSession);
 const updateUserMock = vi.mocked(authClient.updateUser);
 const changePasswordMock = vi.mocked(authClient.changePassword);
 const SESSION_USER: SessionData["user"] = {
@@ -53,6 +59,7 @@ const deferred = <T,>() => {
 };
 
 const renderPage = (client = new QueryClient()) => {
+  client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
   render(
     <QueryClientProvider client={client}>
       <ProfilePage />
@@ -63,14 +70,6 @@ const renderPage = (client = new QueryClient()) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useSessionMock.mockReturnValue({
-    data: {
-      user: SESSION_USER,
-      session: {},
-    },
-    isPending: false,
-    error: null,
-  } as never);
 });
 
 describe("ProfilePage", () => {

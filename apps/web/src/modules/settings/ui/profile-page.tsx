@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -25,8 +25,10 @@ const PasswordSchema = Schema.Struct({
 type PasswordStatus = { kind: "success" | "error"; message: string };
 
 export function ProfilePage() {
-  const session = authClient.useSession();
-  const user = session.data?.user;
+  // The same session the app shell already resolved, not a second read of it:
+  // `_app` cannot reach this route without it, and the name form patches this
+  // cache on save, so reading anything else would show a stale display name.
+  const { data: user } = useSuspenseQuery(sessionUserQuery);
   if (!user) return null;
   return <ProfileForms user={user} />;
 }
