@@ -25,6 +25,7 @@ import {
   FIXED_SERVER_ARGUMENT,
   RECOVERY_RETRY,
 } from "./chrome.ts";
+import { configFile, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Layer, ManagedRuntime } from "effect";
@@ -33,7 +34,6 @@ import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
 import { disposeOwnedProcesses } from "./process.ts";
-import { configFile, readConfig, toOrigin, writeConfig } from "./config.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -277,14 +277,14 @@ const openMainWindow = (origin: string) => {
 
   // Navigation is pinned to the configured origin. Anything else opens in the
   // real browser, where it has no bridge, rather than inside a window that does.
+  // Only http(s) is handed to the OS: file: and custom schemes are a local-exec path.
   window.webContents.on("will-navigate", (event, url) => {
-    if (toOrigin(url) !== origin) {
-      event.preventDefault();
-      void shell.openExternal(url);
-    }
+    if (toOrigin(url) === origin) return;
+    event.preventDefault();
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 

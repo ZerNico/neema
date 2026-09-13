@@ -15,6 +15,16 @@ export interface DesktopConfig {
 
 export const configFile = (userData: string) => join(userData, "server.json");
 
+/** True when the OS may open this URL: http(s) pages only, never file: or a scheme. */
+export const isSafeExternalUrl = (input: string): boolean => {
+  try {
+    const url = new URL(input);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 /** Normalised to an origin: a stored path or query would weaken every later comparison. */
 export const toOrigin = (input: string): string | null => {
   const trimmed = input.trim();

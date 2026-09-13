@@ -76,6 +76,10 @@ become a 90-day session by sending `ChatDesktop/`. The Devices label
 leaves the other valid. After redeeming, the page does what `IdentityBoundary`
 does on an identity change: clear the query cache and replace the document.
 
+Off-origin navigation and `window.open` from the shell are handed to the OS
+only for `http:` and `https:`. Other schemes are dropped rather than passed to
+`openExternal`.
+
 ## Execution belongs to the authenticated app, not a chat route
 
 `DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.

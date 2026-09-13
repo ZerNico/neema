@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readConfig, toOrigin, writeConfig } from "./config.ts";
+import { isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
 
 /**
  * `toOrigin` decides who may reach the bridge, so its job is to collapse every
@@ -48,6 +48,26 @@ describe("normalising a server address", () => {
       "data:text/html,x",
     ]) {
       expect(toOrigin(input)).toBeNull();
+    }
+  });
+});
+
+describe("URLs handed to the OS", () => {
+  it("allows only http and https", () => {
+    expect(isSafeExternalUrl("https://chat.example.com/login")).toBe(true);
+    expect(isSafeExternalUrl("http://localhost:3000/desktop/sign-in")).toBe(true);
+  });
+
+  it("refuses file, javascript and custom schemes", () => {
+    for (const input of [
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+      "data:text/html,x",
+      "ms-msdt:something",
+      "chat-desktop://sign-in?ticket=x",
+      "not a url",
+    ]) {
+      expect(isSafeExternalUrl(input)).toBe(false);
     }
   });
 });
