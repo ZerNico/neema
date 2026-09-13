@@ -1,3 +1,5 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
+import { wakeOn } from "~/modules/sync/server/wakeup.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
@@ -37,7 +39,6 @@ import {
   Schema,
   Stream,
   Semaphore,
-  Schedule,
   type Scope,
 } from "effect";
 import {
@@ -402,7 +403,15 @@ export class StreamEngine extends Context.Service<
                       tx
                         .insert(messageChunks)
                         .values(batch.map((chunk) => ({ ...chunk, messageId: input.messageId })))
-                        .pipe(Effect.orDie, Effect.asVoid),
+                        .pipe(
+                          Effect.orDie,
+                          Effect.andThen(
+                            notifyOnCommit(tx, {
+                              scope: "internal",
+                              event: { type: "research.chunks", messageId: input.messageId },
+                            }),
+                          ),
+                        ),
                     true,
                   )
                 : repo.appendChunks(input.messageId, batch);
@@ -469,12 +478,6 @@ export class StreamEngine extends Context.Service<
                   kind: "done",
                   messageId: input.messageId,
                   runId: research.fence.runId,
-                  status: doneStatus,
-                });
-                yield* sync.publish(input.userId, {
-                  type: "message.status",
-                  conversationId: input.conversationId,
-                  messageId: input.messageId,
                   status: doneStatus,
                 });
               }
@@ -594,6 +597,20 @@ export class StreamEngine extends Context.Service<
                     service: knowledgeService,
                   }
                 : null;
+            const controlWake = yield* wakeOn(
+              sync.signals.pipe(
+                Stream.filter(
+                  (event) =>
+                    event.type === "ready" ||
+                    (event.type === "research.control" && event.messageId === input.messageId),
+                ),
+              ),
+            );
+            yield* controlWake;
+            if (!(yield* research.store.alive(research.fence))) {
+              yield* Deferred.succeed(input.abort, undefined);
+              return yield* Effect.never;
+            }
             const work = runConversationResearch({
               memory,
               authoring,
@@ -624,17 +641,19 @@ export class StreamEngine extends Context.Service<
                 }),
             });
             const control = Effect.gen(function* () {
-              let ticks = 0;
-              while (true) {
-                yield* Effect.sleep(Duration.seconds(1));
-                if (!(yield* research.store.alive(research.fence))) {
-                  yield* Deferred.succeed(input.abort, undefined);
-                  return yield* Effect.never;
-                }
-                if (++ticks % 10 === 0) yield* research.store.heartbeat(research.fence);
+              yield* controlWake;
+              if (!(yield* research.store.alive(research.fence))) {
+                yield* Deferred.succeed(input.abort, undefined);
+                return yield* Effect.never;
               }
-            });
-            researchPhase = yield* Effect.raceFirst(work, control).pipe(
+            }).pipe(Effect.forever);
+            const heartbeat = research.store
+              .heartbeat(research.fence)
+              .pipe(Effect.delay(Duration.seconds(10)), Effect.forever);
+            researchPhase = yield* Effect.raceFirst(
+              work,
+              Effect.raceFirst(control, heartbeat),
+            ).pipe(
               Effect.timeout(
                 Duration.millis(Math.max(1, research.run.deadline.getTime() - Date.now())),
               ),
@@ -2223,8 +2242,6 @@ export class StreamEngine extends Context.Service<
           Effect.gen(function* () {
             // Subscribe to live events FIRST so nothing falls in the gap
             // between DB replay and live tail. Duplicates are dropped by seq.
-            const subscription = yield* PubSub.subscribe(pubsub);
-
             const message = yield* repo.getMessage(messageId).pipe(Effect.orDie);
             if (!message) {
               const done: StreamEvent = { kind: "done", messageId, status: "error" };
@@ -2234,9 +2251,19 @@ export class StreamEngine extends Context.Service<
             if (message.researchRunId) {
               const runId = expectedRunId ?? message.researchRunId;
               let cursor = afterSeq;
-              return Stream.fromEffectSchedule(
+              const wake = yield* wakeOn(
+                sync.signals.pipe(
+                  Stream.filter(
+                    (event) =>
+                      event.type === "ready" ||
+                      ((event.type === "research.chunks" || event.type === "research.control") &&
+                        event.messageId === messageId),
+                  ),
+                ),
+              );
+              return Stream.fromEffectRepeat(
                 Effect.gen(function* () {
-                  yield* repo.research?.reap() ?? Effect.void;
+                  yield* wake;
                   const snapshot = yield* repo.research!.tail(messageId, cursor);
                   const current = snapshot?.message;
                   if (!current || current.researchRunId !== runId)
@@ -2266,13 +2293,13 @@ export class StreamEngine extends Context.Service<
                     events.push({ kind: "done", messageId, runId, status: current.status });
                   return events;
                 }),
-                Schedule.spaced(Duration.seconds(1)),
               ).pipe(
                 Stream.flatMap((events) => Stream.fromIterable(events)),
                 Stream.takeUntil((event) => event.kind === "done"),
               );
             }
 
+            const subscription = yield* PubSub.subscribe(pubsub);
             if (message.status === "streaming" && !inFlight.has(messageId)) yield* reapGenerations;
             const snapshot = repo.research ? yield* repo.research.tail(messageId, afterSeq) : null;
             const current =

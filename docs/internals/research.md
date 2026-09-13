@@ -6,7 +6,8 @@ Deep research is a persisted request mode of an ordinary conversation, not a cha
 
 - Research is a persisted request mode; only validated structured answers inherit it server-side, ordinary text does not. Retry/edit use the target's saved mode. Retry installs a fresh `researchRunId` even when the message ID is reused.
 - Research writes hold the conversation lock and validate current run/owner/lease. Stop, local cancellation, SSE events and client hook identity must all carry the expected run ID. Expired research is terminalized, never auto-resumed.
-- Research tails ordered DB chunks every second, unlike ordinary chat's local live tail. Keep the active SSE subscription through `done` even if a sync refresh sees the terminal row first, or the sticky overlay can strand undisplayed questions and stale status.
+- Research subscribes before replaying ordered DB chunks, then tails on committed chunk/control notifications and listener reconnection. A coalesced wake survives changes during a read; notifications are hints, never the chunk source. Finalization writes its last progress chunk and wakeup in the same transaction, including queued Stop and reaping. Keep the active SSE subscription through `done` even if a sync refresh sees the terminal row first, or the sticky overlay can strand undisplayed questions and stale status.
+- Ownership observation subscribes before work starts and rechecks on control notifications, not each chunk. The fenced ten-second heartbeat remains the fallback ownership check; the process-wide ten-second reaper owns expiry, not each subscriber. Repository terminalization also invalidates browser message status when no research SSE is connected. See [notification recovery](sync.md).
 
 ## Ownership split
 

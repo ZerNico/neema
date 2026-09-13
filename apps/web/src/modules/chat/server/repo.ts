@@ -1,3 +1,4 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration } from "./generation-fence.ts";
@@ -1030,6 +1031,11 @@ export class ChatRepo extends Context.Service<
                     tx,
                     rows.map((row) => row.id),
                   );
+                  for (const row of rows)
+                    yield* notifyOnCommit(tx, {
+                      scope: "internal",
+                      event: { type: "research.control", messageId: row.id },
+                    });
                   yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
                   return keys;
                 }),
@@ -1875,6 +1881,11 @@ export class ChatRepo extends Context.Service<
                     .delete(messages)
                     .where(inArray(messages.id, [...input.deleteMessageIds]))
                     .pipe(Effect.orDie);
+                  for (const messageId of input.deleteMessageIds)
+                    yield* notifyOnCommit(tx, {
+                      scope: "internal",
+                      event: { type: "research.control", messageId },
+                    });
                 }
                 yield* tx
                   .delete(messageChunks)
@@ -1903,6 +1914,10 @@ export class ChatRepo extends Context.Service<
                   .from(messages)
                   .where(eq(messages.id, input.messageId))
                   .pipe(Effect.orDie);
+                yield* notifyOnCommit(tx, {
+                  scope: "internal",
+                  event: { type: "research.control", messageId: input.messageId },
+                });
                 return {
                   claimed: true,
                   generationId,
@@ -1999,6 +2014,11 @@ export class ChatRepo extends Context.Service<
                     .delete(messages)
                     .where(inArray(messages.id, [...input.deleteMessageIds]))
                     .pipe(Effect.orDie);
+                  for (const messageId of input.deleteMessageIds)
+                    yield* notifyOnCommit(tx, {
+                      scope: "internal",
+                      event: { type: "research.control", messageId },
+                    });
                 }
                 yield* tx
                   .update(conversations)
@@ -2056,6 +2076,11 @@ export class ChatRepo extends Context.Service<
                     .orderBy(asc(conversations.id))
                     .for("update");
                 const keys = yield* attachments.releaseForMessages(tx, messageIds);
+                for (const messageId of messageIds)
+                  yield* notifyOnCommit(tx, {
+                    scope: "internal",
+                    event: { type: "research.control", messageId },
+                  });
                 yield* tx.delete(messages).where(inArray(messages.id, [...messageIds]));
                 return keys;
               }),

@@ -1,3 +1,4 @@
+import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -70,6 +71,10 @@ export const queueResearch = Effect.fn("research.queue")(function* (
     .set({ researchRunId: id, generationMode: "research" })
     .where(eq(messages.id, input.messageId))
     .pipe(Effect.orDie);
+  yield* notifyOnCommit(tx, {
+    scope: "internal",
+    event: { type: "research.control", messageId: input.messageId },
+  });
   return id;
 });
 
@@ -355,6 +360,20 @@ export const createResearchStore = (db: Db["Service"]) => {
       })
       .onConflictDoNothing()
       .pipe(Effect.orDie);
+    yield* notifyOnCommit(tx, {
+      scope: "internal",
+      event: { type: "research.control", messageId: run.messageId },
+    });
+    yield* notifyOnCommit(tx, {
+      scope: "user",
+      userId: run.userId,
+      event: {
+        type: "message.status",
+        conversationId: run.conversationId,
+        messageId: run.messageId,
+        status,
+      },
+    });
     return true;
   });
   const get = (runId: string) =>
@@ -453,34 +472,48 @@ export const createResearchStore = (db: Db["Service"]) => {
           ),
         ),
     claim: (runId: string) =>
-      Effect.gen(function* () {
-        const owner = uuidv7();
-        const rows = yield* db
-          .update(researchRuns)
-          .set({
-            status: "running",
-            owner,
-            leaseUntil: sql`clock_timestamp() + interval '60 seconds'`,
-          })
-          .where(
-            and(
-              eq(researchRuns.id, runId),
-              eq(researchRuns.status, "queued"),
-              eq(researchRuns.snapshot, false),
-              eq(researchRuns.cancelRequested, false),
-              sql`${researchRuns.leaseUntil} > clock_timestamp()`,
-            ),
-          )
-          .returning()
-          .pipe(Effect.orDie);
-        const run = rows[0];
-        return run
-          ? {
-              run,
-              fence: { runId, owner, messageId: run.messageId, conversationId: run.conversationId },
-            }
-          : null;
-      }),
+      db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const owner = uuidv7();
+            const rows = yield* tx
+              .update(researchRuns)
+              .set({
+                status: "running",
+                owner,
+                leaseUntil: sql`clock_timestamp() + interval '60 seconds'`,
+              })
+              .where(
+                and(
+                  eq(researchRuns.id, runId),
+                  eq(researchRuns.status, "queued"),
+                  eq(researchRuns.snapshot, false),
+                  eq(researchRuns.cancelRequested, false),
+                  sql`${researchRuns.leaseUntil} > clock_timestamp()`,
+                ),
+              )
+              .returning()
+              .pipe(Effect.orDie);
+            const run = rows[0];
+            if (run)
+              yield* notifyOnCommit(tx, {
+                scope: "internal",
+                event: { type: "research.control", messageId: run.messageId },
+              });
+            return run
+              ? {
+                  run,
+                  fence: {
+                    runId,
+                    owner,
+                    messageId: run.messageId,
+                    conversationId: run.conversationId,
+                  },
+                }
+              : null;
+          }),
+        )
+        .pipe(Effect.orDie),
     heartbeat: (fence: ResearchFence) =>
       locked(fence, (tx) =>
         tx
@@ -531,6 +564,10 @@ export const createResearchStore = (db: Db["Service"]) => {
               .returning()
               .pipe(Effect.orDie))[0];
             if (!run) return false;
+            yield* notifyOnCommit(tx, {
+              scope: "internal",
+              event: { type: "research.control", messageId },
+            });
             if (run.status === "queued") yield* finalizeTx(tx, run, "aborted");
             return true;
           }),

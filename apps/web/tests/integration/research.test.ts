@@ -1280,6 +1280,12 @@ describe("durable deep research", () => {
     expect(events.at(-1)?.kind).toBe("done");
     const chunks = events.filter((event) => event.kind === "chunk");
     expect(chunks.map((chunk) => chunk.seq)).toEqual(chunks.map((_, index) => index + 1));
+    expect(chunks.at(-1)?.chunkKind).toBe("tool");
+    expect(JSON.parse(chunks.at(-1)!.delta)).toMatchObject({
+      family: "research",
+      phase: "result",
+      name: "deep_research",
+    });
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
@@ -1289,6 +1295,14 @@ describe("durable deep research", () => {
         expect(message.generationMode).toBe("research");
         expect(message.content).toContain("Supported conclusion[^1]");
         expect(message.content).not.toContain("[^999]");
+        const persistedChunks = yield* db
+          .select()
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, message.id))
+          .orderBy(messageChunks.seq);
+        expect(
+          chunks.map(({ seq, chunkKind, delta }) => ({ seq, kind: chunkKind, delta })),
+        ).toEqual(persistedChunks.map(({ seq, kind, delta }) => ({ seq, kind, delta })));
         const runs = yield* db
           .select()
           .from(researchRuns)
