@@ -109,7 +109,11 @@ describe("native impersonation through the production handler configuration", ()
     const started = await admin.start(targetId);
     expect(started.status).toBe(200);
     const active = (await admin.identity()).body;
-    expect(projectSessionIdentity(active)).toEqual({ userId: targetId, impersonatedBy: adminId });
+    expect(projectSessionIdentity(active)).toEqual({
+      userId: targetId,
+      impersonatedBy: adminId,
+      sessionId: active.session.id,
+    });
     const duration =
       new Date(active.session.expiresAt).getTime() - new Date(active.session.createdAt).getTime();
     expect(duration).toBeGreaterThanOrEqual(3_599_000);
@@ -124,7 +128,11 @@ describe("native impersonation through the production handler configuration", ()
     const safe = JSON.stringify({ logs, identity: projectSessionIdentity(active) });
     expect(safe).not.toContain(active.session.token);
     expect(safe).not.toContain(original.session.token);
-    expect(Object.keys(projectSessionIdentity(active)!)).toEqual(["userId", "impersonatedBy"]);
+    expect(Object.keys(projectSessionIdentity(active)!)).toEqual([
+      "userId",
+      "impersonatedBy",
+      "sessionId",
+    ]);
   });
 
   it("rejects nonadmins, self, admins, banned users and missing targets without success logs", async () => {
@@ -149,6 +157,7 @@ describe("native impersonation through the production handler configuration", ()
     expect(projectSessionIdentity((await admin.identity()).body)).toEqual({
       userId: adminId,
       impersonatedBy: null,
+      sessionId: expect.any(String),
     });
   });
 

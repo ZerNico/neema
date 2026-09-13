@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import type { SyncEvent } from "../events.ts";
 
 // One SSE connection per tab. Applies this user's domain events (from any
@@ -176,6 +177,10 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         case "memory.changed":
         case "memory.policy.changed":
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
+          break;
+        case "desktop.session.created":
+          void queryClient.invalidateQueries({ queryKey: ["desktop-sessions"] });
+          announceTicketRedeemed(event.ticketId);
           break;
       }
     });

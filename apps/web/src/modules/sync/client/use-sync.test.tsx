@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_SESSION_CREATED_EVENT } from "~/modules/auth/ticket-events.ts";
 import { useSync } from "./use-sync.ts";
 
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
@@ -237,6 +238,22 @@ describe("useSync", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
     },
   );
+});
+
+describe("desktop session events", () => {
+  it("refreshes the device list and tells the page which ticket was redeemed", () => {
+    const { invalidate, source } = renderSync();
+    const heard: unknown[] = [];
+    const listener = (event: Event) => heard.push((event as CustomEvent).detail);
+    window.addEventListener(DESKTOP_SESSION_CREATED_EVENT, listener);
+    try {
+      source.emit("sync", { type: "desktop.session.created", ticketId: "t1" });
+    } finally {
+      window.removeEventListener(DESKTOP_SESSION_CREATED_EVENT, listener);
+    }
+    expect(invalidate.mock.calls).toEqual([[{ queryKey: ["desktop-sessions"] }]]);
+    expect(heard).toEqual([{ ticketId: "t1" }]);
+  });
 });
 
 describe("identity-gated reconnects", () => {

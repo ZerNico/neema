@@ -49,6 +49,12 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("models.defaults.changed"),
   }),
+  // The id is a random per-ticket handle, never the code or its hash, so a
+  // tab showing that code can react without the event revealing anything.
+  Schema.Struct({
+    type: Schema.Literal("desktop.session.created"),
+    ticketId: Schema.String,
+  }),
 ]);
 
 export type SyncEvent = typeof SyncEvent.Type;

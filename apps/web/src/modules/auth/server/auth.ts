@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { runtime } from "~/server/runtime.ts";
 import { createAppAuth } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
@@ -28,6 +29,13 @@ const purgeUserFiles = async (userId: string) => {
 
 const signup = makeSignupGate((effect) => runtime.runPromise(effect));
 
+const onDesktopRedeemed = (userId: string, ticketId: string) =>
+  runtime.runPromise(
+    Effect.flatMap(SyncBus, (bus) =>
+      bus.publish(userId, { type: "desktop.session.created", ticketId }),
+    ),
+  );
+
 const build = async (): Promise<Auth> =>
   createAppAuth({
     // The Better Auth pool is memoized, so a rebuild costs one provider query
@@ -37,6 +45,7 @@ const build = async (): Promise<Auth> =>
     secret: process.env.BETTER_AUTH_SECRET,
     purgeUserFiles,
     signup,
+    onDesktopRedeemed,
     oauthProviders: await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) => repo.listForAuth()),
     ),

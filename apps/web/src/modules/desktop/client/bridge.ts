@@ -14,7 +14,9 @@ import {
 import {
   desktopShellOutdated,
   makeDesktopClient,
+  readDesktopAuth,
   readDesktopChannel,
+  type DesktopAuth,
   type DesktopClient,
   type DesktopError,
   type FolderStatus,
@@ -51,6 +53,10 @@ const subscribeToNothing = () => () => {};
 /** True inside a desktop app older than this site. Never true in a browser. */
 export const useDesktopOutdated = (): boolean =>
   useSyncExternalStore(subscribeToNothing, desktopShellOutdated, () => false);
+
+/** The sign-in capability of the shell around this page, or null in a browser. */
+export const useDesktopAuth = (): DesktopAuth | null =>
+  useSyncExternalStore(subscribeToNothing, readDesktopAuth, () => null);
 
 export const useDesktop = (): DesktopClient | null =>
   // The server has no channel and the desktop shell does, so the two snapshots

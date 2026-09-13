@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { BRIDGE_KEY, PROTOCOL_VERSION } from "@chat/desktop-rpc";
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
+import { makeAuthBridge } from "./auth-preload.ts";
 import { RECOVERY_RETRY } from "./chrome.ts";
 
 declare const location: { readonly protocol: string };
@@ -17,6 +18,7 @@ if (location.protocol === "file:") {
     protocolVersion: PROTOCOL_VERSION,
     build: __BUILD_STAMP__,
     chrome: makeChromeBridge(ipcRenderer, process.platform),
+    auth: makeAuthBridge(ipcRenderer, process.argv),
     request: (tag: unknown, payload: unknown) =>
       ipcRenderer.invoke("chat-desktop:request", { tag, payload }),
   });

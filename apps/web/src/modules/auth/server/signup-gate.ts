@@ -28,4 +28,12 @@ export const makeSignupGate = (run: Run): SignupGate => ({
         yield* signups.record({ userId, status: approved ? "approved" : "pending" });
       }),
     ),
+
+  // No row means an account created before approvals existed.
+  approved: (userId) =>
+    run(
+      Effect.flatMap(SignupRepo, (repo) =>
+        Effect.map(repo.statusOf(userId), (status) => status === null || status === "approved"),
+      ),
+    ),
 });

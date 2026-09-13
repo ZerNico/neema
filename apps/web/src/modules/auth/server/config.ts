@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
+import { desktopSessions } from "./desktop-sessions.ts";
 
 export interface ImpersonationEvent {
   action: "impersonation.start" | "impersonation.stop";
@@ -90,9 +91,15 @@ export interface SignupGate {
     providerId: string | null;
     isFirstUser: boolean;
   }) => Promise<void>;
+  /** Whether an existing account may use the app; a missing record counts as yes. */
+  approved: (userId: string) => Promise<boolean>;
 }
 
-const openSignup: SignupGate = { allow: async () => true, record: async () => {} };
+const openSignup: SignupGate = {
+  allow: async () => true,
+  record: async () => {},
+  approved: async () => true,
+};
 
 /**
  * The provider an account is being created through, or null for email and
@@ -120,6 +127,9 @@ export function createAppAuth({
   purgeUserFiles,
   oauthProviders = [],
   signup = openSignup,
+  onDesktopRedeemed = async () => {},
+  // Better Auth's own default; named so a test can turn the limiter on.
+  rateLimit = process.env.NODE_ENV === "production",
   log = (event) => Effect.runPromise(Effect.logInfo("auth impersonation", event)),
 }: {
   db: Db;
@@ -128,6 +138,9 @@ export function createAppAuth({
   purgeUserFiles: (userId: string) => Promise<void>;
   oauthProviders?: readonly AuthOAuthProvider[];
   signup?: SignupGate;
+  /** Announces a redeemed desktop ticket to the user's open tabs. */
+  onDesktopRedeemed?: (userId: string, ticketId: string) => Promise<void>;
+  rateLimit?: boolean;
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
   return betterAuth({
@@ -137,6 +150,7 @@ export function createAppAuth({
     emailAndPassword: { enabled: true },
     socialProviders: socialProvidersFrom(oauthProviders),
     advanced: { database: { generateId: () => uuidv7() } },
+    rateLimit: { enabled: rateLimit },
     databaseHooks: {
       user: {
         create: {
@@ -229,6 +243,7 @@ export function createAppAuth({
             scopes: [...p.scopes],
           })),
       }),
+      desktopSessions({ approved: signup.approved, onRedeemed: onDesktopRedeemed }),
       tanstackStartCookies(),
     ],
   });

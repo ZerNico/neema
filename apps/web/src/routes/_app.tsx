@@ -1,6 +1,7 @@
 import { DesktopWorkProvider, WorkAttention } from "~/modules/desktop/client/work-host.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
 import { IdentityBoundary, useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import type { SessionIdentity } from "~/modules/auth/identity.ts";
 import {
@@ -54,6 +55,7 @@ function AuthenticatedLayout({
 }) {
   const boundary = useIdentityBoundary();
   useSync(boundary?.reconcile);
+  useDesktopSessionRefresh();
 
   return (
     <DesktopWorkProvider userId={identity.userId}>

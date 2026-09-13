@@ -10,7 +10,7 @@ import {
   Tray,
   type IpcMainInvokeEvent,
 } from "electron";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   attachChrome,
@@ -32,6 +32,13 @@ import { configFile, readConfig, toOrigin, writeConfig } from "./config.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { Sandbox } from "./sandbox.ts";
+import {
+  SIGN_IN_SCHEME,
+  SIGN_IN_TICKET,
+  ticketFromArgv,
+  ticketFromDeepLink,
+  userAgentToken,
+} from "./sign-in-link.ts";
 
 // Bundled to CJS, because an Electron preload must be CJS while `sandbox: true`.
 // `import.meta.url` is empty under that format; `__dirname` is the real thing.
@@ -43,6 +50,9 @@ const connectFile = join(here, "..", "static", "connect.html");
 const recoveryFile = join(here, "..", "static", "recovery.html");
 const connectUrl = pathToFileURL(connectFile).href;
 const recoveryUrl = pathToFileURL(recoveryFile).href;
+const devReload = process.env.CHAT_DESKTOP_DEV_RELOAD === "1";
+// The server keys the desktop session policy on this token; set before any window exists.
+app.userAgentFallback = `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`;
 const windowChrome = new WeakMap<BrowserWindow, ReturnType<typeof attachChrome>>();
 const windowRecovery = new WeakMap<BrowserWindow, ReturnType<typeof attachLoadRecovery>>();
 
@@ -247,7 +257,46 @@ const restoreWindow = () => {
   window?.focus();
 };
 
+/** A ticket that arrives before the window exists (macOS fires open-url early) waits for it. */
+let pendingTicket: string | null = null;
+
+/** A sign-in ticket from the browser reaches the page only once it is loaded. */
+const deliverTicket = (ticket: string) => {
+  restoreWindow();
+  const contents = mainWindow?.webContents;
+  if (!contents) {
+    pendingTicket = ticket;
+    return;
+  }
+  if (contents.isLoadingMainFrame())
+    contents.once("did-finish-load", () => contents.send(SIGN_IN_TICKET, ticket));
+  else contents.send(SIGN_IN_TICKET, ticket);
+};
+
+app.on("open-url", (event, url) => {
+  const ticket = ticketFromDeepLink(url);
+  if (ticket === null) return;
+  event.preventDefault();
+  deliverTicket(ticket);
+});
+
+// The dev supervisor relaunches on every rebuild, so a stranded old instance
+// must not be able to hold the lock against the new one.
+const primaryInstance = devReload || app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+else if (!devReload) {
+  app.on("second-instance", (_event, argv) => {
+    const ticket = ticketFromArgv(argv);
+    if (ticket === null) restoreWindow();
+    else deliverTicket(ticket);
+  });
+  if (process.defaultApp && process.argv[1])
+    app.setAsDefaultProtocolClient(SIGN_IN_SCHEME, process.execPath, [resolve(process.argv[1])]);
+  else app.setAsDefaultProtocolClient(SIGN_IN_SCHEME);
+}
+
 void app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
   const actions = [
@@ -313,7 +362,7 @@ void app.whenReady().then(async () => {
     return executions.request(tag, payload);
   });
 
-  if (process.env.CHAT_DESKTOP_DEV_RELOAD === "1" && process.send) {
+  if (devReload && process.send) {
     // Only the owning dev supervisor can request a restart, never the web page.
     const restart = () => {
       void lifecycle.beforeQuit({ preventDefault() {} }, { confirm: false });
@@ -327,6 +376,11 @@ void app.whenReady().then(async () => {
   }
 
   await start();
+  if (pendingTicket !== null) {
+    const ticket = pendingTicket;
+    pendingTicket = null;
+    deliverTicket(ticket);
+  }
 
   app.on("activate", restoreWindow);
 });

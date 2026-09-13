@@ -4,7 +4,9 @@ import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
 import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
+import { DesktopSignIn } from "~/modules/auth/ui/desktop-sign-in.tsx";
 import { SignInProviders, signInProvidersQuery } from "~/modules/auth/ui/sign-in-providers.tsx";
+import { useDesktopAuth } from "~/modules/desktop/client/bridge.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -27,6 +29,12 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
+  const desktopAuth = useDesktopAuth();
+  if (desktopAuth) return <DesktopSignIn auth={desktopAuth} />;
+  return <LoginForm />;
+}
+
+function LoginForm() {
   const navigate = useNavigate();
   const { redirect } = Route.useSearch();
   const destination = redirect ?? "/";

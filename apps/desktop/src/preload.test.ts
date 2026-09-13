@@ -3,10 +3,21 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
-import type { DesktopChrome } from "@chat/desktop-rpc";
-import { CHROME_GET_STATE, CHROME_SET_THEME, CHROME_STATE, RECOVERY_RETRY } from "./chrome.ts";
+import type { DesktopAuth, DesktopChrome } from "@chat/desktop-rpc";
+import {
+  CHANGE_SERVER,
+  CHROME_GET_STATE,
+  CHROME_SET_THEME,
+  CHROME_STATE,
+  RECOVERY_RETRY,
+} from "./chrome.ts";
+import { SIGN_IN_TICKET } from "./sign-in-link.ts";
 
-const probe = (entry: "preload.ts" | "connect-preload.ts", protocol: string) => {
+const probe = (
+  entry: "preload.ts" | "connect-preload.ts",
+  protocol: string,
+  argv: readonly string[] = [],
+) => {
   const result = buildSync({
     entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
     bundle: true,
@@ -18,7 +29,7 @@ const probe = (entry: "preload.ts" | "connect-preload.ts", protocol: string) => 
   });
   const exposed = new Map<string, Record<string, unknown>>();
   const ipc = Object.assign(new EventEmitter(), {
-    invoke: vi.fn(async () => ({ fullscreen: true })),
+    invoke: vi.fn(async (): Promise<unknown> => ({ fullscreen: true })),
   });
   const electron = {
     contextBridge: {
@@ -32,7 +43,7 @@ const probe = (entry: "preload.ts" | "connect-preload.ts", protocol: string) => 
   });
   runInNewContext(result.outputFiles[0]!.text, {
     require: requireModule,
-    process: { platform: "darwin" },
+    process: { platform: "darwin", argv: ["electron", ...argv] },
     location: { protocol },
     TextEncoder,
     TextDecoder,
@@ -69,6 +80,32 @@ describe("restricted bundled preloads", () => {
     await chrome.setTheme("system");
     expect(ipc.invoke).toHaveBeenLastCalledWith(CHROME_SET_THEME, "system");
     expect(requireModule.mock.calls.every(([name]) => name === "electron")).toBe(true);
+  });
+
+  it("lets the site ask for the server chooser and surfaces a refusal as an error", async () => {
+    const { exposed, ipc } = probe("preload.ts", "https:");
+    const auth = exposed.get("__chatDesktop")!.auth as DesktopAuth;
+    expect(auth.canChangeServer).toBe(true);
+    ipc.invoke.mockResolvedValueOnce({ ok: true });
+    await expect(auth.changeServer()).resolves.toBeUndefined();
+    expect(ipc.invoke).toHaveBeenLastCalledWith(CHANGE_SERVER);
+    ipc.invoke.mockResolvedValueOnce({ ok: false, message: "The server is fixed." });
+    await expect(auth.changeServer()).rejects.toThrow("The server is fixed.");
+  });
+
+  it("forwards sign-in tickets as strings only, until unsubscribed", () => {
+    const { exposed, ipc } = probe("preload.ts", "https:");
+    const auth = exposed.get("__chatDesktop")!.auth as DesktopAuth;
+    const listener = vi.fn();
+    const unsubscribe = auth.onTicket(listener);
+    const electronEvent = { sender: { privileged: true } };
+    ipc.emit(SIGN_IN_TICKET, electronEvent, { ticket: "object" });
+    ipc.emit(SIGN_IN_TICKET, electronEvent, "K7MX");
+    expect(listener).toHaveBeenCalledExactlyOnceWith("K7MX");
+    unsubscribe();
+    expect(ipc.listenerCount(SIGN_IN_TICKET)).toBe(0);
+    ipc.emit(SIGN_IN_TICKET, electronEvent, "again");
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it("gives a local recovery document only read-only chrome and a parameterless retry", async () => {

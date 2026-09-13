@@ -1,17 +1,23 @@
 export interface SessionIdentity {
   userId: string;
   impersonatedBy: string | null;
+  /** Lets the Devices page mark the row the reader is using. Not part of identity equality. */
+  sessionId?: string;
 }
 
 export function projectSessionIdentity(
   session: {
     user: { id: string };
-    session: { impersonatedBy?: string | null | undefined };
+    session: { id?: string; impersonatedBy?: string | null | undefined };
   } | null,
 ): SessionIdentity | null {
-  return session
-    ? { userId: session.user.id, impersonatedBy: session.session.impersonatedBy ?? null }
-    : null;
+  if (!session) return null;
+  const identity: SessionIdentity = {
+    userId: session.user.id,
+    impersonatedBy: session.session.impersonatedBy ?? null,
+  };
+  if (session.session.id) identity.sessionId = session.session.id;
+  return identity;
 }
 
 export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | null) {

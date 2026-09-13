@@ -76,6 +76,17 @@ describe("sync events", () => {
     }),
   );
 
+  it.effect("roundtrips desktop session creation with the ticket handle only", () =>
+    Effect.gen(function* () {
+      const envelope = {
+        scope: "user" as const,
+        userId: "u1",
+        event: { type: "desktop.session.created" as const, ticketId: "t1" },
+      };
+      expect(yield* decodeEnvelope(yield* encodeEnvelope(envelope))).toEqual(envelope);
+    }),
+  );
+
   it.effect("rejects unknown event types", () =>
     Effect.gen(function* () {
       const result = yield* decodeEnvelope(

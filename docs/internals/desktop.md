@@ -31,6 +31,36 @@ bundled document, window and main frame. Recovery can retry only the configured
 server. Aborted/subframe failures are ignored, and an established Work renderer
 is not replaced merely because later network activity fails.
 
+## Sign-in happens in the browser
+
+The shell never shows a password form. Google refuses OAuth from an embedded
+user agent, and the person's provider session lives in their real browser, so
+the login route renders a browser-only screen whenever the shell exposes the
+`auth` capability: a link to `/desktop/sign-in?challenge=…` that the window-open
+handler pushes to the system browser, and a paste field for the code that page
+mints. The browser page mints a ticket only for a signed-in, approved, not
+impersonated account, and shows it twice: as a `chat-desktop://sign-in` link
+and as a `XXXXX-XXXXX-XXXXX-XXXXX` code. The link is never fired automatically,
+because macOS has no scheme registered until the app is packaged and a silent
+failure would leave nothing to paste. Windows and Linux register the scheme at
+runtime; the deep link is otherwise dormant.
+
+A ticket lives three minutes, is stored hashed in Better Auth's `verification`
+table, and is consumed once; every failure is the same "not valid" answer.
+The shell's login page keeps a PKCE verifier in `sessionStorage` and sends its
+S256 challenge with the link, so a ticket minted with a challenge is refused
+without the matching verifier. Settings › Devices mints paste-only tickets
+without a challenge, which the redemption accepts with no verifier at all.
+
+Redemption creates a separate session for the desktop, ninety days long,
+and the shell renews it to a fresh ninety days on every authenticated mount
+through `/desktop/session/refresh`; Better Auth's own refresh would cut it
+back to the browser's seven days. That endpoint, and the Devices label
+"Chat Desktop on …", key on the `ChatDesktop/` token the shell appends to its
+user agent. Revoking either session leaves the other valid. After redeeming,
+the page does what `IdentityBoundary` does on an identity change: clear the
+query cache and replace the document.
+
 ## Execution belongs to the authenticated app, not a chat route
 
 `DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.
