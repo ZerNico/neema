@@ -54,8 +54,6 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     queryKey: ["desktop-work", executorId],
     enabled: !!client && !!executorId,
     queryFn: () => desktopWorkSnapshot({ data: { executorId: executorId! } }),
-    refetchInterval: (query) => (query.state.data?.attempts.length ? 1500 : 15000),
-    refetchIntervalInBackground: true,
   });
 
   const controller = useMemo(() => {
@@ -79,9 +77,10 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
             )
           : Promise.resolve(desktopFailure("That did not run", "Unknown local tool.")),
       complete: async (call, token, result) => {
-        await submitDesktopToolResult({ data: { ...call, token, result } });
+        const response = await submitDesktopToolResult({ data: { ...call, token, result } });
         setFailure(false);
         void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
+        return response.accepted;
       },
       cancel: (callId) => {
         void Effect.runPromise(client.cancelCall({ callId })).catch(report);

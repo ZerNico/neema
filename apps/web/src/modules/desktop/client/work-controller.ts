@@ -25,7 +25,7 @@ export interface WorkSnapshot {
 export interface WorkDependencies {
   claim(call: ExternalOperation): Promise<string | null>;
   execute(call: ExternalOperation, network: NetworkLevel): Promise<DesktopToolResult>;
-  complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<void>;
+  complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
   cancel(callId: string): void;
   beforeExecute(): Promise<void>;
   changed(): void;
@@ -37,6 +37,9 @@ interface Entry {
   permitted?: boolean;
   result?: DesktopToolResult;
   busy: boolean;
+  delivered?: boolean;
+  retries: number;
+  retry?: ReturnType<typeof setTimeout> | undefined;
   deadline: ReturnType<typeof setTimeout>;
 }
 
@@ -78,6 +81,7 @@ export class WorkController {
           call,
           pending: permitted ? null : (kind ?? "read"),
           busy: false,
+          retries: 0,
           ...(permitted ? { permitted: true } : {}),
           deadline: setTimeout(() => {
             this.cancel(call.callId);
@@ -142,7 +146,7 @@ export class WorkController {
   }
 
   private async run(entry: Entry) {
-    if (entry.busy || !this.live(entry)) return;
+    if (entry.busy || entry.delivered || entry.retry || !this.live(entry)) return;
     entry.busy = true;
     try {
       await this.deps.beforeExecute();
@@ -167,11 +171,23 @@ export class WorkController {
             );
       }
       if (!this.live(entry)) return;
-      await this.deps.complete(entry.call, token, entry.result);
-      // Keep the result until the authoritative snapshot drops the call. A
-      // lost response retries delivery, never the filesystem operation.
+      const accepted = await this.deps.complete(entry.call, token, entry.result);
+      if (!this.live(entry)) return;
+      if (!accepted) this.cancel(entry.call.callId);
+      else entry.delivered = true;
+      this.deps.changed();
     } catch (error) {
       this.deps.error(error);
+      if (this.live(entry)) {
+        const delay = Math.min(1000 * 2 ** Math.min(entry.retries++, 4), 10_000);
+        entry.retry = setTimeout(
+          () => {
+            entry.retry = undefined;
+            void this.run(entry);
+          },
+          Math.min(delay, Math.max(0, entry.call.expiresAt - Date.now())),
+        );
+      }
     } finally {
       entry.busy = false;
     }
@@ -181,6 +197,7 @@ export class WorkController {
     const entry = this.entries.get(callId);
     if (!entry) return;
     clearTimeout(entry.deadline);
+    clearTimeout(entry.retry);
     this.entries.delete(callId);
     this.deps.cancel(callId);
   }

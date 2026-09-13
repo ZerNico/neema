@@ -34,6 +34,7 @@ function setup(overrides: Partial<WorkDependencies> = {}) {
     execute: vi.fn(async () => result),
     complete: vi.fn(async () => {
       completed.resolve();
+      return true;
     }),
     cancel: vi.fn(),
     changed: vi.fn(),
@@ -50,6 +51,37 @@ afterEach(() => {
 });
 
 describe("app-owned Work execution", () => {
+  it("does not resend an acknowledged result on unrelated refreshes", async () => {
+    const { controller, deps, completed } = setup();
+    const current = snapshot(call("one"));
+    controller.reconcile(current);
+    controller.decide("one", "allow");
+    await completed;
+    await Promise.resolve();
+    controller.reconcile(current);
+    expect(deps.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["expiry", "removal", "identity"] as const)(
+    "cancels delivery retries on %s",
+    async (reason) => {
+      vi.useFakeTimers();
+      const failed = deferred<void>();
+      const complete = vi.fn(async (): Promise<boolean> => {
+        throw new Error("offline");
+      });
+      const { controller, deps } = setup({ complete, error: () => failed.resolve() });
+      controller.reconcile(snapshot(call("one")));
+      controller.decide("one", "allow");
+      await failed.promise;
+      if (reason === "removal") controller.reconcile(snapshot());
+      if (reason === "identity") controller.dispose();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(deps.execute).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(["manual", "auto", "skip"] as const)(
     "honours %s approval policy and always asks about deletes",
     (approval) => {
@@ -156,7 +188,8 @@ describe("app-owned Work execution", () => {
     expect(deps.cancel).toHaveBeenCalledWith("one");
   });
 
-  it("retries lost result delivery without repeating the side effect", async () => {
+  it("retries lost result delivery without another snapshot or repeating the side effect", async () => {
+    vi.useFakeTimers();
     const failed = deferred<void>();
     const delivered = deferred<void>();
     let attempts = 0;
@@ -164,14 +197,17 @@ describe("app-owned Work execution", () => {
       complete: async () => {
         if (++attempts === 1) throw new Error("connection lost");
         delivered.resolve();
+        return true;
       },
       error: () => failed.resolve(),
     });
-    const current = snapshot(call("one"));
+    const current = snapshot({ ...call("one"), expiresAt: Date.now() + 30_000 });
     controller.reconcile(current);
     controller.decide("one", "allow");
     await failed.promise;
     controller.reconcile(current);
+    expect(attempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
     await delivered.promise;
     expect(deps.execute).toHaveBeenCalledTimes(1);
     expect(attempts).toBe(2);

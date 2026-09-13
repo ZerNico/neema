@@ -49,6 +49,23 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
     let authorized = !reconcileIdentity;
     let connection = 0;
     let identityRetry: ReturnType<typeof setTimeout> | undefined;
+    let workRefreshing = false;
+    let workDirty = false;
+    const refreshWork = () => {
+      if (disposed || !authorized) return;
+      if (workRefreshing) {
+        workDirty = true;
+        return;
+      }
+      workRefreshing = true;
+      workDirty = queryClient.isFetching({ queryKey: ["desktop-work"] }) > 0;
+      void queryClient
+        .invalidateQueries({ queryKey: ["desktop-work"] }, { cancelRefetch: false })
+        .finally(() => {
+          workRefreshing = false;
+          if (workDirty && !disposed && authorized) refreshWork();
+        });
+    };
     source.addEventListener("error", () => {
       authorized = false;
       connection++;
@@ -66,8 +83,8 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       }
       authorized = true;
       refreshKnowledge();
+      refreshWork();
       if (opened || reconcileIdentity) {
-        void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
@@ -102,7 +119,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           void reconcileIdentity?.();
           break;
         case "desktop.work.changed":
-          void queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
+          refreshWork();
           break;
         case "agent.draft.changed":
           void queryClient.invalidateQueries({ queryKey: ["agents", "draft", event.draftId] });
@@ -112,6 +129,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         case "conversation.created":
         case "conversation.updated":
         case "conversation.deleted":
+          refreshWork();
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           if (event.type !== "conversation.created") {
             // Prefix, not this id alone: a branch's detail embeds its source's
@@ -126,6 +144,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           break;
         case "message.created":
         case "message.status":
+          refreshWork();
           void queryClient.invalidateQueries({
             queryKey: ["conversation", event.conversationId],
           });

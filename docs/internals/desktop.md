@@ -35,7 +35,10 @@ is not replaced merely because later network activity fails.
 
 `DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.
 Its controller watches the authenticated Work snapshot, refreshed by id-only
-sync notifications and background reconciliation. Message SSE is for display,
+sync notifications, initial subscription readiness and reconnect reconciliation.
+Conversation policy/title changes and terminal message events refresh it too;
+there is no periodic snapshot fetch. The engine's ten-second maintenance cancels
+stale tracked attempts independently of snapshot reads. Message SSE is for display,
 not execution authority. Opening chat B or settings does not stop chat A, reset
 its approvals, or replay its calls. Each conversation has independent consent.
 Off-route approvals use the shared Sonner notifications with a Review action,
@@ -116,6 +119,10 @@ process has a new execution session and cannot silently replay an old attempt.
 
 The renderer retains a completed result while retrying failed delivery. It does
 not repeat the filesystem operation merely because the HTTP reply was lost.
+Claim and delivery failures schedule their own exponential retry, capped at ten
+seconds and the call deadline. Snapshot refreshes cannot bypass backoff. An
+acknowledged result stops delivery; refusal, removal, expiry and identity teardown
+cancel retries. This retry is failure recovery, not snapshot polling.
 Before the first send, a dispatch barrier is installed; it is released only after
 the new conversation's draft-folder rebinding has been attempted. A failed or
 interrupted rebind does not authorize guessing a path.

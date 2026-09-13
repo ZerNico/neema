@@ -65,6 +65,7 @@ export class ExternalCompletion extends Context.Service<
     complete(callId: string, value: unknown): Effect.Effect<boolean>;
     pending(callId: string): Effect.Effect<boolean>;
     inspect(callId: string): Effect.Effect<ExternalOperation | null>;
+    owners(): Effect.Effect<ExternalOwner[]>;
     snapshot(
       userId: string,
       executorId: string,
@@ -179,6 +180,7 @@ export class ExternalCompletion extends Context.Service<
         complete,
         pending: (callId) => Effect.sync(() => waiting.has(callId)),
         inspect,
+        owners: () => Effect.sync(() => [...attempts.values()].map(({ owner }) => owner)),
         snapshot: (userId, executorId) =>
           Effect.gen(function* () {
             const owned = [...attempts.values()].filter(

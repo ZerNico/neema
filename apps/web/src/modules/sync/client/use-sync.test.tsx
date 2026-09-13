@@ -32,6 +32,27 @@ afterEach(() => {
 });
 
 describe("useSync", () => {
+  it("refreshes work policy on conversation changes and preserves in-flight invalidations", async () => {
+    const { invalidate, source } = renderSync();
+    let release!: () => void;
+    invalidate.mockImplementation((filter) =>
+      filter?.queryKey?.[0] === "desktop-work"
+        ? new Promise<void>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve(),
+    );
+    source.emit("sync", { type: "conversation.updated", conversationId: "c" });
+    source.emit("sync", { type: "desktop.work.changed" });
+    const workCalls = () =>
+      invalidate.mock.calls.filter(([filter]) => filter?.queryKey?.[0] === "desktop-work");
+    expect(workCalls()).toHaveLength(1);
+    release();
+    await Promise.resolve();
+    expect(workCalls()).toHaveLength(2);
+    release();
+  });
+
   it("reconciles again when the server's database listener reconnects", () => {
     const { invalidate, source } = renderSync();
     source.emit("open");
@@ -105,7 +126,7 @@ describe("useSync", () => {
     },
   );
 
-  it("reconciles knowledge on first open without refreshing unrelated queries", () => {
+  it("reconciles knowledge and desktop work on first open", () => {
     const { invalidate, source } = renderSync();
     expect(source.url).toBe("/api/sync");
 
@@ -113,6 +134,7 @@ describe("useSync", () => {
 
     expect(invalidate.mock.calls).toEqual([
       [{ queryKey: ["knowledge"] }, { cancelRefetch: false }],
+      [{ queryKey: ["desktop-work"] }, { cancelRefetch: false }],
     ]);
   });
 

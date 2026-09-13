@@ -300,6 +300,9 @@ export class StreamEngine extends Context.Service<
                 ),
               );
           yield* reapGenerations;
+          for (const owner of yield* external.owners()) {
+            if (!(yield* repo.isDesktopAttemptLive(owner))) yield* external.cancelAttempt(owner);
+          }
         }).pipe(Effect.delay(Duration.seconds(10)), Effect.forever),
       );
 
