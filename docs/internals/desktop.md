@@ -31,6 +31,20 @@ bundled document, window and main frame. Recovery can retry only the configured
 server. Aborted/subframe failures are ignored, and an established Work renderer
 is not replaced merely because later network activity fails.
 
+The server chooser is not only a first-run screen. The app, dock and tray menus,
+the recovery page and the site (sign-in screen, account menu, through the `auth`
+capability) can all reopen it, and each of them can only ask: the address is
+typed in the chooser, never sent by a page, so a compromised site cannot point the
+bridge at another origin. Connecting writes the config, replaces the main window
+with one for the new origin and destroys the chooser; cancelling the chooser
+while a main window exists just closes it. Local work belongs to the server that
+started it, so opening the chooser while Work is active asks first, with the same
+wording family as Quit, and disposes executions and owned processes only after
+a yes. `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
+preload through a process argument, the site and recovery page then show no
+switch at all, the menu item is absent, and the IPC still refuses as a backstop.
+`connect-flow.ts` holds this logic electron-free.
+
 ## Sign-in happens in the browser
 
 The shell never shows a password form. Google refuses OAuth from an embedded

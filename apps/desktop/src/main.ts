@@ -17,10 +17,15 @@ import {
   chromeOptions,
   desktopPlatform,
   isPageSender,
+  CHANGE_SERVER,
   CHROME_GET_STATE,
   CHROME_SET_THEME,
+  CONNECT,
+  CONNECT_CURRENT,
+  FIXED_SERVER_ARGUMENT,
   RECOVERY_RETRY,
 } from "./chrome.ts";
+import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Layer, ManagedRuntime } from "effect";
 import { makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
@@ -44,7 +49,6 @@ import {
 // `import.meta.url` is empty under that format; `__dirname` is the real thing.
 const here = __dirname;
 const REQUEST_CHANNEL = "chat-desktop:request";
-const CONNECT_CHANNEL = "chat-desktop:connect";
 const platform = desktopPlatform(process.platform);
 const connectFile = join(here, "..", "static", "connect.html");
 const recoveryFile = join(here, "..", "static", "recovery.html");
@@ -66,6 +70,7 @@ const windowRecovery = new WeakMap<BrowserWindow, ReturnType<typeof attachLoadRe
  */
 
 let serverOrigin: string | null = null;
+let devOrigin: string | null = null;
 let mainWindow: BrowserWindow | null = null;
 let connectWindow: BrowserWindow | null = null;
 const isRemoteSender = (event: IpcMainInvokeEvent) =>
@@ -76,16 +81,18 @@ const isRemoteSender = (event: IpcMainInvokeEvent) =>
   );
 let tray: Tray | undefined;
 let workState = { active: 0, needsApproval: 0 };
+const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
-const executions = makeExecutions((tag, payload, signal) =>
-  runtime.runPromise(respond(tag, payload), { signal }),
-);
+const runExecution = (tag: string, payload: unknown, signal: AbortSignal) =>
+  runtime.runPromise(respond(tag, payload), { signal });
+// Replaced on a server switch: a disposed instance refuses every later call.
+let executions = makeExecutions(runExecution);
 const lifecycle = makeLifecycle({
   hide: () => {
     mainWindow?.hide();
     connectWindow?.hide();
   },
-  hasWork: () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0,
+  hasWork,
   confirmQuit: async () => {
     const { response } = await dialog.showMessageBox({
       type: "question",
@@ -141,7 +148,12 @@ const desktopShell: Shell = {
   },
 };
 
-const openConnectWindow = () => {
+/** What the chooser prefills; null on first run. */
+let connectCurrent: string | null = null;
+let configPath: string | null = null;
+const hasMainWindow = () => mainWindow !== null && !mainWindow.isDestroyed();
+
+const openConnectWindow = (current: string | null) => {
   const window = new BrowserWindow({
     ...chromeOptions(platform, nativeTheme.shouldUseDarkColors),
     width: 520,
@@ -157,10 +169,16 @@ const openConnectWindow = () => {
     },
   });
   connectWindow = window;
+  connectCurrent = current;
   windowChrome.set(window, attachChrome(window, nativeTheme, platform));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.on("close", (event) => lifecycle.close(event));
+  // Cancelling the chooser leaves the main window as it was. On first run
+  // there is none, so the chooser only hides, as every window does, and the
+  // dock or tray brings it back.
+  window.on("close", (event) => {
+    if (!hasMainWindow()) lifecycle.close(event);
+  });
   window.on("closed", () => {
     if (connectWindow === window) connectWindow = null;
   });
@@ -169,6 +187,60 @@ const openConnectWindow = () => {
   });
   return window;
 };
+
+const connectFlow = makeConnectFlow({
+  fixedServer: () => devOrigin !== null,
+  hasMain: hasMainWindow,
+  hasWork,
+  currentOrigin: () => serverOrigin,
+  confirmSwitch: async () => {
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: ["Keep working", "Switch server"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "Switch server?",
+      message: "Work is still active. Switching servers stops work on this computer.",
+      detail: "Stay on this server to keep working.",
+    });
+    return response === 1;
+  },
+  // Executions and owned processes belong to the server that started them.
+  // The runtime (grants, sandbox) is per machine and stays up.
+  disposeWork: async () => {
+    await executions.dispose();
+    await disposeOwnedProcesses();
+    executions = makeExecutions(runExecution);
+    desktopShell.setWorkState({ active: 0, needsApproval: 0 });
+  },
+  writeConfig: async (origin) => {
+    if (configPath === null) throw new Error("No config path.");
+    await writeConfig(configPath, { serverUrl: origin });
+  },
+  chooser: () => {
+    const window = connectWindow;
+    if (!window || window.isDestroyed()) return null;
+    return {
+      focus: () => {
+        window.show();
+        window.focus();
+      },
+      destroy: () => window.destroy(),
+    };
+  },
+  openConnect: (current) => {
+    openConnectWindow(current);
+  },
+  openMain: (origin) => {
+    serverOrigin = origin;
+    mainWindow = openMainWindow(origin);
+  },
+  closeMain: () => {
+    const window = mainWindow;
+    mainWindow = null;
+    window?.destroy();
+  },
+});
 
 const openMainWindow = (origin: string) => {
   const window = new BrowserWindow({
@@ -181,6 +253,9 @@ const openMainWindow = (origin: string) => {
       sandbox: true,
       backgroundThrottling: false,
       preload: join(here, "preload.cjs"),
+      // Known before the window exists, so the page hides the switch instead
+      // of offering one that would only be refused.
+      additionalArguments: devOrigin === null ? [] : [FIXED_SERVER_ARGUMENT],
     },
   });
 
@@ -216,36 +291,26 @@ const start = async () => {
   console.log(`[desktop] build ${__BUILD_STAMP__}`);
   // A developer points the shell at a dev server without going through the
   // connect window or touching the stored choice, which stays the real one.
-  const devOrigin = process.env.CHAT_DESKTOP_SERVER
-    ? toOrigin(process.env.CHAT_DESKTOP_SERVER)
-    : null;
+  devOrigin = process.env.CHAT_DESKTOP_SERVER ? toOrigin(process.env.CHAT_DESKTOP_SERVER) : null;
   if (devOrigin) {
     serverOrigin = devOrigin;
     mainWindow = openMainWindow(devOrigin);
     return;
   }
-  const file = configFile(app.getPath("userData"));
-  const config = await readConfig(file);
-
+  configPath = configFile(app.getPath("userData"));
+  const config = await readConfig(configPath);
   if (config === null) {
-    const connect = openConnectWindow();
-    ipcMain.handle(CONNECT_CHANNEL, async (event, candidate: unknown) => {
-      if (!isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl))
-        return { ok: false, message: "Not allowed from this page." };
-      const origin = typeof candidate === "string" ? toOrigin(candidate) : null;
-      if (origin === null)
-        return { ok: false, message: "That does not look like a server address." };
-      await writeConfig(file, { serverUrl: origin });
-      serverOrigin = origin;
-      mainWindow = openMainWindow(origin);
-      connect.destroy();
-      return { ok: true };
-    });
+    openConnectWindow(null);
     return;
   }
-
   serverOrigin = config.serverUrl;
   mainWindow = openMainWindow(config.serverUrl);
+};
+
+/** Menu entry; a refusal here is unexpected, since the entry is absent under a pinned server. */
+const chooseServer = async () => {
+  const outcome = await connectFlow.openChooser();
+  if (!outcome.ok) dialog.showErrorBox("Cannot change server", outcome.message);
 };
 
 const restoreWindow = () => {
@@ -299,8 +364,13 @@ void app.whenReady().then(async () => {
   if (!primaryInstance) return;
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
+  // The pinned dev server is decided from the environment, before start() runs.
+  const pinned = Boolean(process.env.CHAT_DESKTOP_SERVER);
   const actions = [
     { label: "Show Chat", click: restoreWindow },
+    ...(pinned
+      ? []
+      : [{ label: "Connect to a different server…", click: () => void chooseServer() }]),
     { label: "Quit Chat", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
   ];
   Menu.setApplicationMenu(
@@ -351,6 +421,26 @@ void app.whenReady().then(async () => {
     if (!isPageSender(event, mainWindow?.webContents, (url) => url === recoveryUrl) || !mainWindow)
       throw new Error("Not allowed from this page.");
     await windowRecovery.get(mainWindow)?.retry();
+  });
+  // The page only asks for the chooser. The address is typed there, so a
+  // compromised site cannot redirect the bridge at another origin.
+  ipcMain.handle(CHANGE_SERVER, (event) => {
+    if (
+      !isRemoteSender(event) &&
+      !isPageSender(event, mainWindow?.webContents, (url) => url === recoveryUrl)
+    )
+      return { ok: false, message: "Not allowed from this page." };
+    return connectFlow.openChooser();
+  });
+  const isConnectSender = (event: IpcMainInvokeEvent) =>
+    isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
+  ipcMain.handle(CONNECT_CURRENT, (event) => {
+    if (!isConnectSender(event)) throw new Error("Not allowed from this page.");
+    return connectCurrent;
+  });
+  ipcMain.handle(CONNECT, (event, candidate: unknown) => {
+    if (!isConnectSender(event)) return { ok: false, message: "Not allowed from this page." };
+    return connectFlow.connect(candidate);
   });
 
   ipcMain.handle(REQUEST_CHANNEL, async (event, message: unknown) => {

@@ -1,10 +1,17 @@
-import { Logout03Icon, Settings02Icon, UserCircleIcon, UserIcon } from "@hugeicons/core-free-icons";
+import {
+  CloudServerIcon,
+  Logout03Icon,
+  Settings02Icon,
+  UserCircleIcon,
+  UserIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { authClient } from "./client.ts";
 import { useIdentityBoundary } from "./identity-boundary.tsx";
+import { useDesktopAuth } from "~/modules/desktop/client/bridge.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import {
   DropdownMenu,
@@ -34,6 +41,11 @@ export function AccountMenu({
   const isAdmin = user.role === "admin";
   const accountLabel = `${user.name}, ${user.email}${impersonating ? ", Impersonating" : ""}`;
   const boundary = useIdentityBoundary();
+  const desktopAuth = useDesktopAuth();
+  const changeServer = useMutation({
+    mutationFn: () => desktopAuth!.changeServer(),
+    onError: (cause) => toast.error(cause.message),
+  });
   const stop = useMutation({
     mutationFn: async () => {
       if (!boundary) throw new Error("Missing identity boundary");
@@ -105,6 +117,18 @@ export function AccountMenu({
           <ThemeSwitch className="w-full" />
         </div>
         <DropdownMenuSeparator />
+        {desktopAuth?.canChangeServer ? (
+          <>
+            <DropdownMenuItem
+              disabled={changeServer.isPending}
+              onClick={() => changeServer.mutate()}
+            >
+              <HugeiconsIcon icon={CloudServerIcon} strokeWidth={2} />
+              Change server
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         {impersonating && (
           <DropdownMenuItem
             disabled={pending}

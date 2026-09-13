@@ -577,9 +577,38 @@ describe("impersonation controls", () => {
     expect(screen.getByText("target@example.test")).toBeVisible();
     await openAccount();
     expect(screen.queryByRole("menuitem", { name: "Stop impersonating" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Change server" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith({ to: "/login" }));
     expect(client.getQueryCache().getAll()).toEqual([]);
     expect(identityNavigation.replace).not.toHaveBeenCalled();
+  });
+
+  it("offers the desktop shell's server chooser and reports its refusal", async () => {
+    const changeServer = vi.fn(async () => {});
+    vi.stubGlobal("__chatDesktop", {
+      auth: { onTicket: () => () => {}, canChangeServer: true, changeServer },
+    });
+    mount(<Account impersonating={false} />);
+    await openAccount();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change server" }));
+    await waitFor(() => expect(changeServer).toHaveBeenCalledOnce());
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    changeServer.mockRejectedValueOnce(new Error("The server is fixed by CHAT_DESKTOP_SERVER."));
+    await openAccount();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change server" }));
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith("The server is fixed by CHAT_DESKTOP_SERVER."),
+    );
+  });
+
+  it("hides the server switch while the shell pins its server", async () => {
+    vi.stubGlobal("__chatDesktop", {
+      auth: { onTicket: () => () => {}, canChangeServer: false, changeServer: vi.fn() },
+    });
+    mount(<Account impersonating={false} />);
+    await openAccount();
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Change server" })).not.toBeInTheDocument();
   });
 });

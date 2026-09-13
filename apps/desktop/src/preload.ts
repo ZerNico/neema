@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { BRIDGE_KEY, PROTOCOL_VERSION } from "@chat/desktop-rpc";
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
-import { makeAuthBridge } from "./auth-preload.ts";
-import { RECOVERY_RETRY } from "./chrome.ts";
+import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
+import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
 
 declare const location: { readonly protocol: string };
 
@@ -12,6 +12,8 @@ if (location.protocol === "file:") {
   contextBridge.exposeInMainWorld("__chatRecovery", {
     chrome: makeLocalChromeBridge(ipcRenderer, process.platform),
     retry: () => ipcRenderer.invoke(RECOVERY_RETRY),
+    canChangeServer: canChangeServer(process.argv),
+    changeServer: () => ipcRenderer.invoke(CHANGE_SERVER),
   });
 } else {
   contextBridge.exposeInMainWorld(BRIDGE_KEY, {

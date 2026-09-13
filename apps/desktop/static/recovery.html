@@ -68,9 +68,12 @@
         line-height: 1.5;
         opacity: 0.7;
       }
-      button {
-        justify-self: start;
+      .actions {
+        display: flex;
+        gap: 8px;
         margin-top: 4px;
+      }
+      button {
         padding: 8px 16px;
         font: inherit;
         color: inherit;
@@ -83,6 +86,13 @@
         opacity: 0.5;
         cursor: default;
       }
+      #change {
+        background: transparent;
+        border: 1px solid rgb(128 128 128 / 0.4);
+      }
+      #change[hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -93,7 +103,10 @@
         Check your connection and make sure your server is running. Your saved server address hasn’t
         changed.
       </p>
-      <button id="retry" type="button">Retry</button>
+      <div class="actions">
+        <button id="retry" type="button">Retry</button>
+        <button id="change" type="button">Use a different server</button>
+      </div>
       <p id="status" role="status"></p>
     </main>
     <script>
@@ -116,6 +129,17 @@
       window.addEventListener("pagehide", unsubscribe, { once: true });
       const retry = document.getElementById("retry");
       const status = document.getElementById("status");
+      const change = document.getElementById("change");
+      // A pinned dev server cannot be switched, so the offer is withheld rather than refused.
+      if (window.__chatRecovery.canChangeServer === false) change.hidden = true;
+      change.addEventListener("click", async () => {
+        try {
+          const outcome = await window.__chatRecovery.changeServer();
+          if (outcome && outcome.ok === false) status.textContent = outcome.message;
+        } catch {
+          status.textContent = "Couldn’t open the server chooser.";
+        }
+      });
       retry.addEventListener("click", async () => {
         retry.disabled = true;
         status.textContent = "Connecting…";

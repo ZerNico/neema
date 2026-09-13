@@ -9,6 +9,9 @@ import {
   CHROME_GET_STATE,
   CHROME_SET_THEME,
   CHROME_STATE,
+  CONNECT,
+  CONNECT_CURRENT,
+  FIXED_SERVER_ARGUMENT,
   RECOVERY_RETRY,
 } from "./chrome.ts";
 import { SIGN_IN_TICKET } from "./sign-in-link.ts";
@@ -82,6 +85,13 @@ describe("restricted bundled preloads", () => {
     expect(requireModule.mock.calls.every(([name]) => name === "electron")).toBe(true);
   });
 
+  it("withholds the server switch from every document while the server is pinned", () => {
+    const remote = probe("preload.ts", "https:", [FIXED_SERVER_ARGUMENT]);
+    expect((remote.exposed.get("__chatDesktop")!.auth as DesktopAuth).canChangeServer).toBe(false);
+    const local = probe("preload.ts", "file:", [FIXED_SERVER_ARGUMENT]);
+    expect(local.exposed.get("__chatRecovery")!.canChangeServer).toBe(false);
+  });
+
   it("lets the site ask for the server chooser and surfaces a refusal as an error", async () => {
     const { exposed, ipc } = probe("preload.ts", "https:");
     const auth = exposed.get("__chatDesktop")!.auth as DesktopAuth;
@@ -108,24 +118,37 @@ describe("restricted bundled preloads", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it("gives a local recovery document only read-only chrome and a parameterless retry", async () => {
+  it("gives a local recovery document read-only chrome and parameterless retry and chooser calls", async () => {
     const { exposed, ipc } = probe("preload.ts", "file:");
     expect(exposed.has("__chatDesktop")).toBe(false);
     const recovery = exposed.get("__chatRecovery")!;
-    expect(Object.keys(recovery).toSorted()).toEqual(["chrome", "retry"]);
+    expect(Object.keys(recovery).toSorted()).toEqual([
+      "canChangeServer",
+      "changeServer",
+      "chrome",
+      "retry",
+    ]);
+    expect(recovery.canChangeServer).toBe(true);
     expect(recovery.chrome).not.toHaveProperty("setTheme");
     expect(recovery.chrome).not.toHaveProperty("request");
     const retry = recovery.retry as () => Promise<void>;
     await retry();
     expect(ipc.invoke).toHaveBeenLastCalledWith(RECOVERY_RETRY);
+    const changeServer = recovery.changeServer as () => Promise<unknown>;
+    await changeServer();
+    expect(ipc.invoke).toHaveBeenLastCalledWith(CHANGE_SERVER);
   });
 
-  it("keeps the connect preload isolated from recovery and Work authority", () => {
-    const { exposed } = probe("connect-preload.ts", "file:");
+  it("keeps the connect preload isolated from recovery and Work authority", async () => {
+    const { exposed, ipc } = probe("connect-preload.ts", "file:");
     expect([...exposed.keys()]).toEqual(["__chatConnect"]);
     const connect = exposed.get("__chatConnect")!;
-    expect(Object.keys(connect).toSorted()).toEqual(["chrome", "connect"]);
+    expect(Object.keys(connect).toSorted()).toEqual(["chrome", "connect", "current"]);
     expect(connect.chrome).not.toHaveProperty("setTheme");
     expect(connect.chrome).not.toHaveProperty("request");
+    await (connect.current as () => Promise<unknown>)();
+    expect(ipc.invoke).toHaveBeenLastCalledWith(CONNECT_CURRENT);
+    await (connect.connect as (url: string) => Promise<unknown>)("chat.example.com");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(CONNECT, "chat.example.com");
   });
 });

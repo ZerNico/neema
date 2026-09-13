@@ -90,6 +90,20 @@
         opacity: 0.5;
         cursor: default;
       }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .actions button {
+        flex: 1;
+      }
+      #cancel {
+        background: transparent;
+        border: 1px solid rgb(128 128 128 / 0.4);
+      }
+      #cancel[hidden] {
+        display: none;
+      }
       .error {
         color: #d1495b;
         font-size: 13px;
@@ -104,7 +118,10 @@
       <p>The address you use in the browser. This app will only share files with that server.</p>
       <input id="url" placeholder="chat.example.com" autofocus spellcheck="false" />
       <p class="error" id="error"></p>
-      <button id="submit" type="submit">Connect</button>
+      <div class="actions">
+        <button id="cancel" type="button" hidden>Cancel</button>
+        <button id="submit" type="submit">Connect</button>
+      </div>
     </form>
     <script>
       const chrome = window.__chatConnect.chrome;
@@ -128,6 +145,18 @@
       const url = document.getElementById("url");
       const error = document.getElementById("error");
       const submit = document.getElementById("submit");
+      const cancel = document.getElementById("cancel");
+      // A current address means a main window exists to go back to.
+      window.__chatConnect
+        .current()
+        .then((current) => {
+          if (typeof current !== "string") return;
+          if (url.value === "") url.value = current;
+          cancel.hidden = false;
+          url.select();
+        })
+        .catch(() => {});
+      cancel.addEventListener("click", () => window.close());
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         error.textContent = "";

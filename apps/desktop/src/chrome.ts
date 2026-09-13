@@ -6,6 +6,8 @@ export const CHROME_GET_STATE = "chat-desktop:chrome-get-state";
 export const CHROME_SET_THEME = "chat-desktop:chrome-set-theme";
 export const RECOVERY_RETRY = "chat-desktop:recovery-retry";
 export const CHANGE_SERVER = "chat-desktop:change-server";
+export const CONNECT = "chat-desktop:connect";
+export const CONNECT_CURRENT = "chat-desktop:connect-current";
 /** Process argument every preload receives while CHAT_DESKTOP_SERVER pins the server. */
 export const FIXED_SERVER_ARGUMENT = "--chat-desktop-fixed-server";
 export const TITLEBAR_HEIGHT = 48;
