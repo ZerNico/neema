@@ -26,30 +26,61 @@ const isPrivateIpv4 = (ip: string): boolean => {
   );
 };
 
-const isPrivateIpv6 = (ip: string): boolean => {
-  const lower = ip.toLowerCase();
-  // Normalize away zone id
-  const bare = lower.split("%")[0]!;
-  if (bare === "::" || bare === "::1") return true;
-  if (
-    bare.startsWith("fe8") ||
-    bare.startsWith("fe9") ||
-    bare.startsWith("fea") ||
-    bare.startsWith("feb")
-  )
-    return true; // link-local fe80::/10
-  if (bare.startsWith("fc") || bare.startsWith("fd")) return true; // ULA fc00::/7
-  if (bare.startsWith("ff")) return true; // multicast
-  // IPv4-mapped: URL normalizes to hex form (::ffff:c0a8:1), but accept the
-  // dotted form too.
-  const v4Dotted = bare.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (v4Dotted) return isPrivateIpv4(v4Dotted[1]!);
-  const v4Hex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (v4Hex) {
-    const hi = Number.parseInt(v4Hex[1]!, 16);
-    const lo = Number.parseInt(v4Hex[2]!, 16);
-    return isPrivateIpv4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+const ipv6PartGroups = (part: string): number[] => {
+  if (part === "") return [];
+  return part.split(":").map((group) => {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return Number.NaN;
+    return Number.parseInt(group, 16);
+  });
+};
+
+/** Eight 16-bit groups, or null when the literal cannot be decoded. */
+const ipv6Groups = (ip: string): number[] | null => {
+  const bare = ip.toLowerCase().split("%")[0]!;
+  let encoded = bare;
+  const ipv4Tail = /:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare);
+  if (ipv4Tail) {
+    const octets = ipv4Tail[1]!.split(".").map(Number);
+    if (octets.length !== 4 || octets.some((octet) => octet > 255 || Number.isNaN(octet)))
+      return null;
+    const hi = (octets[0]! << 8) | octets[1]!;
+    const lo = (octets[2]! << 8) | octets[3]!;
+    encoded = `${bare.slice(0, ipv4Tail.index + 1)}${hi.toString(16)}:${lo.toString(16)}`;
   }
+  const halves = encoded.split("::");
+  if (halves.length > 2) return null;
+  const left = ipv6PartGroups(halves[0]!);
+  const right = halves.length === 2 ? ipv6PartGroups(halves[1]!) : [];
+  if (left.some(Number.isNaN) || right.some(Number.isNaN)) return null;
+  const missing = 8 - left.length - right.length;
+  if (halves.length === 1) return missing === 0 ? left : null;
+  if (missing < 0) return null;
+  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
+};
+
+const ipv4FromGroups = (high: number, low: number) =>
+  `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+
+const isPrivateIpv6 = (ip: string): boolean => {
+  const groups = ipv6Groups(ip);
+  // Fail closed on a literal `isIP` accepted but we could not expand.
+  if (!groups) return true;
+  const zeroHead = (count: number) => groups.slice(0, count).every((group) => group === 0);
+  if (groups.every((group) => group === 0)) return true; // ::
+  if (zeroHead(7) && groups[7] === 1) return true; // ::1
+  if ((groups[0]! & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
+  if ((groups[0]! & 0xfe00) === 0xfc00) return true; // ULA fc00::/7
+  if ((groups[0]! & 0xff00) === 0xff00) return true; // multicast
+  // IPv4-mapped ::ffff:x:x, IPv4-translated ::ffff:0:x:x, IPv4-compatible ::x:x.
+  if (zeroHead(5) && groups[5] === 0xffff) return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
+  if (zeroHead(4) && groups[4] === 0xffff && groups[5] === 0)
+    return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
+  if (zeroHead(6)) return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
+  // NAT64 well-known prefix 64:ff9b::/96 (groups 2-5 are the prefix padding).
+  if (groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0))
+    return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
+  // 6to4 2002:x:x:: embeds the IPv4 address in the next 32 bits.
+  if (groups[0] === 0x2002) return isPrivateIpv4(ipv4FromGroups(groups[1]!, groups[2]!));
   return false;
 };
 
