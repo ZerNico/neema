@@ -92,9 +92,8 @@ function MemorySection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Assistant memory</span>
             <span className="text-muted-foreground text-xs">
-              Globally allow saved memories to be referenced and the model to save new ones
-              automatically. User preferences and manual memory management remain available while
-              this is off.
+              Let models use what they have saved about someone, and save more as they chat. People
+              can still manage their own memories while this is off.
             </span>
           </div>
           <Switch
@@ -277,7 +276,7 @@ function WebSearchSection() {
                 <NumberField
                   field={field}
                   label="Search queries per research run"
-                  description="Maximum individual queries shared across all research workers, not a target. Applies to newly started research runs only; ordinary chat is unchanged."
+                  description="A ceiling for the whole research run, not a goal it aims for. Takes effect on the next run started."
                   min={RESEARCH_SEARCH_BUDGET.min}
                   max={RESEARCH_SEARCH_BUDGET.max}
                   step={1}
@@ -367,10 +366,8 @@ function UrlReaderSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Read linked pages</span>
             <span className="text-muted-foreground text-xs">
-              Lets the model fetch several pages at once from user links or search results and read
-              their extracted content. It has no separate composer toggle: it is available alongside
-              web search or when the conversation provides a URL. Requests to private and internal
-              addresses are refused.
+              Lets the model open links from your messages and search results and read what is on
+              the page.
             </span>
           </div>
           <Switch

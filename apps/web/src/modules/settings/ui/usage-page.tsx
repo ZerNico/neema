@@ -4,8 +4,6 @@ import { startTransition, useState } from "react";
 import { myUsageQuery } from "~/modules/analytics/client/queries.ts";
 import { DEFAULT_USAGE_RANGE, type UsageRangeEncoded } from "~/modules/analytics/schema.ts";
 import { UsageOverview, UsageRangePicker } from "~/modules/analytics/ui/usage-dashboard.tsx";
-import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
-import { Button } from "~/ui/primitives/button";
 import { EmptyState, Page } from "~/ui/page-shell.tsx";
 
 export function UsagePage() {
@@ -40,17 +38,6 @@ export function UsagePage() {
           showActiveUsers={false}
         />
       )}
-      <Disclosure>
-        <DisclosureTrigger render={<Button variant="ghost" size="sm" />}>
-          About usage
-        </DisclosureTrigger>
-        <DisclosureContent>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Tokens measure the text a model reads and writes. Retries and automatic chat titles
-            count too. Where a cost is missing it is unknown, not free.
-          </p>
-        </DisclosureContent>
-      </Disclosure>
     </Page>
   );
 }

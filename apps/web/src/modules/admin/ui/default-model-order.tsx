@@ -77,7 +77,7 @@ export function DefaultModelOrder({
   return (
     <Section
       title="Default model order"
-      description="New chats use the first enabled model in this list that the user can access. If none match, the first available model alphabetically is used. Existing selections and the model picker order stay unchanged."
+      description="New chats use the first model in this list the user can access. Everyone keeps the model they last picked."
     >
       <ListCard>
         {order.length === 0 ? (

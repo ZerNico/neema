@@ -192,10 +192,7 @@ export function OAuthProviderDialog({
                   </SelectContent>
                 </Select>
                 {available.length === 0 ? (
-                  <FieldDescription>
-                    Every built-in provider is already set up. One account system each is all Better
-                    Auth registers.
-                  </FieldDescription>
+                  <FieldDescription>Every built-in provider is already set up.</FieldDescription>
                 ) : null}
               </Field>
             )}

@@ -149,8 +149,8 @@ export function MemoryPage() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="text-sm font-medium">Memory is paused by an administrator</span>
                   <span className="text-muted-foreground text-xs">
-                    Your preferences are preserved, but saved memories are not referenced and models
-                    cannot save them automatically. You can still add, edit, and delete memories.
+                    Models won’t use or add to your memories for now. You can still add, edit and
+                    delete them, and your settings are kept.
                   </span>
                 </div>
               </ListRow>
