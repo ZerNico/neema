@@ -2,6 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
+import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
+import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
 import { SignInProviders, signInProvidersQuery } from "~/modules/auth/ui/sign-in-providers.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
@@ -18,12 +20,17 @@ const RegisterSchema = Schema.Struct({
 });
 
 export const Route = createFileRoute("/register")({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
+    redirectSearch(safeRedirect(search["redirect"])),
+  beforeLoad: ({ context, search }) => leaveIfSignedIn(context.queryClient, search.redirect),
   loader: ({ context }) => context.queryClient.ensureQueryData(signInProvidersQuery),
   component: RegisterPage,
 });
 
 function RegisterPage() {
   const navigate = useNavigate();
+  const { redirect } = Route.useSearch();
+  const destination = redirect ?? "/";
   const [serverError, setServerError] = useState<string | null>(null);
 
   const form = useAppForm({
@@ -40,7 +47,7 @@ function RegisterPage() {
         setServerError(error.message ?? "Could not create the account.");
         return;
       }
-      await navigate({ to: "/" });
+      await navigate({ href: destination });
     },
   });
 
@@ -51,7 +58,7 @@ function RegisterPage() {
           <CardTitle>Create account</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SignInProviders />
+          <SignInProviders callbackURL={destination} />
           <form
             className="flex flex-col gap-4"
             onSubmit={(e) => {
@@ -79,7 +86,11 @@ function RegisterPage() {
         <CardFooter>
           <p className="text-muted-foreground text-sm">
             Already have an account?{" "}
-            <Link to="/login" className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}>
+            <Link
+              to="/login"
+              search={redirectSearch(redirect)}
+              className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
+            >
               Sign in
             </Link>
           </p>
