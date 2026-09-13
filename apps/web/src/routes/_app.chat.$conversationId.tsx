@@ -1,5 +1,6 @@
 import { BubbleChatCancelIcon } from "@hugeicons/core-free-icons";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import {
   chatModelsQuery,
   conversationQuery,
@@ -7,6 +8,8 @@ import {
   researchAvailabilityQuery,
 } from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
+import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import { EmptyState } from "~/ui/page-shell.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
@@ -15,9 +18,8 @@ import { Spinner } from "~/ui/primitives/spinner";
 export const Route = createFileRoute("/_app/chat/$conversationId")({
   // Start the conversation and composer queries together so the model label
   // and search toggle are ready when the view renders, not a round trip later.
-  // Nothing is returned: the view reads from the query cache, and the
-  // SSR query integration already dehydrates them — returning the payload
-  // would serialize the whole conversation into the document a second time.
+  // Nothing is returned: the view reads these from the query cache, so a
+  // loader payload would only be a second copy.
   loader: async ({ context, params, abortController }) => {
     await Promise.all([
       context.queryClient
@@ -36,6 +38,12 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
       // Prefetch keeps optional search-config failures out of the route error boundary.
       context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
       context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),
+      // The composer mounts its agent, collection and skill pickers with the
+      // view rather than on open, so all three fetch on arrival regardless.
+      // Started here they overlap the conversation instead of trailing it.
+      context.queryClient.prefetchQuery(agentsQuery),
+      context.queryClient.prefetchQuery(knowledgeCollectionsQuery),
+      context.queryClient.prefetchQuery(skillsQuery),
     ]);
   },
   component: ChatPage,

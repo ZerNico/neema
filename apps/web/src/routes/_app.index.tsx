@@ -9,6 +9,8 @@ import {
   researchAvailabilityQuery,
   webSearchAvailabilityQuery,
 } from "~/modules/chat/client/queries.ts";
+import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
+import { skillsQuery } from "~/modules/skills/client/queries.ts";
 
 export const Route = createFileRoute("/_app/")({
   // `?agent=<id>` from an agent page pre-selects it in the composer. The
@@ -26,6 +28,10 @@ export const Route = createFileRoute("/_app/")({
       prepareWorkFolder(context.queryClient, DRAFT_CONVERSATION, abortController.signal),
       context.queryClient.ensureQueryData(chatModelsQuery),
       context.queryClient.prefetchQuery(agentsQuery),
+      // The composer's collection and skill pickers mount with the view, so
+      // they fetch on arrival either way; started here they overlap the rest.
+      context.queryClient.prefetchQuery(knowledgeCollectionsQuery),
+      context.queryClient.prefetchQuery(skillsQuery),
       // Optional: a search-config failure must not prevent opening a chat.
       context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
       context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),

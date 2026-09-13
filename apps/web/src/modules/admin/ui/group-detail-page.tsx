@@ -67,7 +67,7 @@ import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { Spinner } from "~/ui/primitives/spinner";
 
-const membersQuery = (groupId: string) =>
+export const membersQuery = (groupId: string) =>
   queryOptions({
     queryKey: ["admin", "group-members", groupId],
     queryFn: () => listGroupMembers({ data: { groupId } }),
