@@ -357,6 +357,14 @@ describe("refreshing a desktop session", () => {
     withinDays(before, 7);
     expect((await new Client(DESKTOP_UA, browser.ip).refresh()).status).toBe(401);
   });
+
+  it("refuses a browser session even when the request claims to be the shell", async () => {
+    const spoof = new Client(DESKTOP_UA, browser.ip);
+    spoof.cookies = new Map(browser.cookies);
+    expect((await spoof.refresh()).status).toBe(403);
+    const before = (await browser.session()).body.session.expiresAt;
+    withinDays(before, 7);
+  });
 });
 
 describe("listing and revoking devices", () => {

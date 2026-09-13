@@ -262,8 +262,9 @@ Differs from most Effect 3 material online.
 - Provider API keys are AES-256-GCM at rest (`PROVIDER_KEY_SECRET`); ciphertext
   never leaves the server.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
-  ticket, and the `ChatDesktop/` user-agent token is what the server keys the
-  90-day policy and the Devices label on. See `docs/internals/desktop.md`.
+  ticket. The 90-day refresh and the Devices label "Chat Desktop on …" key on
+  the `ChatDesktop/` token stored on that session at redemption, not on the
+  current request's user agent. See `docs/internals/desktop.md`.
 - First registered user becomes admin via the `user.create.before` hook. Do not
   bypass Better Auth for user creation. That first account is also the one
   account no policy can refuse, since there is nobody to ask yet.

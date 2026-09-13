@@ -142,10 +142,9 @@ export const desktopSessions = ({
         { method: "POST", use: [sessionMiddleware] },
         async (ctx) => {
           const { session, user } = ctx.context.session;
-          // Better Auth's own refresh would shorten this session back to the
-          // browser lifetime, so the shell extends it here on every launch.
-          // Only the shell gets the long lease, and never while impersonating.
-          if (!hasDesktopMarker(ctx.getHeader("user-agent")) || impersonated(session)) {
+          // Only a session minted by the shell (its stored UA carries the
+          // product token) gets the long lease, and never while impersonating.
+          if (!hasDesktopMarker(session.userAgent) || impersonated(session)) {
             throw new APIError("FORBIDDEN", { message: "Only the desktop app can do this." });
           }
           const updated = await ctx.context.internalAdapter.updateSession(session.token, {

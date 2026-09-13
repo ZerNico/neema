@@ -69,11 +69,12 @@ without a challenge, which the redemption accepts with no verifier at all.
 Redemption creates a separate session for the desktop, ninety days long,
 and the shell renews it to a fresh ninety days on every authenticated mount
 through `/desktop/session/refresh`; Better Auth's own refresh would cut it
-back to the browser's seven days. That endpoint, and the Devices label
-"Chat Desktop on …", key on the `ChatDesktop/` token the shell appends to its
-user agent. Revoking either session leaves the other valid. After redeeming,
-the page does what `IdentityBoundary` does on an identity change: clear the
-query cache and replace the document.
+back to the browser's seven days. Refresh keys on the **stored** session user
+agent from redemption, not the request header, so a browser cookie cannot
+become a 90-day session by sending `ChatDesktop/`. The Devices label
+"Chat Desktop on …" reads that same stored token. Revoking either session
+leaves the other valid. After redeeming, the page does what `IdentityBoundary`
+does on an identity change: clear the query cache and replace the document.
 
 ## Execution belongs to the authenticated app, not a chat route
 
