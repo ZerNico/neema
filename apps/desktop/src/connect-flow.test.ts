@@ -130,4 +130,21 @@ describe("connecting", () => {
     expect(effects.openMain).toHaveBeenCalledExactlyOnceWith("https://chat.example.com");
     expect(chooser.destroy).toHaveBeenCalledOnce();
   });
+
+  it("asks before connect tears down work, even if the chooser is already open", async () => {
+    const { effects, chooser } = host({ hasWork: () => true });
+    effects.chooser.mockReturnValue(chooser);
+    effects.confirmSwitch.mockResolvedValueOnce(false);
+    const flow = makeConnectFlow(effects);
+    await expect(flow.connect("https://other.example.com")).resolves.toEqual({ ok: true });
+    expect(effects.confirmSwitch).toHaveBeenCalledOnce();
+    expect(effects.writeConfig).not.toHaveBeenCalled();
+    expect(effects.disposeWork).not.toHaveBeenCalled();
+    expect(effects.openMain).not.toHaveBeenCalled();
+    effects.confirmSwitch.mockResolvedValueOnce(true);
+    await expect(flow.connect("https://other.example.com")).resolves.toEqual({ ok: true });
+    expect(effects.writeConfig).toHaveBeenCalledExactlyOnceWith("https://other.example.com");
+    expect(effects.disposeWork).toHaveBeenCalledOnce();
+    expect(effects.openMain).toHaveBeenCalledExactlyOnceWith("https://other.example.com");
+  });
 });

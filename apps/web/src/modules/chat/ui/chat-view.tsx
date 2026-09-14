@@ -1376,7 +1376,6 @@ export function NewChatView({
   // the first message creates one to rebind it onto.
   const folder = useFolder(DRAFT_CONVERSATION);
   const [mode, setMode] = useState<ConversationMode>("chat");
-  const attemptFields = () => desktopAttemptFields(requireWorkFolder(mode === "work", folder));
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
@@ -1401,6 +1400,7 @@ export function NewChatView({
       attachmentIds: ReadonlyArray<string>;
       generationMode?: GenerationMode;
       skillIds?: ReadonlyArray<string>;
+      mode: ConversationMode;
     }) =>
       withDraftFolderBinding(
         async () =>
@@ -1410,8 +1410,8 @@ export function NewChatView({
               modelId: modelId!,
               content: input.content,
               searchEnabled,
-              mode,
-              ...(await attemptFields()),
+              mode: input.mode,
+              ...(await desktopAttemptFields(requireWorkFolder(input.mode === "work", folder))),
               timeZone: browserTimeZone(),
               attachmentIds: input.attachmentIds,
               ...(input.generationMode ? { generationMode: input.generationMode } : {}),
@@ -1423,8 +1423,8 @@ export function NewChatView({
       ),
     // Fires when the request starts, i.e. after any queued upload settled —
     // the composer should not move while it is still waiting on those.
-    onMutate: () => {
-      requireWorkFolder(mode === "work", folder);
+    onMutate: (input) => {
+      requireWorkFolder(input.mode === "work", folder);
       setSending(true);
       slide.current = prefersReducedMotion()
         ? Promise.resolve()
@@ -1514,6 +1514,7 @@ export function NewChatView({
                 attachmentIds,
                 ...(generationMode ? { generationMode } : {}),
                 ...(skillIds ? { skillIds } : {}),
+                mode,
               })
             }
             disabled={sendMutation.isPending}

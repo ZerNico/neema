@@ -57,11 +57,13 @@ export const makeConnectFlow = (host: ConnectHost) => {
       return { ok: false, message: "The server is fixed by CHAT_DESKTOP_SERVER." };
     const origin = typeof candidate === "string" ? toOrigin(candidate) : null;
     if (origin === null) return { ok: false, message: "That does not look like a server address." };
+    if (host.hasWork()) {
+      if (!(await host.confirmSwitch())) return { ok: true };
+    }
     await host.writeConfig(origin);
-    if (host.hasMain()) {
-      // Work started under the chooser would otherwise outlive its server.
+    if (host.hasMain() || host.hasWork()) {
       await host.disposeWork();
-      host.closeMain();
+      if (host.hasMain()) host.closeMain();
     }
     host.openMain(origin);
     host.chooser()?.destroy();

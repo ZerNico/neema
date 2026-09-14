@@ -12,6 +12,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import {
+  DRAFT_CONVERSATION,
   desktopShellOutdated,
   makeDesktopClient,
   readDesktopAuth,
@@ -23,6 +24,8 @@ import {
 } from "@chat/desktop-rpc";
 import { joinFolderNames } from "../tool-schema.ts";
 
+export { DRAFT_CONVERSATION };
+
 /**
  * The site's side of the desktop bridge.
  *
@@ -31,9 +34,6 @@ import { joinFolderNames } from "../tool-schema.ts";
  * caller here is expected to render nothing rather than degrade: a folder
  * control with no machine behind it would be a promise the page cannot keep.
  */
-
-/** The key a conversation's folder hangs on before the conversation exists. */
-export const DRAFT_CONVERSATION = "__draft__";
 
 let cached: DesktopClient | null | undefined;
 
@@ -72,8 +72,8 @@ export type FolderState = (
   /** Why the last folder change failed, if it did. */
   readonly refusal: string | null;
   refresh: () => void;
-  /** Opens the picker and adds the choice beside the folders already attached. */
-  choose: () => void;
+  /** Opens the picker and adds the choice, or replaces a named folder. */
+  choose: (replace?: string) => void;
   detach: (name: string) => void;
   setUpSandbox: () => void;
 };
@@ -146,7 +146,7 @@ export const prepareWorkFolder = async (
           if (controller.signal.aborted) aborted();
         });
       }
-      await wait(waitForDraftBinding());
+      await wait(waitForDraftBinding(conversationId));
       controller.signal.throwIfAborted();
       if (busy()) continue;
       const binding = draftBinding;
@@ -211,11 +211,13 @@ export const useFolder = (conversationId: string): FolderState | null => {
   if (!client) return null;
   const run = (effect: Effect.Effect<FolderStatus, DesktopError>) =>
     mutation.mutate({ conversationId, effect });
+  // Prefer the last successful status: a focus refetch can fail while the
+  // grants are still sitting in the cache, and treating that as empty blocks send.
   return {
-    ...(query.isError
-      ? { readiness: "error" as const, status: null }
-      : query.data
-        ? { readiness: "ready" as const, status: query.data }
+    ...(query.data
+      ? { readiness: "ready" as const, status: query.data }
+      : query.isError
+        ? { readiness: "error" as const, status: null }
         : { readiness: "loading" as const, status: null }),
     busy,
     refusal:
@@ -225,7 +227,13 @@ export const useFolder = (conversationId: string): FolderState | null => {
     refresh: () => {
       if (!busy) void query.refetch();
     },
-    choose: () => run(client.chooseFolder({ conversationId })),
+    choose: (replace) =>
+      run(
+        client.chooseFolder({
+          conversationId,
+          ...(typeof replace === "string" ? { replace } : {}),
+        }),
+      ),
     detach: (name) => run(client.detachFolder({ conversationId, name })),
     setUpSandbox: () =>
       run(Effect.flatMap(client.setUpSandbox(), () => client.folderStatus({ conversationId }))),
@@ -287,13 +295,34 @@ export const desktopAttemptFields = async (fields: DesktopSendFields | null) => 
   return { ...fields, desktopExecutorId: session.id };
 };
 
-let draftBinding = Promise.resolve();
-export const waitForDraftBinding = async () => {
-  let current;
-  do {
-    current = draftBinding;
-    await current;
-  } while (current !== draftBinding);
+type DraftBinding = {
+  conversationId: string | null;
+  /** Resolves once the create response has named the destination. */
+  readonly named: Promise<void>;
+  readonly done: Promise<void>;
+};
+
+let draftBinding: DraftBinding | null = null;
+
+/**
+ * Holds dispatch for a first send's rebind. Pass the call's conversation id so
+ * other chats are not stalled once that destination is known.
+ */
+export const waitForDraftBinding = async (conversationId?: string) => {
+  for (;;) {
+    const current = draftBinding;
+    if (!current) return;
+    if (conversationId === undefined || conversationId === DRAFT_CONVERSATION) {
+      await current.done;
+      continue;
+    }
+    if (current.conversationId === null) {
+      await current.named;
+      continue;
+    }
+    if (current.conversationId !== conversationId) return;
+    await current.done;
+  }
 };
 
 // The server can publish a local call before the create-turn response arrives.
@@ -303,17 +332,29 @@ export const withDraftFolderBinding = async <A extends { conversationId: string 
   queryClient: QueryClient,
 ): Promise<A> => {
   const previous = draftBinding;
+  let name!: () => void;
   let release!: () => void;
-  draftBinding = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const current: DraftBinding = {
+    conversationId: null,
+    named: new Promise<void>((resolve) => {
+      name = resolve;
+    }),
+    done: new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  };
+  draftBinding = current;
   try {
-    await previous;
+    await previous?.done;
     const result = await send();
+    current.conversationId = result.conversationId;
+    name();
     const keys = [folderQueryKey(DRAFT_CONVERSATION), folderQueryKey(result.conversationId)];
     await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey, exact: true })));
     try {
       await rebindDraftFolder(result.conversationId);
+    } catch {
+      // Create already committed. The destination stays without a grant.
     } finally {
       await Promise.all(
         keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
@@ -321,6 +362,8 @@ export const withDraftFolderBinding = async <A extends { conversationId: string 
     }
     return result;
   } finally {
+    if (draftBinding === current) draftBinding = null;
+    name();
     release();
   }
 };

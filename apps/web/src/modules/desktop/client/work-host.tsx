@@ -70,7 +70,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       void boundary?.reconcile();
     };
     return new WorkController({
-      beforeExecute: waitForDraftBinding,
+      beforeExecute: (conversationId) => waitForDraftBinding(conversationId),
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
       execute: (call, network) =>
         Schema.is(DesktopToolName)(call.name)

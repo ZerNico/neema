@@ -36,9 +36,9 @@ export const conversations = pgTable(
     branchedFrom: text("branched_from").references((): AnyPgColumn => conversations.id, {
       onDelete: "set null",
     }),
-    // Fixed at creation, like the agent association. A work chat reaches a
-    // folder on the user's machine, so every send needs one and a browser tab
-    // can only read it; a plain chat never offers those tools at all.
+    // Fixed at creation, like the agent association. A work chat can reach
+    // folders on the user's machine; a browser tab can only read it. A folder
+    // is invited, not required: tools stay withheld until one is attached.
     mode: text({ enum: ["chat", "work"] })
       .notNull()
       .default("chat"),

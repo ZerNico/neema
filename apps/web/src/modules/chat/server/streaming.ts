@@ -48,6 +48,7 @@ import {
   readPresentedQuestions,
 } from "~/modules/tools/ask-user-schema.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
+import { acceptDesktopToolResult } from "~/modules/desktop/server/result.ts";
 import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
 import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
@@ -1639,7 +1640,7 @@ export class StreamEngine extends Context.Service<
                             );
                             // The result crossed the page, so it is untrusted
                             // input on the way back in, not just on the way out.
-                            const result: DesktopToolResult =
+                            const result: DesktopToolResult = acceptDesktopToolResult(
                               !part.isFailure && Option.isSome(decoded)
                                 ? decoded.value
                                 : {
@@ -1648,7 +1649,8 @@ export class StreamEngine extends Context.Service<
                                     summary: "That did not run",
                                     detail: "The computer did not report a usable result.",
                                     truncated: false,
-                                  };
+                                  },
+                            );
                             if (result.file) {
                               const bytes = Buffer.from(result.file.base64, "base64");
                               const kind = attachmentKind(result.file.mediaType);

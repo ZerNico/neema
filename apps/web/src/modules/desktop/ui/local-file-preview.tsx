@@ -92,7 +92,9 @@ const readLocalFile = async (
   const extension = fileExtension(path);
   const imageType = IMAGE_MEDIA_TYPES[extension];
   if (imageType !== undefined || extension === "pdf") {
-    const file = await run(client.readBinary({ conversationId, path }));
+    const file = await run(
+      client.readBinary({ conversationId, path, callId: crypto.randomUUID() }),
+    );
     return {
       fileName,
       size: file.bytes,
@@ -100,7 +102,7 @@ const readLocalFile = async (
       url: blobUrl([decode(file.base64)], file.mediaType),
     };
   }
-  const file = await run(client.readFile({ conversationId, path }));
+  const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
   // An SVG is markup, so the desktop hands it over as text, never as bytes.
   // `<img>` is what makes it safe: secure static mode runs no script and
   // fetches nothing. A half-read one holds no picture, so it falls back to

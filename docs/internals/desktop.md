@@ -38,9 +38,13 @@ typed in the chooser, never sent by a page, so a compromised site cannot point t
 bridge at another origin. Connecting writes the config, replaces the main window
 with one for the new origin and destroys the chooser; cancelling the chooser
 while a main window exists just closes it. Local work belongs to the server that
-started it, so opening the chooser while Work is active asks first, with the same
-wording family as Quit, and disposes executions and owned processes only after
-a yes. `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
+started it, so opening the chooser or confirming a new address while Work is
+active asks first, with the same wording family as Quit, and disposes
+executions and owned processes only after a yes. A chooser opened while idle
+does not skip that question if work starts before connect. Draft folder grants
+are forgotten with that dispose, so the next server does not inherit the
+previous compose-time folders; durable conversation mappings stay on the
+machine. `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
 preload through a process argument, the site and recovery page then show no
 switch at all, the menu item is absent, and the IPC still refuses as a backstop.
 `connect-flow.ts` holds this logic electron-free.
@@ -78,7 +82,11 @@ does on an identity change: clear the query cache and replace the document.
 
 Off-origin navigation and `window.open` from the shell are handed to the OS
 only for `http:` and `https:`. Other schemes are dropped rather than passed to
-`openExternal`.
+`openExternal`. Sign-in tickets are delivered only to a loaded page of the
+configured origin; recovery and connect documents never receive them. A ticket
+that arrives while those are showing waits until the origin page is ready.
+The pending slot holds one ticket: a later deep link replaces an undelivered
+one.
 
 ## Execution belongs to the authenticated app, not a chat route
 
@@ -161,7 +169,8 @@ Completed filesystem changes cannot be rolled back.
 
 ## Replay is bounded, not distributed exactly-once execution
 
-Every model-operation RPC includes its call ID, including reads. Main-process
+Every model-operation RPC includes its call ID, including reads. The schema
+requires it; a missing id is refused before the handler runs. Main-process
 replay keys include the RPC tag and a canonical payload fingerprint. An identical
 request joins the original operation or returns its cached reply; changed payloads
 are refused. Separate `readFile` and `readBinary` requests may share one logical
@@ -179,14 +188,22 @@ Claim and delivery failures schedule their own exponential retry, capped at ten
 seconds and the call deadline. Snapshot refreshes cannot bypass backoff. An
 acknowledged result stops delivery; refusal, removal, expiry and identity teardown
 cancel retries. This retry is failure recovery, not snapshot polling.
-Before the first send, a dispatch barrier is installed; it is released only after
-the new conversation's draft-folder rebinding has been attempted. A failed or
-interrupted rebind does not authorize guessing a path.
+Before the first send, a dispatch barrier is installed for that create. Until
+the create response names the conversation, any local call waits, because the
+destination id is not known yet. After that, only calls for the new conversation
+wait through rebind; other conversations are not stalled. The barrier is
+released after rebinding has been attempted. A failed or interrupted rebind
+does not authorize guessing a path. The create itself has already committed, so
+the first send still navigates; the destination simply has no grant until the
+person attaches again.
+
+Mode and research on a first send are sampled at Submit, not after queued
+uploads settle. Draft text and skill chips stay live through that wait.
 
 ## Mode is fixed; capabilities are current
 
 `conversations.mode` is `chat | work`, fixed at creation and inherited by a
-branch. Work needs the desktop app, not a folder. Send, retry, edit and structured
+branch, along with that chat's network and permission levels. Work needs the desktop app, not a folder. Send, retry, edit and structured
 answers all submit current desktop capabilities and executor identity. Work
 attempts without them are refused before rows are created or reset. Retry never
 revives an old attached-folder or command setting. Plain chat ignores local-tool
@@ -194,12 +211,17 @@ capability fields. Browser Work history remains readable, with continuation
 actions disabled and server policy enforced independently.
 
 The server stores folder names per attempt, never paths. `folders.json` maps
-conversations to local grants. The composer strip and submission share a
+conversations to local grants. Writes are serialized and replaced by an atomic
+rename, so overlapping attach/detach cannot resurrect a detached folder after
+restart. Losing the file remains a supported outcome: every conversation asks
+again. The composer strip and submission share a
 conversation-keyed local query, cleared with the authenticated identity cache.
 On capable desktops, route loaders prepare Work conversation and draft folder
 state before the composer mounts. The hook consumes that cache without an immediate
-mount refetch or automatic retry. A failed read opens the conversation with an
-inline folder retry, not a route error or empty grants. Ready-empty is valid: a new
+mount refetch or automatic retry. A failed first read opens the conversation with
+an inline folder retry, not a route error or empty grants. A later refetch that
+fails keeps the last successful status, so a blip on focus does not look like a
+missing folder or block send. Ready-empty is valid: a new
 machine can continue Work without file tools until folders are attached there.
 Folder loading and mutation state block new attempts without opening a second,
 animated warning inside the input. Focus refresh does not remount the host.
@@ -215,7 +237,10 @@ queries are neither server-rendered nor persisted in the web backend.
 
 A model file path begins with an attached folder's basename, such as
 `site/src/index.ts`; `list_folder "."` lists the folders. Duplicate basenames are
-refused. This is a virtual address space for file tools, not a shell mount layout.
+refused at choose and at rebind. A lost folder can be replaced by name from
+Choose it again. `find_files` and `search_files` share the same glob address
+space: a pattern that starts with an attached folder name is scoped to that
+folder. This is a virtual address space for file tools, not a shell mount layout.
 `run_command` separately names its working folder. The shell sees real filesystem
 paths relative to that cwd; `other-folder/file` does not automatically resolve to
 another attached folder. Attached roots are writable under the command's sandbox
@@ -231,7 +256,8 @@ site/main.py`, which fails on both halves and costs two turns to learn.
 File paths pass through `resolveAcross` and `resolveInFolder`. Absolute paths are
 refused, existing ancestors are inspected with `lstat`, and `realpath` establishes
 containment. A dangling symlink is not treated as an absent ordinary path: its
-resolution fails closed. Only `ENOENT` allows walking to a parent. Moves check
+resolution fails closed. Refusals name the path the caller supplied, never a
+host absolute. Only `ENOENT` allows walking to a parent. Moves check
 both ends. This does not claim protection against every concurrent filesystem
 replacement or hard-link alias.
 
@@ -270,16 +296,21 @@ because the handler is waiting rather than finished.
 
 ## Results, search and exact edits
 
-Full local file bytes are transient. Images and PDFs become model file parts
-where supported, with server extraction fallback; persisted tool rows and chunks
-retain only bounded summaries. Native and Hermes loops share this handling.
+Full local file bytes are transient. Text reads and JS search pull a bounded
+prefix from disk rather than buffering the whole file; edits refuse a file
+larger than a write. Images and PDFs become model file parts where supported,
+with server extraction fallback; persisted tool rows and chunks retain only
+bounded summaries. The page's result is untrusted: summary, detail and file
+bytes are capped and sniffed on arrival the way attachments are, before they
+reach the model or process memory. Native and Hermes loops share this handling.
 Research keeps its existing server-side investigation and synthesis paths; this
 change does not add local tools to research workers or move their lifetimes into
 the desktop host.
 
 Search uses installed ripgrep when available and the JavaScript walker otherwise;
-no additional native binary is bundled. Both paths skip symlink traversal and
-apply ignore rules, though engine-specific regular expression differences remain.
+no additional native binary is bundled. Both paths skip symlink traversal,
+include hidden files other than `.git`, and apply ignore rules, though
+engine-specific regular expression differences remain.
 
 Edits require an exact, unique match unless `all` is set. Replacement text is
 literal, including dollar-substitution tokens. `diff` supplies a bounded unified

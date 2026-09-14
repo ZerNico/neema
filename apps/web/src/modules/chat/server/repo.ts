@@ -1110,7 +1110,10 @@ export class ChatRepo extends Context.Service<
                     modelId: source.modelId,
                     // A branch of a work chat is still work: its history is
                     // full of folder activity the continuation has to match.
+                    // Network and approval levels are facts about the chat too.
                     mode: source.mode,
+                    networkLevel: source.networkLevel,
+                    permissionLevel: source.permissionLevel,
                     branchedFrom: source.id,
                     // Left null so the branch sorts by its own createdAt (now)
                     // and lands at the top of the list, like a new chat.

@@ -27,7 +27,7 @@ export interface WorkDependencies {
   execute(call: ExternalOperation, network: NetworkLevel): Promise<DesktopToolResult>;
   complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
   cancel(callId: string): void;
-  beforeExecute(): Promise<void>;
+  beforeExecute(conversationId: string): Promise<void>;
   changed(): void;
   error(error: unknown): void;
 }
@@ -149,7 +149,7 @@ export class WorkController {
     if (entry.busy || entry.delivered || entry.retry || !this.live(entry)) return;
     entry.busy = true;
     try {
-      await this.deps.beforeExecute();
+      await this.deps.beforeExecute(entry.call.conversationId);
       if (!this.live(entry)) return;
       const token = await this.deps.claim(entry.call);
       if (!this.live(entry)) return;

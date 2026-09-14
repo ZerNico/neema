@@ -215,13 +215,15 @@ describe("app-owned Work execution", () => {
 
   it("does not claim before first-send folder rebinding finishes", async () => {
     const barrier = deferred<void>();
-    const { controller, deps, completed } = setup({ beforeExecute: () => barrier.promise });
+    const beforeExecute = vi.fn(() => barrier.promise);
+    const { controller, deps, completed } = setup({ beforeExecute });
     controller.reconcile(snapshot(call("one")));
     controller.decide("one", "allow");
     expect(deps.claim).not.toHaveBeenCalled();
     barrier.resolve();
     await completed;
     expect(deps.execute).toHaveBeenCalledTimes(1);
+    expect(beforeExecute).toHaveBeenCalledWith("a");
   });
 
   it("deduplicates concurrent snapshot refreshes while execution is pending", async () => {

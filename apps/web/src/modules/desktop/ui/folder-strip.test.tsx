@@ -72,3 +72,24 @@ it("explains approval modes and preserves their stored values when selected", as
     screen.getByRole("button", { name: "Permissions: Auto-approve reads" }),
   ).toBeInTheDocument();
 });
+
+it("replaces a lost folder by name when choosing it again", async () => {
+  const choose = vi.fn();
+  render(
+    <FolderStrip
+      folder={{
+        readiness: "ready",
+        status: { folders: [{ name: "site", alive: false }], sandbox: { kind: "ready" } },
+        busy: false,
+        refusal: null,
+        refresh: vi.fn(),
+        choose,
+        detach: vi.fn(),
+        setUpSandbox: vi.fn(),
+      }}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: /site/ }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Choose it again" }));
+  expect(choose).toHaveBeenCalledExactlyOnceWith("site");
+});

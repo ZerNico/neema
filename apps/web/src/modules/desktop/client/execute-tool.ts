@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { DesktopClient, DesktopError, NetworkLevel } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
-import { DesktopToolResult, desktopFailure } from "../tool-schema.ts";
+import { DesktopToolResult, desktopFailure, DESKTOP_TIMEOUTS } from "../tool-schema.ts";
 
 const asResult = (
   outcome:
@@ -220,7 +220,7 @@ export const executeDesktopTool = (
             conversationId,
             command,
             folder: str(args.folder),
-            timeoutMs: 300_000,
+            timeoutMs: DESKTOP_TIMEOUTS.command,
             network,
           }),
           (output) => ({

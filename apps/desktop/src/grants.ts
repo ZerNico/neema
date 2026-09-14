@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
@@ -88,9 +88,23 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
         });
 
         const state = new Map<string, ReadonlyArray<string>>(yield* read);
-        const persist = Effect.promise(async () => {
-          await mkdir(dirname(file), { recursive: true });
-          await writeFile(file, JSON.stringify(Object.fromEntries(state), null, 2), "utf8");
+        // Mutations are sync; writes are not. Overlapping writeFile calls of a
+        // whole-map snapshot can finish out of order and resurrect a detached
+        // folder after restart. One chain, stringify at write time, rename.
+        let writes = Promise.resolve();
+        const persist = Effect.promise(() => {
+          const write = async () => {
+            await mkdir(dirname(file), { recursive: true });
+            const tmp = `${file}.${process.pid}.tmp`;
+            await writeFile(tmp, JSON.stringify(Object.fromEntries(state), null, 2), "utf8");
+            await rename(tmp, file);
+          };
+          const next = writes.then(write, write);
+          writes = next.then(
+            () => undefined,
+            () => undefined,
+          );
+          return next;
         });
         return GrantStore.of(makeStore(state, persist));
       }),

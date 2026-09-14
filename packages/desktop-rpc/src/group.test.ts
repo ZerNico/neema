@@ -16,11 +16,11 @@ const cases = [
 ];
 
 describe("model operation identity", () => {
-  it.each(cases)("preserves an optional callId on $tag", ({ tag, payload }) => {
+  it.each(cases)("requires callId on $tag", ({ tag, payload }) => {
     const rpc = DesktopRpcs.requests.get(tag)!;
     const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
+    expect(() => decode(payload)).toThrow();
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
-    expect(decode(payload)).toMatchObject(payload);
   });
 
   it("still requires callId for commands", () => {

@@ -544,7 +544,7 @@ export const ChatInput = forwardRef<
             variant="outline"
             size="sm"
             spacing={0}
-            disabled={controlsDisabled}
+            disabled={modeDisabled}
             aria-label="Chat mode"
             className="shrink-0"
           >

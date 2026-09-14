@@ -2849,12 +2849,18 @@ describe("local tools on the user's machine", () => {
             const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
             expect(config?.desktopFolder).toBe("edited-folder");
             expect(config?.desktopCommands).toBe(true);
+            yield* repo.updateConversation(seed.conversation.id, {
+              permissionLevel: "skip",
+              networkLevel: "all",
+            });
             const branch = yield* repo.cloneConversationPrefix({
               userId: seed.userId,
               sourceConversationId: seed.conversation.id,
               throughMessageId: edited.assistantMessageId,
             });
             expect(branch.mode).toBe("work");
+            expect(branch.permissionLevel).toBe("skip");
+            expect(branch.networkLevel).toBe("all");
             expect(
               (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session"))
                 .calls,

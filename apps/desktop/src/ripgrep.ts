@@ -13,8 +13,9 @@ import { LIMITS } from "@chat/desktop-rpc";
  * which is correct on the same cases and only slower on very large trees.
  *
  * The two honour the same rules on purpose: `.gitignore` respected even
- * outside a git checkout, `.git` skipped, symlinks not followed, binary files
- * skipped in search. A result must not depend on which backend answered.
+ * outside a git checkout, `.git` skipped, hidden files included, symlinks
+ * not followed, binary files skipped in search. A result must not depend
+ * on which backend answered.
  */
 
 const OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -38,6 +39,8 @@ export const ripgrepAvailable = (): Promise<boolean> => {
   return available;
 };
 
+const RG_TREE = ["--hidden", "--no-require-git", "--glob", "!.git", "--glob", "!.git/**"] as const;
+
 const rg = (args: readonly string[], cwd: string) =>
   runOwnedProcess({
     program: "rg",
@@ -54,14 +57,23 @@ const rg = (args: readonly string[], cwd: string) =>
 /** Paths under `root` matching a glob, newest first. `null` when rg is not present. */
 export const findWithRipgrep = (
   root: string,
-  glob: string,
+  glob: string | undefined,
 ): Effect.Effect<{ paths: string[]; truncated: boolean } | null> =>
   Effect.gen(function* () {
     if (!(yield* Effect.promise(ripgrepAvailable))) return null;
     // `--sortr modified` is what the walker does by hand; `-g` without a slash
-    // matches at any depth, the same rule `globToRegExp` applies.
+    // matches at any depth, the same rule `globToRegExp` applies. `--hidden`
+    // matches the walker, which lists dotfiles other than `.git`.
     const { stdout } = yield* rg(
-      ["--files", "--no-require-git", "--sortr", "modified", "--glob", glob, "--", "."],
+      [
+        "--files",
+        ...RG_TREE,
+        "--sortr",
+        "modified",
+        ...(glob ? ["--glob", glob] : []),
+        "--",
+        ".",
+      ],
       root,
     );
     const all = stdout
@@ -98,6 +110,36 @@ const parseEvent = (line: string): RgMatch | RgSummary | null => {
   }
 };
 
+/** JSON events from one `rg --json` run. Kept parsing after the match cap so the summary still counts. */
+export const parseRipgrepSearchOutput = (
+  stdout: string,
+): { matches: SearchMatch[]; filesSearched: number; truncated: boolean } => {
+  const matches: SearchMatch[] = [];
+  let filesSearched = 0;
+  let truncated = false;
+  for (const line of stdout.split("\n")) {
+    if (line === "") continue;
+    const event = parseEvent(line);
+    if (!event) continue;
+    if (event.type === "summary") {
+      filesSearched = event.data.stats.searches;
+      continue;
+    }
+    if (matches.length >= LIMITS.matches) {
+      truncated = true;
+      continue;
+    }
+    const path = event.data.path.text ?? "";
+    const text = (event.data.lines.text ?? "").replace(/\r?\n$/, "");
+    matches.push({
+      path: path.startsWith("./") ? path.slice(2) : path,
+      line: event.data.line_number ?? 0,
+      text: text.length > LIMITS.matchChars ? text.slice(0, LIMITS.matchChars) : text,
+    });
+  }
+  return { matches, filesSearched, truncated };
+};
+
 /** Matching lines under `root`. `null` when rg is not present. */
 export const searchWithRipgrep = (
   root: string,
@@ -113,7 +155,7 @@ export const searchWithRipgrep = (
       "--json",
       // A folder that is not a git checkout still has its .gitignore honoured,
       // as the walker does; rg's default only reads it inside a repo.
-      "--no-require-git",
+      ...RG_TREE,
       "--regexp",
       pattern,
       // One more than the cap, so truncation can be told from an exact fit.
@@ -127,28 +169,5 @@ export const searchWithRipgrep = (
     // 0 matches, 1 none; 2 is a real error, of which a bad regex is the one a
     // caller can do something about.
     if (code === 2) return yield* Effect.fail({ reason: "bad-pattern" as const });
-    const matches: SearchMatch[] = [];
-    let filesSearched = 0;
-    let truncated = false;
-    for (const line of stdout.split("\n")) {
-      if (line === "") continue;
-      const event = parseEvent(line);
-      if (!event) continue;
-      if (event.type === "summary") {
-        filesSearched = event.data.stats.searches;
-        continue;
-      }
-      if (matches.length >= LIMITS.matches) {
-        truncated = true;
-        break;
-      }
-      const path = event.data.path.text ?? "";
-      const text = (event.data.lines.text ?? "").replace(/\r?\n$/, "");
-      matches.push({
-        path: path.startsWith("./") ? path.slice(2) : path,
-        line: event.data.line_number ?? 0,
-        text: text.length > LIMITS.matchChars ? text.slice(0, LIMITS.matchChars) : text,
-      });
-    }
-    return { matches, filesSearched, truncated };
+    return parseRipgrepSearchOutput(stdout);
   });

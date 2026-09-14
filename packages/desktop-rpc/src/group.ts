@@ -40,11 +40,16 @@ export const DesktopRpcs = RpcGroup.make(
 
   /**
    * Opens the native directory dialog and adds the choice. Cancelling changes
-   * nothing. A folder whose name is already attached is refused with
-   * `already-exists`, since the name is how the model addresses it.
+   * nothing. A live folder whose name is already attached is refused with
+   * `already-exists`. `replace` detaches that name first, which is how a
+   * relocated folder reclaims its address.
    */
   Rpc.make("chooseFolder", {
-    payload: { conversationId: Schema.String },
+    payload: {
+      conversationId: Schema.String,
+      /** Detach this name first, so a relocated folder can reclaim it. */
+      replace: Schema.optionalKey(Schema.String),
+    },
     success: FolderStatus,
     error: DesktopError,
   }),
@@ -82,7 +87,7 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       conversationId: Schema.String,
       path: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: DirectoryListing,
     error: DesktopError,
@@ -92,7 +97,7 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       conversationId: Schema.String,
       path: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: FileContents,
     error: DesktopError,
@@ -101,7 +106,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("writeFile", {
     payload: {
       conversationId: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
       path: Schema.String,
       text: Schema.String,
     },
@@ -114,7 +119,7 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       conversationId: Schema.String,
       path: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: BinaryContents,
     error: DesktopError,
@@ -128,7 +133,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("editFile", {
     payload: {
       conversationId: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
       path: Schema.String,
       old: Schema.String,
       new: Schema.String,
@@ -144,7 +149,7 @@ export const DesktopRpcs = RpcGroup.make(
       conversationId: Schema.String,
       from: Schema.String,
       to: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: MoveReceipt,
     error: DesktopError,
@@ -155,7 +160,7 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       conversationId: Schema.String,
       path: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: DeleteReceipt,
     error: DesktopError,
@@ -166,7 +171,7 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       conversationId: Schema.String,
       pattern: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
     },
     success: FoundPaths,
     error: DesktopError,
@@ -176,7 +181,7 @@ export const DesktopRpcs = RpcGroup.make(
   Rpc.make("searchFiles", {
     payload: {
       conversationId: Schema.String,
-      callId: Schema.optionalKey(Schema.String),
+      callId: Schema.String,
       pattern: Schema.String,
       /** Narrows to paths matching this glob; absent searches everything. */
       glob: Schema.optionalKey(Schema.String),

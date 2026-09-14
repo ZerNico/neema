@@ -61,7 +61,7 @@ describe("the desktop channel", () => {
     );
 
     const contents = await Effect.runPromise(
-      client.readFile({ conversationId: "c1", path: "notes.md" }),
+      client.readFile({ conversationId: "c1", path: "notes.md", callId: "c" }),
     );
 
     expect(contents).toEqual({ path: "notes.md", text: "hello", truncated: false });
@@ -81,7 +81,7 @@ describe("the desktop channel", () => {
     );
 
     const outcome = await Effect.runPromise(
-      Effect.result(client.readFile({ conversationId: "c1", path: "../secrets" })),
+      Effect.result(client.readFile({ conversationId: "c1", path: "../secrets", callId: "c" })),
     );
 
     expect(outcome._tag).toBe("Failure");

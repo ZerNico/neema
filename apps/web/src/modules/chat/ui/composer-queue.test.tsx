@@ -167,20 +167,20 @@ describe("upload-queued composer requests", () => {
     );
   });
 
-  it("uses the current parent callback after a rerender", async () => {
+  it("uses the send callback from the click, not a later parent rerender", async () => {
     const { upload, onSend, rerender } = setup();
     const currentSend = vi.fn().mockResolvedValue(undefined);
     rerender(currentSend);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(currentSend).toHaveBeenCalledExactlyOnceWith(
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(
         "Original draft",
         [attachment.id],
         undefined,
         ["review"],
       ),
     );
-    expect(onSend).not.toHaveBeenCalled();
+    expect(currentSend).not.toHaveBeenCalled();
   });
 
   it("retains the current draft, skills and attachment when sending fails", async () => {

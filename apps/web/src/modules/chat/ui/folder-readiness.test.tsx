@@ -335,6 +335,50 @@ it("holds the dispatch barrier through draft rebind and invalidates both folder 
   expect(client.getQueryState(folderQueryKey("new"))?.isInvalidated).toBe(true);
 });
 
+it("does not stall other conversations after the create response names the destination", async () => {
+  const { client } = setup();
+  const created = deferred<{ conversationId: string }>();
+  const rebound = deferred<BridgeReply>();
+  request.mockReturnValue(rebound.promise);
+  let sending = false;
+  const send = withDraftFolderBinding(async () => {
+    sending = true;
+    return created.promise;
+  }, client);
+  await waitFor(() => expect(sending).toBe(true));
+  const otherDone = vi.fn();
+  const destDone = vi.fn();
+  void waitForDraftBinding("other").then(otherDone);
+  void waitForDraftBinding("new").then(destDone);
+  await Promise.resolve();
+  expect(otherDone).not.toHaveBeenCalled();
+  expect(destDone).not.toHaveBeenCalled();
+  created.resolve({ conversationId: "new" });
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith("rebindFolder", {
+      fromConversationId: DRAFT_CONVERSATION,
+      toConversationId: "new",
+    }),
+  );
+  await waitFor(() => expect(otherDone).toHaveBeenCalled());
+  expect(destDone).not.toHaveBeenCalled();
+  rebound.resolve(reply(attached));
+  await send;
+  await waitFor(() => expect(destDone).toHaveBeenCalled());
+});
+
+it("returns the created conversation when rebind fails", async () => {
+  const { client } = setup();
+  request.mockRejectedValue(new Error("offline"));
+  await expect(
+    withDraftFolderBinding(async () => ({ conversationId: "new" }), client),
+  ).resolves.toEqual({ conversationId: "new" });
+  expect(request).toHaveBeenCalledWith("rebindFolder", {
+    fromConversationId: DRAFT_CONVERSATION,
+    toConversationId: "new",
+  });
+});
+
 it.each(["conversation", "draft"])(
   "prepares %s folders before the routed Composer’s first commit",
   async (kind) => {
@@ -496,8 +540,10 @@ it.each([
       await navigation;
       await preloaded;
     });
-    await screen.findByText(`Destination ${outcome}`);
-    expect(commits).toHaveBeenCalledExactlyOnceWith(outcome);
+    // Outgoing already cached a status, so a failed refetch stays ready
+    // rather than looking like a missing folder.
+    await screen.findByText("Destination ready");
+    expect(commits).toHaveBeenCalledExactlyOnceWith("ready");
     expect(screen.queryByText(/Route error/)).not.toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
   },
@@ -625,6 +671,24 @@ it("mounts a prepared IPC error without retrying until explicitly requested", as
   await userEvent.click(screen.getByRole("button", { name: "Retry folder check" }));
   await screen.findByText("Add a folder from this computer");
   expect(request).toHaveBeenCalledTimes(2);
+});
+
+it("keeps cached folders when a focus refetch fails", async () => {
+  request.mockResolvedValue(reply(attached));
+  const { wrapper } = setup();
+  render(<WorkComposer onSend={async () => {}} />, { wrapper });
+  await screen.findByRole("button", { name: "site" });
+  request.mockResolvedValue({
+    ok: false,
+    error: { _tag: "DesktopError", reason: "failed", message: "Offline" },
+  });
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("button", { name: "site" })).toBeInTheDocument();
+  expect(screen.queryByText("Could not check folders.")).not.toBeInTheDocument();
 });
 
 it("waits for a picker before preparing the destination of a navigation", async () => {

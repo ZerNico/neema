@@ -107,6 +107,17 @@ describe("resolving a path inside the chosen folder", () => {
     expect(outcome.failure.reason).toBe("outside-folder");
   });
 
+  it("does not name the host path when a dangling symlink cannot be resolved", async () => {
+    await symlink(join(outsideDir, "missing"), join(root, "dangling"));
+    const outcome = await attempt("dangling");
+    expect(outcome._tag).toBe("Failure");
+    if (outcome._tag !== "Failure") return;
+    expect(outcome.failure.reason).toBe("not-found");
+    expect(outcome.failure.message).not.toContain(outsideDir);
+    expect(outcome.failure.message).not.toMatch(/^\//);
+    expect(outcome.failure.message).toContain("dangling");
+  });
+
   it("reports a folder that has gone away rather than resolving against nothing", async () => {
     const outcome = await Effect.runPromise(
       Effect.result(resolveInFolder(join(root, "does-not-exist"), "file.ts")),

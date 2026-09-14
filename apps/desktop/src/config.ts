@@ -25,6 +25,10 @@ export const isSafeExternalUrl = (input: string): boolean => {
   }
 };
 
+/** True when `url` is a page of the configured server, not recovery or connect. */
+export const isConfiguredOriginUrl = (url: string, origin: string | null): boolean =>
+  origin !== null && toOrigin(url) === origin;
+
 /** Normalised to an origin: a stored path or query would weaken every later comparison. */
 export const toOrigin = (input: string): string | null => {
   const trimmed = input.trim();

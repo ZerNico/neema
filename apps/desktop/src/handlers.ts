@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { Effect } from "effect";
 import {
@@ -33,6 +33,28 @@ const WALK_LIMIT = 50_000;
 
 const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
 
+/** Bytes already proven to be a regular file, capped so a huge log cannot OOM us. */
+const readPrefix = (absolute: string, maxBytes: number, relative: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const handle = await open(absolute, "r");
+      try {
+        const length = Math.min(maxBytes, (await handle.stat()).size);
+        if (length === 0) return Buffer.alloc(0);
+        const buffer = Buffer.alloc(length);
+        const { bytesRead } = await handle.read(buffer, 0, length, 0);
+        return buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    },
+    catch: () =>
+      new DesktopError({
+        reason: "failed",
+        message: `Could not read ${relative}.`,
+      }),
+  });
+
 /**
  * The desktop side of the contract. Every procedure that touches disk goes
  * through `resolveInFolder` first, so the containment check is not something a
@@ -61,6 +83,30 @@ const noFolder = new DesktopError({
 /** Which segment of a many-folder path is the folder, for the name the model sees back. */
 const prefixed = (folder: string, relative: string) =>
   relative === "." ? folder : `${folder}/${relative}`;
+
+const alreadyAttached = (name: string) =>
+  new DesktopError({
+    reason: "already-exists",
+    message: `A folder named ${name} is already attached. Rename one of them, or choose a different folder.`,
+  });
+
+/**
+ * A glob may name a folder (`site/**`). Strip that so it applies inside the
+ * folder it names and skips the others. Find and search share this so a
+ * pattern like `workspace` plus nested files is not searched as a nested path.
+ */
+const globScope = (
+  glob: string | undefined,
+  name: string,
+  folders: ReadonlyArray<string>,
+): { glob: string | undefined; skip: boolean } => {
+  if (!glob) return { glob: undefined, skip: false };
+  const [head, ...rest] = glob.split("/");
+  if (!folders.some((folder) => folderName(folder) === head)) return { glob, skip: false };
+  return head === name
+    ? { glob: rest.join("/") || undefined, skip: false }
+    : { glob, skip: true };
+};
 
 export const makeHandlers = (shell: Shell) =>
   Effect.gen(function* () {
@@ -105,7 +151,7 @@ export const makeHandlers = (shell: Shell) =>
       setWorkState: (state) => Effect.sync(() => shell.setWorkState(state)),
       folderStatus: ({ conversationId }) => status(conversationId),
 
-      chooseFolder: ({ conversationId }) =>
+      chooseFolder: ({ conversationId, replace }) =>
         Effect.gen(function* () {
           const picked = yield* Effect.tryPromise({
             try: () => shell.pickDirectory(),
@@ -116,17 +162,22 @@ export const makeHandlers = (shell: Shell) =>
           if (picked === null) return yield* status(conversationId);
           // The name is how the model addresses the folder, so two folders
           // with the same name cannot both be attached to one chat.
-          const current = yield* grants.lookup(conversationId);
+          let current = yield* grants.lookup(conversationId);
+          if (replace) {
+            const match = current.find((folder) => folderName(folder) === replace);
+            if (match && match !== picked) {
+              yield* grants.forget(conversationId, match);
+              current = yield* grants.lookup(conversationId);
+            }
+          }
           const clash = current.find(
             (folder) => folder !== picked && folderName(folder) === folderName(picked),
           );
           if (clash) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "already-exists",
-                message: `A folder named ${folderName(picked)} is already attached. Rename one of them, or choose a different folder.`,
-              }),
-            );
+            const alive = yield* resolveInFolder(clash, ".").pipe(Effect.result);
+            if (alive._tag === "Success")
+              return yield* Effect.fail(alreadyAttached(folderName(picked)));
+            yield* grants.forget(conversationId, clash);
           }
           yield* grants.remember(conversationId, picked);
           return yield* status(conversationId);
@@ -143,6 +194,15 @@ export const makeHandlers = (shell: Shell) =>
       rebindFolder: ({ fromConversationId, toConversationId }) =>
         Effect.gen(function* () {
           const folders = yield* grants.lookup(fromConversationId);
+          const dest = yield* grants.lookup(toConversationId);
+          // Same rule as choose: the name is the address, so two folders that
+          // share one cannot both sit on the destination.
+          for (const folder of folders) {
+            const clash = dest.find(
+              (existing) => existing !== folder && folderName(existing) === folderName(folder),
+            );
+            if (clash) return yield* Effect.fail(alreadyAttached(folderName(folder)));
+          }
           // Nothing under the draft key is the ordinary case: the chat was
           // started without picking a folder first.
           for (const folder of folders) yield* grants.remember(toConversationId, folder);
@@ -221,14 +281,7 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const bytes = yield* Effect.tryPromise({
-            try: () => readFile(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not read ${target.relative}.`,
-              }),
-          });
+          const bytes = yield* readPrefix(target.absolute, LIMITS.readBytes, target.relative);
           // A NUL in the first few kilobytes is what `file` and git use to
           // call something binary. Decoding it anyway would hand the model
           // noise and the server a string Postgres refuses.
@@ -244,7 +297,7 @@ export const makeHandlers = (shell: Shell) =>
           // Capped here rather than at the caller: an uncapped read would go
           // into the transcript and, on models without native tool calling,
           // into the prompt as prose.
-          const truncated = text.length > LIMITS.readChars;
+          const truncated = text.length > LIMITS.readChars || info.size > bytes.length;
           return {
             path: target.relative,
             text: truncated ? text.slice(0, LIMITS.readChars) : text,
@@ -307,14 +360,31 @@ export const makeHandlers = (shell: Shell) =>
       editFile: ({ conversationId, path, old: before, new: after, all }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);
-          const bytes = yield* Effect.tryPromise({
-            try: () => readFile(target.absolute),
+          const info = yield* Effect.tryPromise({
+            try: () => stat(target.absolute),
             catch: () =>
               new DesktopError({
                 reason: "not-found",
                 message: `${target.relative} does not exist.`,
               }),
           });
+          if (!info.isFile()) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-a-file",
+                message: `${target.relative} is not a file.`,
+              }),
+            );
+          }
+          if (info.size > LIMITS.writeBytes) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "too-large",
+                message: `${target.relative} is too large to edit.`,
+              }),
+            );
+          }
+          const bytes = yield* readPrefix(target.absolute, LIMITS.writeBytes, target.relative);
           if (isBinary(bytes)) {
             return yield* Effect.fail(
               new DesktopError({
@@ -449,11 +519,6 @@ export const makeHandlers = (shell: Shell) =>
       findFiles: ({ conversationId, pattern }) =>
         Effect.gen(function* () {
           const folders = yield* foldersFor(conversationId);
-          const matcher = yield* Effect.try({
-            try: () => globToRegExp(pattern),
-            catch: () =>
-              new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
-          });
           // Each folder answers for itself; the cap applies to the union so a
           // big first folder cannot hide the second entirely.
           const perFolder = Math.max(1, Math.floor(LIMITS.foundPaths / folders.length));
@@ -461,9 +526,17 @@ export const makeHandlers = (shell: Shell) =>
           let truncated = false;
           for (const folder of folders) {
             const name = folderName(folder);
+            const scope = globScope(pattern, name, folders);
+            if (scope.skip) continue;
+            const inner = scope.glob ?? "*";
+            const matcher = yield* Effect.try({
+              try: () => globToRegExp(inner),
+              catch: () =>
+                new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
+            });
             const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
             if (root._tag === "Failure") continue;
-            const fast = yield* findWithRipgrep(root.success.absolute, pattern);
+            const fast = yield* findWithRipgrep(root.success.absolute, scope.glob);
             if (fast) {
               paths.push(...fast.paths.slice(0, perFolder).map((rel) => prefixed(name, rel)));
               truncated ||= fast.truncated || fast.paths.length > perFolder;
@@ -500,17 +573,6 @@ export const makeHandlers = (shell: Shell) =>
               reason: "bad-pattern",
               message: `${pattern} is not a valid regular expression.`,
             });
-          // A glob may name a folder (`site/**`); strip that so it applies
-          // inside the folder it names and skips the others.
-          const scopeFor = (name: string) => {
-            if (!glob) return { glob: undefined, skip: false };
-            const [head, ...rest] = glob.split("/");
-            const namesAFolder = folders.some((folder) => folderName(folder) === head);
-            if (!namesAFolder) return { glob, skip: false };
-            return head === name
-              ? { glob: rest.join("/") || undefined, skip: false }
-              : { glob, skip: true };
-          };
           const matches: SearchMatch[] = [];
           let filesSearched = 0;
           let truncated = false;
@@ -520,7 +582,7 @@ export const makeHandlers = (shell: Shell) =>
               break;
             }
             const name = folderName(folder);
-            const scope = scopeFor(name);
+            const scope = globScope(glob, name, folders);
             if (scope.skip) continue;
             const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
             if (root._tag === "Failure") continue;
@@ -551,10 +613,14 @@ export const makeHandlers = (shell: Shell) =>
                 truncated = true;
                 break;
               }
-              const bytes = yield* Effect.promise(() => readFile(file.absolute).catch(() => null));
-              if (bytes === null || isBinary(bytes)) continue;
+              const loaded = yield* readPrefix(
+                file.absolute,
+                LIMITS.readBytes,
+                file.relative,
+              ).pipe(Effect.result);
+              if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
               filesSearched += 1;
-              const lines = bytes.toString("utf8").split("\n");
+              const lines = loaded.success.toString("utf8").split("\n");
               for (let index = 0; index < lines.length; index += 1) {
                 const line = lines[index]!;
                 if (!regex.test(line)) continue;

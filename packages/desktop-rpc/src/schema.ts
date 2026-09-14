@@ -7,10 +7,18 @@ import { Schema } from "effect";
  * unprivileged peer to the site.
  */
 
+/** Folder grants hang on this key until the first message creates a conversation. */
+export const DRAFT_CONVERSATION = "__draft__";
+
 /** Caps live here so a bounded result is the contract, not each caller's habit. */
 export const LIMITS = {
   /** One read. Beyond this the file comes back truncated with a marker. */
   readChars: 64_000,
+  /**
+   * Bytes pulled into memory for a text read or search. Enough UTF-8 for
+   * `readChars`; the rest of a huge file is never buffered.
+   */
+  readBytes: 256_000,
   /** Combined stdout and stderr kept from one command. */
   outputChars: 32_000,
   /** Entries returned for one directory listing. */
@@ -206,7 +214,9 @@ export const UNOPENABLE_EXTENSIONS = new Set([
   ".lnk",
   ".msc",
   ".msi",
+  ".mpkg",
   ".pif",
+  ".pkg",
   ".ps1",
   ".reg",
   ".run",

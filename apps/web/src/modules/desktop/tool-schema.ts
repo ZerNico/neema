@@ -1,3 +1,4 @@
+import { LIMITS } from "@chat/desktop-rpc";
 import { Schema } from "effect";
 
 /**
@@ -57,7 +58,7 @@ export const DesktopToolResult = Schema.Struct({
   ok: Schema.Boolean,
   /** One line for the transcript row: "Read src/index.ts". */
   summary: Schema.String,
-  /** What the model reads. Already capped by the desktop app. */
+  /** What the model reads. Capped on the machine and again on the way in. */
   detail: Schema.String,
   truncated: Schema.Boolean,
   /** Sandbox denials, when the machine reported any. */
@@ -81,7 +82,13 @@ export type DesktopToolResult = typeof DesktopToolResult.Type;
  * would be the same mistake web tools already avoid by never persisting page
  * bodies. An excerpt is enough for a reader checking what happened.
  */
+const TRANSCRIPT_SUMMARY_CHARS = 500;
 const TRANSCRIPT_DETAIL_CHARS = 2_000;
+const TRANSCRIPT_VIOLATION_CHARS = 400;
+const TRANSCRIPT_VIOLATIONS = 20;
+
+/** One-line summaries and command output share this ceiling with a desktop read. */
+export const DESKTOP_RESULT_DETAIL_CHARS = LIMITS.readChars;
 
 // Postgres refuses a NUL inside jsonb, and a binary file read as text is full
 // of them. The page is untrusted input, so the row is made safe here rather
@@ -91,12 +98,17 @@ const storable = (text: string) => text.replaceAll("\u0000", "");
 export const forTranscript = (result: DesktopToolResult): DesktopToolResult => ({
   v: 1,
   ok: result.ok,
-  summary: storable(result.summary),
+  summary: storable(result.summary).slice(0, TRANSCRIPT_SUMMARY_CHARS),
   // A file's bytes are dropped here, which is the whole reason this exists.
-  detail: storable(result.detail.slice(0, TRANSCRIPT_DETAIL_CHARS)),
+  detail: storable(result.detail).slice(0, TRANSCRIPT_DETAIL_CHARS),
   truncated: result.truncated || result.detail.length > TRANSCRIPT_DETAIL_CHARS,
   ...(result.violations && result.violations.length > 0
-    ? { violations: [...result.violations] }
+    ? {
+        violations: result.violations
+          .map((item) => storable(item).slice(0, TRANSCRIPT_VIOLATION_CHARS))
+          .filter((item) => item !== "")
+          .slice(0, TRANSCRIPT_VIOLATIONS),
+      }
     : {}),
 });
 

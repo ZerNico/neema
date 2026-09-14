@@ -4,6 +4,7 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { runtime } from "~/server/runtime.ts";
+import { acceptDesktopToolResult } from "./result.ts";
 import { DesktopToolResult } from "../tool-schema.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -88,7 +89,12 @@ export const submitDesktopToolResult = createServerFn({ method: "POST" })
         const owner = { ...data, userId: context.session.user.id };
         if (!(yield* repo.isDesktopAttemptLive(owner))) return { accepted: false };
         return {
-          accepted: yield* external.completeClaim(data.callId, owner, data.token, data.result),
+          accepted: yield* external.completeClaim(
+            data.callId,
+            owner,
+            data.token,
+            acceptDesktopToolResult(data.result),
+          ),
         };
       }),
     ),

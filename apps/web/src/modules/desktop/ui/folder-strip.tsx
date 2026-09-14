@@ -106,7 +106,9 @@ export function FolderStrip({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {item.alive ? null : (
-                <DropdownMenuItem onClick={folder.choose}>Choose it again</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => folder.choose(item.name)}>
+                  Choose it again
+                </DropdownMenuItem>
               )}
               <DropdownMenuItem variant="destructive" onClick={() => folder.detach(item.name)}>
                 Detach {item.name}
@@ -119,7 +121,7 @@ export function FolderStrip({
           variant="ghost"
           className="text-muted-foreground hover:text-foreground h-6 gap-1.5 px-1.5 text-xs"
           disabled={busy}
-          onClick={folder.choose}
+          onClick={() => folder.choose()}
         >
           <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} className="size-3.5" />
           {status.folders.length === 0 ? "Add a folder from this computer" : "Add another"}

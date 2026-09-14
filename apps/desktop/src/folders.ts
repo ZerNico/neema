@@ -17,12 +17,13 @@ import { DesktopError } from "@chat/desktop-rpc";
  * textual check and read the host. Every answer here therefore ends at
  * `realpath`, and because a write targets a file that does not exist yet, the
  * walk resolves the nearest existing ancestor and rebuilds the tail from it.
+ * Refusals name the path the caller supplied, never a host absolute.
  */
 
-const outside = (path: string) =>
+const outside = (named: string) =>
   new DesktopError({
     reason: "outside-folder",
-    message: `${path} is outside the folder you chose.`,
+    message: `${named} is outside the folder you chose.`,
   });
 
 export const exists = (path: string) =>
@@ -39,10 +40,10 @@ export const exists = (path: string) =>
     catch: () => new DesktopError({ reason: "failed", message: "Could not read that path." }),
   });
 
-const realOrFail = (path: string) =>
+const realOrFail = (path: string, named: string) =>
   Effect.tryPromise({
     try: () => realpath(path),
-    catch: () => new DesktopError({ reason: "not-found", message: `${path} does not exist.` }),
+    catch: () => new DesktopError({ reason: "not-found", message: `${named} does not exist.` }),
   });
 
 /** True when `candidate` is the root itself or sits underneath it. */
@@ -54,7 +55,7 @@ const within = (root: string, candidate: string) =>
  * do not. A write to `src/new/file.ts` in a folder with no `new/` still has to
  * be checked, and the only thing that can be `realpath`-ed is `src`.
  */
-const existingAncestor = (target: string) =>
+const existingAncestor = (target: string, named: string) =>
   Effect.gen(function* () {
     const trail: string[] = [];
     let current = target;
@@ -64,7 +65,7 @@ const existingAncestor = (target: string) =>
       // A path whose every component is missing cannot be contained by anything
       // we can prove, so treat it as outside rather than guessing.
       if (dir === current || base === "" || current === root) {
-        return yield* Effect.fail(outside(target));
+        return yield* Effect.fail(outside(named));
       }
       trail.push(base);
       current = dir;
@@ -90,8 +91,8 @@ export const resolveInFolder = (
   requested: string,
 ): Effect.Effect<ResolvedPath, DesktopError> =>
   Effect.gen(function* () {
-    if (isAbsolute(requested)) return yield* Effect.fail(outside(requested));
-    const realRoot = yield* realOrFail(root).pipe(
+    if (isAbsolute(requested)) return yield* Effect.fail(outside("That path"));
+    const realRoot = yield* realOrFail(root, requested).pipe(
       Effect.mapError(
         () =>
           new DesktopError({
@@ -102,8 +103,8 @@ export const resolveInFolder = (
     );
 
     const target = resolve(realRoot, requested);
-    const { base, trail } = yield* existingAncestor(target);
-    const realBase = yield* realOrFail(base);
+    const { base, trail } = yield* existingAncestor(target, requested);
+    const realBase = yield* realOrFail(base, requested);
     if (!within(realRoot, realBase)) return yield* Effect.fail(outside(requested));
 
     const absolute = trail.length === 0 ? realBase : join(realBase, ...trail);
@@ -141,7 +142,7 @@ export const resolveAcross = (
   requested: string,
 ): Effect.Effect<LocatedPath, DesktopError> =>
   Effect.gen(function* () {
-    if (isAbsolute(requested)) return yield* Effect.fail(outside(requested));
+    if (isAbsolute(requested)) return yield* Effect.fail(outside("That path"));
     const normalised = requested.replaceAll("\\", "/").replace(/^\.\//, "");
     const [head, ...rest] = normalised.split("/");
     const root = folders.find((folder) => folderName(folder) === head);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { desktopToolsSystemHint } from "./tool-schema.ts";
+import { desktopToolsSystemHint, forTranscript } from "./tool-schema.ts";
 
 describe("desktop tools system hint", () => {
   it("separates the file-tool address space from a command's working folder", () => {
@@ -23,5 +23,24 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Running commands is unavailable on this computer");
     expect(hint).not.toContain("cd DVR");
     expect(hint).not.toContain("main.py");
+  });
+});
+
+describe("forTranscript", () => {
+  it("strips NULs and caps every persisted field", () => {
+    const stored = forTranscript({
+      v: 1,
+      ok: true,
+      summary: `${"x".repeat(800)}\u0000`,
+      detail: `${"y".repeat(3_000)}\u0000`,
+      truncated: false,
+      violations: ["denied\u0000", "ok", ...Array.from({ length: 30 }, () => "n")],
+    });
+    expect(stored.summary).toHaveLength(500);
+    expect(stored.summary.includes("\u0000")).toBe(false);
+    expect(stored.detail).toHaveLength(2_000);
+    expect(stored.truncated).toBe(true);
+    expect(stored.violations).toHaveLength(20);
+    expect(stored.violations?.some((item) => item.includes("\u0000"))).toBe(false);
   });
 });

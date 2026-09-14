@@ -25,11 +25,11 @@ import {
   FIXED_SERVER_ARGUMENT,
   RECOVERY_RETRY,
 } from "./chrome.ts";
-import { configFile, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
+import { configFile, isConfiguredOriginUrl, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Layer, ManagedRuntime } from "effect";
-import { makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { DRAFT_CONVERSATION, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -215,10 +215,17 @@ const connectFlow = makeConnectFlow({
     return response === 1;
   },
   // Executions and owned processes belong to the server that started them.
-  // The runtime (grants, sandbox) is per machine and stays up.
+  // The runtime (sandbox, conversation grants) is per machine and stays up,
+  // except the compose-time draft key, which would otherwise follow us there.
   disposeWork: async () => {
     await executions.dispose();
     await disposeOwnedProcesses();
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const grants = yield* GrantStore;
+        yield* grants.forgetAll(DRAFT_CONVERSATION);
+      }),
+    );
     executions = makeExecutions(runExecution);
     desktopShell.setWorkState({ active: 0, needsApproval: 0 });
   },
@@ -292,6 +299,8 @@ const openMainWindow = (origin: string) => {
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
+  window.webContents.on("did-finish-load", flushPendingTicket);
+  window.webContents.on("did-navigate", flushPendingTicket);
   void recovery.retry();
   return window;
 };
@@ -334,17 +343,21 @@ const restoreWindow = () => {
 /** A ticket that arrives before the window exists (macOS fires open-url early) waits for it. */
 let pendingTicket: string | null = null;
 
-/** A sign-in ticket from the browser reaches the page only once it is loaded. */
-const deliverTicket = (ticket: string) => {
-  restoreWindow();
+const flushPendingTicket = () => {
+  if (pendingTicket === null) return;
   const contents = mainWindow?.webContents;
-  if (!contents) {
-    pendingTicket = ticket;
-    return;
-  }
-  if (contents.isLoadingMainFrame())
-    contents.once("did-finish-load", () => contents.send(SIGN_IN_TICKET, ticket));
-  else contents.send(SIGN_IN_TICKET, ticket);
+  if (!contents || contents.isLoadingMainFrame()) return;
+  if (!isConfiguredOriginUrl(contents.getURL(), serverOrigin)) return;
+  const ticket = pendingTicket;
+  pendingTicket = null;
+  contents.send(SIGN_IN_TICKET, ticket);
+};
+
+/** A sign-in ticket from the browser reaches the configured origin page only. */
+const deliverTicket = (ticket: string) => {
+  pendingTicket = ticket;
+  restoreWindow();
+  flushPendingTicket();
 };
 
 app.on("open-url", (event, url) => {

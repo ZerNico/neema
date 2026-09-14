@@ -148,15 +148,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const send = () => {
     if (sendDisabled || !modelId || blockedReason) return;
     touched.current = true;
+    const submitted = requestRef.current;
     attachments.submit((attachmentIds) => {
       const current = requestRef.current;
-      if (current.blockedReason || current.disabled || !current.modelId) return;
+      if (submitted.blockedReason || submitted.disabled || !submitted.modelId) return;
       const content = current.draft.trim();
       if (!content && attachmentIds.length === 0) return;
-      const request = current.onSend(
+      const request = submitted.onSend(
         content,
         attachmentIds,
-        current.researchEnabled ? "research" : undefined,
+        submitted.researchEnabled ? "research" : undefined,
         current.skillIds,
       );
       void request.then(

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
+import { isConfiguredOriginUrl, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
 
 /**
  * `toOrigin` decides who may reach the bridge, so its job is to collapse every
@@ -37,6 +37,16 @@ describe("normalising a server address", () => {
       toOrigin("https://chat.example.com"),
     );
     expect(toOrigin("https://evil.test/https://chat.example.com")).toBe("https://evil.test");
+  });
+
+  it("treats only the configured origin as the signed-in page", () => {
+    expect(isConfiguredOriginUrl("https://chat.example.com/login", "https://chat.example.com")).toBe(
+      true,
+    );
+    expect(isConfiguredOriginUrl("file:///tmp/recovery.html", "https://chat.example.com")).toBe(
+      false,
+    );
+    expect(isConfiguredOriginUrl("https://chat.example.com/login", null)).toBe(false);
   });
 
   it("refuses anything that is not an http server", () => {
