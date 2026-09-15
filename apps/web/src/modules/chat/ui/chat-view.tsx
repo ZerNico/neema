@@ -842,6 +842,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
   const generating =
     sendMutation.isPending || answerMutation.isPending || stream.status === "streaming";
+  // What may still be writing to a document: a row the server says is streaming,
+  // or a generation this client just started. Deliberately not `generating`,
+  // whose stream status stays "streaming" while the smoothed text drains long
+  // after the answer is complete.
+  const documentsLocked =
+    streamingMessage !== undefined ||
+    sendMutation.isPending ||
+    answerMutation.isPending ||
+    retryMutation.isPending ||
+    editMutation.isPending;
   const mutationPending =
     answerMutation.isPending ||
     questionNeedsRefresh ||
@@ -1418,7 +1428,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     <DocumentOwner
       documentIds={documentIds}
       goneIds={scopedForgottenDocuments}
-      locked={generating}
+      locked={documentsLocked}
       onGone={forgetDocument}
       ref={documents}
     >

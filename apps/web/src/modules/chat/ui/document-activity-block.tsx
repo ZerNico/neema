@@ -81,20 +81,55 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   );
 }
 
+/** One line for a call that touched a document the full card already shows. */
+function DocumentActivityRow({
+  activity,
+  documentId,
+}: {
+  activity: DocumentToolActivity;
+  documentId: string | undefined;
+}) {
+  const { entry } = useDocumentPanel(documentId ?? "");
+  const label = (
+    <>
+      {documentActivityLabel(activity)}
+      {activity.status === "error" && (activity.error || activity.result?.message)
+        ? `: ${activity.error ?? activity.result?.message}`
+        : null}
+    </>
+  );
+  const icon = (
+    <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4 shrink-0" aria-hidden />
+  );
+  // The row names a document that is open one click away, so it opens it rather
+  // than making the person hunt for the card that created it.
+  if (documentId && entry?.open)
+    return (
+      <button
+        type="button"
+        onClick={entry.open}
+        aria-expanded={entry.expanded}
+        className={cn(
+          activityRowClassName,
+          "mb-2 rounded-lg text-left hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none",
+        )}
+      >
+        {icon}
+        <span className="min-w-0 truncate">{label}</span>
+      </button>
+    );
+  return (
+    <div className={cn(activityRowClassName, "mb-2")}>
+      {icon}
+      <span className={cn("min-w-0", activity.status === "running" && "text-shimmer")}>{label}</span>
+    </div>
+  );
+}
+
 export function DocumentActivityBlock({ activity }: { activity: DocumentToolActivity }) {
   const reference = activity.result?.documentId;
   const create = activity.name === "create_document" && activity.result?.outcome === "created";
   if (reference && create)
     return <DocumentWidget documentId={reference} {...(activity.result?.title ? { title: activity.result.title } : {})} />;
-  return (
-    <div className={cn(activityRowClassName, "mb-2")}>
-      <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
-      <span className={cn(activity.status === "running" && "text-shimmer")}>
-        {documentActivityLabel(activity)}
-        {activity.status === "error" && (activity.error || activity.result?.message)
-          ? `: ${activity.error ?? activity.result?.message}`
-          : null}
-      </span>
-    </div>
-  );
+  return <DocumentActivityRow activity={activity} documentId={reference} />;
 }

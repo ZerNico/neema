@@ -101,8 +101,18 @@ function Harness() {
   );
 }
 
+// jsdom implements pointer events without pointer capture, which the resize
+// handle uses so a drag survives leaving the 6px handle.
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {};
+  Element.prototype.releasePointerCapture = () => {};
+}
+
 const preferenceListeners = new Set<() => void>();
 beforeEach(() => {
+  // The rail width is a real preference, so it outlives a render; reset it or
+  // one test's drag becomes the next test's starting width.
+  window.localStorage.removeItem("chat.detail-panel-width");
   environment.mobile = false;
   environment.pathname = "/chat/one";
   environment.reducedMotion = true;
@@ -244,6 +254,45 @@ describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
   });
 });
 
+it("resizes the desktop rail by drag and keyboard, within limits, and remembers it", async () => {
+  const { unmount } = render(<Harness />);
+  act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
+  const rail = screen.getByRole("complementary");
+  const handle = screen.getByRole("separator", { name: "Resize panel" });
+  const width = async (expected: string) =>
+    waitFor(() => expect(rail.style.width).toBe(expected));
+  await width("352px");
+
+  // The rail is on the right, so dragging its edge left widens it.
+  fireEvent.pointerDown(handle, { button: 0, clientX: 800, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
+  await width("452px");
+  fireEvent.pointerUp(handle, { clientX: 700, pointerId: 1 });
+
+  // Half the window is the ceiling, so the conversation keeps its share, and
+  // the floor keeps the header and a line of Markdown readable.
+  fireEvent.pointerDown(handle, { button: 0, clientX: 700, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: -4000, pointerId: 1 });
+  await width(`${Math.round(window.innerWidth / 2)}px`);
+  fireEvent.pointerMove(handle, { clientX: 4000, pointerId: 1 });
+  await width("320px");
+  fireEvent.pointerUp(handle, { clientX: 4000, pointerId: 1 });
+
+  fireEvent.keyDown(handle, { key: "ArrowLeft" });
+  await width("344px");
+  fireEvent.keyDown(handle, { key: "ArrowRight" });
+  await width("320px");
+
+  // Kept across a remount, and a double click puts it back.
+  unmount();
+  render(<Harness />);
+  act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
+  const reopened = screen.getByRole("complementary");
+  await waitFor(() => expect(reopened.style.width).toBe("320px"));
+  fireEvent.doubleClick(screen.getByRole("separator", { name: "Resize panel" }));
+  await waitFor(() => expect(reopened.style.width).toBe("352px"));
+});
+
 it("closes the desktop rail on Escape", () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
@@ -257,7 +306,7 @@ it("deselects immediately, retains only inert presentation, then cleans up on de
   act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Outgoing" /> }));
   const rail = screen.getByRole("complementary");
   expect(rail).toHaveClass("test-panel-class", "overflow-hidden");
-  expect(rail.firstElementChild).toHaveClass("w-[22rem]");
+  expect((rail.firstElementChild as HTMLElement).style.width).toBe("352px");
   act(() => panel.close());
   expect(selectionRender).toHaveBeenLastCalledWith(null);
   expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
@@ -301,10 +350,10 @@ it("switches identities in the existing expanded desktop shell", async () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>First body</p> }));
   const rail = screen.getByRole("complementary");
-  await waitFor(() => expect(rail.style.width).toBe("22rem"));
+  await waitFor(() => expect(rail.style.width).toBe("352px"));
   act(() => panel.open({ id: "two", title: "Sources", body: <p>Second body</p> }));
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("22rem");
+  expect(rail.style.width).toBe("352px");
   expect(screen.queryByText("First body")).not.toBeInTheDocument();
   expect(screen.getByText("Second body")).toBeInTheDocument();
 });
@@ -360,7 +409,7 @@ it("cleans up without a completion event when animation frames are unavailable",
 it("opens at full width and removes closed content synchronously with reduced motion", () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Reduced body</p> }));
-  expect(screen.getByRole("complementary").style.width).toBe("22rem");
+  expect(screen.getByRole("complementary").style.width).toBe("352px");
   act(() => panel.close());
   expect(screen.queryByText("Reduced body")).not.toBeInTheDocument();
 });
@@ -540,7 +589,7 @@ it("survives an identity revalidation on tab return without replaying its open a
   act(() => release(identity));
   act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Live" /> }));
   const rail = screen.getByRole("complementary");
-  await waitFor(() => expect(rail.style.width).toBe("22rem"));
+  await waitFor(() => expect(rail.style.width).toBe("352px"));
   fireEvent.click(screen.getByRole("button", { name: "Count: 0" }));
   const counter = screen.getByRole("button", { name: "Count: 1" });
   const openTarget = animations.at(-1)?.target;
@@ -548,11 +597,11 @@ it("survives an identity revalidation on tab return without replaying its open a
   fireEvent(document, new Event("visibilitychange"));
   fireEvent.focus(window);
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("22rem");
+  expect(rail.style.width).toBe("352px");
   expect(rail).toBeVisible();
   await act(async () => release(identity));
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("22rem");
+  expect(rail.style.width).toBe("352px");
   expect(screen.getByRole("button", { name: "Count: 1" })).toBe(counter);
   expect(animations.at(-1)?.target).toBe(openTarget);
 

@@ -18,6 +18,9 @@ const theme = EditorView.theme({
     padding: "1rem",
     minHeight: "24rem",
     caretColor: "var(--foreground)",
+    // CodeMirror leaves this to the host stylesheet, and ours resets it, so the
+    // one surface in the app you type into showed an arrow.
+    cursor: "text",
   },
   ".cm-scroller": { overflow: "auto", fontFamily: "inherit" },
   ".cm-gutters": {

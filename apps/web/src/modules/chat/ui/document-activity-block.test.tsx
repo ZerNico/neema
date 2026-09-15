@@ -28,6 +28,25 @@ describe("document activity", () => {
     expect(screen.queryByRole("button", { name: /Open document/ })).not.toBeInTheDocument();
   });
 
+  it("leaves an update row inert when its document has no controller here", () => {
+    render(
+      <DocumentActivityBlock
+        activity={activity({
+          name: "edit_document",
+          result: {
+            outcome: "updated",
+            documentId: "document-1",
+            documentConversationId: "original-chat",
+            title: "Trip plan",
+            revision: 2,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Updated Trip plan")).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("keeps a failed patch compact instead of duplicating the creation card", () => {
     render(
       <DocumentActivityBlock

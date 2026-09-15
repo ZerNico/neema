@@ -1659,6 +1659,35 @@ describe("ChatView documents", () => {
     expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-2" } });
   });
 
+  it("opens the document from a later update row, and locks the panel only while a row streams", async () => {
+    const editRow = {
+      ...documentReference(),
+      id: "document-edit",
+      toolName: "edit_document",
+      turnIndex: 1,
+      result: {
+        outcome: "updated",
+        documentId: "document-1",
+        documentConversationId: "c1",
+        title: "Trip plan",
+        revision: 2,
+      },
+    };
+    renderView(null, { toolCalls: [documentReference(), editRow] });
+
+    // The compact row for the edit opens the same document as the card.
+    const update = await screen.findByRole("button", { name: /Updated Trip plan/ });
+    fireEvent.click(update);
+    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
+    expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
+      "Original source",
+    );
+    // Nothing is generating, so the panel is editable.
+    expect(
+      screen.queryByText("Read-only while the assistant is answering."),
+    ).not.toBeInTheDocument();
+  });
+
   it("drops the card once a retry has deleted the document that answer created", async () => {
     renderView(null, { toolCalls: [documentReference()] });
     expect(await screen.findByRole("button", { name: "Open document: Trip plan" })).toBeVisible();

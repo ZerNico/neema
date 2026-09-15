@@ -13,6 +13,12 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
+import {
+  DETAIL_PANEL_MIN,
+  DETAIL_PANEL_STEP,
+  detailPanelMax,
+  useDetailPanelWidth,
+} from "~/ui/detail-panel-width.ts";
 import { useAppReducedMotion } from "~/ui/motion";
 import { Button } from "~/ui/primitives/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "~/ui/primitives/sheet";
@@ -212,14 +218,103 @@ function restorePanelFocus(root: HTMLElement, opener: HTMLElement | null) {
   if (tabIndex === null) fallback.removeAttribute("tabindex");
 }
 
+/**
+ * The rail's left edge, dragged to resize. Pointer capture keeps the drag alive
+ * over the transcript and its iframes, and the same control resizes from the
+ * keyboard, since a drag handle nobody can tab to is a control half the people
+ * using it cannot reach.
+ */
+function DetailPanelResizer({
+  width,
+  onResize,
+  onReset,
+  onDraggingChange,
+}: {
+  width: number;
+  onResize: (width: number, persist?: boolean) => void;
+  onReset: () => void;
+  onDraggingChange: (dragging: boolean) => void;
+}) {
+  const start = useRef<{ x: number; width: number } | null>(null);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      aria-valuenow={width}
+      aria-valuemin={DETAIL_PANEL_MIN}
+      aria-valuemax={detailPanelMax(typeof window === "undefined" ? width * 2 : window.innerWidth)}
+      tabIndex={0}
+      // Sits wholly inside the rail: the shell clips its overflow, so a handle
+      // straddling the edge loses its outer half and the cursor with it.
+      className={cn(
+        "absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize",
+        "hover:bg-border focus-visible:bg-ring focus-visible:outline-none",
+        "touch-none transition-colors",
+      )}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        start.current = { x: event.clientX, width };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        onDraggingChange(true);
+      }}
+      onPointerMove={(event) => {
+        const from = start.current;
+        if (!from) return;
+        // The rail is on the right, so dragging left widens it.
+        onResize(from.width + (from.x - event.clientX), false);
+      }}
+      onPointerUp={(event) => {
+        if (!start.current) return;
+        start.current = null;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        onDraggingChange(false);
+        onResize(width);
+      }}
+      onLostPointerCapture={() => {
+        if (!start.current) return;
+        start.current = null;
+        onDraggingChange(false);
+        onResize(width);
+      }}
+      onDoubleClick={onReset}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") onResize(width + DETAIL_PANEL_STEP);
+        else if (event.key === "ArrowRight") onResize(width - DETAIL_PANEL_STEP);
+        else if (event.key === "Home" || event.key === "End") onReset();
+        else return;
+        event.preventDefault();
+      }}
+    />
+  );
+}
+
 function DesktopPanel({ className }: { className: string | undefined }) {
   const panel = useDetailPanel();
   const registerBeforeAction = useContext(DetailPanelBeforeActionContext);
   const { selected, request, open, generation, finishExit } = usePanelPresentation();
   const selectedId = selected?.id;
   const reducedMotion = useAppReducedMotion();
+  const { width, resize, reset } = useDetailPanelWidth();
+  const [dragging, setDragging] = useState(false);
   const root = useRef<HTMLElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+
+  // A drag leaves the 8px handle almost immediately, and the cursor follows
+  // whatever is under the pointer, so hold it on the document for the duration
+  // and stop the transcript selecting text as the pointer sweeps it.
+  useEffect(() => {
+    if (!dragging) return;
+    const { style } = document.body;
+    const cursor = style.cursor;
+    const select = style.userSelect;
+    style.cursor = "col-resize";
+    style.userSelect = "none";
+    return () => {
+      style.cursor = cursor;
+      style.userSelect = select;
+    };
+  }, [dragging]);
 
   useLayoutEffect(() => {
     const handleAction = (action: PanelAction) => {
@@ -259,7 +354,10 @@ function DesktopPanel({ className }: { className: string | undefined }) {
   }, [open, reducedMotion, generation, finishExit]);
 
   if (!request) return null;
-  const target = `${open ? "open" : "closed"}-${generation}-${reducedMotion ? "reduced" : "animated"}`;
+  // The width belongs in the label: Motion re-runs on a changed label, not on a
+  // changed variant definition, so a drag would otherwise leave the rail at the
+  // width it opened with.
+  const target = `${open ? "open" : "closed"}-${generation}-${reducedMotion ? "reduced" : "animated"}-${open ? width : 0}`;
   const duration = reducedMotion ? 0 : 0.2;
   return (
     <m.aside
@@ -272,22 +370,31 @@ function DesktopPanel({ className }: { className: string | undefined }) {
         !open && "pointer-events-none",
         className,
       )}
-      initial={{ width: reducedMotion ? "22rem" : 0 }}
+      initial={{ width: reducedMotion ? width : 0 }}
       animate={target}
-      variants={{ [target]: { width: open ? "22rem" : 0 } }}
-      transition={{ duration, ease: "easeInOut" }}
+      variants={{ [target]: { width: open ? width : 0 } }}
+      // A drag must track the pointer, not ease toward it; the open and close
+      // animation keeps its own duration.
+      transition={dragging ? { duration: 0 } : { duration, ease: "easeInOut" }}
       onAnimationComplete={(definition) => {
         if (!open && definition === target) finishExit(generation);
       }}
     >
       <m.div
         key={request.id}
-        className="flex min-h-0 w-[22rem] flex-1 flex-col border-l"
+        style={{ width }}
+        className="relative flex min-h-0 flex-1 flex-col border-l"
         initial={{ opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : 8 }}
         animate={target}
         variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
         transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
       >
+        <DetailPanelResizer
+          width={width}
+          onResize={resize}
+          onReset={reset}
+          onDraggingChange={setDragging}
+        />
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{request.title}</p>
           {request.subtitle ? (
