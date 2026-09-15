@@ -1388,6 +1388,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       generationDisabled,
       work.readOnly,
       saveQuestionEdit,
+      // Carries `editSkillIds` and `editContext` in: both are its own
+      // dependencies, so picking a skill mid-edit gives this a new identity and
+      // the chips refresh. Dropping either from its list strands them here.
       saveEdit,
       searchEnabled,
       setSearchEnabled,

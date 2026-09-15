@@ -191,6 +191,19 @@ vi.mock("./virtual-message-list.tsx", () => ({
               >
                 Offer research
               </button>
+              <button
+                type="button"
+                aria-label={`Pick skill in edit ${String(message.id)}`}
+                onClick={() =>
+                  (
+                    message.editState as {
+                      skills?: { onChange: (ids: string[]) => void };
+                    }
+                  ).skills?.onChange(["s-picked"])
+                }
+              >
+                Pick skill
+              </button>
               <output data-testid={`edit-selection-${String(message.id)}`}>
                 {(
                   message.editState as { skills?: { selectedIds: readonly string[] } }
@@ -1870,6 +1883,16 @@ describe("ChatView documents", () => {
 });
 
 describe("ChatView edit offers", () => {
+  it("shows a skill picked while the editor is open", () => {
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    expect(screen.getByTestId("edit-selection-m-user")).toHaveTextContent("|");
+    fireEvent.click(screen.getByRole("button", { name: "Pick skill in edit m-user" }));
+    // The chips are projected from the same memo as the transcript rows, and
+    // reach it only through `saveEdit`'s identity. This pins that chain.
+    expect(screen.getByTestId("edit-selection-m-user")).toHaveTextContent("s-picked");
+  });
+
   it("sends the research offer the edit asked for, and forgets it on the next edit", async () => {
     editMock.mockResolvedValue({ conversationId: "c1", assistantMessageId: "next" } as never);
     renderView();
