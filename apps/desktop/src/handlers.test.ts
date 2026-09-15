@@ -2,13 +2,22 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { vi } from "vitest";
 
 // Whether `rg` answers is decided per test, so both backends are proven
-// against the same folder and the same expectations.
-const ripgrep = vi.hoisted(() => ({ present: true }));
+// against the same folder and the same expectations. The handlers ask this
+// module which backend to use, so the switch is real; `calls` proves it.
+const ripgrep = vi.hoisted(() => ({ present: true, calls: 0 }));
 vi.mock("./ripgrep.ts", async (importOriginal) => {
   const original = await importOriginal<typeof import("./ripgrep.ts")>();
+  const counted =
+    <A extends unknown[], R>(fn: (...args: A) => R) =>
+    (...args: A) => {
+      ripgrep.calls += 1;
+      return fn(...args);
+    };
   return {
     ...original,
     ripgrepAvailable: () => original.ripgrepAvailable().then((real) => real && ripgrep.present),
+    findWithRipgrep: counted(original.findWithRipgrep),
+    searchWithRipgrep: counted(original.searchWithRipgrep),
   };
 });
 import { tmpdir } from "node:os";
@@ -35,7 +44,7 @@ let root: string;
 let outsideDir: string;
 let handlers: DesktopHandlers;
 let picked: string | null;
-let ran: { command: string; cwd: string; network: string; allowWrite: string[] }[];
+let ran: { command: string; cwd: string; allowWrite: string[] }[];
 let revealed: { absolute: string; mode: string }[];
 /** What the operating system complained about, when the test wants it to. */
 let revealComplaint: string | null;
@@ -48,9 +57,9 @@ const stubSandbox = Layer.succeed(
   Sandbox.of({
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
-    run: ({ command, cwd, network, allowWrite }) =>
+    run: ({ command, cwd, allowWrite }) =>
       Effect.sync(() => {
-        ran.push({ command, cwd, network, allowWrite: [...allowWrite] });
+        ran.push({ command, cwd, allowWrite: [...allowWrite] });
         return { exitCode: 0, output: "", truncated: false, violations: [] };
       }),
   }),
@@ -72,6 +81,7 @@ beforeAll(async () => {
       revealed.push({ absolute, mode });
       return revealComplaint;
     },
+    serverOrigin: () => "https://chat.test",
     executionSession: () => ({ id: "test-session" }),
     cancelCall: () => false,
     setWorkState: () => {},
@@ -108,11 +118,22 @@ describe("before a folder is attached", () => {
   it("refuses every request that would touch disk", async () => {
     const fresh = "conv-untouched";
     expect(
-      await failureOf(handlers.readFile({ callId: "t", conversationId: fresh, path: "workspace/src/index.ts" })),
+      await failureOf(
+        handlers.readFile({ callId: "t", conversationId: fresh, path: "workspace/src/index.ts" }),
+      ),
     ).toBe("no-folder");
-    expect(await failureOf(handlers.listDirectory({ conversationId: fresh, callId: "t", path: "." }))).toBe(
-      "no-folder",
-    );
+    expect(
+      await failureOf(
+        handlers.deletePath({
+          callId: "t",
+          conversationId: fresh,
+          paths: ["workspace/src/index.ts"],
+        }),
+      ),
+    ).toBe("no-folder");
+    expect(
+      await failureOf(handlers.listDirectory({ conversationId: fresh, callId: "t", path: "." })),
+    ).toBe("no-folder");
     expect(
       await failureOf(
         handlers.runCommand({
@@ -121,7 +142,6 @@ describe("before a folder is attached", () => {
           command: "echo hi",
           folder: "workspace",
           timeoutMs: 1000,
-          network: "packages",
         }),
       ),
     ).toBe("no-folder");
@@ -147,14 +167,22 @@ describe("once a folder is attached", () => {
 
   it("reads and writes inside it", async () => {
     const contents = await Effect.runPromise(
-      handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/index.ts" }),
+      handlers.readFile({
+        callId: "t",
+        conversationId: CONVERSATION,
+        path: "workspace/src/index.ts",
+      }),
     );
     expect(contents.text).toBe("export {}\n");
 
     const huge = join(root, "src", "huge.log");
     await writeFile(huge, "a".repeat(LIMITS.readBytes + 1_000));
     const truncated = await Effect.runPromise(
-      handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/huge.log" }),
+      handlers.readFile({
+        callId: "t",
+        conversationId: CONVERSATION,
+        path: "workspace/src/huge.log",
+      }),
     );
     expect(truncated.truncated).toBe(true);
     expect(truncated.text).toHaveLength(LIMITS.readChars);
@@ -191,20 +219,32 @@ describe("once a folder is attached", () => {
     );
     expect(
       await failureOf(
-        handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/logo.png" }),
+        handlers.readFile({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: "workspace/src/logo.png",
+        }),
       ),
     ).toBe("not-text");
   });
 
   it("reads an image as bytes and refuses anything else", async () => {
     const image = await Effect.runPromise(
-      handlers.readBinary({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/logo.png" }),
+      handlers.readBinary({
+        callId: "t",
+        conversationId: CONVERSATION,
+        path: "workspace/src/logo.png",
+      }),
     );
     expect(image.mediaType).toBe("image/png");
     expect(Buffer.from(image.base64, "base64")[0]).toBe(0x89);
     expect(
       await failureOf(
-        handlers.readBinary({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/index.ts" }),
+        handlers.readBinary({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: "workspace/src/index.ts",
+        }),
       ),
     ).toBe("not-binary");
   });
@@ -300,23 +340,90 @@ describe("once a folder is attached", () => {
     expect(await readFile(join(root, "src", "sub", "new.txt"), "utf8")).toBe("x");
 
     const gone = await Effect.runPromise(
-      handlers.deletePath({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/sub" }),
+      handlers.deletePath({
+        callId: "t",
+        conversationId: CONVERSATION,
+        paths: ["workspace/src/sub"],
+      }),
     );
-    expect(gone.kind).toBe("directory");
+    expect(gone).toEqual({
+      deleted: [{ path: "workspace/src/sub", kind: "directory" }],
+      failed: [],
+    });
     expect(
       await failureOf(
-        handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "workspace/src/sub/new.txt" }),
+        handlers.readFile({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: "workspace/src/sub/new.txt",
+        }),
       ),
     ).toBe("not-found");
     expect(
-      await failureOf(handlers.deletePath({ callId: "t", conversationId: CONVERSATION, path: "workspace" })),
-    ).toBe("outside-folder");
+      await Effect.runPromise(
+        handlers.deletePath({ callId: "t", conversationId: CONVERSATION, paths: ["workspace"] }),
+      ),
+    ).toEqual({
+      deleted: [],
+      failed: [
+        {
+          path: "workspace",
+          reason: "outside-folder",
+          message: "The folder itself cannot be deleted.",
+        },
+      ],
+    });
+  });
+
+  it("deletes several paths in one call and keeps going after a miss", async () => {
+    await writeFile(join(root, "src", "a.txt"), "a");
+    await writeFile(join(root, "src", "b.txt"), "b");
+    const receipt = await Effect.runPromise(
+      handlers.deletePath({
+        callId: "t",
+        conversationId: CONVERSATION,
+        paths: [
+          "workspace/src/a.txt",
+          "workspace/src/missing.txt",
+          "workspace/src/a.txt",
+          "workspace/src/b.txt",
+          "workspace",
+        ],
+      }),
+    );
+    expect(receipt.deleted).toEqual([
+      { path: "workspace/src/a.txt", kind: "file" },
+      { path: "workspace/src/b.txt", kind: "file" },
+    ]);
+    expect(receipt.failed).toEqual([
+      {
+        path: "workspace/src/missing.txt",
+        reason: "not-found",
+        message: "workspace/src/missing.txt does not exist.",
+      },
+      {
+        path: "workspace",
+        reason: "outside-folder",
+        message: "The folder itself cannot be deleted.",
+      },
+    ]);
+    expect(
+      await failureOf(
+        handlers.readFile({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: "workspace/src/a.txt",
+        }),
+      ),
+    ).toBe("not-found");
   });
 
   it.each([true, false])(
     "finds by glob and searches by regex, ignoring what git ignores (ripgrep: %s)",
     async (withRipgrep) => {
       ripgrep.present = withRipgrep;
+      ripgrep.calls = 0;
+      const rgInstalled = await (await import("./ripgrep.ts")).ripgrepAvailable();
       await writeFile(join(root, ".gitignore"), "ignored/\n");
       await mkdir(join(root, "ignored"), { recursive: true });
       await writeFile(join(root, "ignored", "noise.ts"), "needle");
@@ -354,15 +461,49 @@ describe("once a folder is attached", () => {
       ]);
       expect(hits.filesSearched).toBeGreaterThan(0);
       expect(
-        await failureOf(handlers.searchFiles({ callId: "t", conversationId: CONVERSATION, pattern: "(" })),
+        await failureOf(
+          handlers.searchFiles({ callId: "t", conversationId: CONVERSATION, pattern: "(" }),
+        ),
       ).toBe("bad-pattern");
+      // The glob dialects differ, so each backend has its own unreadable glob;
+      // what they share is that it is a refusal, not a defect.
+      const badGlob = withRipgrep && rgInstalled ? "[" : "{?}";
+      expect(
+        await failureOf(
+          handlers.searchFiles({
+            callId: "t",
+            conversationId: CONVERSATION,
+            pattern: "x",
+            glob: badGlob,
+          }),
+        ),
+      ).toBe("bad-pattern");
+      // The mocked switch reached the handlers: rg ran only when it was allowed to.
+      if (rgInstalled) expect(ripgrep.calls > 0).toBe(withRipgrep);
+      else       expect(ripgrep.calls).toBe(0);
     },
   );
+
+  it("finds a matching folder and the files inside it", async () => {
+    await mkdir(join(root, "DVR", "extracted_images"), { recursive: true });
+    await writeFile(join(root, "DVR", "extracted_images", "frame.png"), "png");
+    await writeFile(join(root, "DVR", "readme.txt"), "no");
+    const found = await Effect.runPromise(
+      handlers.findFiles({ callId: "t", conversationId: CONVERSATION, pattern: "**/*extracted*" }),
+    );
+    expect(found.paths).toContain("workspace/DVR/extracted_images/");
+    expect(found.paths).toContain("workspace/DVR/extracted_images/frame.png");
+    expect(found.paths).not.toContain("workspace/DVR/readme.txt");
+  });
 
   it("refuses to read or write through a symlink that leaves it", async () => {
     expect(
       await failureOf(
-        handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "workspace/escape/secrets.txt" }),
+        handlers.readFile({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: "workspace/escape/secrets.txt",
+        }),
       ),
     ).toBe("outside-folder");
     expect(
@@ -511,7 +652,7 @@ describe("once a folder is attached", () => {
   it("will not hand a file this computer would run to its default application", async () => {
     revealed = [];
     await writeFile(join(root, "install.command"), "rm -rf /\n");
-    await writeFile(join(root, "drawing.svg"), "<svg onload=\"alert(1)\"></svg>");
+    await writeFile(join(root, "drawing.svg"), '<svg onload="alert(1)"></svg>');
     await writeFile(join(root, "runme"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
     for (const path of ["workspace/install.command", "workspace/drawing.svg", "workspace/runme"]) {
       expect(
@@ -591,7 +732,11 @@ describe("once a folder is attached", () => {
       await ask({ conversationId: CONVERSATION, path: "workspace/src/index.ts", mode: "launch" }),
     ).toMatchObject({ ok: false, error: { reason: "failed" } });
     expect(
-      await ask({ conversationId: CONVERSATION, path: "workspace/escape/secrets.txt", mode: "open" }),
+      await ask({
+        conversationId: CONVERSATION,
+        path: "workspace/escape/secrets.txt",
+        mode: "open",
+      }),
     ).toMatchObject({ ok: false, error: { reason: "outside-folder" } });
     expect(revealed).toHaveLength(1);
   });
@@ -608,7 +753,11 @@ describe("once a folder is attached", () => {
     ).toBe("outside-folder");
     expect(
       await failureOf(
-        handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: join(outsideDir, "secrets.txt") }),
+        handlers.readFile({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: join(outsideDir, "secrets.txt"),
+        }),
       ),
     ).toBe("outside-folder");
   });
@@ -622,14 +771,12 @@ describe("once a folder is attached", () => {
         command: "echo hi",
         folder: "workspace",
         timeoutMs: 1000,
-        network: "packages",
       }),
     );
 
     expect(ran).toHaveLength(1);
     expect(ran[0]?.cwd).toBe(await Effect.runPromise(realRoot()));
     // The level is the chat's, carried down per call; the desktop stores none.
-    expect(ran[0]?.network).toBe("packages");
   });
 
   it("attaches a second folder, addresses both by name, and refuses a name clash", async () => {
@@ -652,7 +799,11 @@ describe("once a folder is attached", () => {
     // Each folder answers under its own name, and neither can see the other
     // except by name.
     const secret = await Effect.runPromise(
-      handlers.readFile({ callId: "t", conversationId: CONVERSATION, path: "elsewhere/secrets.txt" }),
+      handlers.readFile({
+        callId: "t",
+        conversationId: CONVERSATION,
+        path: "elsewhere/secrets.txt",
+      }),
     );
     expect(secret.text).toBe("token\n");
     expect(
@@ -674,7 +825,6 @@ describe("once a folder is attached", () => {
         command: "echo hi",
         folder: "elsewhere",
         timeoutMs: 1000,
-        network: "packages",
       }),
     );
     expect(ran[0]?.cwd.endsWith("elsewhere")).toBe(true);

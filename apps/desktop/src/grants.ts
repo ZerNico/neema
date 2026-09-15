@@ -11,31 +11,35 @@ import { Context, Effect, Layer } from "effect";
  * about a filesystem the server cannot see. It also means the grant lives where
  * the authority to honour it lives.
  *
+ * Keys carry the server origin as well as the conversation id. Ids are minted
+ * by whichever server the shell is connected to, so two servers can hand out
+ * the same one, and a grant given to a conversation on one must not open the
+ * folder to a conversation on the other.
+ *
  * Losing this file is a supported outcome: every conversation simply asks
- * again.
+ * again. Entries written before the origin was part of the key are dropped
+ * on read for the same reason.
  */
 export interface Grants {
   /** Absolute paths, in the order they were attached. Empty when never told one. */
-  lookup(conversationId: string): Effect.Effect<ReadonlyArray<string>>;
+  lookup(key: GrantKey): Effect.Effect<ReadonlyArray<string>>;
   /** Appends; a path already present is left where it is. */
-  remember(conversationId: string, folder: string): Effect.Effect<void>;
+  remember(key: GrantKey, folder: string): Effect.Effect<void>;
   /** Removes one path. */
-  forget(conversationId: string, folder: string): Effect.Effect<void>;
+  forget(key: GrantKey, folder: string): Effect.Effect<void>;
   /** Removes every path under a key. */
-  forgetAll(conversationId: string): Effect.Effect<void>;
+  forgetAll(key: GrantKey): Effect.Effect<void>;
 }
 
-/**
- * Reads the current `{ id: [path] }` shape and the two earlier single-folder
- * ones, `{ id: path }` and `{ id: { folder } }`.
- */
-const parseFolders = (value: unknown): string[] => {
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
-  if (!value || typeof value !== "object") return [];
-  const folder = (value as { folder?: unknown }).folder;
-  return typeof folder === "string" ? [folder] : [];
-};
+export interface GrantKey {
+  readonly origin: string;
+  readonly conversationId: string;
+}
+
+/** An origin never contains a space; the id after it may contain anything. */
+const encodeKey = ({ origin, conversationId }: GrantKey) => `${origin} ${conversationId}`;
+/** Matches what `encodeKey` writes; older files used the bare id. */
+const ENCODED_KEY = /^https?:\/\/\S+ ./;
 
 const withFolder = (folders: ReadonlyArray<string>, folder: string) =>
   folders.includes(folder) ? folders : [...folders, folder];
@@ -45,22 +49,24 @@ const makeStore = (
   state: Map<string, ReadonlyArray<string>>,
   persist: Effect.Effect<void>,
 ): Grants => ({
-  lookup: (conversationId) => Effect.sync(() => state.get(conversationId) ?? []),
-  remember: (conversationId, folder) =>
+  lookup: (key) => Effect.sync(() => state.get(encodeKey(key)) ?? []),
+  remember: (key, folder) =>
     Effect.suspend(() => {
-      state.set(conversationId, withFolder(state.get(conversationId) ?? [], folder));
+      const id = encodeKey(key);
+      state.set(id, withFolder(state.get(id) ?? [], folder));
       return persist;
     }),
-  forget: (conversationId, folder) =>
+  forget: (key, folder) =>
     Effect.suspend(() => {
-      const rest = (state.get(conversationId) ?? []).filter((item) => item !== folder);
-      if (rest.length === 0) state.delete(conversationId);
-      else state.set(conversationId, rest);
+      const id = encodeKey(key);
+      const rest = (state.get(id) ?? []).filter((item) => item !== folder);
+      if (rest.length === 0) state.delete(id);
+      else state.set(id, rest);
       return persist;
     }),
-  forgetAll: (conversationId) =>
+  forgetAll: (key) =>
     Effect.suspend(() => {
-      state.delete(conversationId);
+      state.delete(encodeKey(key));
       return persist;
     }),
 });
@@ -78,7 +84,8 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
             // a non-path into the containment check.
             const entries: Array<[string, string[]]> = [];
             for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-              const folders = parseFolders(value);
+              if (!ENCODED_KEY.test(id) || !Array.isArray(value)) continue;
+              const folders = value.filter((item): item is string => typeof item === "string");
               if (folders.length > 0) entries.push([id, folders]);
             }
             return entries;

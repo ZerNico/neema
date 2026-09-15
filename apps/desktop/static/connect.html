@@ -163,10 +163,10 @@
         submit.disabled = true;
         try {
           const result = await window.__chatConnect.connect(url.value);
-          if (!result.ok) {
-            error.textContent = result.message;
-            submit.disabled = false;
-          }
+          // A connected chooser is destroyed by main; a declined switch or a
+          // refusal leaves it open, so Connect has to work again.
+          if (!result.ok) error.textContent = result.message;
+          if (!result.ok || result.declined) submit.disabled = false;
         } catch {
           error.textContent = "Couldn’t connect. Please try again.";
           submit.disabled = false;

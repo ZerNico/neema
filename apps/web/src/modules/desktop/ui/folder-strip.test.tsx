@@ -23,9 +23,9 @@ it("explains approval modes and preserves their stored values when selected", as
         }}
         settings={{
           permissionLevel,
-          onChange: (patch) => {
-            changed(patch);
-            setPermissionLevel(patch.permissionLevel!);
+          onChange: (level) => {
+            changed(level);
+            setPermissionLevel(level);
           },
         }}
       />
@@ -53,19 +53,21 @@ it("explains approval modes and preserves their stored values when selected", as
     "Allow reading, editing, moving files, and running commands without asking.",
   );
   expect(
-    screen.getByText("The delete tool always asks. An allowed command can still delete files."),
+    screen.getByText(
+      "The delete tool always asks, once for the whole list. An allowed command can still delete files.",
+    ),
   ).toBeInTheDocument();
   await userEvent.click(
     screen.getByRole("menuitemradio", { name: "Auto-approve reads and changes" }),
   );
-  expect(changed).toHaveBeenLastCalledWith({ permissionLevel: "skip" });
+  expect(changed).toHaveBeenLastCalledWith("skip");
   expect(
     screen.getByRole("menuitemradio", { name: "Auto-approve reads and changes" }),
   ).toHaveAttribute("aria-checked", "true");
   await userEvent.click(screen.getByRole("menuitemradio", { name: "Approve each action" }));
-  expect(changed).toHaveBeenLastCalledWith({ permissionLevel: "manual" });
+  expect(changed).toHaveBeenLastCalledWith("manual");
   await userEvent.click(screen.getByRole("menuitemradio", { name: "Auto-approve reads" }));
-  expect(changed).toHaveBeenLastCalledWith({ permissionLevel: "auto" });
+  expect(changed).toHaveBeenLastCalledWith("auto");
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   expect(

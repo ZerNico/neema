@@ -10,7 +10,6 @@ const input: SandboxRun = {
   cwd: "/tmp",
   allowWrite: ["/tmp"],
   timeoutMs: 1_000,
-  network: "all",
 };
 const result = { code: 0, stdout: "", stderr: "", timedOut: false };
 const managerFor = () => ({
@@ -35,55 +34,36 @@ const scopedSandbox = async (
 };
 
 describe("sandbox lifetime", () => {
-  it("serializes policy changes across services until child cleanup completes", async () => {
+  it("runs commands from separate services concurrently under one started manager", async () => {
     const manager = managerFor();
-    const running = Promise.withResolvers<void>();
+    const running = { first: Promise.withResolvers<void>(), second: Promise.withResolvers<void>() };
     const finish = Promise.withResolvers<void>();
-    const cleaning = Promise.withResolvers<void>();
-    const clean = Promise.withResolvers<void>();
     const execute: typeof runOwnedProcess = ({ args }) =>
       Effect.gen(function* () {
-        if (args[0] === "first") {
-          running.resolve();
-          yield* Effect.promise(() => finish.promise);
-        }
+        running[args[0] as "first" | "second"].resolve();
+        yield* Effect.promise(() => finish.promise);
         return result;
-      }).pipe(
-        Effect.ensuring(
-          Effect.promise(async () => {
-            if (args[0] === "first") {
-              cleaning.resolve();
-              await clean.promise;
-            }
-          }),
-        ),
-      );
+      });
     const firstService = await scopedSandbox(manager, execute);
     const secondService = await scopedSandbox(manager, execute);
     try {
       const first = Effect.runPromise(firstService.sandbox.run(input));
-      await running.promise;
       const second = Effect.runPromise(
-        secondService.sandbox.run({
-          ...input,
-          command: "second",
-          callId: "second",
-          network: "none",
-        }),
+        secondService.sandbox.run({ ...input, command: "second", callId: "second" }),
       );
-      finish.resolve();
-      await cleaning.promise;
-      expect(manager.updateConfig).toHaveBeenCalledTimes(1);
-      expect(manager.cleanupAfterCommand).not.toHaveBeenCalled();
-      clean.resolve();
-      await Promise.all([first, second]);
-      expect(manager.updateConfig).toHaveBeenCalledTimes(2);
-      expect(manager.cleanupAfterCommand).toHaveBeenCalledTimes(2);
+      // Both children are alive at once: neither waited for the other.
+      await Promise.all([running.first.promise, running.second.promise]);
+      expect(manager.wrapWithSandboxArgv).toHaveBeenCalledTimes(2);
       expect(manager.initialize).toHaveBeenCalledTimes(1);
+      // The policy is fixed at initialize; nothing rewrites it per command.
+      expect(manager.updateConfig).not.toHaveBeenCalled();
+      finish.resolve();
+      await Promise.all([first, second]);
+      // Mount cleanup is process-wide, so it runs once the last command is out.
+      expect(manager.cleanupAfterCommand).toHaveBeenCalledTimes(1);
       await firstService.close();
       expect(manager.reset).not.toHaveBeenCalled();
     } finally {
-      clean.resolve();
       finish.resolve();
       await firstService.close();
       await secondService.close();
@@ -91,7 +71,30 @@ describe("sandbox lifetime", () => {
     expect(manager.reset).toHaveBeenCalledOnce();
   });
 
-  it("cancels queued work without preparing it and interrupts a running command before cleanup", async () => {
+  it("does not reset the manager while a command is still running", async () => {
+    const manager = managerFor();
+    const running = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const execute: typeof runOwnedProcess = () =>
+      Effect.gen(function* () {
+        running.resolve();
+        yield* Effect.promise(() => finish.promise);
+        return result;
+      });
+    const service = await scopedSandbox(manager, execute);
+    const command = Effect.runPromise(service.sandbox.run(input));
+    await running.promise;
+    const closing = service.close();
+    // The close is waiting on the drain, not racing the child.
+    await Promise.resolve();
+    expect(manager.reset).not.toHaveBeenCalled();
+    finish.resolve();
+    await command;
+    await closing;
+    expect(manager.reset).toHaveBeenCalledOnce();
+  });
+
+  it("interrupts a running command and cleans up after it", async () => {
     const manager = managerFor();
     const running = Promise.withResolvers<void>();
     const cleaning = Promise.withResolvers<void>();
@@ -107,29 +110,19 @@ describe("sandbox lifetime", () => {
         ),
       );
     const service = await scopedSandbox(manager, execute);
-    const firstController = new AbortController();
-    const queuedController = new AbortController();
-    const first = Effect.runPromiseExit(service.sandbox.run(input), {
-      signal: firstController.signal,
-    });
+    const controller = new AbortController();
+    const first = Effect.runPromiseExit(service.sandbox.run(input), { signal: controller.signal });
     await running.promise;
-    const queued = Effect.runPromiseExit(
-      service.sandbox.run({ ...input, command: "queued", callId: "queued" }),
-      { signal: queuedController.signal },
-    );
-    queuedController.abort();
-    expect(Exit.isFailure(await queued)).toBe(true);
-    firstController.abort();
+    controller.abort();
     await cleaning.promise;
     expect(manager.cleanupAfterCommand).not.toHaveBeenCalled();
-    expect(manager.wrapWithSandboxArgv).toHaveBeenCalledTimes(1);
     clean.resolve();
     expect(Exit.isFailure(await first)).toBe(true);
     expect(manager.cleanupAfterCommand).toHaveBeenCalledOnce();
     await service.close();
   });
 
-  it("waits for cancelled preparation to settle before releasing policy ownership", async () => {
+  it("counts a cancelled preparation out before the manager is released", async () => {
     const manager = managerFor();
     const preparing = Promise.withResolvers<void>();
     const prepared = Promise.withResolvers<{ argv: string[]; env: NodeJS.ProcessEnv }>();
@@ -143,17 +136,14 @@ describe("sandbox lifetime", () => {
     const first = Effect.runPromiseExit(service.sandbox.run(input), { signal: controller.signal });
     await preparing.promise;
     controller.abort();
-    const second = Effect.runPromise(
-      service.sandbox.run({ ...input, command: "second", callId: "second" }),
-    );
-    expect(manager.updateConfig).toHaveBeenCalledTimes(1);
+    const closing = service.close();
+    await Promise.resolve();
+    expect(manager.reset).not.toHaveBeenCalled();
     prepared.resolve({ argv: ["fake", "first"], env: {} });
     expect(Exit.isFailure(await first)).toBe(true);
-    await second;
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[0]?.[0].args).toEqual(["second"]);
-    expect(manager.cleanupAfterCommand).toHaveBeenCalledTimes(2);
-    await service.close();
+    expect(execute).not.toHaveBeenCalled();
+    await closing;
+    expect(manager.reset).toHaveBeenCalledOnce();
   });
 
   it("only records successful initialization, allowing a failed start to retry", async () => {

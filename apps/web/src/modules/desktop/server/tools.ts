@@ -1,3 +1,4 @@
+import { LIMITS } from "@chat/desktop-rpc";
 import { Duration, Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
@@ -38,9 +39,10 @@ export const readLocalFileTool = Tool.make("read_local_file", {
 
 export const findFilesTool = Tool.make("find_files", {
   description:
-    "Find files across the attached folders by glob, newest first: `*.ts` at any depth, " +
-    "`src/**/*.test.ts`, `{a,b}.md`. Skips what .gitignore skips. Capped, so narrow the pattern " +
-    "if the result says it was truncated.",
+    "Find files and folders across the attached folders by glob, newest first: `*.ts` at any depth, " +
+    "`src/**/*.test.ts`, `{a,b}.md`. A folder whose name matches is included, and so is every file " +
+    "inside it, so `*extracted*` finds `DVR/extracted_images/` and its contents. Skips what " +
+    ".gitignore skips. Capped, so narrow the pattern if the result says it was truncated.",
   parameters: Schema.Struct({
     pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
   }),
@@ -87,9 +89,12 @@ export const moveLocalFileTool = Tool.make("move_local_file", {
 
 export const deleteLocalFileTool = Tool.make("delete_local_file", {
   description:
-    "Delete a file, or a folder and everything inside it, within the attached folders. This " +
-    "cannot be undone. The user is always asked first and may refuse.",
-  parameters: Schema.Struct({ path: Path }),
+    "Delete files or folders, and everything inside a folder, within the attached folders. " +
+    `Pass every path in one call rather than one call per file, up to ${LIMITS.deletedPaths}. ` +
+    "The user is asked once for that list and may refuse. This cannot be undone.",
+  parameters: Schema.Struct({
+    paths: Schema.Array(Path).check(Schema.isMinLength(1), Schema.isMaxLength(LIMITS.deletedPaths)),
+  }),
   success: DesktopToolResult,
   failureMode: "return",
 });

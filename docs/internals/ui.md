@@ -30,8 +30,12 @@ className={buttonVariants({...})}>`.
   theme-dependent UI before the application, so controls do not first render browser defaults. The
   document response sets a Content-Security-Policy: production hashes those two boot scripts,
   development leaves Vite's inline preamble and HMR socket room. Auth checks and route loaders
-  still use authorized server functions. Startup shows `StartupPending`;
-  route loading must not replace the authenticated background Work host.
+  still use authorized server functions. Startup shows `StartupPending`.
+  Uncaught route errors and unmatched URLs go through TanStack Start’s root
+  `errorComponent` / `notFoundComponent` and the matching router defaults
+  (`src/ui/route-error.tsx`), which reuse `ErrorState` / `EmptyState`; a
+  conversation 404 stays on that route’s own `notFoundComponent`. Route loading
+  must not replace the authenticated background Work host.
 - Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`, `ListCard`/`ListRow`,
   `EmptyState`, `ErrorState`), used across admin, settings, tools, agents, knowledge and the chats index.
   **`Page` is the scroll container**: the app layout's `<main>` is a fixed-height flex child that never
@@ -148,9 +152,11 @@ false`), so a page body is written against data already there. This includes loc
   creating answer, so rewinding that answer removes it; its rich card stays at the creating tool
   call's text offset, never in a transcript footer. The manual agent editor similarly pins its dirty
   baseline rather than treating a background refetch as permission to overwrite newer settings.
-- Upload-queued composer sends dispatch the current draft and selections together. `Composer` keeps one
-  effect-updated request ref, including `onSend`, so an upload can't pair fresh text with stale skills or
-  a stale parent callback; research mode stays locked while queued.
+- Upload-queued composer sends sample in two moments, on purpose. What the person decided by
+  pressing Submit (`onSend`, research mode, the blocked/disabled state, the model) is frozen at the
+  click; what they can still edit while uploads settle (draft text, skill chips) is read at dispatch.
+  `Composer` keeps one effect-updated request ref for both and copies it at the click; see
+  `docs/internals/desktop.md` for the mode-fixed rule this serves.
 - `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line transcript summary row,
   sitting beside `disclosureTriggerClassName` — a message stacks both. Chat disclosures use
   `~/ui/disclosure.tsx` for measured-height/opacity animation, reduced-motion and hidden-until-found

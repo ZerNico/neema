@@ -307,11 +307,14 @@ export function ErrorState({
   title = "Something went wrong",
   description,
   onRetry,
+  action,
   className,
 }: {
   title?: string;
   description?: string;
   onRetry?: () => void;
+  /** Extra way out besides retry; route errors use this for a home link. */
+  action?: ReactNode;
   className?: string;
 }) {
   return (
@@ -323,11 +326,16 @@ export function ErrorState({
         <EmptyTitle className="text-sm">{title}</EmptyTitle>
         {description ? <EmptyDescription>{description}</EmptyDescription> : null}
       </EmptyHeader>
-      {onRetry ? (
+      {onRetry || action ? (
         <EmptyContent>
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            Try again
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {onRetry ? (
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                Try again
+              </Button>
+            ) : null}
+            {action}
+          </div>
         </EmptyContent>
       ) : null}
     </Empty>

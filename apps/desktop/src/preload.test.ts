@@ -113,9 +113,21 @@ describe("restricted bundled preloads", () => {
     ipc.emit(SIGN_IN_TICKET, electronEvent, "K7MX");
     expect(listener).toHaveBeenCalledExactlyOnceWith("K7MX");
     unsubscribe();
-    expect(ipc.listenerCount(SIGN_IN_TICKET)).toBe(0);
     ipc.emit(SIGN_IN_TICKET, electronEvent, "again");
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a ticket that arrives before the page subscribes, for the first subscriber only", () => {
+    const { exposed, ipc } = probe("preload.ts", "https:");
+    const auth = exposed.get("__chatDesktop")!.auth as DesktopAuth;
+    const electronEvent = { sender: { privileged: true } };
+    ipc.emit(SIGN_IN_TICKET, electronEvent, "EARLY");
+    const first = vi.fn();
+    auth.onTicket(first);
+    expect(first).toHaveBeenCalledExactlyOnceWith("EARLY");
+    const second = vi.fn();
+    auth.onTicket(second);
+    expect(second).not.toHaveBeenCalled();
   });
 
   it("gives a local recovery document read-only chrome and parameterless retry and chooser calls", async () => {

@@ -54,17 +54,83 @@ describe("DesktopActivityBlock", () => {
     expect(screen.getByRole("button", { name: "Allow edits for this chat" })).toBeInTheDocument();
   });
 
-  it("offers no blanket grant for a delete", () => {
+  it("offers no blanket grant for a delete and lists every path", () => {
     const decide = vi.fn();
     show(
       <DesktopActivityBlock
-        activity={running({ callId: "call-3", name: "delete_local_file", args: { path: "old/" } })}
+        activity={running({
+          callId: "call-3",
+          name: "delete_local_file",
+          args: { paths: ["Downloads/dup.pdf", "Downloads/old.zip"] },
+        })}
         approval={{ kind: "delete", decide }}
       />,
     );
-    expect(screen.getByText("Delete from this computer")).toBeInTheDocument();
+    expect(screen.getByText("Delete 2 files in Downloads")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "dup.pdf",
+      "old.zip",
+    ]);
     expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
+  });
+
+  it("groups a mixed-folder delete under each folder name", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          callId: "call-3b",
+          name: "delete_local_file",
+          args: { paths: ["Downloads/dup.pdf", "site/tmp.log"] },
+        })}
+        approval={{ kind: "delete", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("Delete 2 files from this computer")).toBeInTheDocument();
+    expect(screen.getByText("Downloads")).toBeInTheDocument();
+    expect(screen.getByText("site")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "dup.pdf",
+      "tmp.log",
+    ]);
+  });
+
+  it("still names a single-file delete with its full path", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          callId: "call-3c",
+          name: "delete_local_file",
+          args: { paths: ["Downloads/dup.pdf"] },
+        })}
+        approval={{ kind: "delete", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("Delete from this computer")).toBeInTheDocument();
+    expect(screen.getByText("Downloads/dup.pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("still names a delete that used the older single path argument", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({ callId: "call-4", name: "delete_local_file", args: { path: "old/" } })}
+      />,
+    );
+    expect(screen.getByText("Deleting old/")).toBeInTheDocument();
+  });
+
+  it("summarises a many-file delete while it is running", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          callId: "call-5",
+          name: "delete_local_file",
+          args: { paths: ["a.txt", "b.txt"] },
+        })}
+      />,
+    );
+    expect(screen.getByText("Deleting 2 files")).toBeInTheDocument();
   });
 
   it("shows a plain row, with no way to act, once the call is decided", () => {

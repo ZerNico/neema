@@ -115,8 +115,9 @@ describe("DesktopSignIn", () => {
     expect(screen.queryByRole("button", { name: /Change server/ })).not.toBeInTheDocument();
   });
 
-  it("redeems a ticket delivered by the shell's deep link", async () => {
+  it("fills in a deep-linked ticket and redeems it only when the person continues", async () => {
     redeem.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
     const { listeners } = renderPage();
     await waitFor(() => expect(listeners.size).toBe(1));
 
@@ -124,6 +125,12 @@ describe("DesktopSignIn", () => {
       for (const listener of listeners) listener(TICKET);
     });
 
+    // Anyone can open the deep link, so arrival alone must not sign in.
+    expect(screen.getByLabelText("Code")).toHaveValue(TICKET);
+    expect(redeem).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() =>
       expect(redeem).toHaveBeenCalledWith({ ticket: TICKET, verifier: expect.any(String) }),
     );

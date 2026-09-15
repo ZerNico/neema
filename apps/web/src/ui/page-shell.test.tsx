@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
-import { Page, Section, SectionShell } from "./page-shell.tsx";
+import { ErrorState, Page, Section, SectionShell } from "./page-shell.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
@@ -77,5 +77,20 @@ describe("Page", () => {
     expect(scrollerOf(scroller.parentElement)).toBeNull();
     // The shell column must be able to shrink so the Page's h-full is real.
     expect(scroller.parentElement).toHaveClass("min-h-0", "flex-1");
+  });
+});
+
+describe("ErrorState", () => {
+  it("keeps retry and a custom action on the same card", () => {
+    render(
+      <ErrorState
+        title="Could not load this page"
+        onRetry={() => {}}
+        action={<button type="button">Back to chats</button>}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load this page");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Back to chats" })).toBeVisible();
   });
 });

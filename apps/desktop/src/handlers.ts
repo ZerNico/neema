@@ -5,6 +5,7 @@ import {
   DesktopError,
   LIMITS,
   UNOPENABLE_EXTENSIONS,
+  type DeleteFailure,
   type DesktopHandlers,
   type DirectoryEntry,
   type FolderStatus,
@@ -15,8 +16,8 @@ import { unifiedDiff } from "./diff.ts";
 import { GrantStore } from "./grants.ts";
 import { exists, folderName, resolveAcross, resolveInFolder } from "./folders.ts";
 import { Sandbox } from "./sandbox.ts";
-import { findWithRipgrep, searchWithRipgrep } from "./ripgrep.ts";
-import { globToRegExp, walkFiles } from "./walk.ts";
+import { ripgrepAvailable, searchWithRipgrep } from "./ripgrep.ts";
+import { globToRegExp, globMatches, walkFiles } from "./walk.ts";
 
 /** What a model can be handed as bytes: images for vision, PDFs for documents. */
 const BINARY_MEDIA_TYPES: Record<string, string> = {
@@ -70,6 +71,8 @@ export interface Shell {
    * system. Resolves to the system's complaint, or null when it took the path.
    */
   revealPath(absolute: string, mode: RevealMode): Promise<string | null>;
+  /** The server whose conversation ids these are; part of every grant key. */
+  serverOrigin(): string;
   executionSession(): { id: string };
   cancelCall(callId: string): boolean;
   setWorkState(state: { active: number; needsApproval: number }): void;
@@ -90,6 +93,11 @@ const alreadyAttached = (name: string) =>
     message: `A folder named ${name} is already attached. Rename one of them, or choose a different folder.`,
   });
 
+const deleteFailureReason = (reason: DesktopError["reason"]): DeleteFailure["reason"] =>
+  reason === "outside-folder" || reason === "not-found" || reason === "no-folder"
+    ? reason
+    : "failed";
+
 /**
  * A glob may name a folder (`site/**`). Strip that so it applies inside the
  * folder it names and skips the others. Find and search share this so a
@@ -103,15 +111,23 @@ const globScope = (
   if (!glob) return { glob: undefined, skip: false };
   const [head, ...rest] = glob.split("/");
   if (!folders.some((folder) => folderName(folder) === head)) return { glob, skip: false };
-  return head === name
-    ? { glob: rest.join("/") || undefined, skip: false }
-    : { glob, skip: true };
+  return head === name ? { glob: rest.join("/") || undefined, skip: false } : { glob, skip: true };
 };
 
 export const makeHandlers = (shell: Shell) =>
   Effect.gen(function* () {
-    const grants = yield* GrantStore;
+    const store = yield* GrantStore;
     const sandbox = yield* Sandbox;
+    // Every grant is looked up under the origin the shell is connected to, so
+    // the handlers cannot forget to scope one.
+    const key = (conversationId: string) => ({ origin: shell.serverOrigin(), conversationId });
+    const grants = {
+      lookup: (conversationId: string) => store.lookup(key(conversationId)),
+      remember: (conversationId: string, folder: string) =>
+        store.remember(key(conversationId), folder),
+      forget: (conversationId: string, folder: string) => store.forget(key(conversationId), folder),
+      forgetAll: (conversationId: string) => store.forgetAll(key(conversationId)),
+    };
 
     /** The attached folders, or a refusal. Used by everything that touches disk. */
     const foldersFor = (conversationId: string) =>
@@ -122,6 +138,38 @@ export const makeHandlers = (shell: Shell) =>
     /** A model path, `site/src/index.ts`, resolved inside the folder it names. */
     const locate = (conversationId: string, path: string) =>
       Effect.flatMap(foldersFor(conversationId), (folders) => resolveAcross(folders, path));
+
+    /** One path from a batch. The folder root is the user's to detach, never to delete. */
+    const removeAt = (conversationId: string, path: string) =>
+      Effect.gen(function* () {
+        const target = yield* locate(conversationId, path);
+        if (target.absolute === target.root) {
+          return yield* Effect.fail(
+            new DesktopError({
+              reason: "outside-folder",
+              message: "The folder itself cannot be deleted.",
+            }),
+          );
+        }
+        const info = yield* Effect.tryPromise({
+          try: () => stat(target.absolute),
+          catch: () =>
+            new DesktopError({
+              reason: "not-found",
+              message: `${target.relative} does not exist.`,
+            }),
+        });
+        const kind = info.isDirectory() ? ("directory" as const) : ("file" as const);
+        yield* Effect.tryPromise({
+          try: () => rm(target.absolute, { recursive: kind === "directory" }),
+          catch: () =>
+            new DesktopError({
+              reason: "failed",
+              message: `Could not delete ${target.relative}.`,
+            }),
+        });
+        return { path: target.relative, kind };
+      });
 
     const status = (conversationId: string): Effect.Effect<FolderStatus> =>
       Effect.gen(function* () {
@@ -483,37 +531,24 @@ export const makeHandlers = (shell: Shell) =>
           return { from: source.relative, to: destination.relative };
         }),
 
-      deletePath: ({ conversationId, path }) =>
+      deletePath: ({ conversationId, paths }) =>
         Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
-          // A bare folder name is the folder itself, which is the user's to
-          // detach, never the model's to delete.
-          if (target.absolute === target.root) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "outside-folder",
-                message: "The folder itself cannot be deleted.",
-              }),
-            );
+          // Conversation-level: nothing to delete against. Per-path misses
+          // stay in the receipt so one missing file does not abort the rest.
+          yield* foldersFor(conversationId);
+          const deleted: { path: string; kind: "file" | "directory" }[] = [];
+          const failed: DeleteFailure[] = [];
+          for (const path of new Set(paths)) {
+            const outcome = yield* Effect.result(removeAt(conversationId, path));
+            if (outcome._tag === "Success") deleted.push(outcome.success);
+            else
+              failed.push({
+                path,
+                reason: deleteFailureReason(outcome.failure.reason),
+                message: outcome.failure.message,
+              });
           }
-          const info = yield* Effect.tryPromise({
-            try: () => stat(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${target.relative} does not exist.`,
-              }),
-          });
-          const kind = info.isDirectory() ? ("directory" as const) : ("file" as const);
-          yield* Effect.tryPromise({
-            try: () => rm(target.absolute, { recursive: kind === "directory" }),
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not delete ${target.relative}.`,
-              }),
-          });
-          return { path: target.relative, kind };
+          return { deleted, failed };
         }),
 
       findFiles: ({ conversationId, pattern }) =>
@@ -536,14 +571,16 @@ export const makeHandlers = (shell: Shell) =>
             });
             const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
             if (root._tag === "Failure") continue;
-            const fast = yield* findWithRipgrep(root.success.absolute, scope.glob);
-            if (fast) {
-              paths.push(...fast.paths.slice(0, perFolder).map((rel) => prefixed(name, rel)));
-              truncated ||= fast.truncated || fast.paths.length > perFolder;
-              continue;
-            }
+            // Walker, not rg: `--files` never names a directory, so a glob like
+            // `**/*extracted*` would miss `DVR/extracted_images/` and every file
+            // inside it whose own name does not match.
             const walked = yield* Effect.promise(() =>
-              walkFiles(root.success.absolute, WALK_LIMIT, (rel) => matcher.test(rel)),
+              walkFiles(
+                root.success.absolute,
+                WALK_LIMIT,
+                (rel) => globMatches(matcher, rel),
+                (rel) => matcher.test(rel),
+              ),
             );
             // Newest first: the file just changed is the one being asked about.
             const sorted = walked.files.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -568,11 +605,6 @@ export const makeHandlers = (shell: Shell) =>
                 message: `${pattern} is not a valid regular expression.`,
               }),
           });
-          const badPattern = () =>
-            new DesktopError({
-              reason: "bad-pattern",
-              message: `${pattern} is not a valid regular expression.`,
-            });
           const matches: SearchMatch[] = [];
           let filesSearched = 0;
           let truncated = false;
@@ -586,10 +618,8 @@ export const makeHandlers = (shell: Shell) =>
             if (scope.skip) continue;
             const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
             if (root._tag === "Failure") continue;
-            const fast = yield* searchWithRipgrep(root.success.absolute, pattern, scope.glob).pipe(
-              Effect.mapError(badPattern),
-            );
-            if (fast) {
+            if (yield* Effect.promise(ripgrepAvailable)) {
+              const fast = yield* searchWithRipgrep(root.success.absolute, pattern, scope.glob);
               for (const hit of fast.matches) {
                 if (matches.length >= LIMITS.matches) {
                   truncated = true;
@@ -601,7 +631,13 @@ export const makeHandlers = (shell: Shell) =>
               truncated ||= fast.truncated;
               continue;
             }
-            const matcher = scope.glob ? globToRegExp(scope.glob) : null;
+            const matcher = scope.glob
+              ? yield* Effect.try({
+                  try: () => globToRegExp(scope.glob!),
+                  catch: () =>
+                    new DesktopError({ reason: "bad-pattern", message: `Could not read ${glob}.` }),
+                })
+              : null;
             const walked = yield* Effect.promise(() =>
               walkFiles(root.success.absolute, WALK_LIMIT, (rel) =>
                 matcher ? matcher.test(rel) : true,
@@ -613,11 +649,9 @@ export const makeHandlers = (shell: Shell) =>
                 truncated = true;
                 break;
               }
-              const loaded = yield* readPrefix(
-                file.absolute,
-                LIMITS.readBytes,
-                file.relative,
-              ).pipe(Effect.result);
+              const loaded = yield* readPrefix(file.absolute, LIMITS.readBytes, file.relative).pipe(
+                Effect.result,
+              );
               if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
               filesSearched += 1;
               const lines = loaded.success.toString("utf8").split("\n");
@@ -666,7 +700,7 @@ export const makeHandlers = (shell: Shell) =>
           return { path: target.relative, created: !existed, bytes };
         }),
 
-      runCommand: ({ conversationId, callId, command, folder, timeoutMs, network }) =>
+      runCommand: ({ conversationId, callId, command, folder, timeoutMs }) =>
         Effect.gen(function* () {
           const folders = yield* foldersFor(conversationId);
           // The named folder is the cwd; every attached folder is writable, so
@@ -683,7 +717,6 @@ export const makeHandlers = (shell: Shell) =>
             cwd: cwd.absolute,
             allowWrite: roots.filter((root): root is string => root !== null),
             timeoutMs,
-            network,
           });
         }),
 

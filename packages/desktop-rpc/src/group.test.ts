@@ -10,7 +10,7 @@ const cases = [
   { tag: "writeFile", payload: { ...path, text: "hello" } },
   { tag: "editFile", payload: { ...path, old: "hello", new: "world", all: false } },
   { tag: "movePath", payload: { conversationId: "chat", from: "work/a", to: "work/b" } },
-  { tag: "deletePath", payload: path },
+  { tag: "deletePath", payload: { conversationId: "chat", paths: ["work/file"] } },
   { tag: "findFiles", payload: { conversationId: "chat", pattern: "*.ts" } },
   { tag: "searchFiles", payload: { conversationId: "chat", pattern: "needle" } },
 ];
@@ -31,7 +31,6 @@ describe("model operation identity", () => {
       command: "true",
       folder: "work",
       timeoutMs: 100,
-      network: "none",
     };
     expect(() => decode(payload)).toThrow();
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });

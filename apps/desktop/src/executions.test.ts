@@ -7,7 +7,7 @@ const payload = { callId: "call", conversationId: "chat", path: "work/file.txt" 
 const reply = { ok: true, value: { text: "hello" } } as const;
 
 describe("main-process executions", () => {
-  it("deduplicates in-flight and completed calls across renderer clients", async () => {
+  it("joins a reloaded renderer onto the call its predecessor started", async () => {
     const finish = Promise.withResolvers<typeof reply>();
     const started = Promise.withResolvers<void>();
     const run = vi.fn(() => {
@@ -15,42 +15,45 @@ describe("main-process executions", () => {
       return finish.promise;
     });
     const executions = makeExecutions(run);
-    const first = executions.request("readFile", payload);
+    const first = executions.request("writeFile", payload);
     await started.promise;
-    const reloaded = executions.request("readFile", {
-      path: payload.path,
-      conversationId: "chat",
-      callId: "call",
-    });
+    const reloaded = executions.request("writeFile", { ...payload });
     expect(first).toBe(reloaded);
     finish.resolve(reply);
     expect(await first).toEqual(reply);
-    expect(await executions.request("readFile", payload)).toEqual(reply);
     expect(run).toHaveBeenCalledTimes(1);
     await executions.dispose();
   });
 
-  it("rejects changed payloads, but permits readFile then readBinary under one call id", async () => {
+  it("answers a replayed side effect from its retained result, and a read by reading again", async () => {
     const run = vi.fn(async () => reply);
     const executions = makeExecutions(run);
-    await executions.request("readFile", payload);
-    expect(await executions.request("readFile", { ...payload, path: "work/other" })).toMatchObject({
-      ok: false,
-    });
-    expect(await executions.request("readBinary", payload)).toEqual(reply);
+    expect(await executions.request("writeFile", payload)).toEqual(reply);
+    expect(await executions.request("writeFile", payload)).toEqual(reply);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(await executions.request("readFile", payload)).toEqual(reply);
+    expect(await executions.request("readFile", payload)).toEqual(reply);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps operations under one call id apart by their tag", async () => {
+    const run = vi.fn(async () => reply);
+    const executions = makeExecutions(run);
+    await executions.request("editFile", payload);
+    expect(await executions.request("runCommand", payload)).toEqual(reply);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
-  it("retains failures, rather than retrying their effects", async () => {
+  it("retains a failed side effect rather than retrying it", async () => {
     const failure = refusalReply("not-found", "Missing.");
     const run = vi.fn(async () => failure);
     const executions = makeExecutions(run);
-    expect(await executions.request("readFile", payload)).toEqual(failure);
-    expect(await executions.request("readFile", payload)).toEqual(failure);
+    expect(await executions.request("deletePath", payload)).toEqual(failure);
+    expect(await executions.request("deletePath", payload)).toEqual(failure);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("tombstones delayed requests even when cancellation arrives first", async () => {
+  it("refuses a request that arrives after its cancellation", async () => {
     const run = vi.fn(async () => reply);
     const executions = makeExecutions(run);
     expect(executions.cancelCall("call")).toBe(false);
@@ -59,7 +62,22 @@ describe("main-process executions", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("aborts running fibers and waits for their finalizers during disposal", async () => {
+  it("forgets results and cancellations once the server would no longer accept them", async () => {
+    let now = 0;
+    const run = vi.fn(async () => reply);
+    const executions = makeExecutions(run, { now: () => now, retentionMs: 10 });
+    await executions.request("writeFile", payload);
+    executions.cancelCall("stopped");
+    now = 5;
+    expect(await executions.request("writeFile", payload)).toEqual(reply);
+    expect(run).toHaveBeenCalledTimes(1);
+    now = 11;
+    expect(await executions.request("writeFile", payload)).toEqual(reply);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(await executions.request("writeFile", { ...payload, callId: "stopped" })).toEqual(reply);
+  });
+
+  it("aborts running work and waits for its finalizers during disposal", async () => {
     const started = Promise.withResolvers<void>();
     const cleaning = Promise.withResolvers<void>();
     const cleaned = Promise.withResolvers<void>();
@@ -96,35 +114,8 @@ describe("main-process executions", () => {
     });
   });
 
-  it("never evicts active work to meet retention or capacity limits", async () => {
-    let now = 0;
-    const finish = Promise.withResolvers<typeof reply>();
-    const run = vi.fn(() => finish.promise);
-    const executions = makeExecutions(run, { now: () => now, retentionMs: 10, maxEntries: 1 });
-    const first = executions.request("readFile", payload);
-    now = 100;
-    expect(await executions.request("readFile", { ...payload, callId: "second" })).toMatchObject({
-      ok: false,
-    });
-    expect(executions.request("readFile", payload)).toBe(first);
-    finish.resolve(reply);
-    await first;
-    now = 111;
-    expect(await executions.request("readFile", { ...payload, callId: "second" })).toEqual(reply);
-    expect(run).toHaveBeenCalledTimes(2);
-  });
-
-  it("bounds cached reply bytes without allowing the operation to run again", async () => {
-    const run = vi.fn(async () => reply);
-    const executions = makeExecutions(run, { maxBytes: 1 });
-    expect(await executions.request("readFile", payload)).toEqual(reply);
-    expect(await executions.request("readFile", payload)).toMatchObject({ ok: false });
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
   it("gives each app lifetime a new execution identity", () => {
     const first = makeExecutions(async () => reply);
-    expect(first.id).toBe(first.id);
     expect(first.id).not.toBe(makeExecutions(async () => reply).id);
   });
 });

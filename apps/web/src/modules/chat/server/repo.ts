@@ -88,8 +88,8 @@ export interface GenerationConfig {
   readonly knowledgeMode: "none" | "context" | "retrieval";
   readonly searchEnabled: boolean;
   readonly planEnabled: boolean;
-  /** Folder name when this attempt could reach a machine; null when it could not. */
-  readonly desktopFolder?: string | null;
+  /** Folder names when this attempt could reach a machine; null when it could not. */
+  readonly desktopFolders?: ReadonlyArray<string> | null;
   /** Whether that machine could sandbox a command at the time. */
   readonly desktopCommands?: boolean;
 }
@@ -325,7 +325,7 @@ const toConfig = (
   knowledgeMode: row.knowledgeMode,
   searchEnabled: row.searchEnabled,
   planEnabled: row.planEnabled,
-  desktopFolder: row.desktopFolder,
+  desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
 });
 
@@ -420,7 +420,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       knowledgeMode: config.knowledgeMode,
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
-      desktopFolder: config.desktopFolder ?? null,
+      desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
       collectionIds: [...config.collectionIds],
     })
@@ -528,7 +528,6 @@ export class ChatRepo extends Context.Service<
         title: string;
         modelId: string;
         lastMessageAt: Date;
-        networkLevel: "none" | "packages" | "all";
         permissionLevel: "manual" | "auto" | "skip";
       }>,
     ): Effect.Effect<void>;
@@ -1126,9 +1125,8 @@ export class ChatRepo extends Context.Service<
                     modelId: source.modelId,
                     // A branch of a work chat is still work: its history is
                     // full of folder activity the continuation has to match.
-                    // Network and approval levels are facts about the chat too.
+                    // The approval level is a fact about the chat too.
                     mode: source.mode,
-                    networkLevel: source.networkLevel,
                     permissionLevel: source.permissionLevel,
                     branchedFrom: source.id,
                     // Left null so the branch sorts by its own createdAt (now)

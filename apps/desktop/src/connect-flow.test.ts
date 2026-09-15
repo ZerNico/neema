@@ -136,7 +136,10 @@ describe("connecting", () => {
     effects.chooser.mockReturnValue(chooser);
     effects.confirmSwitch.mockResolvedValueOnce(false);
     const flow = makeConnectFlow(effects);
-    await expect(flow.connect("https://other.example.com")).resolves.toEqual({ ok: true });
+    await expect(flow.connect("https://other.example.com")).resolves.toEqual({
+      ok: true,
+      declined: true,
+    });
     expect(effects.confirmSwitch).toHaveBeenCalledOnce();
     expect(effects.writeConfig).not.toHaveBeenCalled();
     expect(effects.disposeWork).not.toHaveBeenCalled();

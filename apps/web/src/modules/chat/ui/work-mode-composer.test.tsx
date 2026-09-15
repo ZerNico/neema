@@ -182,7 +182,7 @@ describe("work mode", () => {
     await userEvent.click(sendButton());
     expect(sent).toHaveBeenLastCalledWith({
       fromDesktop: true,
-      desktopFolder: "site",
+      desktopFolders: ["site"],
       desktopCommands: true,
     });
     await userEvent.click(screen.getByRole("button", { name: "site" }));

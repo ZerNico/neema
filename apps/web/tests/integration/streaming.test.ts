@@ -3088,7 +3088,7 @@ describe("local tools on the user's machine", () => {
         attachmentIds: [],
         fromDesktop: true,
         desktopExecutorId: "desktop-test-session",
-        desktopFolder: folder,
+        desktopFolders: [folder],
         desktopCommands,
       }),
     );
@@ -3175,13 +3175,13 @@ describe("local tools on the user's machine", () => {
               searchEnabled: false,
               fromDesktop: true,
               desktopExecutorId: "answer-session",
-              desktopFolder: "answer-folder",
+              desktopFolders: ["answer-folder"],
               desktopCommands: false,
             });
             yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
-            expect((yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolder).toBe(
-              "answer-folder",
-            );
+            expect(
+              (yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolders,
+            ).toEqual(["answer-folder"]);
             const rows = yield* repo.listMessages(seed.conversation.id);
             const answer = rows.find((row) => row.questionResponse)!;
             if (path === "missing assistant") yield* repo.deleteMessages([sent.assistantMessageId]);
@@ -3198,17 +3198,14 @@ describe("local tools on the user's machine", () => {
               },
               fromDesktop: true,
               desktopExecutorId: "edit-answer-session",
-              desktopFolder: "edited-folder",
+              desktopFolders: ["edited-folder"],
               desktopCommands: true,
             });
             yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
             const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
-            expect(config?.desktopFolder).toBe("edited-folder");
+            expect(config?.desktopFolders).toEqual(["edited-folder"]);
             expect(config?.desktopCommands).toBe(true);
-            yield* repo.updateConversation(seed.conversation.id, {
-              permissionLevel: "skip",
-              networkLevel: "all",
-            });
+            yield* repo.updateConversation(seed.conversation.id, { permissionLevel: "skip" });
             const branch = yield* repo.cloneConversationPrefix({
               userId: seed.userId,
               sourceConversationId: seed.conversation.id,
@@ -3216,7 +3213,6 @@ describe("local tools on the user's machine", () => {
             });
             expect(branch.mode).toBe("work");
             expect(branch.permissionLevel).toBe("skip");
-            expect(branch.networkLevel).toBe("all");
             expect(
               (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session"))
                 .calls,
@@ -3280,7 +3276,7 @@ describe("local tools on the user's machine", () => {
       const retried = await runtime.runPromise(
         ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
       );
-      expect(retried?.desktopFolder).toBeNull();
+      expect(retried?.desktopFolders).toBeNull();
       expect(retried?.desktopCommands).toBe(false);
       expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).not.toContain("read_local_file");
       const detail = await runtime.runPromise(
@@ -3299,7 +3295,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "current-edit-session",
-            desktopFolder: "current-folder",
+            desktopFolders: ["current-folder"],
             desktopCommands: true,
           }),
         ),
@@ -3308,7 +3304,7 @@ describe("local tools on the user's machine", () => {
       const edited = await runtime.runPromise(
         ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
       );
-      expect(edited?.desktopFolder).toBe("current-folder");
+      expect(edited?.desktopFolders).toEqual(["current-folder"]);
       expect(edited?.desktopCommands).toBe(true);
       expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).toContain("run_command");
     } finally {
@@ -3406,7 +3402,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
-            desktopFolder: folder,
+            desktopFolders: [folder],
           }),
         ),
       );
@@ -3552,7 +3548,7 @@ describe("local tools on the user's machine", () => {
                 fromDesktop: true,
                 desktopExecutorId: "executor-1",
                 deviceSessionId,
-                desktopFolder: folder,
+                desktopFolders: [folder],
               });
               return { conversation, messageId: sent.assistantMessageId };
             }),
@@ -3663,7 +3659,7 @@ describe("local tools on the user's machine", () => {
             mode: "work",
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
-            desktopFolder: folder,
+            desktopFolders: [folder],
           }),
         ),
       );
@@ -3749,7 +3745,7 @@ describe("local tools on the user's machine", () => {
             mode: "work",
             fromDesktop: true,
             desktopExecutorId: "ignored-session",
-            desktopFolder: "ignored-folder",
+            desktopFolders: ["ignored-folder"],
             desktopCommands: true,
           }),
         ),

@@ -50,8 +50,8 @@ import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./titl
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
     searchEnabled: boolean;
-    /** Folder attached on the machine this send came from, by name. */
-    desktopFolder?: string | undefined;
+    /** Folders attached on the machine this send came from, by name. */
+    desktopFolders?: ReadonlyArray<string> | undefined;
     desktopCommands?: boolean | undefined;
     fromDesktop?: boolean | undefined;
     desktopExecutorId?: string | undefined;
@@ -133,7 +133,7 @@ export class ChatService extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
-        desktopFolder?: string | undefined;
+        desktopFolders?: ReadonlyArray<string> | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
@@ -176,8 +176,7 @@ export class ChatService extends Context.Service<
     updateWorkSettings(input: {
       userId: string;
       conversationId: string;
-      networkLevel?: "none" | "packages" | "all" | undefined;
-      permissionLevel?: "manual" | "auto" | "skip" | undefined;
+      permissionLevel: "manual" | "auto" | "skip";
     }): Effect.Effect<void, ConversationNotFound | InvalidMessage>;
     renameConversation(input: {
       userId: string;
@@ -319,8 +318,8 @@ function makeChatService() {
           searchAvailable: boolean;
           collectionIds?: ReadonlyArray<string> | undefined;
           skillIds?: ReadonlyArray<string> | undefined;
-          /** Folder the sending machine reported; retry has no submission. */
-          desktopFolder?: string | undefined;
+          /** Folders the sending machine reported; retry has no submission. */
+          desktopFolders?: ReadonlyArray<string> | undefined;
           desktopCommands?: boolean | undefined;
           fromDesktop?: boolean | undefined;
           desktopExecutorId?: string | undefined;
@@ -339,9 +338,12 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
-          const desktopFolder = defaults.mode === "work" ? (input.desktopFolder ?? null) : null;
+          const desktopFolders =
+            defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
+              ? input.desktopFolders
+              : null;
           const desktopCommands =
-            defaults.mode === "work" && !!desktopFolder && !!input.desktopCommands;
+            defaults.mode === "work" && desktopFolders !== null && !!input.desktopCommands;
           if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
             return yield* new WorkDesktopRequired();
           // An edit that submits a selection is changing it, so it cannot take the
@@ -366,7 +368,7 @@ function makeChatService() {
                 [],
               ),
               searchEnabled,
-              desktopFolder,
+              desktopFolders,
               desktopCommands,
             };
           }
@@ -391,7 +393,7 @@ function makeChatService() {
               ? (editedSkills ?? continuation?.standaloneSkillIds)
               : (continuation?.standaloneSkillIds ?? input.skillIds),
             searchEnabled,
-            desktopFolder,
+            desktopFolders,
             desktopCommands,
             model: input.model,
             searchAvailable: input.searchAvailable,
@@ -440,7 +442,7 @@ function makeChatService() {
           attempt: "send",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
-          ...(input.desktopFolder !== undefined ? { desktopFolder: input.desktopFolder } : {}),
+          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
@@ -514,7 +516,7 @@ function makeChatService() {
           messageId: string;
           attachmentIds: ReadonlyArray<string>;
           searchEnabled: boolean;
-          desktopFolder?: string | undefined;
+          desktopFolders?: ReadonlyArray<string> | undefined;
           desktopCommands?: boolean | undefined;
           fromDesktop?: boolean | undefined;
           desktopExecutorId?: string | undefined;
@@ -543,8 +545,8 @@ function makeChatService() {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
                   desktopExecutorId: input.desktopExecutorId,
-                  ...(input.edit.desktopFolder !== undefined
-                    ? { desktopFolder: input.edit.desktopFolder }
+                  ...(input.edit.desktopFolders !== undefined
+                    ? { desktopFolders: input.edit.desktopFolders }
                     : {}),
                   ...(input.edit.desktopCommands !== undefined
                     ? { desktopCommands: input.edit.desktopCommands }
@@ -559,7 +561,7 @@ function makeChatService() {
                   attempt: "retry",
                   fromDesktop: input.fromDesktop,
                   desktopExecutorId: input.desktopExecutorId,
-                  desktopFolder: input.desktopFolder,
+                  desktopFolders: input.desktopFolders,
                   desktopCommands: input.desktopCommands,
                 }),
           }),
@@ -703,7 +705,7 @@ function makeChatService() {
         desktopExecutorId: input.desktopExecutorId,
         deviceSessionId: input.deviceSessionId,
         fromDesktop: input.fromDesktop,
-        desktopFolder: input.desktopFolder,
+        desktopFolders: input.desktopFolders,
         desktopCommands: input.desktopCommands,
         expectedMessages: all,
         userId: input.userId,
@@ -811,8 +813,8 @@ function makeChatService() {
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
-        /** Folder attached on the machine this edit came from, by name. */
-        desktopFolder?: string | undefined;
+        /** Folders attached on the machine this edit came from, by name. */
+        desktopFolders?: ReadonlyArray<string> | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
@@ -873,7 +875,7 @@ function makeChatService() {
           desktopExecutorId: input.desktopExecutorId,
           deviceSessionId: input.deviceSessionId,
           fromDesktop: input.fromDesktop,
-          desktopFolder: input.desktopFolder,
+          desktopFolders: input.desktopFolders,
           desktopCommands: input.desktopCommands,
           expectedMessages: all,
           userId: input.userId,
@@ -893,7 +895,7 @@ function makeChatService() {
             searchEnabled: input.searchEnabled,
             fromDesktop: input.fromDesktop,
             desktopExecutorId: input.desktopExecutorId,
-            desktopFolder: input.desktopFolder,
+            desktopFolders: input.desktopFolders,
             desktopCommands: input.desktopCommands,
             ...(input.skillIds ? { skillIds: input.skillIds } : {}),
             ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
@@ -923,7 +925,7 @@ function makeChatService() {
           attempt: "edit",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
-          ...(input.desktopFolder !== undefined ? { desktopFolder: input.desktopFolder } : {}),
+          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
@@ -1020,15 +1022,13 @@ function makeChatService() {
     const updateWorkSettings = Effect.fn("ChatService.updateWorkSettings")(function* (input: {
       userId: string;
       conversationId: string;
-      networkLevel?: "none" | "packages" | "all" | undefined;
-      permissionLevel?: "manual" | "auto" | "skip" | undefined;
+      permissionLevel: "manual" | "auto" | "skip";
     }) {
       const conversation = yield* repo.getConversation(input.userId, input.conversationId);
       if (conversation.mode !== "work")
         return yield* new InvalidMessage({ reason: "only a work chat has work settings" });
       yield* repo.updateConversation(input.conversationId, {
-        ...(input.networkLevel ? { networkLevel: input.networkLevel } : {}),
-        ...(input.permissionLevel ? { permissionLevel: input.permissionLevel } : {}),
+        permissionLevel: input.permissionLevel,
       });
       yield* sync.publish(input.userId, {
         type: "conversation.updated",

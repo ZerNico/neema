@@ -22,7 +22,6 @@ const snapshot = (...calls: ExternalOperation[]): WorkSnapshot => ({
     conversationId,
     title: conversationId,
     approval: "auto",
-    network: "none",
   })),
 });
 const controllers: WorkController[] = [];
@@ -152,7 +151,7 @@ describe("app-owned Work execution", () => {
     controller.decide("next", "allow-rest");
     await completed;
     expect(deps.execute).toHaveBeenCalledTimes(1);
-    expect(deps.execute).toHaveBeenCalledWith(next, "none");
+    expect(deps.execute).toHaveBeenCalledWith(next, expect.any(Number));
     expect(deps.cancel).toHaveBeenCalledWith("old");
   });
 

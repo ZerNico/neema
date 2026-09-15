@@ -14,7 +14,11 @@ const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength
 /** The document open in the panel when the message was sent; the model reads it first. */
 const OpenDocumentId = Schema.optionalKey(ResourceId);
 export const desktopSubmissionFields = {
-  desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+  desktopFolders: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))).check(
+      Schema.isMaxLength(32),
+    ),
+  ),
   desktopCommands: Schema.optionalKey(Schema.Boolean),
   fromDesktop: Schema.optionalKey(Schema.Boolean),
   desktopExecutorId: Schema.optionalKey(ResourceId),
@@ -130,16 +134,12 @@ export const EditMessageInput = Schema.Union([
   }),
 ]);
 
-export const NetworkLevel = Schema.Literals(["none", "packages", "all"]);
-export type NetworkLevel = typeof NetworkLevel.Type;
 export const PermissionLevel = Schema.Literals(["manual", "auto", "skip"]);
 export type PermissionLevel = typeof PermissionLevel.Type;
 
-/** Either field alone is a valid update; omitted keeps the current value. */
 export const UpdateWorkSettingsInput = Schema.Struct({
   conversationId: Schema.String,
-  networkLevel: Schema.optionalKey(NetworkLevel),
-  permissionLevel: Schema.optionalKey(PermissionLevel),
+  permissionLevel: PermissionLevel,
 });
 
 export const RenameConversationInput = Schema.Struct({

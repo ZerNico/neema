@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unifiedDiff } from "./diff.ts";
-import { globToRegExp, walkFiles } from "./walk.ts";
+import { globMatches, globToRegExp, walkFiles } from "./walk.ts";
 
 describe("globToRegExp", () => {
   const matches = (pattern: string, path: string) => globToRegExp(pattern).test(path);
@@ -31,6 +31,18 @@ describe("globToRegExp", () => {
   it("treats regex metacharacters literally", () => {
     expect(matches("a.b", "axb")).toBe(false);
     expect(matches("(x)", "(x)")).toBe(true);
+  });
+});
+
+describe("globMatches", () => {
+  const matches = (pattern: string, path: string) => globMatches(globToRegExp(pattern), path);
+
+  it("includes files that sit inside a matching folder", () => {
+    expect(matches("**/*extracted*", "DVR/extracted_images")).toBe(true);
+    expect(matches("**/*extracted*", "DVR/extracted_images/frame.png")).toBe(true);
+    expect(matches("**/*extracted*", "DVR/other/frame.png")).toBe(false);
+    expect(matches("*.ts", "src/index.ts")).toBe(true);
+    expect(matches("*.ts", "src/nested")).toBe(false);
   });
 });
 
@@ -78,6 +90,20 @@ describe("walkFiles", () => {
     const { files, truncated } = await walkFiles(root, 2);
     expect(files.length).toBeLessThanOrEqual(2);
     expect(truncated).toBe(true);
+  });
+
+  it("can name a matching directory as well as the files under it", async () => {
+    const matcher = globToRegExp("**/*nested*");
+    const { files } = await walkFiles(
+      root,
+      1000,
+      (rel) => globMatches(matcher, rel),
+      (rel) => matcher.test(rel),
+    );
+    const paths = files.map((file) => file.relative).sort();
+    expect(paths).toContain("src/nested/");
+    expect(paths).toContain("src/nested/deep.ts");
+    expect(paths).not.toContain("src/index.ts");
   });
 });
 

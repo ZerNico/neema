@@ -1,6 +1,12 @@
 import { toOrigin } from "./config.ts";
 
-export type ConnectOutcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * `declined` is the person keeping their current server when asked; the
+ * chooser stays open and usable. It is not a failure, so it carries no message.
+ */
+export type ConnectOutcome =
+  | { readonly ok: true; readonly declined?: true }
+  | { readonly ok: false; readonly message: string };
 
 export interface ConnectHost {
   /** True while a developer pinned the server; the stored choice is then never touched. */
@@ -41,7 +47,7 @@ export const makeConnectFlow = (host: ConnectHost) => {
     switching = (async () => {
       if (host.hasMain() && host.hasWork()) {
         // Declining is the person's own answer, not a refusal to report.
-        if (!(await host.confirmSwitch())) return { ok: true } as const;
+        if (!(await host.confirmSwitch())) return { ok: true, declined: true } as const;
         await host.disposeWork();
       }
       host.openConnect(host.currentOrigin());
@@ -58,7 +64,7 @@ export const makeConnectFlow = (host: ConnectHost) => {
     const origin = typeof candidate === "string" ? toOrigin(candidate) : null;
     if (origin === null) return { ok: false, message: "That does not look like a server address." };
     if (host.hasWork()) {
-      if (!(await host.confirmSwitch())) return { ok: true };
+      if (!(await host.confirmSwitch())) return { ok: true, declined: true };
     }
     await host.writeConfig(origin);
     if (host.hasMain() || host.hasWork()) {

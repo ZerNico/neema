@@ -12,6 +12,7 @@ import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import { EmptyState } from "~/ui/page-shell.tsx";
+import { RouteStatusScreen } from "~/ui/route-error.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 
@@ -72,7 +73,7 @@ function ChatPending() {
 
 function ChatNotFound() {
   return (
-    <div className="flex h-full items-center justify-center p-6">
+    <RouteStatusScreen>
       <EmptyState
         icon={BubbleChatCancelIcon}
         title="Chat not found"
@@ -84,6 +85,6 @@ function ChatNotFound() {
           </Link>
         }
       />
-    </div>
+    </RouteStatusScreen>
   );
 }

@@ -31,6 +31,8 @@ export const LIMITS = {
   matches: 200,
   /** Characters kept of one matching line. */
   matchChars: 400,
+  /** Paths accepted in one delete. A cleanup is one call, not one per file. */
+  deletedPaths: 100,
   /** Bytes of one binary file (image or document) sent to the model. */
   binaryBytes: 20 * 1024 * 1024,
 } as const;
@@ -100,9 +102,22 @@ export const MoveReceipt = Schema.Struct({
 });
 export type MoveReceipt = typeof MoveReceipt.Type;
 
-export const DeleteReceipt = Schema.Struct({
+export const DeleteItem = Schema.Struct({
   path: Schema.String,
   kind: Schema.Literals(["file", "directory"]),
+});
+export type DeleteItem = typeof DeleteItem.Type;
+
+export const DeleteFailure = Schema.Struct({
+  path: Schema.String,
+  reason: Schema.Literals(["no-folder", "outside-folder", "not-found", "failed"]),
+  message: Schema.String,
+});
+export type DeleteFailure = typeof DeleteFailure.Type;
+
+export const DeleteReceipt = Schema.Struct({
+  deleted: Schema.Array(DeleteItem),
+  failed: Schema.Array(DeleteFailure),
 });
 export type DeleteReceipt = typeof DeleteReceipt.Type;
 
@@ -244,14 +259,6 @@ export const UNOPENABLE_EXTENSIONS = new Set([
  */
 export const RevealMode = Schema.Literals(["reveal", "open"]);
 export type RevealMode = typeof RevealMode.Type;
-
-/**
- * How far a command may reach. Package managers are what a build needs and
- * the default. Policy of the chat, held by the server; the page passes it
- * down with each command, so the desktop never stores it.
- */
-export const NetworkLevel = Schema.Literals(["none", "packages", "all"]);
-export type NetworkLevel = typeof NetworkLevel.Type;
 
 /** Whether commands can run, and if not, whether the app itself can fix it. */
 export const SandboxAvailability = Schema.Union([

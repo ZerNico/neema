@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { desktopToolsSystemHint, forTranscript } from "./tool-schema.ts";
+import { deletePathsOf, desktopToolsSystemHint, forTranscript } from "./tool-schema.ts";
 
 describe("desktop tools system hint", () => {
   it("separates the file-tool address space from a command's working folder", () => {
@@ -9,6 +9,7 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain('Every path starts with that name, like "DVR/README.md"');
     expect(hint).toContain('a command in "DVR" takes "main.py"');
     expect(hint).toContain('"cd DVR" would fail');
+    expect(hint).toContain("Put every path you mean to delete in one delete_local_file call");
   });
 
   it("names a folder the user actually attached in both examples", () => {
@@ -23,6 +24,14 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Running commands is unavailable on this computer");
     expect(hint).not.toContain("cd DVR");
     expect(hint).not.toContain("main.py");
+  });
+});
+
+describe("deletePathsOf", () => {
+  it("reads a list and still understands an older single path", () => {
+    expect(deletePathsOf({ paths: ["a.txt", "b.txt", "a.txt", ""] })).toEqual(["a.txt", "b.txt"]);
+    expect(deletePathsOf({ path: "old/" })).toEqual(["old/"]);
+    expect(deletePathsOf({})).toEqual([]);
   });
 });
 

@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { refusalReply, type BridgeReply } from "@chat/desktop-rpc";
 
+/** Calls the model makes, keyed by the server's call id. Anything else runs as asked. */
 const MODEL_OPERATIONS = new Set([
   "listDirectory",
   "readFile",
@@ -14,70 +15,52 @@ const MODEL_OPERATIONS = new Set([
   "runCommand",
 ]);
 
+/** Operations whose result must be kept for a while: running them twice is a second edit. */
+const SIDE_EFFECTS = new Set(["writeFile", "editFile", "movePath", "deletePath", "runCommand"]);
+
 interface Entry {
-  readonly callId: string | undefined;
-  readonly fingerprint: string;
+  readonly callId: string;
   readonly controller: AbortController;
   promise: Promise<BridgeReply>;
   completedAt?: number;
-  bytes: number;
 }
-
-const fingerprint = (payload: unknown) =>
-  createHash("sha256")
-    .update(
-      JSON.stringify(payload, (_key, value: unknown) =>
-        value && typeof value === "object" && !Array.isArray(value)
-          ? Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b)))
-          : value,
-      ),
-    )
-    .digest("hex");
 
 const cancelled = () => refusalReply("failed", "This desktop call was cancelled.");
 
-/** Replay survives renderer replacement, not an app restart. Retention is one day. */
+/**
+ * Joins a renderer that reloaded mid-call onto the work its predecessor
+ * started, so a page refresh never runs a write or a command twice.
+ *
+ * In-flight calls are shared by call id. A finished side effect is retained
+ * for as long as the server would still accept its result, so a late replay
+ * gets the answer instead of a second execution; a finished read is dropped
+ * at once, since reading twice costs nothing and its result may be large.
+ * A cancellation is remembered for the same window, so a request that
+ * arrives after its Stop is refused rather than started.
+ */
 export const makeExecutions = (
   run: (tag: string, payload: unknown, signal: AbortSignal) => Promise<BridgeReply>,
-  options: {
-    now?: () => number;
-    retentionMs?: number;
-    maxEntries?: number;
-    maxBytes?: number;
-  } = {},
+  options: { now?: () => number; retentionMs?: number } = {},
 ) => {
   const id = randomUUID();
   const entries = new Map<string, Entry>();
-  const tombstones = new Map<string, number>();
+  const cancellations = new Map<string, number>();
   const now = options.now ?? Date.now;
-  const retentionMs = options.retentionMs ?? 24 * 60 * 60 * 1_000;
-  const maxEntries = options.maxEntries ?? 10_000;
-  const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
-  let bytes = 0;
+  // The server waits at most ten minutes for a command; a replay after that
+  // meets a handler that has already given up, so keeping more buys nothing.
+  const retentionMs = options.retentionMs ?? 10 * 60 * 1_000;
   let closed = false;
 
   const prune = () => {
     const cutoff = now() - retentionMs;
-    const activeCalls = new Set<string>();
-    for (const [key, entry] of entries) {
-      if (entry.completedAt === undefined && entry.callId !== undefined)
-        activeCalls.add(entry.callId);
-      if (entry.completedAt !== undefined && entry.completedAt <= cutoff) {
-        bytes -= entry.bytes;
-        entries.delete(key);
-      }
-    }
-    for (const [callId, at] of tombstones) {
-      if (at <= cutoff && !activeCalls.has(callId)) {
-        tombstones.delete(callId);
-      }
-    }
+    for (const [key, entry] of entries)
+      if (entry.completedAt !== undefined && entry.completedAt <= cutoff) entries.delete(key);
+    for (const [callId, at] of cancellations) if (at <= cutoff) cancellations.delete(callId);
   };
 
   const request = (tag: string, payload: unknown): Promise<BridgeReply> => {
     if (closed) return Promise.resolve(cancelled());
     if (!MODEL_OPERATIONS.has(tag)) return run(tag, payload, new AbortController().signal);
-    prune();
     const callId =
       payload &&
       typeof payload === "object" &&
@@ -85,35 +68,15 @@ export const makeExecutions = (
       typeof payload.callId === "string"
         ? payload.callId
         : undefined;
-    if (callId !== undefined && tombstones.has(callId)) return Promise.resolve(cancelled());
-    let hash: string;
-    try {
-      hash = fingerprint(payload);
-    } catch {
-      return Promise.resolve(refusalReply("failed", "Malformed request."));
-    }
-    const key = callId === undefined ? randomUUID() : JSON.stringify([callId, tag]);
+    if (callId === undefined) return run(tag, payload, new AbortController().signal);
+    prune();
+    if (cancellations.has(callId)) return Promise.resolve(cancelled());
+    const key = JSON.stringify([callId, tag]);
     const previous = entries.get(key);
-    if (previous) {
-      return previous.fingerprint === hash
-        ? previous.promise
-        : Promise.resolve(
-            refusalReply("failed", "This call id was already used with a different payload."),
-          );
-    }
-    // Refuse admission rather than discard active work or permit a replay to write twice.
-    if (entries.size + tombstones.size >= maxEntries)
-      return Promise.resolve(
-        refusalReply("failed", "Desktop call retention is full. Try again later."),
-      );
+    if (previous) return previous.promise;
+
     const controller = new AbortController();
-    const entry: Entry = {
-      callId,
-      fingerprint: hash,
-      controller,
-      bytes: 0,
-      promise: Promise.resolve(cancelled()),
-    };
+    const entry: Entry = { callId, controller, promise: Promise.resolve(cancelled()) };
     entries.set(key, entry);
     entry.promise = Promise.resolve()
       .then(() => (controller.signal.aborted ? cancelled() : run(tag, payload, controller.signal)))
@@ -124,36 +87,16 @@ export const makeExecutions = (
       )
       .then((reply) => {
         entry.completedAt = now();
-        if (callId === undefined) {
-          entries.delete(key);
-        } else {
-          entry.bytes = Buffer.byteLength(JSON.stringify(reply));
-          bytes += entry.bytes;
-          if (bytes > maxBytes) {
-            // Keep the identity even when the bulky result cannot be retained.
-            bytes -= entry.bytes;
-            entry.bytes = 0;
-            entry.promise = Promise.resolve(
-              refusalReply(
-                "failed",
-                "This call completed, but its result is no longer retained. It will not be executed again.",
-              ),
-            );
-          }
-        }
+        if (!SIDE_EFFECTS.has(tag)) entries.delete(key);
         return reply;
       });
     return entry.promise;
   };
 
+  /** Interrupts the call if it is running; true when there was one to interrupt. */
   const cancelCall = (callId: string) => {
     prune();
-    if (!tombstones.has(callId) && entries.size + tombstones.size >= maxEntries) {
-      // Existing calls can always be stopped, even at capacity.
-      if (![...entries.values()].some((entry) => entry.callId === callId))
-        throw new Error("Desktop cancellation retention is full.");
-    }
-    tombstones.set(callId, now());
+    cancellations.set(callId, now());
     let interrupted = false;
     for (const entry of entries.values()) {
       if (entry.callId === callId && entry.completedAt === undefined) {
@@ -177,8 +120,7 @@ export const makeExecutions = (
       for (const entry of active) entry.controller.abort();
       await Promise.all(active.map((entry) => entry.promise));
       entries.clear();
-      tombstones.clear();
-      bytes = 0;
+      cancellations.clear();
     },
   };
 };

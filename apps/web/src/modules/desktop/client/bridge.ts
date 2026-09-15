@@ -22,7 +22,6 @@ import {
   type DesktopError,
   type FolderStatus,
 } from "@chat/desktop-rpc";
-import { joinFolderNames } from "../tool-schema.ts";
 
 export { DRAFT_CONVERSATION };
 
@@ -243,11 +242,21 @@ export const useFolder = (conversationId: string): FolderState | null => {
 export interface DesktopSendFields {
   /** Submission policy information, not cryptographic proof of a desktop client. */
   readonly fromDesktop: true;
-  /** The attached folders' names, joined; the server stores no path. */
-  readonly desktopFolder?: string;
+  /** The attached folders' names; the server stores no path. */
+  readonly desktopFolders?: ReadonlyArray<string>;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
 }
+
+/**
+ * Whether a work chat may act right now: the machine answered about its
+ * folders and is not changing them. The one definition the gate, the
+ * composer and the send fields all read.
+ */
+export const folderUsable = (
+  folder: FolderState | null,
+): folder is Extract<FolderState, { readiness: "ready" }> =>
+  folder !== null && folder.readiness === "ready" && !folder.busy;
 
 /**
  * What each message reports about the machine it was sent from, derived from
@@ -257,11 +266,11 @@ export interface DesktopSendFields {
  * A folder that has gone missing is left out, since the model could not reach it.
  */
 export const desktopSendFields = (folder: FolderState | null): DesktopSendFields | null => {
-  if (!folder || folder.readiness !== "ready" || folder.busy) return null;
+  if (!folderUsable(folder)) return null;
   const names = folder.status.folders.filter((item) => item.alive).map((item) => item.name);
   return {
     fromDesktop: true,
-    ...(names.length > 0 ? { desktopFolder: joinFolderNames(names) } : {}),
+    ...(names.length > 0 ? { desktopFolders: names } : {}),
     desktopCommands: names.length > 0 && folder.status.sandbox.kind === "ready",
   };
 };
@@ -281,10 +290,13 @@ export const rebindDraftFolder = async (conversationId: string): Promise<void> =
   );
 };
 
+/** Shown when a work chat tries to act before the machine has answered about folders. */
+export const WORK_FOLDER_UNAVAILABLE =
+  "Wait for the folder check before continuing this work chat.";
+
 export const requireWorkFolder = (working: boolean, folder: FolderState | null) => {
   const fields = working ? desktopSendFields(folder) : null;
-  if (working && !fields)
-    throw new Error("Wait for the folder check before continuing this work chat.");
+  if (working && !fields) throw new Error(WORK_FOLDER_UNAVAILABLE);
   return fields;
 };
 

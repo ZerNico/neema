@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { routeTree } from "./routeTree.gen";
+import { RouteError, RouteNotFound } from "./ui/route-error.tsx";
 import { StartupPending } from "./ui/startup-pending.tsx";
 
 export function getRouter() {
@@ -21,6 +22,9 @@ export function getRouter() {
     defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
     defaultPendingComponent: StartupPending,
+    // Root sets these too: a document-level failure never sees the defaults.
+    defaultErrorComponent: RouteError,
+    defaultNotFoundComponent: RouteNotFound,
     defaultPendingMinMs: 0,
   });
 

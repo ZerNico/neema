@@ -10,13 +10,15 @@ import {
   FileContents,
   FolderStatus,
   FoundPaths,
+  LIMITS,
   MoveReceipt,
-  NetworkLevel,
   RevealMode,
   SandboxAvailability,
   SearchMatches,
   WriteReceipt,
 } from "./schema.ts";
+
+const deletedPathsMax = LIMITS.deletedPaths;
 
 /**
  * Everything the site may ask of the machine it is running on.
@@ -155,11 +157,18 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
-  /** Removes a file, or a directory and everything under it. */
+  /**
+   * Removes files or directories (recursively). One call is one confirmation;
+   * a missing path does not stop the rest. Conversation-level refusals
+   * (`no-folder`) still fail the procedure.
+   */
   Rpc.make("deletePath", {
     payload: {
       conversationId: Schema.String,
-      path: Schema.String,
+      paths: Schema.Array(Schema.String).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(deletedPathsMax),
+      ),
       callId: Schema.String,
     },
     success: DeleteReceipt,
@@ -198,9 +207,12 @@ export const DesktopRpcs = RpcGroup.make(
       command: Schema.String,
       /** Which attached folder is the working directory. */
       folder: Schema.String,
-      timeoutMs: Schema.Int,
-      /** The chat's policy, held server-side; the page carries it down per call. */
-      network: NetworkLevel,
+      /**
+       * How long the desktop lets the command run. The page derives it from
+       * the server's deadline for the call, so a command never outlives the
+       * wait that would accept its result.
+       */
+      timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
     },
     success: CommandOutput,
     error: DesktopError,

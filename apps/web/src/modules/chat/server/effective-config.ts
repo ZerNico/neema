@@ -113,8 +113,8 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     collectionIds?: ReadonlyArray<string> | undefined;
     skillIds?: ReadonlyArray<string> | undefined;
     searchEnabled: boolean;
-    /** Folder name the sending machine reported; absent when it had none. */
-    desktopFolder?: string | null | undefined;
+    /** Folder names the sending machine reported; absent when it had none. */
+    desktopFolders?: ReadonlyArray<string> | null | undefined;
     desktopCommands?: boolean | undefined;
     model: { contextLength: number | null | undefined };
     /** Whether web search could run at all; an agent preference cannot force it. */
@@ -162,7 +162,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       knowledgeMode,
       searchEnabled,
       planEnabled,
-      desktopFolder: input.desktopFolder ?? null,
+      desktopFolders: input.desktopFolders ?? null,
       desktopCommands: input.desktopCommands ?? false,
     } satisfies GenerationConfig;
   },

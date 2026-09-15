@@ -74,7 +74,7 @@ const call = (callId: string) => ({
   expiresAt: Date.now() + 60000,
 });
 const settings = [
-  { conversationId: "a", title: "First work", approval: "auto" as const, network: "none" as const },
+  { conversationId: "a", title: "First work", approval: "auto" as const },
 ];
 const cleanups: (() => void)[] = [];
 beforeEach(() => {

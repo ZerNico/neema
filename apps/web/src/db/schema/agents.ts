@@ -177,12 +177,12 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    */
   searchEnabled: boolean("search_enabled").notNull().default(false),
   /**
-   * The folder attached on the machine this attempt was sent from, by name.
-   * Null means the tools that reach a machine were not offered. Only a name:
-   * the path stays on the machine that granted it, so the same conversation
-   * continued elsewhere resolves its own folder or none.
+   * The folders attached on the machine this attempt was sent from, by name.
+   * Null means the tools that reach a machine were not offered. Only names:
+   * the paths stay on the machine that granted them, so the same conversation
+   * continued elsewhere resolves its own folders or none.
    */
-  desktopFolder: text("desktop_folder"),
+  desktopFolders: text("desktop_folders").array(),
   /** Whether that machine could sandbox a command when this was sent. */
   desktopCommands: boolean("desktop_commands").notNull().default(false),
   /**

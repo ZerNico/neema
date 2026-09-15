@@ -58,7 +58,6 @@ import {
   readPresentedQuestions,
 } from "~/modules/tools/ask-user-schema.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
-import { acceptDesktopToolResult } from "~/modules/desktop/server/result.ts";
 import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
 import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
@@ -103,7 +102,6 @@ import {
   DesktopToolResult,
   desktopToolsSystemHint,
   forTranscript,
-  splitFolderNames,
 } from "~/modules/desktop/tool-schema.ts";
 import type { CompactionChunkEnvelope } from "../schema.ts";
 import {
@@ -761,7 +759,7 @@ export class StreamEngine extends Context.Service<
           };
           // Offered only when the machine that sent this message said a folder
           // was attached, so a browser tab never sees these names.
-          const desktopTools = config.desktopFolder
+          const desktopTools = config.desktopFolders
             ? prepareDesktopTools({
                 rowIdFor: (providerCallId) =>
                   Effect.suspend(() => Deferred.await(desktopCallReady(providerCallId))),
@@ -955,12 +953,12 @@ export class StreamEngine extends Context.Service<
             ...(webTools
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
               : []),
-            ...(desktopTools && config.desktopFolder
+            ...(desktopTools && config.desktopFolders
               ? [
                   {
                     role: "system" as const,
                     content: desktopToolsSystemHint(
-                      splitFolderNames(config.desktopFolder),
+                      config.desktopFolders,
                       config.desktopCommands ?? false,
                     ),
                   },
@@ -1710,9 +1708,10 @@ export class StreamEngine extends Context.Service<
                             const decoded = Schema.decodeUnknownOption(DesktopToolResult)(
                               part.result,
                             );
-                            // The result crossed the page, so it is untrusted
-                            // input on the way back in, not just on the way out.
-                            const result: DesktopToolResult = acceptDesktopToolResult(
+                            // Already capped and sniffed where it came in
+                            // (`acceptDesktopToolResult` in the submit function);
+                            // here it only has to be the shape the handler promised.
+                            const result: DesktopToolResult =
                               !part.isFailure && Option.isSome(decoded)
                                 ? decoded.value
                                 : {
@@ -1721,8 +1720,7 @@ export class StreamEngine extends Context.Service<
                                     summary: "That did not run",
                                     detail: "The computer did not report a usable result.",
                                     truncated: false,
-                                  },
-                            );
+                                  };
                             if (result.file) {
                               const bytes = Buffer.from(result.file.base64, "base64");
                               const kind = attachmentKind(result.file.mediaType);

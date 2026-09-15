@@ -1,4 +1,3 @@
-import type { NetworkLevel } from "@chat/desktop-rpc";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import type {
   ExternalOperation,
@@ -19,12 +18,12 @@ export interface WorkSnapshot {
     conversationId: string;
     title: string | null;
     approval: PermissionLevel;
-    network: NetworkLevel;
   }[];
 }
 export interface WorkDependencies {
   claim(call: ExternalOperation): Promise<string | null>;
-  execute(call: ExternalOperation, network: NetworkLevel): Promise<DesktopToolResult>;
+  /** Runs the call locally; `remainingMs` is what is left of the server's deadline. */
+  execute(call: ExternalOperation, remainingMs: number): Promise<DesktopToolResult>;
   complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
   cancel(callId: string): void;
   beforeExecute(conversationId: string): Promise<void>;
@@ -159,12 +158,8 @@ export class WorkController {
         return;
       }
       if (!entry.result) {
-        const settings = this.snapshot.settings.find(
-          (s) => s.conversationId === entry.call.conversationId,
-        );
-        if (!settings) return;
         entry.result = entry.permitted
-          ? await this.deps.execute(entry.call, settings.network)
+          ? await this.deps.execute(entry.call, entry.call.expiresAt - Date.now())
           : desktopFailure(
               "You declined that",
               "The user declined this. Do not try it again in another form.",

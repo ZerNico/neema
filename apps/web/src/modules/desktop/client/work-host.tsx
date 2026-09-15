@@ -72,10 +72,10 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     return new WorkController({
       beforeExecute: (conversationId) => waitForDraftBinding(conversationId),
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
-      execute: (call, network) =>
+      execute: (call, remainingMs) =>
         Schema.is(DesktopToolName)(call.name)
           ? Effect.runPromise(
-              executeDesktopTool(client, call.conversationId, network, {
+              executeDesktopTool(client, call.conversationId, remainingMs, {
                 callId: call.callId,
                 name: call.name,
                 args: call.args,
@@ -202,12 +202,22 @@ export function WorkConnectionNotice() {
   );
 }
 
+/**
+ * Stable until the controller reports a change: this feeds the message list's
+ * display memo, so a fresh object per render would re-render every message on
+ * every stream chunk.
+ */
 export function useWorkApprovals(conversationId: string) {
-  const { controller } = useContext(WorkContext);
-  return {
-    pending: controller?.pending(conversationId) ?? new Map<string, PendingKind>(),
-    decide: (callId: string, choice: ApprovalChoice) => controller?.decide(callId, choice),
-  };
+  const { controller, revision } = useContext(WorkContext);
+  return useMemo(
+    () => ({
+      pending: controller?.pending(conversationId) ?? new Map<string, PendingKind>(),
+      decide: (callId: string, choice: ApprovalChoice) => controller?.decide(callId, choice),
+      /** The controller's change counter, so this value is new exactly when its contents are. */
+      revision,
+    }),
+    [controller, conversationId, revision],
+  );
 }
 
 export function WorkAttention() {

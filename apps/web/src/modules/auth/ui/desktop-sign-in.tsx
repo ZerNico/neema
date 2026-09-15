@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { DesktopAuth } from "@chat/desktop-rpc";
 import { redeemDesktopTicket } from "~/modules/auth/client.ts";
@@ -37,6 +37,12 @@ function loadVerifier(): string {
  * The shell's login screen. There is no password form here: sign-in happens
  * in the system browser, which mints a code the shell redeems. The code
  * arrives either through the deep link (`auth.onTicket`) or by paste.
+ *
+ * A deep-linked code only fills the field; the person presses Continue. Any
+ * page can open `chat-desktop://sign-in?ticket=…`, and a code minted from
+ * Settings › Devices carries no challenge, so the verifier cannot tell a code
+ * this shell asked for from one an attacker's account minted. Redeeming it
+ * unasked would sign this computer into that account.
  */
 export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
   const queryClient = useQueryClient();
@@ -44,6 +50,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [shapeError, setShapeError] = useState<string | null>(null);
+  const continueButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,9 +91,10 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
     () =>
       auth.onTicket((ticket) => {
         setCode(ticket);
-        submit(ticket);
+        setShapeError(null);
+        continueButton.current?.focus();
       }),
-    [auth, submit],
+    [auth],
   );
 
   const changeServer = useMutation({
@@ -138,7 +146,12 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
               />
             </Field>
             {error ? <FieldError>{error}</FieldError> : null}
-            <PendingButton type="submit" className="w-full" pending={redeem.isPending}>
+            <PendingButton
+              ref={continueButton}
+              type="submit"
+              className="w-full"
+              pending={redeem.isPending}
+            >
               Continue
             </PendingButton>
           </form>

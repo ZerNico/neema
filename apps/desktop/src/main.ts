@@ -28,8 +28,8 @@ import {
 import { configFile, isConfiguredOriginUrl, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Effect, Layer, ManagedRuntime } from "effect";
-import { DRAFT_CONVERSATION, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { Layer, ManagedRuntime } from "effect";
+import { makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -126,6 +126,12 @@ const runtime = ManagedRuntime.make(
 );
 
 const desktopShell: Shell = {
+  // Requests only arrive from the configured origin's page (`isPageSender`),
+  // so by the time a handler runs there is one.
+  serverOrigin: () => {
+    if (serverOrigin === null) throw new Error("No server is configured.");
+    return serverOrigin;
+  },
   executionSession: () => ({ id: executions.id }),
   cancelCall: (callId) => executions.cancelCall(callId),
   setWorkState: (state) => {
@@ -215,17 +221,11 @@ const connectFlow = makeConnectFlow({
     return response === 1;
   },
   // Executions and owned processes belong to the server that started them.
-  // The runtime (sandbox, conversation grants) is per machine and stays up,
-  // except the compose-time draft key, which would otherwise follow us there.
+  // The runtime (sandbox, grants) is per machine and stays up; grants are
+  // keyed by origin, so nothing from this server is visible on the next.
   disposeWork: async () => {
     await executions.dispose();
     await disposeOwnedProcesses();
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const grants = yield* GrantStore;
-        yield* grants.forgetAll(DRAFT_CONVERSATION);
-      }),
-    );
     executions = makeExecutions(runExecution);
     desktopShell.setWorkState({ active: 0, needsApproval: 0 });
   },
@@ -377,6 +377,10 @@ else if (!devReload) {
     if (ticket === null) restoreWindow();
     else deliverTicket(ticket);
   });
+  // Windows and Linux launch the app with the link as an argument when it is
+  // not already running; only a running instance gets `second-instance`.
+  const coldStart = ticketFromArgv(process.argv);
+  if (coldStart !== null) pendingTicket = coldStart;
   if (process.defaultApp && process.argv[1])
     app.setAsDefaultProtocolClient(SIGN_IN_SCHEME, process.execPath, [resolve(process.argv[1])]);
   else app.setAsDefaultProtocolClient(SIGN_IN_SCHEME);
@@ -488,11 +492,8 @@ void app.whenReady().then(async () => {
   }
 
   await start();
-  if (pendingTicket !== null) {
-    const ticket = pendingTicket;
-    pendingTicket = null;
-    deliverTicket(ticket);
-  }
+  // A ticket that arrived before the window existed is handed over now.
+  flushPendingTicket();
 
   app.on("activate", restoreWindow);
 });

@@ -4,6 +4,7 @@ import { sniffBinaryMediaType, sanitizeFileName } from "~/modules/attachments/se
 import {
   DESKTOP_RESULT_DETAIL_CHARS,
   desktopFailure,
+  storable,
   type DesktopToolResult,
 } from "../tool-schema.ts";
 
@@ -15,8 +16,6 @@ const NAME_CHARS = 200;
 const MAX_FILE_BASE64 = Math.ceil((LIMITS.binaryBytes * 4) / 3) + 4;
 
 const ALLOWED_FILE_TYPES: ReadonlySet<string> = new Set([...IMAGE_MEDIA_TYPES, PDF_MEDIA_TYPE]);
-
-const storable = (text: string) => text.replaceAll("\u0000", "");
 
 const acceptFile = (
   file: NonNullable<DesktopToolResult["file"]>,

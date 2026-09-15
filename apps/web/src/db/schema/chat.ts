@@ -42,12 +42,9 @@ export const conversations = pgTable(
     mode: text({ enum: ["chat", "work"] })
       .notNull()
       .default("chat"),
-    // Work-chat policy. Policy is a fact about the chat, not the machine, so
-    // it lives here and every device honours the same choice; the folder path
-    // is the one thing that stays on the machine.
-    networkLevel: text("network_level", { enum: ["none", "packages", "all"] })
-      .notNull()
-      .default("packages"),
+    // How much a work chat asks before acting. Policy is a fact about the
+    // chat, not the machine, so it lives here and every device honours the
+    // same choice; the folder path is the one thing that stays on the machine.
     permissionLevel: text("permission_level", { enum: ["manual", "auto", "skip"] })
       .notNull()
       .default("auto"),

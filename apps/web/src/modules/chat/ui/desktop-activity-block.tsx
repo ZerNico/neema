@@ -14,6 +14,7 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import type { ApprovalChoice, PendingKind } from "~/modules/desktop/client/approvals.ts";
+import { deletePathsOf } from "~/modules/desktop/tool-schema.ts";
 import { useLocalFilePreview } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/card.tsx";
@@ -53,6 +54,8 @@ const argText = (activity: DesktopToolActivity) => {
       return text(args.pattern);
     case "move_local_file":
       return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
+    case "delete_local_file":
+      return deletePathsOf(args).join("\n");
     default:
       return text(args.path);
   }
@@ -95,11 +98,38 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Editing ${what}` : "Editing a file";
     case "move_local_file":
       return what ? `Moving ${what}` : "Moving a file";
-    case "delete_local_file":
-      return what ? `Deleting ${what}` : "Deleting a file";
+    case "delete_local_file": {
+      const listed = deletePathsOf(activity.args);
+      if (listed.length === 1) return `Deleting ${listed[0]}`;
+      if (listed.length > 1) return `Deleting ${listed.length} files`;
+      return "Deleting files";
+    }
     case "run_command":
       return what ? `Running ${what}` : "Running a command";
   }
+};
+
+/** First-segment groups so a Downloads cleanup is names, not fifty full paths. */
+const groupDeletePaths = (paths: ReadonlyArray<string>) => {
+  const grouped = new Map<string, string[]>();
+  const loose: string[] = [];
+  for (const path of paths) {
+    const slash = path.indexOf("/");
+    if (slash <= 0) {
+      loose.push(path);
+      continue;
+    }
+    const folder = path.slice(0, slash);
+    const rest = path.slice(slash + 1);
+    const items = grouped.get(folder) ?? [];
+    items.push(rest === "" ? path : rest);
+    grouped.set(folder, items);
+  }
+  const groups: { folder: string | null; items: string[] }[] = [...grouped].map(
+    ([folder, items]) => ({ folder, items }),
+  );
+  if (loose.length > 0) groups.push({ folder: null, items: loose });
+  return groups;
 };
 
 /** What the reader is being asked to allow, in their words. */
@@ -113,8 +143,15 @@ const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
           : "Read this file";
     case "command":
       return "Run on this computer";
-    case "delete":
-      return "Delete from this computer";
+    case "delete": {
+      const listed = deletePathsOf(activity.args);
+      if (listed.length <= 1) return "Delete from this computer";
+      const groups = groupDeletePaths(listed);
+      const only = groups.length === 1 ? groups[0] : undefined;
+      return only?.folder
+        ? `Delete ${listed.length} files in ${only.folder}`
+        : `Delete ${listed.length} files from this computer`;
+    }
     default:
       return activity.name === "move_local_file"
         ? "Move on this computer"
@@ -123,6 +160,34 @@ const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
           : "Change this file";
   }
 };
+
+function DeletePathList({ paths }: { paths: ReadonlyArray<string> }) {
+  const groups = groupDeletePaths(paths);
+  const folderInTitle = groups.length === 1 && groups[0]?.folder !== null;
+  return (
+    <div className="bg-muted max-h-64 min-w-0 max-w-full overflow-auto rounded-xl px-3 py-2 text-xs">
+      <div className="flex min-w-0 flex-col gap-2">
+        {groups.map((group) => (
+          <div key={group.folder ?? ""} className="min-w-0">
+            {!folderInTitle && group.folder ? (
+              <p className="text-muted-foreground mb-1">{group.folder}</p>
+            ) : null}
+            <ul className="space-y-1">
+              {group.items.map((item) => (
+                <li
+                  key={`${group.folder ?? ""}/${item}`}
+                  className="min-w-0 [overflow-wrap:anywhere]"
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const blanketLabel = (kind: PendingKind) =>
   kind === "command" ? "Allow commands for this chat" : "Allow edits for this chat";
@@ -147,7 +212,8 @@ function ApprovalCard({
   activity: DesktopToolActivity;
   approval: DesktopApprovalRequest;
 }) {
-  const what = argText(activity);
+  const listed = activity.name === "delete_local_file" ? deletePathsOf(activity.args) : [];
+  const what = listed.length > 1 ? "" : argText(activity);
   return (
     // Same rhythm as the clarification card: py-4 on the shell, px-4 inside.
     <Card className="mb-3 gap-0 py-4">
@@ -161,7 +227,9 @@ function ApprovalCard({
           />
           <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind)}</span>
         </div>
-        {what ? (
+        {listed.length > 1 ? (
+          <DeletePathList paths={listed} />
+        ) : what ? (
           <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
             {what}
           </pre>
@@ -257,7 +325,9 @@ export function DesktopActivityBlock({
       {preview ? (
         // Two targets, because the row now answers two questions: what the file
         // holds now, and what the call did to it.
-        <div className={cn("flex min-w-0 max-w-full items-center gap-1", failed && "text-destructive")}>
+        <div
+          className={cn("flex min-w-0 max-w-full items-center gap-1", failed && "text-destructive")}
+        >
           <button
             type="button"
             onClick={preview.open}

@@ -28,6 +28,7 @@ import {
   waitForDraftBinding,
   withDraftFolderBinding,
 } from "~/modules/desktop/client/bridge.ts";
+import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { Composer } from "./composer.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -112,10 +113,11 @@ function WorkComposer({
   onSend: () => Promise<unknown>;
   working?: boolean;
 }) {
-  const folder = useFolder("a");
+  const work = useWorkGate("a", working);
   return (
     <Composer
-      folder={folder}
+      folder={work.folder}
+      readOnly={work.readOnly}
       mode={{ kind: "fixed", value: working ? "work" : "chat" }}
       onSend={onSend}
       disabled={false}
@@ -136,9 +138,6 @@ it("blocks Work while IPC is unresolved, offers retry on failure, then permits r
   const send = vi.fn().mockResolvedValue(undefined);
   render(<WorkComposer onSend={send} />, { wrapper });
   expect(screen.getByText("Checking folders…")).toBeInTheDocument();
-  expect(
-    screen.queryByText("Folder status must be checked before continuing."),
-  ).not.toBeInTheDocument();
   expect(screen.getByRole("textbox")).toBeEnabled();
   expect(screen.queryByText("Add a folder from this computer")).not.toBeInTheDocument();
   await userEvent.type(screen.getByRole("textbox"), "Continue{Enter}");
@@ -169,12 +168,13 @@ it("blocks submission during a picker and uses its result for the next Work atte
   const { wrapper } = setup();
   const sent = vi.fn();
   function SharedFolder() {
-    const folder = useFolder("a");
+    const work = useWorkGate("a", true);
     return (
       <Composer
-        folder={folder}
+        folder={work.folder}
+        readOnly={work.readOnly}
         mode={{ kind: "fixed", value: "work" }}
-        onSend={async () => sent(await desktopAttemptFields(requireWorkFolder(true, folder)))}
+        onSend={async () => sent(await work.attemptFields())}
         disabled={false}
         modelId="m1"
         onModelChange={() => {}}
@@ -187,7 +187,6 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await userEvent.click(
     await screen.findByRole("button", { name: "Add a folder from this computer" }),
   );
-  expect(screen.queryByText("Updating folders…")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox")).toBeEnabled();
   await userEvent.type(screen.getByRole("textbox"), "Use the folder{Enter}");
   expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -199,7 +198,7 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await waitFor(() =>
     expect(sent).toHaveBeenCalledWith({
       fromDesktop: true,
-      desktopFolder: "site",
+      desktopFolders: ["site"],
       desktopCommands: true,
       desktopExecutorId: "executor",
     }),

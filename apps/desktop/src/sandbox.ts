@@ -3,43 +3,98 @@ import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { Context, Effect, Layer, Semaphore } from "effect";
 import { runOwnedProcess } from "./process.ts";
-import {
-  DesktopError,
-  LIMITS,
-  type NetworkLevel,
-  type SandboxAvailability,
-} from "@chat/desktop-rpc";
+import { DesktopError, LIMITS, type SandboxAvailability } from "@chat/desktop-rpc";
+
+const home = homedir();
+const inHome = (...segments: string[]) => join(home, ...segments);
+
+/**
+ * Where toolchains keep what a build reads: version managers, package stores
+ * and caches. Everything else under the home directory is denied, because a
+ * command is driven by file contents the user did not write and the home
+ * directory is where every CLI keeps its credentials. Outside the home
+ * directory the disk stays readable; compilers and system libraries live there.
+ *
+ * A tool installed somewhere unusual fails with a denial that names the path,
+ * which is the failure to prefer over a readable `~/.git-credentials`.
+ */
+const TOOLCHAIN_READ = [
+  // Node
+  inHome(".nvm"),
+  inHome(".npm"),
+  inHome(".pnpm"),
+  inHome(".local", "share", "pnpm"),
+  inHome("Library", "pnpm"),
+  inHome(".yarn"),
+  inHome(".bun"),
+  inHome(".deno"),
+  inHome(".volta"),
+  inHome(".node-gyp"),
+  // Python
+  inHome(".pyenv"),
+  inHome(".local", "share", "uv"),
+  inHome(".local", "share", "virtualenvs"),
+  inHome(".virtualenvs"),
+  inHome(".conda"),
+  inHome("miniconda3"),
+  inHome("anaconda3"),
+  inHome("Library", "Python"),
+  inHome(".config", "pip"),
+  inHome(".config", "uv"),
+  // Rust, Go, Ruby, JVM
+  inHome(".cargo"),
+  inHome(".rustup"),
+  inHome("go"),
+  inHome(".go"),
+  inHome(".gem"),
+  inHome(".rbenv"),
+  inHome(".sdkman"),
+  inHome(".m2"),
+  inHome(".gradle"),
+  // Cross-language version managers and user-local installs
+  inHome(".asdf"),
+  inHome(".local", "share", "mise"),
+  inHome(".config", "mise"),
+  inHome(".local", "bin"),
+  inHome(".local", "lib"),
+  inHome(".nix-profile"),
+  // Caches, and git's identity (name and email; the credential file stays denied)
+  inHome(".cache"),
+  inHome("Library", "Caches"),
+  inHome(".gitconfig"),
+  inHome(".config", "git"),
+];
+
+/** Secrets that sit inside a re-allowed region above. A deeper deny wins in srt. */
+const SECRETS_INSIDE_TOOLCHAINS = [
+  inHome(".cache", "huggingface", "token"),
+  inHome(".cache", "gh"),
+  inHome(".config", "git", "credentials"),
+];
 
 /**
  * Everything a command may never touch, whatever folder is attached.
  *
- * Reads are deny-then-allow in srt, so denying these regions still leaves the
- * rest of the disk readable; that is deliberate, since a build reads compilers
- * and caches all over the machine. Writes are allow-only and this config lists
- * none, so the *only* writable place is the folder passed per call.
+ * Reads are deny-then-allow in srt, so the home directory is denied as a
+ * whole and the toolchain paths above are re-allowed inside it. Writes are
+ * allow-only and this config lists none, so the *only* writable place is the
+ * set of folders passed per call.
+ *
+ * Network is one policy for the machine, set once here. srt keeps a single
+ * proxy per process and reads this list live, which is why the level is not
+ * a per-chat choice: two chats with different levels would need two proxies.
  *
  * Not user-editable in v1. A settings screen for this would be a way to talk
  * someone into disabling their own sandbox.
  */
 const GLOBAL_POLICY: SandboxRuntimeConfig = {
   filesystem: {
-    denyRead: [
-      join(homedir(), ".ssh"),
-      join(homedir(), ".aws"),
-      join(homedir(), ".gnupg"),
-      join(homedir(), ".config", "gh"),
-      join(homedir(), ".npmrc"),
-      join(homedir(), ".netrc"),
-      join(homedir(), ".kube"),
-    ],
-    allowRead: [],
-    // Filled per call with the attached folder; empty here means no writes.
+    denyRead: [home, ...SECRETS_INSIDE_TOOLCHAINS],
+    allowRead: TOOLCHAIN_READ,
     allowWrite: [],
     denyWrite: [],
   },
   network: {
-    // The `packages` level, and the baseline `initialize` is given. `none`
-    // and `all` are per-call overrides in `run`.
     allowedDomains: [
       "registry.npmjs.org",
       "*.npmjs.org",
@@ -112,20 +167,7 @@ export interface SandboxRun {
   /** Every attached folder's real root: the only places a command may write. */
   readonly allowWrite: ReadonlyArray<string>;
   readonly timeoutMs: number;
-  readonly network: NetworkLevel;
 }
-
-/**
- * What each level hands srt per call. `all` is spelled as a wildcard rather
- * than an absent allowlist, because an absent one falls back to the global
- * `packages` policy field by field.
- */
-const networkFor = (level: NetworkLevel): SandboxRuntimeConfig["network"] =>
-  level === "none"
-    ? { allowedDomains: [], deniedDomains: [] }
-    : level === "all"
-      ? { allowedDomains: ["*"], deniedDomains: [] }
-      : GLOBAL_POLICY.network;
 
 export interface SandboxResult {
   readonly exitCode: number;
@@ -149,39 +191,58 @@ export class Sandbox extends Context.Service<
   );
 }
 
-// The manager owns one proxy policy for the process, not one policy per command.
-const commandPermit = Semaphore.makeUnsafe(1);
-const managerStates = new WeakMap<typeof SandboxManager, { started: boolean; owners: number }>();
+/**
+ * The manager is one per process, so its lifecycle is shared by every
+ * service built over it: started once, reset when the last owner goes, and
+ * never reset or set up while a command is running.
+ */
+interface ManagerState {
+  started: boolean;
+  owners: number;
+  running: number;
+}
+const managerStates = new WeakMap<typeof SandboxManager, ManagerState>();
+/** Guards start, reset and the Windows install against each other and against running commands. */
+const lifecyclePermit = Semaphore.makeUnsafe(1);
 
 export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess) =>
   Effect.gen(function* () {
-    /**
-     * Initialised once, with the global policy only. `initialize` returns
-     * early whenever a previous call is in flight or done, *before* it stores
-     * the new config, so a second call with a different policy silently keeps
-     * the old one. Reconfiguring means `reset` plus `initialize`, which drops
-     * the proxies mid-session. Hence: global denies here, the folder per call.
-     */
-    const state = managerStates.get(manager) ?? { started: false, owners: 0 };
+    const state = managerStates.get(manager) ?? { started: false, owners: 0, running: 0 };
     managerStates.set(manager, state);
     state.owners += 1;
-    const ensureStarted = Effect.suspend(() => {
-      if (state.started) return Effect.void;
-      return Effect.tryPromise({
-        try: async () => {
-          await manager.initialize(GLOBAL_POLICY);
-          state.started = true;
-        },
-        catch: (cause) =>
-          new DesktopError({
-            reason: "sandbox-unavailable",
-            message: `Could not start the sandbox: ${String(cause)}`,
-          }),
-      });
-    });
+
+    // `initialize` returns early whenever a previous call is in flight or
+    // done, *before* it stores the new config, so it is called exactly once
+    // per process with the whole policy. The folders are the only per-call
+    // part and travel through `wrapWithSandboxArgv`.
+    const ensureStarted = lifecyclePermit.withPermit(
+      Effect.suspend(() => {
+        if (state.started) return Effect.void;
+        return Effect.tryPromise({
+          try: async () => {
+            await manager.initialize(GLOBAL_POLICY);
+            state.started = true;
+          },
+          catch: (cause) =>
+            new DesktopError({
+              reason: "sandbox-unavailable",
+              message: `Could not start the sandbox: ${String(cause)}`,
+            }),
+        });
+      }),
+    );
+
+    // Waits for running commands to drain before touching shared state.
+    const whenIdle = <A, E>(effect: Effect.Effect<A, E>) =>
+      lifecyclePermit.withPermit(
+        Effect.gen(function* () {
+          while (state.running > 0) yield* Effect.sleep("50 millis");
+          return yield* effect;
+        }),
+      );
 
     yield* Effect.addFinalizer(() =>
-      commandPermit.withPermit(
+      whenIdle(
         Effect.promise(async () => {
           state.owners -= 1;
           if (state.owners === 0) {
@@ -241,43 +302,25 @@ export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess)
           }
         });
         return yield* availability();
-      }).pipe(commandPermit.withPermit);
+      }).pipe(whenIdle);
 
-    const run = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
+    const runCounted = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
       Effect.gen(function* () {
-        const available = yield* availability();
-        if (available.kind !== "ready") {
-          return yield* Effect.fail(
-            new DesktopError({
-              reason: "sandbox-unavailable",
-              message: "Commands are unavailable until the sandbox is set up.",
-            }),
-          );
-        }
-        yield* ensureStarted.pipe(Effect.uninterruptible);
-        // The per-call override below shapes the Seatbelt profile, but the
-        // proxy that answers CONNECTs reads the manager's own config. Both
-        // have to agree, so the level is applied there first.
-        yield* Effect.sync(() =>
-          manager.updateConfig({ ...GLOBAL_POLICY, network: networkFor(input.network) }),
-        );
-
         const { argv, env } = yield* Effect.tryPromise({
           try: () =>
             manager.wrapWithSandboxArgv(
               input.command,
               undefined,
-              // The grant, per call. It cannot go in the global config
-              // because that one is frozen after the first initialize. The
-              // denies are repeated rather than inherited so the one config
-              // a reader sees at the call site is the whole policy.
+              // The grant, per call. The denies are repeated rather than
+              // inherited so the one config a reader sees at the call site
+              // is the whole filesystem policy.
               {
                 filesystem: {
                   denyRead: GLOBAL_POLICY.filesystem.denyRead,
+                  allowRead: [...TOOLCHAIN_READ, ...input.allowWrite],
                   allowWrite: [...input.allowWrite],
                   denyWrite: [],
                 },
-                network: networkFor(input.network),
               },
               undefined,
               input.cwd,
@@ -331,10 +374,37 @@ export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess)
           truncated,
           violations,
         };
-      }).pipe(
-        Effect.ensuring(Effect.sync(() => manager.cleanupAfterCommand())),
-        commandPermit.withPermit,
-      );
+      });
+
+    const run = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
+      Effect.gen(function* () {
+        const available = yield* availability();
+        if (available.kind !== "ready") {
+          return yield* Effect.fail(
+            new DesktopError({
+              reason: "sandbox-unavailable",
+              message: "Commands are unavailable until the sandbox is set up.",
+            }),
+          );
+        }
+        yield* ensureStarted.pipe(Effect.uninterruptible);
+
+        // Counted for the whole command, preparation included, so a reset,
+        // the Windows install and the Linux mount cleanup all wait for it.
+        return yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            state.running += 1;
+          }),
+          () => runCounted(input),
+          () =>
+            Effect.sync(() => {
+              state.running -= 1;
+              // Tears down bwrap mount points on Linux, for the whole process;
+              // running it under another command's feet would unmount its tree.
+              if (state.running === 0) manager.cleanupAfterCommand();
+            }),
+        );
+      });
 
     return Sandbox.of({ availability, setUp, run });
   });

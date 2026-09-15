@@ -70,23 +70,33 @@ S256 challenge with the link, so a ticket minted with a challenge is refused
 without the matching verifier. Settings › Devices mints paste-only tickets
 without a challenge, which the redemption accepts with no verifier at all.
 
+A deep-linked ticket only fills the code field; the person presses Continue.
+Anyone can open `chat-desktop://sign-in?ticket=…`, and a paste-only ticket has
+no challenge for the verifier to check, so a shell that redeemed on arrival
+could be signed into whichever account minted the ticket. The click is the
+consent the verifier cannot supply for that path.
+
 Redemption creates a separate session for the desktop, ninety days long,
 and the shell renews it to a fresh ninety days on every authenticated mount
-through `/desktop/session/refresh`; Better Auth's own refresh would cut it
-back to the browser's seven days. Refresh keys on the **stored** session user
-agent from redemption, not the request header, so a browser cookie cannot
-become a 90-day session by sending `ChatDesktop/`. The Devices label
-"Chat Desktop on …" reads that same stored token. Revoking either session
-leaves the other valid. After redeeming, the page does what `IdentityBoundary`
-does on an identity change: clear the query cache and replace the document.
+through `/desktop/session/refresh`; Better Auth's own late refresh (from day
+84) would otherwise re-set the cookie to the browser's seven days. Refresh
+keys on the **stored** session user agent from redemption, not the request
+header. That gate is a convenience, not a boundary: any authenticated
+browser can mint and redeem a ticket and hold a 90-day session that way.
+The Devices label "Chat Desktop on …" reads that same stored token. Revoking
+either session leaves the other valid. After redeeming, the page does what
+`IdentityBoundary` does on an identity change: clear the query cache and
+replace the document.
 
 Off-origin navigation and `window.open` from the shell are handed to the OS
 only for `http:` and `https:`. Other schemes are dropped rather than passed to
 `openExternal`. Sign-in tickets are delivered only to a loaded page of the
-configured origin; recovery and connect documents never receive them. A ticket
-that arrives while those are showing waits until the origin page is ready.
-The pending slot holds one ticket: a later deep link replaces an undelivered
-one.
+configured origin; recovery and connect documents never receive them. Main
+holds one undelivered ticket until that page's frame has loaded (a later deep
+link replaces it); the preload then holds it until the login screen subscribes,
+because the frame loads before the SPA mounts its listener. Windows and Linux
+deliver the link as an argument, of a second instance when the app is running
+and of `process.argv` on a cold start; both are read.
 
 ## Execution belongs to the authenticated app, not a chat route
 
@@ -155,7 +165,12 @@ Native and Hermes calls share this handoff and the normal prompt-folding loop.
 
 The wait must have its own deadline: the ordinary generation flusher renews the
 lease even when idle. Reads get two minutes; changes and commands get ten.
-The registration and handler share that deadline. Expired or terminal calls
+The registration and handler share that deadline, and it starts at
+registration, before anyone has approved. The desktop's own command timeout
+is therefore derived from what is left of it when execution starts, minus a
+delivery margin, never a fixed ten minutes of its own: a command either
+finishes inside the wait that will accept its result or is stopped, and is
+not started at all when approval came too late. Expired or terminal calls
 cannot be newly claimed. Stop revokes the attempt, and generation scope cleanup
 removes authority on completion, failure or interruption.
 
@@ -170,17 +185,19 @@ Completed filesystem changes cannot be rolled back.
 ## Replay is bounded, not distributed exactly-once execution
 
 Every model-operation RPC includes its call ID, including reads. The schema
-requires it; a missing id is refused before the handler runs. Main-process
-replay keys include the RPC tag and a canonical payload fingerprint. An identical
-request joins the original operation or returns its cached reply; changed payloads
-are refused. Separate `readFile` and `readBinary` requests may share one logical
-call ID. Cancellation installs a tombstone even before a request arrives.
-
-Replies and tombstones are held in memory for 24 hours, with entry and byte
-limits. Capacity refuses admission rather than evicting active work. An oversized
-completed reply may become an explicit unavailable-result refusal, never a reason
-to rerun the side effect. None of this persists through an app crash. A new main
-process has a new execution session and cannot silently replay an old attempt.
+requires it; a missing id is refused before the handler runs. Main keys
+in-flight work by call ID and RPC tag, so a renderer that reloads mid-call
+joins the operation its predecessor started instead of starting a second one.
+A finished side effect (write, edit, move, delete, command) is retained for
+ten minutes, the longest the server would still accept its result, and a
+replay in that window gets the answer rather than a second execution; a
+finished read is dropped at once, since reading twice costs nothing and the
+result may be large. A cancellation is remembered for the same window so a
+request arriving after its Stop is refused, not started. Nothing is keyed on
+payload content: the page is the configured origin's, and a hostile page
+would simply mint a new id. None of this persists through an app crash. A
+new main process has a new execution session and cannot silently replay an
+old attempt.
 
 The renderer retains a completed result while retrying failed delivery. It does
 not repeat the filesystem operation merely because the HTTP reply was lost.
@@ -203,18 +220,21 @@ uploads settle. Draft text and skill chips stay live through that wait.
 ## Mode is fixed; capabilities are current
 
 `conversations.mode` is `chat | work`, fixed at creation and inherited by a
-branch, along with that chat's network and permission levels. Work needs the desktop app, not a folder. Send, retry, edit and structured
+branch, along with that chat's permission level. Work needs the desktop app,
+not a folder. Send, retry, edit and structured
 answers all submit current desktop capabilities and executor identity. Work
 attempts without them are refused before rows are created or reset. Retry never
 revives an old attached-folder or command setting. Plain chat ignores local-tool
 capability fields. Browser Work history remains readable, with continuation
 actions disabled and server policy enforced independently.
 
-The server stores folder names per attempt, never paths. `folders.json` maps
-conversations to local grants. Writes are serialized and replaced by an atomic
-rename, so overlapping attach/detach cannot resurrect a detached folder after
-restart. Losing the file remains a supported outcome: every conversation asks
-again. The composer strip and submission share a
+The server stores folder names per attempt (`desktop_folders`, an array),
+never paths. `folders.json` maps server origin plus conversation to local
+grants: ids are minted by the server the shell is connected to, so two servers
+can issue the same one, and a grant on one must not open the folder to the
+other. Writes are serialized and replaced by an atomic rename, so overlapping
+attach/detach cannot resurrect a detached folder after restart. Losing the
+file remains a supported outcome: every conversation asks again. The composer strip and submission share a
 conversation-keyed local query, cleared with the authenticated identity cache.
 On capable desktops, route loaders prepare Work conversation and draft folder
 state before the composer mounts. The hook consumes that cache without an immediate
@@ -224,7 +244,9 @@ fails keeps the last successful status, so a blip on focus does not look like a
 missing folder or block send. Ready-empty is valid: a new
 machine can continue Work without file tools until folders are attached there.
 Folder loading and mutation state block new attempts without opening a second,
-animated warning inside the input. Focus refresh does not remount the host.
+animated warning inside the input. ChatView and NewChatView share that gate
+through `useWorkGate`; the composer is told `readOnly` rather than computing
+it again. Focus refresh does not remount the host.
 
 Loader preparation holds a query observer so unmounting the outgoing composer for
 route pending UI cannot cancel the read the destination still needs. It respects
@@ -238,9 +260,11 @@ queries are neither server-rendered nor persisted in the web backend.
 A model file path begins with an attached folder's basename, such as
 `site/src/index.ts`; `list_folder "."` lists the folders. Duplicate basenames are
 refused at choose and at rebind. A lost folder can be replaced by name from
-Choose it again. `find_files` and `search_files` share the same glob address
-space: a pattern that starts with an attached folder name is scoped to that
-folder. This is a virtual address space for file tools, not a shell mount layout.
+Choose it again. `find_files` names a matching folder and the files inside it,
+not only files whose own names match. `find_files` and `search_files` share the
+same glob address space: a pattern that starts with an attached folder name is
+scoped to that folder. This is a virtual address space for file tools, not a
+shell mount layout.
 `run_command` separately names its working folder. The shell sees real filesystem
 paths relative to that cwd; `other-folder/file` does not automatically resolve to
 another attached folder. Attached roots are writable under the command's sandbox
@@ -262,10 +286,21 @@ both ends. This does not claim protection against every concurrent filesystem
 replacement or hard-link alias.
 
 Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
-Its proxy reads global mutable network policy, so a semaphore covers the entire
-command lifetime: initialization, configuration, preparation, child execution,
-and cleanup. A queued command cannot alter a running command's network policy.
-Initialization is marked successful only after it succeeds.
+Its manager is one per process with one proxy and one live policy, which is
+why network policy is a fact about the machine, set once at initialization,
+and not a per-chat choice: two chats wanting different levels would need two
+proxies. Commands from different chats run concurrently; only start, reset,
+the Windows install and the Linux mount cleanup wait for running commands to
+drain. Initialization is marked successful only after it succeeds.
+
+Reads are deny-then-allow in srt, so the home directory is denied as a whole
+and a list of toolchain locations (version managers, package stores, caches,
+git's identity) is re-allowed inside it, with the few credential files that
+sit in those regions denied again. The rest of the disk stays readable. Each
+call adds its attached folders to both the read and the write allow lists;
+they are the only writable places. A tool installed somewhere unusual fails
+with a denial that names the path, which is preferred over a readable
+`~/.git-credentials`.
 
 On macOS, the wrapper replaces `localhost` in leading sandbox-generated proxy
 environment assignments with `127.0.0.1`, avoiding resolver access denied by the
@@ -280,15 +315,16 @@ before its policy ownership can be released.
 
 ## Policy is server-held; consent is local
 
-Network and permission levels belong to the conversation. The host refreshes
-them from the server and sends the network level with commands. The folder strip
-shows only the approval level: “Approve each action”, “Auto-approve reads”, or
-“Auto-approve reads and changes”, with descriptions in the picker. The stored
-values remain `manual`, `auto`, and `skip`. There is no per-chat network picker.
+The permission level belongs to the conversation; the host refreshes it from
+the server. The folder strip is where it is changed: “Approve each action”,
+“Auto-approve reads”, or “Auto-approve reads and changes”, with descriptions
+in the picker. The stored values remain `manual`, `auto`, and `skip`.
 
 Manual asks for reads too; automatic asks before changes and commands; skip
 allows those without another question. The dedicated delete tool always asks,
-but an allowed command can also delete files; this is not a deletion safeguard. Conversation-scoped
+once per call, and a call may name several paths so a cleanup is one
+confirmation rather than one per file. An allowed command can also delete
+files; this is not a deletion safeguard. Conversation-scoped
 blanket edit grants never cover commands or deletes, and manual reads have no
 blanket grant. These decisions outlive route changes but not the authenticated
 execution host. Approval cards remain actionable while generation is streaming,
@@ -301,16 +337,24 @@ prefix from disk rather than buffering the whole file; edits refuse a file
 larger than a write. Images and PDFs become model file parts where supported,
 with server extraction fallback; persisted tool rows and chunks retain only
 bounded summaries. The page's result is untrusted: summary, detail and file
-bytes are capped and sniffed on arrival the way attachments are, before they
-reach the model or process memory. Native and Hermes loops share this handling.
+bytes are capped and sniffed once, in the server function that accepts them,
+before they reach the model or process memory; the generation loop only checks
+the shape. Native and Hermes loops share this handling.
 Research keeps its existing server-side investigation and synthesis paths; this
 change does not add local tools to research workers or move their lifetimes into
 the desktop host.
 
-Search uses installed ripgrep when available and the JavaScript walker otherwise;
-no additional native binary is bundled. Both paths skip symlink traversal,
-include hidden files other than `.git`, and apply ignore rules, though
-engine-specific regular expression differences remain.
+Search uses installed ripgrep when available and the JavaScript walker
+otherwise; no additional native binary is bundled, and the handler picks the
+backend once per call. Both skip symlink traversal, include hidden files other
+than `.git`, and honour `.gitignore` even outside a checkout. They are not
+identical: rg also reads `.ignore`, `.rgignore` and repository excludes, gives
+a deeper `.gitignore` precedence where the walker ORs them, and has its own
+glob and regex dialects. rg runs with `--no-config` so a user's
+`RIPGREP_CONFIG_PATH` cannot add `--follow` or `--no-ignore`. Its exit code 2
+covers any error, including one unreadable file, so a run that produced a
+summary is a partial answer and only a run with none is a failure, with a bad
+pattern or glob told apart by rg's message.
 
 Edits require an exact, unique match unless `all` is set. Replacement text is
 literal, including dollar-substitution tokens. `diff` supplies a bounded unified

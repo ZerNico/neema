@@ -38,11 +38,16 @@ const loadIgnore = async (dir: string): Promise<Ignore | null> => {
  * Every file under `root`, ignore rules applied. Bounded by `limit` files
  * visited (not returned), so a huge folder with a broken `.gitignore` still
  * answers instead of walking forever.
+ *
+ * `keepDirectory`, when set, also returns directories whose relative path
+ * passes it, so a glob like `*extracted*` can name the folder, not only files
+ * whose own names match.
  */
 export const walkFiles = async (
   root: string,
   limit: number,
   keep: (relativePath: string) => boolean = () => true,
+  keepDirectory?: (relativePath: string) => boolean,
 ): Promise<{ files: WalkedFile[]; truncated: boolean }> => {
   const files: WalkedFile[] = [];
   let visited = 0;
@@ -69,7 +74,25 @@ export const walkFiles = async (
         return ig.ignores(isDir ? `${rel}/` : rel);
       });
       if (ignored) continue;
+      const rel = toPosix(relative(root, absolute));
       if (isDir) {
+        if (keepDirectory) {
+          visited += 1;
+          if (visited > limit) {
+            truncated = true;
+            return;
+          }
+          if (keepDirectory(rel)) {
+            let mtimeMs = 0;
+            try {
+              mtimeMs = (await stat(absolute)).mtimeMs;
+            } catch {
+              await visit(absolute, matchers);
+              continue;
+            }
+            files.push({ relative: `${rel}/`, absolute, mtimeMs });
+          }
+        }
         await visit(absolute, matchers);
         continue;
       }
@@ -79,7 +102,6 @@ export const walkFiles = async (
         truncated = true;
         return;
       }
-      const rel = toPosix(relative(root, absolute));
       if (!keep(rel)) continue;
       let mtimeMs = 0;
       try {
@@ -127,4 +149,19 @@ export const globToRegExp = (pattern: string): RegExp => {
     } else out += ch.replaceAll(/[.+^$()|[\]\\]/g, "\\$&");
   }
   return new RegExp(`^${anywhere ? "(?:.*/)?" : ""}${out}$`);
+};
+
+/**
+ * A file matches when its name does, or when it sits inside a matching
+ * folder: `*extracted*` finds `DVR/extracted_images/frame.png`, not only a
+ * file whose own name contains "extracted".
+ */
+export const globMatches = (matcher: RegExp, path: string): boolean => {
+  let rest = path;
+  for (;;) {
+    if (matcher.test(rest)) return true;
+    const slash = rest.lastIndexOf("/");
+    if (slash === -1) return false;
+    rest = rest.slice(0, slash);
+  }
 };

@@ -49,7 +49,6 @@ export const desktopWorkSnapshot = createServerFn({ method: "POST" })
               conversationId,
               title: conversation.title,
               approval: conversation.permissionLevel,
-              network: conversation.networkLevel,
             });
         }
         return {

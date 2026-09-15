@@ -20,14 +20,16 @@ export const ticketFromDeepLink = (url: string): string | null => {
     return null;
   }
   if (parsed.protocol !== `${SIGN_IN_SCHEME}:`) return null;
-  // Chromium parses a custom scheme as opaque, so the host lands in the path.
+  // `chat-desktop://sign-in` parses with `sign-in` as the host and an empty
+  // path; `chat-desktop:///sign-in` the other way round. Both spellings are
+  // accepted by reading the two together.
   const target = `${parsed.host}${parsed.pathname}`.replace(/^\/+|\/+$/g, "");
   if (target !== "sign-in") return null;
   const ticket = parsed.searchParams.get("ticket")?.trim() ?? "";
   return ticket === "" ? null : ticket;
 };
 
-/** Windows and Linux deliver the link as an argument of a second instance. */
+/** Windows and Linux deliver the link as an argument: of a second instance, or of a cold start. */
 export const ticketFromArgv = (argv: readonly string[]): string | null => {
   for (const argument of argv) {
     const ticket = ticketFromDeepLink(argument);

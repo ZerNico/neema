@@ -14,6 +14,7 @@ import {
   DesktopChromeProvider,
   desktopChromeInitScript,
 } from "~/ui/desktop-chrome.tsx";
+import { RouteError, RouteNotFound } from "~/ui/route-error.tsx";
 import { StartupPending } from "~/ui/startup-pending.tsx";
 
 interface RouterContext {
@@ -30,6 +31,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     links: [{ rel: "stylesheet", href: appCss }],
   }),
   shellComponent: RootDocument,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
 });
 
 function RootDocument({ children }: { children: ReactNode }) {

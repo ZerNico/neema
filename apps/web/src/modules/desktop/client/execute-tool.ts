@@ -1,8 +1,13 @@
 import { Effect } from "effect";
-import type { DesktopClient, DesktopError, NetworkLevel } from "@chat/desktop-rpc";
+import type { DesktopClient, DesktopError } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
-import { DesktopToolResult, desktopFailure, DESKTOP_TIMEOUTS } from "../tool-schema.ts";
+import {
+  DesktopToolResult,
+  desktopFailure,
+  DESKTOP_TIMEOUTS,
+  deletePathsOf,
+} from "../tool-schema.ts";
 
 const asResult = (
   outcome:
@@ -72,7 +77,8 @@ const describeEntry = (entry: {
 export const executeDesktopTool = (
   client: DesktopClient,
   conversationId: string,
-  network: NetworkLevel,
+  /** What is left of the server's deadline for this call when execution starts. */
+  remainingMs: number,
   activity: Pick<Extract<ToolActivity, { family: "desktop" }>, "name" | "args" | "callId">,
 ): Effect.Effect<DesktopToolResult> => {
   const args = activity.args ?? {};
@@ -90,7 +96,7 @@ export const executeDesktopTool = (
           (found) => ({
             v: 1 as const,
             ok: true,
-            summary: `Found ${found.paths.length} ${found.paths.length === 1 ? "file" : "files"} matching ${found.pattern}`,
+            summary: `Found ${found.paths.length} ${found.paths.length === 1 ? "match" : "matches"} for ${found.pattern}`,
             detail: found.paths.length === 0 ? "(no matches)" : found.paths.join("\n"),
             truncated: found.truncated,
           }),
@@ -148,17 +154,38 @@ export const executeDesktopTool = (
             truncated: false,
           }),
         );
-      case "delete_local_file":
+      case "delete_local_file": {
+        const paths = deletePathsOf(args);
+        if (paths.length === 0) {
+          return Effect.succeed(desktopFailure("Nothing to delete", "No paths were named."));
+        }
         return Effect.map(
-          client.deletePath({ callId: activity.callId, conversationId, path }),
-          (receipt) => ({
-            v: 1 as const,
-            ok: true,
-            summary: `Deleted ${receipt.path}`,
-            detail: `${receipt.kind === "directory" ? "Folder" : "File"} ${receipt.path} deleted.`,
-            truncated: false,
-          }),
+          client.deletePath({ callId: activity.callId, conversationId, paths }),
+          (receipt) => {
+            const lines = [
+              ...receipt.deleted.map(
+                (item) => `${item.kind === "directory" ? "Folder" : "File"} ${item.path} deleted.`,
+              ),
+              ...receipt.failed.map((item) => `${item.path}: ${item.message}`),
+            ];
+            const n = receipt.deleted.length;
+            const missed = receipt.failed.length;
+            const done = n === 1 ? `Deleted ${receipt.deleted[0]!.path}` : `Deleted ${n} files`;
+            return {
+              v: 1 as const,
+              ok: n > 0,
+              summary:
+                n === 0
+                  ? "Could not delete"
+                  : missed === 0
+                    ? done
+                    : `${done} (${missed} could not)`,
+              detail: lines.join("\n"),
+              truncated: false,
+            };
+          },
         );
+      }
       case "list_folder":
         return Effect.map(
           client.listDirectory({ callId: activity.callId, conversationId, path }),
@@ -213,15 +240,28 @@ export const executeDesktopTool = (
             truncated: false,
           }),
         );
-      case "run_command":
+      case "run_command": {
+        // A slow approval has already eaten into the server's wait; what is
+        // left, minus the trip back, is all the command may take.
+        const timeoutMs = Math.min(
+          DESKTOP_TIMEOUTS.command,
+          remainingMs - DESKTOP_TIMEOUTS.deliveryMargin,
+        );
+        if (timeoutMs <= 0) {
+          return Effect.succeed(
+            desktopFailure(
+              "Not started",
+              "Approval came too late for the command to finish in time. Ask again to run it.",
+            ),
+          );
+        }
         return Effect.map(
           client.runCommand({
             callId: activity.callId,
             conversationId,
             command,
             folder: str(args.folder),
-            timeoutMs: DESKTOP_TIMEOUTS.command,
-            network,
+            timeoutMs,
           }),
           (output) => ({
             v: 1 as const,
@@ -235,6 +275,7 @@ export const executeDesktopTool = (
             ...(output.violations.length > 0 ? { violations: output.violations } : {}),
           }),
         );
+      }
     }
   };
 

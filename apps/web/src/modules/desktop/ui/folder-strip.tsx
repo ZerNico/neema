@@ -15,15 +15,10 @@ import { cn } from "~/ui/utils";
 import { PERMISSION_LEVELS } from "../client/approvals.ts";
 import type { FolderState } from "../client/bridge.ts";
 
-/**
- * The chat's approval policy, held server-side; the strip is where it is
- * changed. The network level is deliberately not here: how far a command may
- * reach is a trust decision about the account, not a choice per task, so it
- * belongs in settings rather than beside the folder.
- */
+/** The chat's approval policy, held server-side; the strip is where it is changed. */
 export interface WorkSettingsControl {
   readonly permissionLevel: PermissionLevel;
-  readonly onChange: (patch: { permissionLevel?: PermissionLevel }) => void;
+  readonly onChange: (level: PermissionLevel) => void;
 }
 
 /**
@@ -135,10 +130,7 @@ export function FolderStrip({
           <>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
             {settings ? (
-              <PermissionPicker
-                level={settings.permissionLevel}
-                onChange={(permissionLevel) => settings.onChange({ permissionLevel })}
-              />
+              <PermissionPicker level={settings.permissionLevel} onChange={settings.onChange} />
             ) : null}
           </>
         ) : null}
@@ -239,7 +231,8 @@ function PermissionPicker({
           ))}
         </DropdownMenuRadioGroup>
         <p className="text-muted-foreground px-3 py-2 text-xs">
-          The delete tool always asks. An allowed command can still delete files.
+          The delete tool always asks, once for the whole list. An allowed command can still delete
+          files.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

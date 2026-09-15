@@ -6,11 +6,7 @@ import type { ComposerContext } from "./context-picker.tsx";
 import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
-import {
-  useDesktop,
-  useDesktopOutdated,
-  type FolderState,
-} from "~/modules/desktop/client/bridge.ts";
+import { useDesktop, useDesktopOutdated, type FolderState } from "~/modules/desktop/client/bridge.ts";
 import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -58,6 +54,12 @@ interface ComposerProps {
    * message agree. Null in a browser.
    */
   folder?: FolderState | null | undefined;
+  /**
+   * From `useWorkGate`: the folder check is not ready. Send is blocked; the
+   * textarea stays usable. The parent owns this so the strip and the send
+   * cannot disagree.
+   */
+  readOnly?: boolean | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -69,13 +71,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onModelChange,
     searchEnabled,
     onSearchEnabledChange,
-    textareaDisabled = false,
+    textareaDisabled,
     controlsDisabled,
     context,
     initialSkillId,
     mode,
     settings,
     folder = null,
+    readOnly = false,
   },
   ref,
 ) {
@@ -91,8 +94,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       : !desktop
         ? "This is a work chat. Open it in the desktop app to continue."
         : null;
-  const folderBlocked = working && (folder?.readiness !== "ready" || folder.busy);
-  const sendDisabled = disabled || folderBlocked;
+  const sendDisabled = disabled || (working && readOnly);
   const skills = useQuery(skillsQuery);
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],

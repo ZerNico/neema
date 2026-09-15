@@ -52,15 +52,10 @@ import {
   updateWorkSettings,
 } from "../server/functions.ts";
 import type { GenerationMode } from "../research-schema.ts";
-import type { ConversationMode, NetworkLevel, PermissionLevel } from "../schema.ts";
+import type { ConversationMode, PermissionLevel } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
-import {
-  DRAFT_CONVERSATION,
-  requireWorkFolder,
-  desktopAttemptFields,
-  withDraftFolderBinding,
-  useFolder,
-} from "~/modules/desktop/client/bridge.ts";
+import { DRAFT_CONVERSATION, withDraftFolderBinding } from "~/modules/desktop/client/bridge.ts";
+import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
 import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
@@ -410,11 +405,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const [retryEpoch, setRetryEpoch] = useState(0);
   // One folder state for the strip and the send, so attaching in the strip is
   // what the very next message reports. A plain chat never offers the tools.
-  const folder = useFolder(conversationId);
-  const workReadOnly =
-    data.conversation.mode === "work" && (folder?.readiness !== "ready" || folder.busy);
-  const attemptFields = () =>
-    desktopAttemptFields(requireWorkFolder(data.conversation.mode === "work", folder));
+  const work = useWorkGate(conversationId, data.conversation.mode === "work");
+  const folder = work.folder;
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
@@ -521,9 +513,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   }, [conversationId, data.documents, data.toolCalls, stream.tools]);
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
-    mutationFn: (patch: { permissionLevel?: PermissionLevel; networkLevel?: NetworkLevel }) =>
-      updateWorkSettings({ data: { conversationId, ...patch } }),
+    mutationFn: (permissionLevel: PermissionLevel) =>
+      updateWorkSettings({ data: { conversationId, permissionLevel } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+    onError: () => toast.error("Could not change the approval level."),
   });
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
@@ -646,12 +639,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       throw new Error("document has unresolved changes");
     }
   };
-  const checkWorkReady = () => {
-    if (workReadOnly) {
-      toast.error("Wait for the folder check before continuing this work chat.");
-      throw new Error("Work folder status unavailable");
-    }
-  };
+  const checkWorkReady = () => work.check();
   const beforeGeneration = async () => {
     checkWorkReady();
     await flushAgentDraft();
@@ -672,7 +660,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           modelId: effectiveModelId!,
           content: input.content,
           searchEnabled,
-          ...(await attemptFields()),
+          ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
           attachmentIds: input.attachmentIds,
@@ -721,7 +709,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           modelId: effectiveModelId!,
           searchEnabled,
-          ...(await attemptFields()),
+          ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -742,7 +730,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         data: {
           conversationId,
           ...input,
-          ...(await attemptFields()),
+          ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -805,7 +793,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         data: {
           conversationId,
           ...input,
-          ...(await attemptFields()),
+          ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -880,6 +868,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     retryMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
+  // Generation actions (edit/retry/answer/save) wait on the folder; branch
+  // copies history and must stay available in a browser.
+  const generationDisabled = actionsDisabled || work.readOnly;
   // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
   // oxlint-disable react-hooks/exhaustive-deps
   const respondToQuestion = useCallback(
@@ -1231,14 +1222,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ? {
               questionActions: {
                 ...(canRespond ? { onRespond: respondToQuestion } : {}),
-                disabled: actionsDisabled || workReadOnly || !effectiveModelId,
+                disabled: generationDisabled || !effectiveModelId,
                 ...(resolution
                   ? {
                       resolved: {
                         ...resolution,
                         ...(answerTime ? { time: answerTime } : {}),
                         onEdit: () => openEdit(resolution.messageId),
-                        editDisabled: actionsDisabled || workReadOnly,
+                        editDisabled: generationDisabled,
                       },
                     }
                   : {}),
@@ -1259,7 +1250,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         ...(message.role === "user" && message.status === "complete"
           ? {
               onEdit: () => openEdit(message.id),
-              editDisabled: actionsDisabled || workReadOnly,
+              editDisabled: generationDisabled,
             }
           : {}),
         // Only the answer itself can be forked, and only once it is finished —
@@ -1275,7 +1266,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               onRetry: () => void retry(retryTarget),
               onRetryWith: (pickedModelId: string) => void retry(retryTarget, pickedModelId),
               retryModelId: modelByMessage.get(retryTarget) ?? null,
-              retryDisabled: actionsDisabled || workReadOnly,
+              retryDisabled: generationDisabled,
             }
           : {}),
       };
@@ -1291,7 +1282,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     branchAt,
     compactionsByMessage,
     desktopApprovalRequests,
-    workReadOnly,
+    generationDisabled,
     effectiveModelId,
     respondToQuestion,
     tailMessageId,
@@ -1320,7 +1311,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 editState: {
                   onSave: saveQuestionEdit,
                   onCancel: closeEdit,
-                  disabled: mutationPending || generating || workReadOnly || !effectiveModelId,
+                  disabled: generationDisabled || !effectiveModelId,
                 },
               },
             },
@@ -1335,7 +1326,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               researchEnabled: activeEditingMessage.generationMode === "research",
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
-              saveDisabled: editPending || workReadOnly,
+              saveDisabled: editPending || work.readOnly,
               controlsDisabled: editPending,
               modelId: effectiveModelId,
               onModelChange: setModelId,
@@ -1382,9 +1373,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       editUploads,
       effectiveModelId,
       liveId,
-      mutationPending,
-      generating,
-      workReadOnly,
+      generationDisabled,
+      work.readOnly,
       saveQuestionEdit,
       saveEdit,
       searchEnabled,
@@ -1505,10 +1495,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <Composer
               ref={composer}
               folder={folder}
+              readOnly={work.readOnly}
               mode={{ kind: "fixed", value: data.conversation.mode }}
               settings={{
                 permissionLevel: data.conversation.permissionLevel,
-                onChange: (patch) => workSettingsMutation.mutate(patch),
+                onChange: (level) => workSettingsMutation.mutate(level),
               }}
               onSend={(content, attachmentIds, generationMode, skillIds) =>
                 sendMutation.mutateAsync({
@@ -1600,10 +1591,11 @@ export function NewChatView({
   }, [selectedAgentId, selectedAgent.data]);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
+  const [mode, setMode] = useState<ConversationMode>("chat");
   // No conversation yet, so a folder picked here hangs on the draft key until
   // the first message creates one to rebind it onto.
-  const folder = useFolder(DRAFT_CONVERSATION);
-  const [mode, setMode] = useState<ConversationMode>("chat");
+  const work = useWorkGate(DRAFT_CONVERSATION, mode === "work");
+  const folder = work.folder;
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
@@ -1639,7 +1631,7 @@ export function NewChatView({
               content: input.content,
               searchEnabled,
               mode: input.mode,
-              ...(await desktopAttemptFields(requireWorkFolder(input.mode === "work", folder))),
+              ...(await work.attemptFields(input.mode === "work")),
               timeZone: browserTimeZone(),
               attachmentIds: input.attachmentIds,
               ...(input.generationMode ? { generationMode: input.generationMode } : {}),
@@ -1652,7 +1644,7 @@ export function NewChatView({
     // Fires when the request starts, i.e. after any queued upload settled —
     // the composer should not move while it is still waiting on those.
     onMutate: (input) => {
-      requireWorkFolder(input.mode === "work", folder);
+      work.check(input.mode === "work");
       setSending(true);
       slide.current = prefersReducedMotion()
         ? Promise.resolve()
@@ -1735,6 +1727,7 @@ export function NewChatView({
           <Composer
             initialSkillId={initialSkillId}
             folder={folder}
+            readOnly={work.readOnly}
             mode={{ kind: "choose", value: mode, onChange: setMode }}
             onSend={(content, attachmentIds, generationMode, skillIds) =>
               sendMutation.mutateAsync({
