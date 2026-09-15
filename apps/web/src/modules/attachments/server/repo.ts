@@ -14,6 +14,7 @@ import { attachmentKind } from "../constants.ts";
 import type { Attachment, MessageAttachment } from "../schema.ts";
 import { AttachmentNotAvailable } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
+import { isUniqueViolation } from "~/server/sql.ts";
 
 export interface AttachmentAssociation {
   before(tx: DbTx): Effect.Effect<void>;
@@ -67,20 +68,6 @@ const withBlobColumns = {
 // Postgres unique_violation, wherever the driver buried it in the cause
 // chain. Anything else raised during the claim insert is a real fault and
 // must not be dressed up as a user-level conflict.
-const isUniqueViolation = (error: unknown): boolean => {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
-    if ((current as { code?: unknown }).code === "23505") return true;
-    if (
-      typeof (current as { message?: unknown }).message === "string" &&
-      (current as { message: string }).message.includes("duplicate key value")
-    ) {
-      return true;
-    }
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-};
 
 const deleteAttachmentRows = (
   tx: DbTx,

@@ -53,6 +53,7 @@ import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { escapeLike } from "~/server/sql.ts";
 import {
   BranchNotAllowed,
   ConversationBusy,
@@ -211,7 +212,6 @@ export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
 
 // `%`, `_` and the escape character itself are literals when someone types
 // them into a search box, not wildcards.
-const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
 
 // Callers hold the conversation lock. Only one successful immutable batch can
 // own the immediately following structured user response.

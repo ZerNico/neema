@@ -7,8 +7,8 @@ import { Db } from "~/server/db.ts";
 import { SharingRateLimited } from "../errors.ts";
 import { sharingResources } from "./resources.ts";
 import type { ResourceGrants, SharedResource, ShareRecipient } from "../schema.ts";
+import { escapeLike } from "~/server/sql.ts";
 
-const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
 /** One page of the picker; the query narrows it rather than paging. */
 const RECIPIENT_LIMIT = 20;
 

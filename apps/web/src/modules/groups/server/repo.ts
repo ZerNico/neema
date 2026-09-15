@@ -1,9 +1,10 @@
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
-import { Cause, Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { GroupMemberNotFound, GroupNameTaken, GroupNotFound } from "../errors.ts";
 import { Db } from "~/server/db.ts";
 import { groupMembers, groups, user } from "~/db/schema/index.ts";
+import { isUniqueViolation } from "~/server/sql.ts";
 
 export type GroupRow = typeof groups.$inferSelect;
 export type GroupWithCount = GroupRow & { memberCount: number };
@@ -22,19 +23,6 @@ export interface Membership {
 
 // A unique-name conflict arrives as EffectDrizzleQueryError whose `cause` is
 // a whole Effect Cause wrapping SqlError → effect/sql's tagged
-// UniqueViolation. Squash the Cause to the underlying failure and walk from
-// there instead of assuming exact nesting.
-const isUniqueViolation = (error: unknown): boolean => {
-  const outer = (error as { cause?: unknown }).cause;
-  let current: unknown = Cause.isCause(outer) ? Cause.squash(outer) : outer;
-  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
-    if ((current as { _tag?: unknown })._tag === "UniqueViolation") return true;
-    const reason = (current as { reason?: { _tag?: unknown } }).reason;
-    if (reason?._tag === "UniqueViolation") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-};
 
 export class GroupRepo extends Context.Service<
   GroupRepo,
