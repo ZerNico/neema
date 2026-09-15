@@ -77,7 +77,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           modelId: data.modelId,
           content: data.content,
-          generationMode: data.generationMode,
+          researchEnabled: data.researchEnabled,
           searchEnabled: data.searchEnabled,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
@@ -133,6 +133,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           modelId: data.modelId,
           searchEnabled: data.searchEnabled,
+          researchEnabled: data.researchEnabled,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
@@ -259,7 +260,6 @@ export const stopGeneration = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
-          researchRunId: data.researchRunId,
         }),
       ).pipe(
         Effect.catchTags({

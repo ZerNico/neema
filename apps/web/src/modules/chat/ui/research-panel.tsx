@@ -286,7 +286,7 @@ function researchPanelRequest(
 ): DetailPanelRequest | null {
   const runId = runIdOf(activity);
   if (!runId) return null;
-  const running = activity.status === "running" && activity.progress?.phase !== "synthesizing";
+  const running = activity.status === "running";
   return {
     id: researchPanelId(messageId, runId),
     title: "Deep research",
@@ -331,7 +331,6 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
       )
     : undefined;
   const messageId = selectedMessage?.id;
-  const currentRunId = selectedMessage?.researchRunId;
   const activities = selectedMessage?.toolActivities;
   // Text smoothing changes display rows every token, but does not change their
   // activity data. Neither text nor the refreshed detail request is a dependency.
@@ -344,8 +343,6 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
     );
     if (!activity) return null;
     const runId = runIdOf(activity);
-    // A retry can replace the durable run before its fresh stream data arrives.
-    if (currentRunId !== undefined && currentRunId !== runId) return null;
     const webActivities = activities.filter(
       (candidate): candidate is ResearchStepActivity =>
         (candidate.family === "web" ||
@@ -354,7 +351,7 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
         candidate.runId === runId,
     );
     return researchPanelRequest(messageId, activity, webActivities);
-  }, [messageId, currentRunId, activities, selectedId]);
+  }, [messageId, activities, selectedId]);
 
   useEffect(() => {
     if (!selectedId?.startsWith("research:")) return;

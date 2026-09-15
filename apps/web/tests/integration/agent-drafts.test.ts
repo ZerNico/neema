@@ -908,6 +908,7 @@ describe("draft transaction write fences", () => {
       conversationId: draft.conversationId,
       messageId: uuidv7(),
       runId: uuidv7(),
+      generationId: uuidv7(),
       owner: uuidv7(),
     };
     await run(
@@ -918,13 +919,14 @@ describe("draft transaction write fences", () => {
           conversationId: draft.conversationId,
           role: "assistant",
           status: "streaming",
-          generationMode: "research",
-          researchRunId: fence.runId,
+          generationId: fence.generationId,
         });
         yield* db.insert(researchRuns).values({
           id: fence.runId,
           conversationId: draft.conversationId,
           messageId: fence.messageId,
+          generationId: fence.generationId,
+          toolCallId: null,
           userId: owner,
           owner: fence.owner,
           status: "running",

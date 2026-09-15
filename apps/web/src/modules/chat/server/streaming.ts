@@ -1,10 +1,14 @@
-import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
-import { wakeOn } from "~/modules/sync/server/wakeup.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
+import {
+  prepareResearchTool,
+  ResearchToolResult,
+  type ToolCallRowRef,
+} from "./research/tool.ts";
+
 import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
 import {
   DocumentToolName,
@@ -25,7 +29,6 @@ import {
 } from "~/modules/agents/tool-schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
-import { lockResearchFence } from "./research/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
@@ -34,10 +37,7 @@ import { acceptGeneratedImage } from "./generated-images.ts";
 import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
 import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
-import { messageChunks } from "~/db/schema/chat.ts";
-import { runConversationResearch } from "./conversation-research.ts";
 import { prepareConversationContext } from "./conversation-context.ts";
-import type { ResearchPhase } from "../research-schema.ts";
 import {
   Context,
   Deferred,
@@ -201,7 +201,6 @@ export class StreamEngine extends Context.Service<
       messageId: string;
       modelId: string;
       searchEnabled: boolean;
-      researchRunId?: string | undefined;
       generationId?: string | undefined;
       desktopExecutorId?: string | undefined;
       /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
@@ -326,7 +325,6 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
-        researchRunId?: string | undefined;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
@@ -337,14 +335,6 @@ export class StreamEngine extends Context.Service<
         const fence = yield* GenerationFence;
         const currentMessage = yield* repo.getMessage(input.messageId);
         if (fence && currentMessage?.generationId !== fence.generationId) return;
-        if (input.researchRunId && currentMessage?.researchRunId !== input.researchRunId) return;
-        const claim =
-          currentMessage?.researchRunId && repo.research
-            ? yield* repo.research.claim(currentMessage.researchRunId)
-            : null;
-        if (currentMessage?.generationMode === "research" && !claim) return;
-        const research = claim && repo.research ? { ...claim, store: repo.research } : null;
-        let researchPhase: ResearchPhase = "error";
         // The frozen configuration this answer runs with. Dispatch consumes it
         // read-only: identity is decided at turn time, access is rechecked here.
         const config = yield* repo.getGenerationConfig(input.messageId);
@@ -391,7 +381,7 @@ export class StreamEngine extends Context.Service<
         let assembledReasoning = "";
         let acceptedImages = 0;
         let replay: ProviderReplay | null = null;
-        const imageOutput = !research && model?.capabilities.imageOutput === true;
+        const imageOutput = model?.capabilities.imageOutput === true;
         let imageCostIncomplete = false;
         let modelCallOpen = false;
         let buffer: Array<{ seq: number; kind: ChunkKind; delta: string }> = [];
@@ -412,40 +402,17 @@ export class StreamEngine extends Context.Service<
               // slow first token or a long tool round cannot get the row reaped
               // mid-answer. Research keeps its own lease on the run.
               if (batch.length === 0)
-                return research || !fence
-                  ? Effect.void
-                  : repo.renewGenerationLease(input.messageId, fence.generationId);
-              const persist = research
-                ? research.store.locked(
-                    research.fence,
-                    (tx) =>
-                      tx
-                        .insert(messageChunks)
-                        .values(batch.map((chunk) => ({ ...chunk, messageId: input.messageId })))
-                        .pipe(
-                          Effect.orDie,
-                          Effect.andThen(
-                            notifyOnCommit(tx, {
-                              scope: "internal",
-                              event: { type: "research.chunks", messageId: input.messageId },
-                            }),
-                          ),
-                        ),
-                    true,
-                  )
-                : repo.appendChunks(input.messageId, batch);
-              return persist.pipe(
+                return fence
+                  ? repo.renewGenerationLease(input.messageId, fence.generationId)
+                  : Effect.void;
+              return repo.appendChunks(input.messageId, batch).pipe(
                 Effect.flatMap(() =>
                   Effect.forEach(
                     batch,
                     (chunk) =>
                       PubSub.publish(pubsub, {
                         kind: "chunk",
-                        ...(research
-                          ? { runId: research.fence.runId }
-                          : fence
-                            ? { runId: fence.generationId }
-                            : {}),
+                        ...(fence ? { runId: fence.generationId } : {}),
                         messageId: input.messageId,
                         seq: chunk.seq,
                         chunkKind: chunk.kind,
@@ -480,28 +447,6 @@ export class StreamEngine extends Context.Service<
 
         const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
-            if (research) {
-              yield* flush.pipe(Effect.catchCause(() => Effect.void));
-              const phase =
-                status === "aborted" ? "aborted" : status === "error" ? "error" : researchPhase;
-              const finalized = yield* research.store.finalize(
-                research.fence.runId,
-                phase,
-                research.fence.owner,
-              );
-              if (finalized) {
-                const terminal = yield* repo.getMessage(input.messageId);
-                const doneStatus =
-                  terminal?.status === "streaming" ? "error" : (terminal?.status ?? "error");
-                yield* PubSub.publish(pubsub, {
-                  kind: "done",
-                  messageId: input.messageId,
-                  runId: research.fence.runId,
-                  status: doneStatus,
-                });
-              }
-              return;
-            }
             yield* flush;
             if (error) {
               yield* Effect.logError("generation failed", {
@@ -590,12 +535,7 @@ export class StreamEngine extends Context.Service<
         let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
-          const writeGuard = (tx: DbTx) =>
-            research
-              ? lockResearchFence(tx, research.fence)
-              : fence
-                ? lockGeneration(tx, fence)
-                : Effect.interrupt;
+          const writeGuard = (tx: DbTx) => (fence ? lockGeneration(tx, fence) : Effect.interrupt);
           const authoring = yield* prepareAgentDraftTools({
             services: authoringServices,
             userId: input.userId,
@@ -611,83 +551,6 @@ export class StreamEngine extends Context.Service<
             openDocumentId: input.openDocumentId,
             writeGuard,
           });
-          if (research) {
-            // Research reads the same frozen configuration; its knowledge
-            // session is scoped to `generate` like the ordinary path's.
-            const researchKnowledge =
-              config.knowledgeMode !== "none"
-                ? {
-                    session: yield* knowledgeSearch.session({
-                      userId: input.userId,
-                      collectionIds: config.collectionIds,
-                      manifest: config.manifest,
-                    }),
-                    service: knowledgeService,
-                  }
-                : null;
-            const controlWake = yield* wakeOn(
-              sync.signals.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.type === "ready" ||
-                    (event.type === "research.control" && event.messageId === input.messageId),
-                ),
-              ),
-            );
-            yield* controlWake;
-            if (!(yield* research.store.alive(research.fence))) {
-              yield* Deferred.succeed(input.abort, undefined);
-              return yield* Effect.never;
-            }
-            const work = runConversationResearch({
-              memory,
-              authoring,
-              store: research.store,
-              fence: research.fence,
-              gateway,
-              repo,
-              providers,
-              webSearch,
-              urlReader,
-              promptDeps,
-              history: completed,
-              priorSources,
-              runtimeContext,
-              config,
-              knowledge: researchKnowledge,
-              skillReader,
-              modelId: input.modelId,
-              userId: input.userId,
-              startedAt: research.run.createdAt.getTime(),
-              emit: pushToolChunk,
-              emitCompaction: pushCompactionChunk,
-              getTextOffset: () => assembled.length,
-              text: (delta) =>
-                Effect.suspend(() => {
-                  pushChunk("text", delta);
-                  return flush;
-                }),
-            });
-            const control = Effect.gen(function* () {
-              yield* controlWake;
-              if (!(yield* research.store.alive(research.fence))) {
-                yield* Deferred.succeed(input.abort, undefined);
-                return yield* Effect.never;
-              }
-            }).pipe(Effect.forever);
-            const heartbeat = research.store
-              .heartbeat(research.fence)
-              .pipe(Effect.delay(Duration.seconds(10)), Effect.forever);
-            researchPhase = yield* Effect.raceFirst(
-              work,
-              Effect.raceFirst(control, heartbeat),
-            ).pipe(
-              Effect.timeout(
-                Duration.millis(Math.max(1, research.run.deadline.getTime() - Date.now())),
-              ),
-            );
-            return;
-          }
           // Attachments resolve here, inside the generation: a missing blob or
           // an unparseable PDF then finalizes the message as an error like any
           // other generation failure.
@@ -748,11 +611,11 @@ export class StreamEngine extends Context.Service<
           const askTools = prepareAskUserTool();
           // Replaced each turn, because a provider call id is unique only
           // within one and a handler only ever runs inside one.
-          const turnCallRows = new Map<string, Deferred.Deferred<string | undefined>>();
-          const desktopCallReady = (providerCallId: string) => {
+          const turnCallRows = new Map<string, Deferred.Deferred<ToolCallRowRef | undefined>>();
+          const callRowReady = (providerCallId: string) => {
             let ready = turnCallRows.get(providerCallId);
             if (!ready) {
-              ready = Deferred.makeUnsafe<string | undefined>();
+              ready = Deferred.makeUnsafe<ToolCallRowRef | undefined>();
               turnCallRows.set(providerCallId, ready);
             }
             return ready;
@@ -762,7 +625,9 @@ export class StreamEngine extends Context.Service<
           const desktopTools = config.desktopFolders
             ? prepareDesktopTools({
                 rowIdFor: (providerCallId) =>
-                  Effect.suspend(() => Deferred.await(desktopCallReady(providerCallId))),
+                  Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
+                    Effect.map((row) => row?.rowId),
+                  ),
                 commands: config.desktopCommands ?? false,
               })
             : null;
@@ -785,9 +650,39 @@ export class StreamEngine extends Context.Service<
             history: completed,
           });
           const { memoryTools } = conversationContext;
+          // Research is a tool on an ordinary turn: the model writes the brief
+          // and answers from the evidence. The run it starts is owned by its
+          // tool call and fenced by this generation.
+          const researchTool =
+            config.researchEnabled && repo.research && fence
+              ? prepareResearchTool({
+                  store: repo.research,
+                  gateway,
+                  providers,
+                  webSearch,
+                  urlReader,
+                  userUrls: readerUrls,
+                  priorSources,
+                  config,
+                  knowledge: knowledgeSession
+                    ? { session: knowledgeSession, service: knowledgeService }
+                    : null,
+                  ...(skillReader ? { skillReader } : {}),
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  generationId: fence.generationId,
+                  modelId: input.modelId,
+                  rowFor: (providerCallId) =>
+                    Effect.suspend(() => Deferred.await(callRowReady(providerCallId))),
+                  emit: pushToolChunk,
+                  emitCompaction: pushCompactionChunk,
+                })
+              : null;
           const commonGroups = [
             authoring.group,
             documents.group,
+            ...(researchTool ? [researchTool.group] : []),
             ...(desktopTools ? [desktopTools] : []),
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
@@ -1462,9 +1357,12 @@ export class StreamEngine extends Context.Service<
                                         ? "skill"
                                         : Schema.is(KnowledgeToolName)(part.name)
                                           ? "knowledge"
-                                          : part.name === "web_search" || part.name === "read_url"
-                                            ? "web"
-                                            : null;
+                                          : part.name === "deep_research"
+                                            ? "research"
+                                            : part.name === "web_search" ||
+                                                part.name === "read_url"
+                                              ? "web"
+                                              : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1488,7 +1386,8 @@ export class StreamEngine extends Context.Service<
                               family === "memory" ||
                               family === "skill" ||
                               family === "agent-draft" ||
-                              family === "document"
+                              family === "document" ||
+                              family === "research"
                                 ? {}
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
@@ -1496,6 +1395,18 @@ export class StreamEngine extends Context.Service<
                                     : {}
                                   : (args as JsonValue),
                           });
+                          if (family === "research") {
+                            // The handler cannot learn its own row id: the
+                            // toolkit hands it the provider's call id, and this
+                            // row is minted here. It waits on the same handshake
+                            // the desktop tools use, then describes its own run.
+                            yield* Deferred.succeed(callRowReady(part.id), {
+                              rowId,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                            });
+                            return;
+                          }
                           if (family === "memory" || family === "ask" || family === "plan") {
                             yield* pushToolChunk(
                               family === "plan"
@@ -1525,7 +1436,7 @@ export class StreamEngine extends Context.Service<
                           if (family === "desktop") {
                             // SDK handlers run concurrently with this observer.
                             // Release them only after the owned registration exists.
-                            const ready = desktopCallReady(part.id);
+                            const ready = callRowReady(part.id);
                             if (!input.desktopExecutorId || !input.generationId) {
                               yield* Deferred.succeed(ready, undefined);
                               return;
@@ -1543,7 +1454,11 @@ export class StreamEngine extends Context.Service<
                                 ? DESKTOP_TIMEOUTS.command
                                 : DESKTOP_TIMEOUTS.quick,
                             });
-                            yield* Deferred.succeed(ready, rowId);
+                            yield* Deferred.succeed(ready, {
+                              rowId,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                            });
                             yield* pushToolChunk({
                               v: 1,
                               family,
@@ -1646,6 +1561,52 @@ export class StreamEngine extends Context.Service<
                         case "tool-result": {
                           const rowId = callRowIds.get(part.id);
                           if (!rowId) return;
+                          if (part.name === "deep_research") {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(ResearchToolResult)(
+                              part.result,
+                            );
+                            const result =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : ({ outcome: "failed" } as ResearchToolResult);
+                            const run =
+                              result.runId && repo.research
+                                ? yield* repo.research.get(result.runId)
+                                : null;
+                            // Only evidence is a usable answer. A run that
+                            // produced none has already recorded why.
+                            const ok = result.outcome === "evidence";
+                            // The run wrote this row's body as it went. Settling
+                            // the call must not replace the progress and sources
+                            // the panel reads back on reload.
+                            yield* repo.settleToolCall({
+                              id: rowId,
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : {
+                                    error: {
+                                      code: "ResearchIncomplete",
+                                      message: result.message ?? "Research produced no evidence.",
+                                    },
+                                  }),
+                            });
+                            if (run)
+                              yield* pushToolChunk({
+                                v: 1,
+                                family: "research",
+                                phase: "result",
+                                callId: rowId,
+                                runId: run.id,
+                                name: "deep_research",
+                                turnIndex: turn,
+                                callIndex: callIndex - 1,
+                                textOffset: 0,
+                                progress: run.progress,
+                              });
+                            return;
+                          }
                           if (Schema.is(AgentDraftToolName)(part.name)) {
                             if (isPreliminary) return;
                             const activity = projectAgentDraftResult(
@@ -2233,7 +2194,7 @@ export class StreamEngine extends Context.Service<
         yield* Effect.raceFirst(Effect.raceFirst(ran, stopped), flusher).pipe(
           Effect.flatMap((wasStopped) => finalize(wasStopped ? "aborted" : "complete")),
           Effect.catchCause((cause) => finalize("error", cause)),
-          Effect.onInterrupt(() => (research ? finalize("error") : Effect.void)),
+          Effect.onInterrupt(() => finalize("error")),
         );
       });
 
@@ -2243,7 +2204,6 @@ export class StreamEngine extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
-        researchRunId?: string | undefined;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
@@ -2252,13 +2212,9 @@ export class StreamEngine extends Context.Service<
       }) {
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
-        if (
-          !input.researchRunId &&
-          (!input.generationId || message?.generationId !== input.generationId)
-        )
-          return;
+        if (!input.generationId || message?.generationId !== input.generationId) return;
         const fence: GenerationIdentity | null =
-          !input.researchRunId && input.generationId
+          input.generationId
             ? {
                 userId: input.userId,
                 conversationId: input.conversationId,
@@ -2277,7 +2233,7 @@ export class StreamEngine extends Context.Service<
                 deviceSessionId: input.deviceSessionId,
               }
             : null;
-        const registration = { abort, runId: input.researchRunId ?? fence?.generationId, owner };
+        const registration = { abort, runId: fence?.generationId, owner };
         inFlight.set(input.messageId, registration);
         // Detached from the request fiber: survives the HTTP response ending.
         yield* Effect.forkIn(
@@ -2330,64 +2286,9 @@ export class StreamEngine extends Context.Service<
               return Stream.make(done);
             }
 
-            if (message.researchRunId) {
-              const runId = expectedRunId ?? message.researchRunId;
-              let cursor = afterSeq;
-              const wake = yield* wakeOn(
-                sync.signals.pipe(
-                  Stream.filter(
-                    (event) =>
-                      event.type === "ready" ||
-                      ((event.type === "research.chunks" || event.type === "research.control") &&
-                        event.messageId === messageId),
-                  ),
-                ),
-              );
-              return Stream.fromEffectRepeat(
-                Effect.gen(function* () {
-                  yield* wake;
-                  const snapshot = yield* repo.research!.tail(messageId, cursor);
-                  const current = snapshot?.message;
-                  if (!current || current.researchRunId !== runId)
-                    return [
-                      {
-                        kind: "done" as const,
-                        messageId,
-                        runId: current?.researchRunId ?? runId,
-                        status: "error" as const,
-                      },
-                    ];
-                  const rows = snapshot?.chunks ?? [];
-                  const events: StreamEvent[] = [];
-                  for (const chunk of rows) {
-                    if (chunk.seq !== cursor + 1) break;
-                    cursor = chunk.seq;
-                    events.push({
-                      kind: "chunk",
-                      messageId,
-                      runId,
-                      seq: chunk.seq,
-                      chunkKind: chunk.kind,
-                      delta: chunk.delta,
-                    });
-                  }
-                  if (current.status !== "streaming" && (rows.at(-1)?.seq ?? cursor) === cursor)
-                    events.push({ kind: "done", messageId, runId, status: current.status });
-                  return events;
-                }),
-              ).pipe(
-                Stream.flatMap((events) => Stream.fromIterable(events)),
-                Stream.takeUntil((event) => event.kind === "done"),
-              );
-            }
-
             const subscription = yield* PubSub.subscribe(pubsub);
             if (message.status === "streaming" && !inFlight.has(messageId)) yield* reapGenerations;
-            const snapshot = repo.research ? yield* repo.research.tail(messageId, afterSeq) : null;
-            const current =
-              snapshot?.message ??
-              (yield* repo.getMessage(messageId).pipe(Effect.orDie)) ??
-              message;
+            const current = (yield* repo.getMessage(messageId).pipe(Effect.orDie)) ?? message;
             const runId = expectedRunId ?? current.generationId ?? undefined;
             if (current.generationId && current.generationId !== runId)
               return Stream.make({
@@ -2396,7 +2297,7 @@ export class StreamEngine extends Context.Service<
                 runId: current.generationId,
                 status: "error" as const,
               });
-            const persisted = snapshot?.chunks ?? (yield* repo.chunksAfter(messageId, afterSeq));
+            const persisted = yield* repo.chunksAfter(messageId, afterSeq);
             let lastSeq = persisted.at(-1)?.seq ?? afterSeq;
 
             const replay: Stream.Stream<StreamEvent> = Stream.fromIterable(

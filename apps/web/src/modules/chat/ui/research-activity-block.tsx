@@ -13,17 +13,8 @@ import { MotionSwap } from "~/ui/motion.tsx";
 // live in the detail panel this row opens (research-panel.tsx), not here.
 const activeLabels: Record<ResearchPhase, string> = {
   queued: "Starting research",
-  // Clarifying is an internal decision about whether to ask anything, and it
-  // lasts a second or two. Narrating it says nothing the reader wants.
-  clarifying: "Starting research",
-  planning: "Planning research",
   researching: "Researching",
-  // Synthesis is the answer streaming in below, exactly like any reply; the
-  // row has already settled by then. Kept total for exhaustiveness.
-  synthesizing: "Researching",
   complete: "Researching",
-  awaiting_answer: "Researching",
-  partial: "Researching",
   aborted: "Researching",
   interrupted: "Researching",
   error: "Researching",
@@ -73,11 +64,6 @@ export function ResearchActivityBlock({
 }) {
   const progress = activity.progress;
   const phase = progress?.phase;
-  // The question card that follows says everything this row would, and the
-  // answered run continues in the next message — two research rows for one
-  // request is the duplicate, not information.
-  if (phase === "awaiting_answer") return null;
-
   // max-w-full: a button is shrink-to-fit, and a long unbreakable target (a
   // URL, a query without spaces) would size it past the bubble before the
   // detail span ever got the chance to truncate.
@@ -85,9 +71,9 @@ export function ResearchActivityBlock({
   const buttonClassName =
     "hover:text-foreground focus-visible:ring-ring/30 rounded-lg text-left transition-colors outline-none focus-visible:ring-3";
 
-  // Once synthesis starts the investigation is over: the row settles into its
-  // finished form and the answer streams in below it like any other reply.
-  const running = activity.status === "running" && phase !== "synthesizing";
+  // The row settles when the call returns; the answer streams in below it like
+  // any other reply.
+  const running = activity.status === "running";
   const detail = running ? currentDetail(webActivities) : null;
 
   const sources = sourceCount ?? activity.sources?.length ?? 0;

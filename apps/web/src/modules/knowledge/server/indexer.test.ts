@@ -45,7 +45,10 @@ describe("knowledge worker lifetime", () => {
       yield* TestClock.adjust(Duration.seconds(10));
       expect(extractions).toBe(1);
       const idleEmbeddings = embeddings;
-      yield* PubSub.publish(signals, { type: "knowledge.work", stage: "extraction" });
+      yield* PubSub.publish(signals, {
+        type: "knowledge.work",
+        stage: "extraction",
+      } satisfies WorkSignal);
       yield* Deferred.await(next);
       expect(extractions).toBe(2);
       expect(embeddings).toBe(idleEmbeddings);

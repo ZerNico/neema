@@ -75,7 +75,6 @@ const read: WebToolActivity = {
 
 const message = {
   id: "m1",
-  researchRunId: "run-1",
   role: "assistant" as const,
   content: "",
   reasoning: "",
@@ -90,7 +89,6 @@ const tree = (
   content = message.content,
   options: {
     visible?: boolean;
-    researchRunId?: string | null;
     id?: string;
     removed?: boolean;
   } = {},
@@ -292,7 +290,7 @@ describe("research panel", () => {
             status: "complete",
             progress: {
               ...research.progress!,
-              phase: "partial",
+              phase: "error",
               usageComplete: false,
               limitations,
               tasks,
@@ -344,9 +342,10 @@ describe("research panel", () => {
     rerender(tree(undefined, undefined, undefined, { visible: false }));
     const settled: ResearchToolActivity = {
       ...research,
+      status: "complete",
       progress: {
         ...research.progress!,
-        phase: "synthesizing",
+        phase: "complete",
         tasks: research.progress!.tasks.map((task) =>
           Object.assign({}, task, { status: "complete" as const }),
         ),
@@ -378,7 +377,7 @@ describe("research panel", () => {
     expect(within(panel).queryByText(/usage/i)).not.toBeInTheDocument();
   });
 
-  it.each(["stale overlay", "new activity"])("closes the old run on retry (%s)", (stage) => {
+  it("closes the old run on retry", () => {
     const { rerender } = renderBubble();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
     const fresh: ResearchToolActivity = {
@@ -387,15 +386,10 @@ describe("research panel", () => {
       runId: "run-2",
       progress: { ...research.progress!, runId: "run-2" },
     };
-    // Retry reuses the message ID. The durable identity fences even an old
-    // stream overlay still carrying run-1's activities.
-    rerender(
-      tree(stage === "stale overlay" ? undefined : [fresh], undefined, undefined, {
-        researchRunId: "run-2",
-      }),
-    );
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    rerender(tree([fresh], undefined, undefined, { researchRunId: "run-2" }));
+    // Retry reuses the message id. The panel follows the chosen call, so a run
+    // the retry replaced has no activity left to render from. Stale chunks
+    // never arrive: the stream itself is fenced by the generation.
+    rerender(tree([fresh]));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
     expect(screen.getByRole("complementary", { name: "Deep research" })).toBeInTheDocument();

@@ -83,10 +83,6 @@ export const messages = pgTable(
     // final assembled text; for streaming messages this is written on completion
     content: text().notNull().default(""),
     // Structured answer; content is its server-generated model/provenance projection.
-    generationMode: text("generation_mode", { enum: ["chat", "research"] })
-      .notNull()
-      .default("chat"),
-    researchRunId: text("research_run_id"),
     generationId: text("generation_id").$defaultFn(uuidv7),
     // Heartbeat for a streaming ordinary generation, renewed by the owning
     // fiber's periodic flush. Null while streaming means a process died before

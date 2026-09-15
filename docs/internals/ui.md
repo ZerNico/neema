@@ -124,8 +124,8 @@ false`), so a page body is written against data already there. This includes loc
 - The web-search toggle rests on a default (`useSearchMode(defaultEnabled)`): true in plain chat,
   the installed or selected agent's "web search by default" otherwise. A manual flip is one
   message's opt-in or opt-out and resets on send; picking another agent in a new chat resets it
-  too. Deep research mode changes only `researchEnabled`; that search preference stays intact
-  while its toggle is hidden in research. Opening a conversation or new chat focuses the
+  too. The deep-research toggle sets `researchEnabled` only, leaving that search preference
+  intact while its own control is hidden. Opening a conversation or new chat focuses the
   composer, except on a phone (`useIsMobile`), where it would raise the keyboard over what the user came
   to read.
 - Agent Create/Edit with chat uses a one-shot TanStack history-state text prefill, not a query
@@ -153,7 +153,7 @@ false`), so a page body is written against data already there. This includes loc
   call's text offset, never in a transcript footer. The manual agent editor similarly pins its dirty
   baseline rather than treating a background refetch as permission to overwrite newer settings.
 - Upload-queued composer sends sample in two moments, on purpose. What the person decided by
-  pressing Submit (`onSend`, research mode, the blocked/disabled state, the model) is frozen at the
+  pressing Submit (`onSend`, the research offer, the blocked/disabled state, the model) is frozen at the
   click; what they can still edit while uploads settle (draft text, skill chips) is read at dispatch.
   `Composer` keeps one effect-updated request ref for both and copies it at the click; see
   `docs/internals/desktop.md` for the mode-fixed rule this serves.

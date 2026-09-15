@@ -1,13 +1,11 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   conversations,
   messages,
-  messageChunks,
   messageToolCalls,
-  messageCompactionEvents,
   models,
   researchRuns,
   researchTasks,
@@ -24,6 +22,8 @@ export type ResearchFence = {
   runId: string;
   messageId: string;
   conversationId: string;
+  /** The attempt that started the run; a retry or edit mints a new one. */
+  generationId: string;
   owner: string;
 };
 export const initialResearchProgress = (runId: string): ResearchProgress => ({
@@ -35,12 +35,14 @@ export const initialResearchProgress = (runId: string): ResearchProgress => ({
 });
 
 /** Caller holds conversation lock. User advisory lock orders admission across conversations. */
-export const queueResearch = Effect.fn("research.queue")(function* (
+const queueResearch = Effect.fn("research.queue")(function* (
   tx: DbTx,
   input: {
     userId: string;
     conversationId: string;
     messageId: string;
+    generationId: string;
+    toolCallId: string;
     modelId: string;
   },
 ) {
@@ -62,19 +64,12 @@ export const queueResearch = Effect.fn("research.queue")(function* (
       reason: "You already have an active deep research request. Stop it or wait for it to finish.",
     });
   const id = uuidv7();
+  // Nothing is written to the message: a run is a unit of work owned by its
+  // tool call, fenced by the generation that started it.
   yield* tx
     .insert(researchRuns)
     .values({ id, ...input, modelName: input.modelId, progress: initialResearchProgress(id) })
     .pipe(Effect.orDie);
-  yield* tx
-    .update(messages)
-    .set({ researchRunId: id, generationMode: "research" })
-    .where(eq(messages.id, input.messageId))
-    .pipe(Effect.orDie);
-  yield* notifyOnCommit(tx, {
-    scope: "internal",
-    event: { type: "research.control", messageId: input.messageId },
-  });
   return id;
 });
 
@@ -99,10 +94,11 @@ export const lockResearchFence = Effect.fn("research.lockFence")(function* (
         eq(researchRuns.id, fence.runId),
         eq(researchRuns.conversationId, fence.conversationId),
         eq(researchRuns.messageId, fence.messageId),
+        eq(researchRuns.generationId, fence.generationId),
         eq(researchRuns.owner, fence.owner),
         eq(researchRuns.status, "running"),
         eq(messages.conversationId, fence.conversationId),
-        eq(messages.researchRunId, fence.runId),
+        eq(messages.generationId, fence.generationId),
         eq(messages.status, "streaming"),
         sql`${researchRuns.leaseUntil} > clock_timestamp()`,
         ...(allowCancelled ? [] : [eq(researchRuns.cancelRequested, false)]),
@@ -139,7 +135,8 @@ export const createResearchStore = (db: Db["Service"]) => {
       .from(messages)
       .where(eq(messages.id, run.messageId))
       .pipe(Effect.orDie))[0];
-    if (!current || current.researchRunId !== run.id || run.status === "terminal") return false;
+    if (!current || current.generationId !== run.generationId || run.status === "terminal")
+      return false;
     const calls = yield* tx
       .select()
       .from(researchCalls)
@@ -189,15 +186,9 @@ export const createResearchStore = (db: Db["Service"]) => {
     const status =
       phase === "aborted"
         ? "aborted"
-        : ["complete", "awaiting_answer", "partial"].includes(phase)
+        : phase === "complete"
           ? "complete"
           : "error";
-    const chunks = yield* tx
-      .select()
-      .from(messageChunks)
-      .where(eq(messageChunks.messageId, run.messageId))
-      .orderBy(asc(messageChunks.seq))
-      .pipe(Effect.orDie);
     const progress = projectResearchProgress({
       ...run.progress,
       phase,
@@ -231,110 +222,27 @@ export const createResearchStore = (db: Db["Service"]) => {
       .set({ status: "error" })
       .where(and(eq(researchCalls.runId, run.id), eq(researchCalls.status, "running")))
       .pipe(Effect.orDie);
-    yield* tx
-      .update(messageToolCalls)
-      .set({
-        status: "error",
-        completedAt: new Date(),
-        error: { code: "ResearchEnded", message: phase },
-      })
-      .where(
-        and(eq(messageToolCalls.messageId, run.messageId), eq(messageToolCalls.status, "running")),
-      )
-      .pipe(Effect.orDie);
-    yield* tx
-      .update(messageCompactionEvents)
-      .set({
-        status: "error",
-        completedAt: new Date(),
-        error: { code: "ResearchEnded", message: phase },
-      })
-      .where(
-        and(
-          eq(messageCompactionEvents.messageId, run.messageId),
-          eq(messageCompactionEvents.status, "running"),
-        ),
-      )
-      .pipe(Effect.orDie);
-    const root = (yield* tx
-      .select()
-      .from(messageToolCalls)
-      .where(eq(messageToolCalls.id, run.id))
-      .pipe(Effect.orDie))[0];
-    const result = (root?.result ?? {}) as Record<string, unknown>;
-    if (!root)
-      yield* tx
-        .insert(messageToolCalls)
-        .values({
-          id: run.id,
-          messageId: run.messageId,
-          researchRunId: run.id,
-          turnIndex: 0,
-          callIndex: 0,
-          textOffset: 0,
-          providerCallId: run.id,
-          toolName: "deep_research",
-          arguments: {},
-          result: { progress } as never,
-          status: "running",
-        })
-        .pipe(Effect.orDie);
-    yield* tx
-      .update(messageToolCalls)
-      .set({
-        status: status === "complete" ? "complete" : "error",
-        result: { ...result, progress } as never,
-        completedAt: new Date(),
-      })
-      .where(eq(messageToolCalls.id, run.id))
-      .pipe(Effect.orDie);
-    yield* tx
-      .insert(messageChunks)
-      .values({
-        messageId: run.messageId,
-        seq: (chunks.at(-1)?.seq ?? 0) + 1,
-        kind: "tool",
-        delta: JSON.stringify({
-          v: 1,
-          family: "research",
-          name: "deep_research",
-          phase: "result",
-          runId: run.id,
-          callId: run.id,
-          turnIndex: 0,
-          callIndex: 0,
-          textOffset: root?.textOffset ?? 0,
-          progress,
-        }),
-      })
-      .pipe(Effect.orDie);
-    yield* tx
-      .update(messages)
-      .set({
-        status,
-        content: chunks
-          .filter((c) => c.kind === "text")
-          .map((c) => c.delta)
-          .join(""),
-        reasoning: chunks
-          .filter((c) => c.kind === "reasoning")
-          .map((c) => c.delta)
-          .join(""),
-        completedAt: new Date(),
-        usage: { inputTokens: totals.inputTokens, outputTokens: totals.outputTokens },
-        error:
-          status === "error"
-            ? {
-                tag: "ResearchInterrupted",
-                message:
-                  phase === "interrupted"
-                    ? "Research was interrupted. Retry to start a new attempt."
-                    : "Research could not be completed. Retained findings are available in the research activity.",
-              }
-            : null,
-      })
-      .where(eq(messages.id, run.messageId))
-      .pipe(Effect.orDie);
+    // Run-scoped only. Ending a run must never touch the message or its other
+    // rows: the run is one tool call inside a generation that continues after
+    // it, and the generation's own completion path owns everything else. Its
+    // own call is the exception, because the body there is the run's.
+    if (run.toolCallId) {
+      const row = (yield* tx
+        .select({ result: messageToolCalls.result })
+        .from(messageToolCalls)
+        .where(eq(messageToolCalls.id, run.toolCallId))
+        .pipe(Effect.orDie))[0];
+      if (row)
+        yield* tx
+          .update(messageToolCalls)
+          .set({
+            result: JSON.parse(
+              JSON.stringify({ ...(row.result as Record<string, unknown>), progress }),
+            ),
+          })
+          .where(eq(messageToolCalls.id, run.toolCallId))
+          .pipe(Effect.orDie);
+    }
     const existingModel = (yield* tx
       .select({ id: models.id })
       .from(models)
@@ -360,10 +268,6 @@ export const createResearchStore = (db: Db["Service"]) => {
       })
       .onConflictDoNothing()
       .pipe(Effect.orDie);
-    yield* notifyOnCommit(tx, {
-      scope: "internal",
-      event: { type: "research.control", messageId: run.messageId },
-    });
     yield* notifyOnCommit(tx, {
       scope: "user",
       userId: run.userId,
@@ -471,6 +375,15 @@ export const createResearchStore = (db: Db["Service"]) => {
             Effect.forEach(rows, (row) => finalize(row.id, "interrupted"), { discard: true }),
           ),
         ),
+    /** A run started from inside a turn, rather than by the send that queued one. */
+    queue: (input: {
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      generationId: string;
+      toolCallId: string;
+      modelId: string;
+    }) => db.transaction((tx) => queueResearch(tx, input)).pipe(Effect.catchTag("SqlError", Effect.die)),
     claim: (runId: string) =>
       db
         .transaction((tx) =>
@@ -496,10 +409,6 @@ export const createResearchStore = (db: Db["Service"]) => {
               .pipe(Effect.orDie);
             const run = rows[0];
             if (run)
-              yield* notifyOnCommit(tx, {
-                scope: "internal",
-                event: { type: "research.control", messageId: run.messageId },
-              });
             return run
               ? {
                   run,
@@ -508,6 +417,7 @@ export const createResearchStore = (db: Db["Service"]) => {
                     owner,
                     messageId: run.messageId,
                     conversationId: run.conversationId,
+                    generationId: run.generationId,
                   },
                 }
               : null;
@@ -539,12 +449,28 @@ export const createResearchStore = (db: Db["Service"]) => {
           Effect.orDie,
           Effect.map((rows) => rows.length > 0),
         ),
-    cancel: (messageId: string, expectedRunId: string) =>
+    /**
+     * Stop cancels whatever run this attempt started. The caller knows the
+     * generation, never the run: a run is a tool call inside it, and a turn may
+     * make several.
+     */
+    cancelForGeneration: (messageId: string, generationId: string) =>
       db
         .transaction((tx) =>
           Effect.gen(function* () {
-            const candidate = yield* get(expectedRunId);
-            if (!candidate || candidate.messageId !== messageId) return false;
+            const candidate = (yield* tx
+              .select()
+              .from(researchRuns)
+              .where(
+                and(
+                  eq(researchRuns.messageId, messageId),
+                  eq(researchRuns.generationId, generationId),
+                  inArray(researchRuns.status, ["queued", "running"]),
+                ),
+              )
+              .pipe(Effect.orDie))[0];
+            if (!candidate) return false;
+            const expectedRunId = candidate.id;
             yield* tx
               .select({ id: conversations.id })
               .from(conversations)
@@ -564,49 +490,8 @@ export const createResearchStore = (db: Db["Service"]) => {
               .returning()
               .pipe(Effect.orDie))[0];
             if (!run) return false;
-            yield* notifyOnCommit(tx, {
-              scope: "internal",
-              event: { type: "research.control", messageId },
-            });
             if (run.status === "queued") yield* finalizeTx(tx, run, "aborted");
             return true;
-          }),
-        )
-        .pipe(Effect.orDie),
-    tail: (messageId: string, afterSeq: number) =>
-      db
-        .transaction((tx) =>
-          Effect.gen(function* () {
-            const target = (yield* tx
-              .select()
-              .from(messages)
-              .where(eq(messages.id, messageId))
-              .pipe(Effect.orDie))[0];
-            if (!target) return null;
-            yield* tx
-              .select({ id: conversations.id })
-              .from(conversations)
-              .where(eq(conversations.id, target.conversationId))
-              .for("update")
-              .pipe(Effect.orDie);
-            const message = (yield* tx
-              .select()
-              .from(messages)
-              .where(eq(messages.id, messageId))
-              .pipe(Effect.orDie))[0];
-            if (!message) return null;
-            const chunks = yield* tx
-              .select()
-              .from(messageChunks)
-              .where(
-                and(
-                  eq(messageChunks.messageId, messageId),
-                  sql`${messageChunks.seq} > ${afterSeq}`,
-                ),
-              )
-              .orderBy(asc(messageChunks.seq))
-              .pipe(Effect.orDie);
-            return { message, chunks };
           }),
         )
         .pipe(Effect.orDie),

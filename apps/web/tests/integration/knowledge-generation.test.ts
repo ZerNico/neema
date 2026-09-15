@@ -205,7 +205,7 @@ const send = (input: {
   collectionIds?: ReadonlyArray<string>;
   skillIds?: ReadonlyArray<string>;
   searchEnabled?: boolean;
-  generationMode?: "chat" | "research";
+  researchEnabled?: boolean;
 }) =>
   run(
     Effect.flatMap(ChatService, (chat) =>
@@ -215,8 +215,8 @@ const send = (input: {
         modelId: input.modelId ?? smallModelId,
         content: input.content ?? "Summarize the notes.",
         searchEnabled: input.searchEnabled ?? false,
+        researchEnabled: input.researchEnabled ?? false,
         attachmentIds: [],
-        ...(input.generationMode ? { generationMode: input.generationMode } : {}),
         ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
         collectionIds: input.collectionIds ?? [],
         skillIds: input.skillIds ?? [],
@@ -525,6 +525,7 @@ describe("knowledge-backed generations", () => {
           modelId: smallModelId,
           content: "Edited question",
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
         }),
       ),
@@ -578,6 +579,7 @@ describe("knowledge-backed generations", () => {
                 modelId: smallModelId,
                 content: "Again",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
                 agentId: later,
               }),
@@ -645,6 +647,7 @@ describe("knowledge-backed generations", () => {
               modelId: noToolModelId,
               content: "Edited question",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -745,6 +748,7 @@ describe("knowledge-backed generations", () => {
           messageId: String(userMessage.id),
           modelId: smallModelId,
           searchEnabled: false,
+          researchEnabled: false,
           content: "Explicit edit",
           attachmentIds: [],
         }),
@@ -782,26 +786,25 @@ describe("knowledge-backed generations", () => {
 
   it.each(
     (["delete", "unshare", "dependency"] as const).flatMap((change) =>
-      (["chat", "research"] as const).map((generationMode) => ({ change, generationMode })),
+      [false, true].map((researchEnabled) => ({ change, researchEnabled })),
     ),
   )(
-    "fails closed on $change before a $generationMode answer, attachments, descendants or run state can be destroyed",
-    async ({ change, generationMode }) => {
+    "fails closed on $change before a research=$researchEnabled answer, attachments, descendants or run state can be destroyed",
+    async ({ change, researchEnabled }) => {
       const owner = await createUser();
       const recipient = await createUser();
       const agentId = await makeAgent(owner);
       await exec(
         `insert into agent_user_grants (agent_id,user_id) values ('${agentId}','${recipient}')`,
       );
-      if (generationMode === "research")
-        script = (input) =>
-          tool(input, "ask_user", {
-            questions: [{ question: "Focus?", options: [], multiSelect: false }],
-          });
+      script = (input) =>
+        tool(input, "ask_user", {
+          questions: [{ question: "Focus?", options: [], multiSelect: false }],
+        });
       const first = await send({
         userId: recipient,
         agentId,
-        generationMode,
+        researchEnabled,
         modelId: researchModelId,
       });
       await settle(first.assistantMessageId);
@@ -858,6 +861,7 @@ describe("knowledge-backed generations", () => {
                 modelId: researchModelId,
                 content: "Should not replace",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
               }),
             ),
@@ -874,6 +878,7 @@ describe("knowledge-backed generations", () => {
                 modelId: smallModelId,
                 content: "Should not append",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
               }),
             ),
@@ -909,7 +914,7 @@ describe("knowledge-backed generations", () => {
   );
 
   it.each(["retry", "edit"] as const)(
-    "refreshes research %s configuration with a fresh run and generation fence",
+    "refreshes research %s configuration with a fresh generation fence",
     async (action) => {
       const owner = await createUser();
       const agentId = await makeAgent(owner);
@@ -921,13 +926,13 @@ describe("knowledge-backed generations", () => {
         userId: owner,
         agentId,
         modelId: researchModelId,
-        generationMode: "research",
+        researchEnabled: true,
       });
       await settle(first.assistantMessageId);
       const fence = async () =>
         (
           await exec(
-            `select research_run_id, generation_id from messages where id = '${first.assistantMessageId}'`,
+            `select generation_id from messages where id = '${first.assistantMessageId}'`,
           )
         ).rows[0]!;
       const original = await fence();
@@ -949,6 +954,7 @@ describe("knowledge-backed generations", () => {
               modelId: researchModelId,
               content: "Edited research",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -958,15 +964,13 @@ describe("knowledge-backed generations", () => {
       expect(await configRow(first.assistantMessageId)).toMatchObject({
         resolved_agent: { configRevision: 2 },
       });
-      const current = await fence();
-      expect(current.research_run_id).not.toBe(original.research_run_id);
-      expect(current.generation_id).not.toBe(original.generation_id);
+      expect((await fence()).generation_id).not.toBe(original.generation_id);
     },
   );
 
-  it.each(["chat", "research"] as const)(
-    "resolves live configuration for a validated %s continuation",
-    async (generationMode) => {
+  it.each([false, true])(
+    "resolves live configuration for a validated continuation (research=%s)",
+    async (researchEnabled) => {
       const owner = await createUser();
       const old = await collectionWith(owner, [["Old", "Old evidence."]]);
       const current = await collectionWith(owner, [["Current", "Current evidence."]]);
@@ -978,7 +982,7 @@ describe("knowledge-backed generations", () => {
       const first = await send({
         userId: owner,
         agentId,
-        generationMode,
+        researchEnabled,
         modelId: researchModelId,
       });
       expect(await settle(first.assistantMessageId)).toMatchObject({ status: "complete" });
@@ -994,6 +998,7 @@ describe("knowledge-backed generations", () => {
             conversationId: first.conversationId,
             modelId: researchModelId,
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             questionResponse: { callId: String(call.id), response: { kind: "skip" } },
           }),
@@ -1005,10 +1010,15 @@ describe("knowledge-backed generations", () => {
         collection_ids: [current.collectionId],
         standalone_collection_ids: [],
       });
+      // Answering a clarification is its own submission: it does not inherit
+      // the offer the original send made.
       expect(
-        (await exec(`select generation_mode from messages where id = '${next.assistantMessageId}'`))
-          .rows,
-      ).toEqual([{ generation_mode: generationMode }]);
+        (
+          await exec(
+            `select research_enabled from message_generation_config where message_id = '${next.assistantMessageId}'`,
+          )
+        ).rows,
+      ).toEqual([{ research_enabled: false }]);
     },
   );
 
@@ -1203,6 +1213,7 @@ describe("knowledge-backed generations", () => {
             messageId: String(userMessage.id),
             modelId: noToolModelId,
             searchEnabled,
+            researchEnabled: false,
             content: "Updated request",
             attachmentIds: [],
           }),
@@ -1246,6 +1257,7 @@ describe("knowledge-backed generations", () => {
           messageId: String(userMessage.id),
           modelId: smallModelId,
           searchEnabled: false,
+          researchEnabled: false,
           content: "Updated request",
           attachmentIds: [],
           collectionIds: [second.collectionId],
@@ -1295,6 +1307,7 @@ describe("knowledge-backed generations", () => {
             conversationId: sent.conversationId,
             modelId: noToolModelId,
             searchEnabled: !searchEnabled,
+            researchEnabled: false,
             attachmentIds: [],
             questionResponse: { callId: String(call.id), response: { kind: "skip" } },
           }),
@@ -1327,6 +1340,7 @@ describe("knowledge-backed generations", () => {
           conversationId: sent.conversationId,
           modelId,
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
           collectionIds: [],
           questionResponse: { callId: String(call.id), response: { kind: "skip" } },
@@ -1373,6 +1387,7 @@ describe("knowledge-backed generations", () => {
               modelId: smallModelId,
               content: "Hi",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
               ...input,
             }),
@@ -1504,20 +1519,27 @@ describe("knowledge-backed generations", () => {
       const content = promptText(input.prompt);
       if (content.includes("You compact the older part of a chat conversation"))
         return "compaction";
-      if (input.toolkit?.tools["ask_user"]) return "clarification";
       if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
-      if (input.toolkit?.tools["web_search"]) return "worker";
-      if (content.includes("Prepare a self-contained research brief")) return "planning";
+      if (input.toolkit?.tools["web_search"] && !input.toolkit.tools["ask_user"]) return "worker";
       if (content.includes("Write a concise, evidence-dense report")) return "report";
-      return "synthesis";
+      return "host";
     };
+    const hostTurn = (input: GatewayInput, brief: string, answer: string) =>
+      input.prompt.content.some(
+        (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+      )
+        ? Stream.make(text(answer), finish())
+        : tool(input, "deep_research", { brief });
     let coordinatorTurns = 0;
     const workerPrompts: string[] = [];
     script = (input) => {
       const phase = phaseOf(input);
-      if (phase === "clarification") return Stream.make(text("No clarification needed."), finish());
-      if (phase === "planning")
-        return Stream.make(text("Check the contract and the web."), finish());
+      if (phase === "host")
+        return hostTurn(
+          input,
+          "Check the contract and the web for the notice period that applies.",
+          "# Findings\nNinety days of notice[^2].\n",
+        );
       if (phase === "coordinator")
         return ++coordinatorTurns === 1
           ? tool(input, "dispatch_research", {
@@ -1545,19 +1567,17 @@ describe("knowledge-backed generations", () => {
           });
         return Stream.make(finish());
       }
-      if (phase === "report")
-        return Stream.make(
-          text("The contract fixes ninety days[^2]; the web agrees[^1]."),
-          finish(),
-        );
-      return Stream.make(text("# Findings\nNinety days of notice[^2].\n"), finish());
+      return Stream.make(
+        text("The contract fixes ninety days[^2]; the web agrees[^1]."),
+        finish(),
+      );
     };
     const sent = await send({
       userId: owner,
       modelId: researchModelId,
       content: "What notice period applies?",
       collectionIds: [collectionId],
-      generationMode: "research",
+      researchEnabled: true,
     });
     const final = await settle(sent.assistantMessageId);
     expect(final).toMatchObject({ status: "complete" });
@@ -1607,20 +1627,28 @@ describe("knowledge-backed generations", () => {
       const content = promptText(input.prompt);
       if (content.includes("You compact the older part of a chat conversation"))
         return "compaction";
-      if (input.toolkit?.tools["ask_user"]) return "clarification";
       if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
-      if (input.toolkit?.tools["web_search"]) return "worker";
-      if (content.includes("Prepare a self-contained research brief")) return "planning";
+      if (input.toolkit?.tools["web_search"] && !input.toolkit.tools["ask_user"]) return "worker";
       if (content.includes("Write a concise, evidence-dense report")) return "report";
-      return "synthesis";
+      return "host";
     };
+    const hostTurn = (input: GatewayInput, brief: string, answer: string) =>
+      input.prompt.content.some(
+        (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+      )
+        ? Stream.make(text(answer), finish())
+        : tool(input, "deep_research", { brief });
     let coordinatorTurns = 0;
     const workerPrompts: string[] = [];
     const remainingSeen: number[] = [];
     script = (input) => {
       const phase = phaseOf(input);
-      if (phase === "clarification") return Stream.make(text("No clarification needed."), finish());
-      if (phase === "planning") return Stream.make(text("Consult the skill."), finish());
+      if (phase === "host")
+        return hostTurn(
+          input,
+          "Consult the review skill and apply its guidance to this request.",
+          "# Findings\nThe review guidance was applied.\n",
+        );
       if (phase === "coordinator")
         return ++coordinatorTurns === 1
           ? tool(input, "dispatch_research", {
@@ -1642,15 +1670,14 @@ describe("knowledge-backed generations", () => {
           });
         return Stream.make(finish());
       }
-      if (phase === "report") return Stream.make(text("Report of the review."), finish());
-      return Stream.make(text("# Findings\nThe review guidance was applied.\n"), finish());
+      return Stream.make(text("Report of the review."), finish());
     };
     const sent = await send({
       userId: owner,
       modelId: researchModelId,
       content: "Review this.",
       skillIds: [id],
-      generationMode: "research",
+      researchEnabled: true,
     });
     expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
     const calls = (
@@ -1771,9 +1798,9 @@ describe("knowledge-backed generations", () => {
     expect(await settle(other.assistantMessageId)).toMatchObject({ status: "complete" });
   });
 
-  it.each(["chat", "research"] as const)(
-    "terminates %s when the selection is revoked mid-flight",
-    async (generationMode) => {
+  it.each([false, true])(
+    "terminates a generation with research=%s when the selection is revoked mid-flight",
+    async (researchEnabled) => {
       const owner = await createUser();
       const { collectionId, documents } = await collectionWith(owner, [
         ["Note", "Revoked evidence."],
@@ -1786,8 +1813,8 @@ describe("knowledge-backed generations", () => {
       const sent = await send({
         userId: owner,
         collectionIds: [collectionId],
-        generationMode,
-        ...(generationMode === "research" ? { modelId: researchModelId } : {}),
+        researchEnabled,
+        ...(researchEnabled ? { modelId: researchModelId } : {}),
       });
       await run(Deferred.await(hold.reached));
       await run(
@@ -1915,6 +1942,7 @@ describe("portable skill generation attempts", () => {
                 modelId: noToolModelId,
                 content: "Edited skill question",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
               }),
             ),
@@ -1985,6 +2013,7 @@ describe("portable skill generation attempts", () => {
                 modelId: noToolModelId,
                 content: "Must not replace the question",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
               }),
             );

@@ -1,16 +1,9 @@
 import { Schema } from "effect";
 
-export const GenerationMode = Schema.Literals(["chat", "research"]);
-export type GenerationMode = typeof GenerationMode.Type;
 export const ResearchPhase = Schema.Literals([
   "queued",
-  "clarifying",
-  "planning",
   "researching",
-  "synthesizing",
   "complete",
-  "awaiting_answer",
-  "partial",
   "aborted",
   "interrupted",
   "error",

@@ -1,6 +1,5 @@
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { Schema } from "effect";
-import { GenerationMode } from "./research-schema.ts";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { AttachmentIds } from "~/modules/attachments/schema.ts";
 
@@ -29,12 +28,13 @@ export type DesktopSubmission = {
 };
 
 const generationFields = {
-  generationMode: Schema.optionalKey(GenerationMode),
   timeZone: TimeZone,
   openDocumentId: OpenDocumentId,
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
+  /** Offers `deep_research` to the attempt; the model still chooses. */
+  researchEnabled: Schema.Boolean,
   ...desktopSubmissionFields,
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
@@ -66,6 +66,7 @@ export const AnswerQuestionInput = Schema.Struct({
   response: QuestionResponse,
   modelId: Schema.String,
   searchEnabled: Schema.Boolean,
+  researchEnabled: Schema.Boolean,
   ...desktopSubmissionFields,
   timeZone: TimeZone,
   openDocumentId: OpenDocumentId,
@@ -91,7 +92,6 @@ export const ListConversationsInput = Schema.Struct({
 
 export const MessageIdInput = Schema.Struct({
   generationId: Schema.optionalKey(Schema.String),
-  researchRunId: Schema.optionalKey(Schema.String),
   conversationId: Schema.String,
   messageId: Schema.String,
 });
@@ -125,6 +125,7 @@ export const EditMessageInput = Schema.Union([
     messageId: Schema.String,
     modelId: Schema.String,
     searchEnabled: Schema.Boolean,
+    researchEnabled: Schema.Boolean,
     ...desktopSubmissionFields,
     timeZone: TimeZone,
     openDocumentId: OpenDocumentId,

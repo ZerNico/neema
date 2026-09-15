@@ -9,7 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { conversations, messages } from "./chat.ts";
+import { conversations, messages, messageToolCalls } from "./chat.ts";
 import { user } from "./auth.ts";
 import type { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import type { UsageTotals } from "~/modules/analytics/server/usage.ts";
@@ -27,6 +27,15 @@ export const researchRuns = pgTable(
     messageId: text("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
+    // The attempt that started the run. A retry or edit mints a new generation
+    // id, which is what invalidates this run's fence; the run never owns the
+    // message, so there is nothing on the message to clear.
+    generationId: text("generation_id").notNull(),
+    // The `deep_research` row this run answers. `set null` because a rewind
+    // may drop the row while the ledger still wants the run.
+    toolCallId: text("tool_call_id").references(() => messageToolCalls.id, {
+      onDelete: "set null",
+    }),
     status: text({ enum: ["queued", "running", "terminal"] })
       .notNull()
       .default("queued"),
@@ -51,6 +60,7 @@ export const researchRuns = pgTable(
       .on(t.userId)
       .where(sql`${t.status} in ('queued', 'running')`),
     index("research_runs_message_idx").on(t.messageId),
+    index("research_runs_tool_call_idx").on(t.toolCallId),
     index("research_runs_lease_idx")
       .on(t.leaseUntil)
       .where(sql`${t.status} in ('queued', 'running')`),

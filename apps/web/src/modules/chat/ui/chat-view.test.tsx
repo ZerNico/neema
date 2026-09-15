@@ -721,6 +721,7 @@ describe("ChatView inline question answers", () => {
           messageId: "structured-user",
           modelId: "m1",
           searchEnabled: false,
+          researchEnabled: false,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
           questionResponse: revised,
@@ -1039,6 +1040,8 @@ describe("ChatView question handoff", () => {
           modelId: "m2",
           // Model Two has no native tool calling; search is still offered.
           searchEnabled: true,
+          // Answering a clarification is its own submission and has no toggle.
+          researchEnabled: false,
           timeZone: "Europe/Berlin",
         },
       }),

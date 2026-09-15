@@ -596,6 +596,7 @@ describe("generation-time enforcement", () => {
           modelId: privateModel,
           content: "hello",
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
         });
         const denied = yield* chat
@@ -605,6 +606,7 @@ describe("generation-time enforcement", () => {
             modelId: privateModel,
             content: "hello",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           })
           .pipe(Effect.flip);

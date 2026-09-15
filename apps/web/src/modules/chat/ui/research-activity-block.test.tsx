@@ -85,12 +85,13 @@ const envelope = (phase: string, progress: unknown) =>
 describe("research activity", () => {
   it("rolls changed targets inside a fixed line, keeps the action stable, and settles immediately", async () => {
     const onOpen = vi.fn();
-    const tree = (target: string, synthesis = false) => (
+    const tree = (target: string, settled = false) => (
       <AppMotionProvider>
         <ResearchActivityBlock
           activity={{
             ...root,
-            progress: { ...root.progress!, phase: synthesis ? "synthesizing" : "researching" },
+            status: settled ? "complete" : "running",
+            progress: { ...root.progress!, phase: settled ? "complete" : "researching" },
           }}
           sourceCount={1}
           webActivities={[{ ...web, targets: [target] }]}
@@ -129,13 +130,14 @@ describe("research activity", () => {
     const { rerender } = render(<ResearchActivityBlock activity={root} webActivities={[web]} />);
     expect(screen.getByText("Researching")).toBeTruthy();
     expect(screen.getByText("Searching \u201cprimary evidence\u201d")).toBeTruthy();
-    // Synthesis is just the answer streaming in: the row is already finished.
+    // The call has returned; the answer streaming in below is an ordinary reply.
     rerender(
       <ResearchActivityBlock
         activity={{
           ...root,
+          status: "complete",
           sources: web.sources!,
-          progress: { ...root.progress!, phase: "synthesizing" },
+          progress: { ...root.progress!, phase: "complete" },
         }}
         webActivities={[web]}
       />,
@@ -201,16 +203,6 @@ describe("research activity", () => {
     expect(screen.getByText("stopped early")).toBeTruthy();
   });
 
-  it("leaves the row to the question card while answers are pending", () => {
-    const { container } = render(
-      <ResearchActivityBlock
-        activity={{ ...root, progress: { ...root.progress!, phase: "awaiting_answer" } }}
-        webActivities={[web]}
-      />,
-    );
-    expect(container).toBeEmptyDOMElement();
-  });
-
   it("keeps one outer anchor and leaves orphaned web activity visible", () => {
     const parts = projectAssistantBody({
       content: "PlanReport",
@@ -245,12 +237,12 @@ describe("research activity", () => {
     ).toBe(started);
     const complete = applyToolChunk(
       started,
-      envelope("result", { ...root.progress, phase: "partial" }),
+      envelope("result", { ...root.progress, phase: "complete" }),
     );
     expect(complete[0]).toMatchObject({
       status: "complete",
       textOffset: 4,
-      progress: { phase: "partial" },
+      progress: { phase: "complete" },
     });
     expect(applyToolChunk(complete, envelope("progress", root.progress))).toBe(complete);
     const child = applyToolChunk(

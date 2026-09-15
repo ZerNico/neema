@@ -113,6 +113,8 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     collectionIds?: ReadonlyArray<string> | undefined;
     skillIds?: ReadonlyArray<string> | undefined;
     searchEnabled: boolean;
+    /** Whether `deep_research` is offered to this attempt. */
+    researchEnabled: boolean;
     /** Folder names the sending machine reported; absent when it had none. */
     desktopFolders?: ReadonlyArray<string> | null | undefined;
     desktopCommands?: boolean | undefined;
@@ -161,6 +163,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       manifest,
       knowledgeMode,
       searchEnabled,
+      researchEnabled: input.researchEnabled,
       planEnabled,
       desktopFolders: input.desktopFolders ?? null,
       desktopCommands: input.desktopCommands ?? false,

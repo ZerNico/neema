@@ -219,6 +219,7 @@ const generateOnce = Effect.fn("test.generateOnce")(function* (userId: string, m
     modelId,
     content: "hello there",
     searchEnabled: false,
+    researchEnabled: false,
     attachmentIds: [],
   });
   yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runCollect);

@@ -58,8 +58,7 @@ it.each(["stream first", "detail first"])(
       content: "",
       reasoning: "",
       modelId: "model-1",
-      generationMode: "research",
-      researchRunId: "run-1",
+      generationId: "gen-1",
       questionResponse: null,
       usage: null,
       error: null,
@@ -122,12 +121,12 @@ it.each(["stream first", "detail first"])(
           messageId: "m1",
           toolName: "deep_research",
           status: "complete",
-          researchRunId: "run-1",
+          researchRunId: null,
           turnIndex: 0,
           callIndex: 0,
           textOffset: 0,
           arguments: {},
-          result: { progress: { ...progress, phase: "awaiting_answer" } },
+          result: { progress: { ...progress, phase: "complete" } },
           error: null,
         },
         {
@@ -157,18 +156,19 @@ it.each(["stream first", "detail first"])(
     const source = FakeEventSource.instances.find((entry) =>
       entry.url.includes("/messages/m1/stream"),
     )!;
-    expect(source.url).toContain("runId=run-1");
+    // The stream is fenced by the attempt, not by the run a call inside it made.
+    expect(source.url).toContain("runId=gen-1");
     act(() => {
       source.emit("chunk", {
         seq: 1,
         kind: "tool",
-        runId: "run-1",
+        runId: "gen-1",
         delta: JSON.stringify({ ...root, phase: "progress", progress }),
       });
       source.emit("chunk", {
         seq: 2,
         kind: "tool",
-        runId: "run-1",
+        runId: "gen-1",
         delta: JSON.stringify({ ...ask, phase: "start" }),
       });
     });
@@ -184,7 +184,7 @@ it.each(["stream first", "detail first"])(
       source.emit("chunk", {
         seq: 3,
         kind: "tool",
-        runId: "run-1",
+        runId: "gen-1",
         delta: JSON.stringify({ ...ask, phase: "result", result }),
       });
     });
@@ -196,20 +196,21 @@ it.each(["stream first", "detail first"])(
       source.emit("chunk", {
         seq: 4,
         kind: "tool",
-        runId: "run-1",
+        runId: "gen-1",
         delta: JSON.stringify({
           ...root,
           phase: "result",
-          progress: { ...progress, phase: "awaiting_answer" },
+          progress: { ...progress, phase: "complete" },
         }),
       });
-      source.emit("done", { status: "complete", runId: "run-1" });
+      source.emit("done", { status: "complete", runId: "gen-1" });
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send answers" })).toBeEnabled());
     expect(screen.getByRole("textbox", { name: "Your answer" })).toBe(draft);
     expect(draft).toHaveValue("Focus on access and cost");
-    // The question card is the whole story now: no second research row above it.
-    expect(screen.queryByText(/Researching|Research /)).not.toBeInTheDocument();
+    // The call returned before the host asked, so its settled row stands above
+    // the question card rather than still claiming to be running.
+    expect(screen.queryByText("Researching")).not.toBeInTheDocument();
     expect(getConversationWithMessages).toHaveBeenCalled();
     vi.mocked(getConversationWithMessages).mockClear();
     client.clear();

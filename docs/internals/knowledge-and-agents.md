@@ -12,7 +12,7 @@ whatever agent the conversation is associated with.
   snapshot: no swap, reselect or removal afterward. No row means plain chat; a null agent FK is
   a deletion tombstone. `AgentNotAvailable` blocks new attempts on a deleted/inaccessible agent
   while history stays readable.
-- Every new attempt (send, retry, edit, structured answer, research continuation, branches)
+- Every new attempt (send, retry, edit, structured answer, branches)
   resolves the current revision/dependencies through ACL-aware `AgentRepo.get` inside the
   attempt transaction, before any destructive reset. `message_generation_config` then captures
   that private `resolvedAgent` provenance plus original `standaloneCollectionIds` separately;
@@ -29,7 +29,7 @@ whatever agent the conversation is associated with.
 
 - A draft is an ordinary conversation’s working resource, not an installed agent or a special
   chat mode. `draft_agent` lazily creates one, or snapshots an owned target, under the current
-  generation/research fence. A conversation holds as many drafts as agents being prepared, each
+  generation fence. A conversation holds as many drafts as agents being prepared, each
   with its own id: opening the same target twice returns the draft already holding it, and an
   untargeted call reuses an empty unedited draft, so a repeated call cannot litter the chat.
   Anything else is a second agent and gets its own draft — reusing one draft for a second agent
@@ -122,7 +122,7 @@ whatever agent the conversation is associated with.
   read needs. A search hit is a bounded excerpt (`searchExcerptChars`, 800) so a multi-query
   batch keeps all its hits instead of spending the cap on the first few whole chunks.
 - Document sources are namespaced by `kind` (`document` vs. `web`) so citation indexes never
-  collide and documents grant no web URL authority; both chat and research project results
+  collide and documents grant no web URL authority; the host turn and an investigation project results
   through `projectKnowledgeToolResult`. Range reads walk 4,096-code-point blocks inside
   PostgreSQL and reject starts inside surrogate pairs, so continuation offsets stay exact.
 

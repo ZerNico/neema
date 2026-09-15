@@ -2,7 +2,13 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { EditMessageInput, RetryMessageInput, SendMessageInput } from "./schema.ts";
 
-const generation = { modelId: "m1", content: "hello", searchEnabled: false, attachmentIds: [] };
+const generation = {
+  modelId: "m1",
+  content: "hello",
+  searchEnabled: false,
+  researchEnabled: false,
+  attachmentIds: [],
+};
 
 it("accepts a structured edit without prose and rejects mixed edit payloads", () => {
   const decode = Schema.decodeUnknownSync(EditMessageInput);
@@ -11,6 +17,7 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
     messageId: "u1",
     modelId: "m1",
     searchEnabled: false,
+    researchEnabled: false,
     attachmentIds: [],
     questionResponse: { kind: "skip" },
   };

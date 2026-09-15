@@ -51,7 +51,6 @@ import {
   stopGeneration,
   updateWorkSettings,
 } from "../server/functions.ts";
-import type { GenerationMode } from "../research-schema.ts";
 import type { ConversationMode, PermissionLevel } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import { DRAFT_CONVERSATION, withDraftFolderBinding } from "~/modules/desktop/client/bridge.ts";
@@ -467,7 +466,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     };
   }, [
     streamingMessage?.id,
-    streamingMessage?.researchRunId,
     streamingMessage?.generationId,
     retryEpoch,
   ]);
@@ -483,7 +481,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     initialStream,
     conversationId,
     retryEpoch,
-    subscribedMessage?.researchRunId ?? subscribedMessage?.generationId ?? null,
+    subscribedMessage?.generationId ?? null,
   );
 
   // A draft of this conversation, from any of the three paths that can reveal
@@ -651,7 +649,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     mutationFn: async (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
-      generationMode?: GenerationMode;
+      researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
     }) =>
       sendMessage({
@@ -664,7 +662,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           timeZone: browserTimeZone(),
           ...documentFocus(),
           attachmentIds: input.attachmentIds,
-          ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+          researchEnabled: input.researchEnabled,
           skillIds: [...(input.skillIds ?? [])],
           ...context.sendFields,
         },
@@ -709,6 +707,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           modelId: effectiveModelId!,
           searchEnabled,
+          // The composer's research toggle belongs to a send. Answering a
+          // clarification and editing are their own submissions, and neither
+          // surface offers the toggle, so neither asks for the tool.
+          researchEnabled: false,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
@@ -764,7 +766,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const stopMutation = useMutation({
-    mutationFn: (input: { messageId: string; researchRunId?: string; generationId?: string }) =>
+    mutationFn: (input: { messageId: string; generationId?: string }) =>
       stopGeneration({ data: { conversationId, ...input } }),
     // No invalidation here: the generation finalizes itself and the `done`
     // event already carries the terminal status back through the stream hook.
@@ -793,6 +795,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         data: {
           conversationId,
           ...input,
+          researchEnabled: false,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
@@ -1323,7 +1326,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             ...projected,
             editState: {
               initialDraft: activeEditingMessage.content,
-              researchEnabled: activeEditingMessage.generationMode === "research",
+              researchEnabled: false,
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
               saveDisabled: editPending || work.readOnly,
@@ -1501,11 +1504,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 permissionLevel: data.conversation.permissionLevel,
                 onChange: (level) => workSettingsMutation.mutate(level),
               }}
-              onSend={(content, attachmentIds, generationMode, skillIds) =>
+              onSend={(content, attachmentIds, researchEnabled, skillIds) =>
                 sendMutation.mutateAsync({
                   content,
                   attachmentIds,
-                  ...(generationMode ? { generationMode } : {}),
+                  researchEnabled,
                   ...(skillIds ? { skillIds } : {}),
                 })
               }
@@ -1516,9 +1519,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                         messageId: stoppableId,
                         ...(streamingMessage?.generationId
                           ? { generationId: streamingMessage.generationId }
-                          : {}),
-                        ...(streamingMessage?.researchRunId
-                          ? { researchRunId: streamingMessage.researchRunId }
                           : {}),
                       }),
                   }
@@ -1618,7 +1618,7 @@ export function NewChatView({
     mutationFn: async (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
-      generationMode?: GenerationMode;
+      researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
       mode: ConversationMode;
     }) =>
@@ -1634,7 +1634,7 @@ export function NewChatView({
               ...(await work.attemptFields(input.mode === "work")),
               timeZone: browserTimeZone(),
               attachmentIds: input.attachmentIds,
-              ...(input.generationMode ? { generationMode: input.generationMode } : {}),
+              researchEnabled: input.researchEnabled,
               skillIds: [...(input.skillIds ?? [])],
               ...context.sendFields,
             },
@@ -1729,11 +1729,11 @@ export function NewChatView({
             folder={folder}
             readOnly={work.readOnly}
             mode={{ kind: "choose", value: mode, onChange: setMode }}
-            onSend={(content, attachmentIds, generationMode, skillIds) =>
+            onSend={(content, attachmentIds, researchEnabled, skillIds) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
-                ...(generationMode ? { generationMode } : {}),
+                researchEnabled,
                 ...(skillIds ? { skillIds } : {}),
                 mode,
               })

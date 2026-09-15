@@ -486,6 +486,7 @@ describe("conversational agent authoring", () => {
               modelId: textModelId,
               content: "Help me edit this agent.",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -612,6 +613,7 @@ describe("conversational agent authoring", () => {
               modelId: textModelId,
               content: "Keep working with my changes.",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -626,6 +628,7 @@ describe("conversational agent authoring", () => {
               modelId: textModelId,
               content: "Let’s refine the agent.",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -699,6 +702,7 @@ describe("conversational agent authoring", () => {
               modelId: textModelId,
               content: "Prepare an agent.",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -765,7 +769,7 @@ describe("conversational agent authoring", () => {
     try {
       const sent = await runtime.runPromise(
         ChatService.use((service) =>
-          service.sendMessage({ ...answerInput(seed), searchEnabled: false }),
+          service.sendMessage({ ...answerInput(seed), searchEnabled: false, researchEnabled: false }),
         ),
       );
       await collectDraftTurn(sent.assistantMessageId);
@@ -807,6 +811,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Use Claude as the preferred model.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -876,6 +881,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Find a skill for a future agent.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -926,6 +932,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Make a Jira agent.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -1003,6 +1010,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Make a ticket agent.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -1032,6 +1040,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Now make a release notes agent.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -1116,6 +1125,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Make two agents.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -1164,6 +1174,7 @@ describe("conversational agent authoring", () => {
             modelId: textModelId,
             content: "Edit this unavailable agent.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),
@@ -1213,6 +1224,7 @@ describe("conversation documents", () => {
           modelId: textModelId,
           content: "Make me a release checklist.",
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
           openDocumentId,
         }),
@@ -1563,6 +1575,7 @@ describe("structured answer persistence and edits", () => {
             messageId: turn.userMessage.id,
             modelId: textModelId,
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           };
           const ordinary = yield* service
@@ -1921,13 +1934,14 @@ describe("atomic question answers", () => {
         const engine = yield* StreamEngine;
         const seed = yield* setupQuestion;
         const unknown = yield* service
-          .sendMessage({ ...answerInput(seed), modelId: uuidv7(), searchEnabled: false })
+          .sendMessage({ ...answerInput(seed), modelId: uuidv7(), searchEnabled: false, researchEnabled: false })
           .pipe(Effect.flip);
         const before = yield* repo.listMessages(seed.conversation.id);
         const reply = yield* service.sendMessage({
           ...answerInput(seed),
           modelId: visionModelId,
           searchEnabled: false,
+          researchEnabled: false,
           timeZone: "Europe/Berlin",
         });
         yield* engine.subscribe(reply.assistantMessageId, 0).pipe(Stream.runCollect);
@@ -2518,6 +2532,7 @@ describe("retry with a different model", () => {
           modelId: textModelId,
           content: "What day is it?",
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
           timeZone: "Europe/Berlin",
         });
@@ -2538,6 +2553,7 @@ describe("retry with a different model", () => {
           modelId: textModelId,
           content: "What time is it?",
           searchEnabled: false,
+          researchEnabled: false,
           attachmentIds: [],
           timeZone: "Asia/Tokyo",
         });
@@ -3085,6 +3101,7 @@ describe("local tools on the user's machine", () => {
         modelId: textModelId,
         content: "What is in the readme?",
         searchEnabled: false,
+        researchEnabled: false,
         attachmentIds: [],
         fromDesktop: true,
         desktopExecutorId: "desktop-test-session",
@@ -3173,6 +3190,7 @@ describe("local tools on the user's machine", () => {
             const sent = yield* service.sendMessage({
               ...answerInput(seed),
               searchEnabled: false,
+              researchEnabled: false,
               fromDesktop: true,
               desktopExecutorId: "answer-session",
               desktopFolders: ["answer-folder"],
@@ -3192,6 +3210,7 @@ describe("local tools on the user's machine", () => {
               modelId: textModelId,
               attachmentIds: [],
               searchEnabled: false,
+              researchEnabled: false,
               questionResponse: {
                 kind: "answers",
                 answers: [{ selected: [], custom: "Current choice" }],
@@ -3292,6 +3311,7 @@ describe("local tools on the user's machine", () => {
             modelId: textModelId,
             content: "Edited instruction",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "current-edit-session",
@@ -3399,6 +3419,7 @@ describe("local tools on the user's machine", () => {
             modelId: visionModelId,
             content: "What is in the logo?",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
@@ -3544,6 +3565,7 @@ describe("local tools on the user's machine", () => {
                 modelId: textModelId,
                 content: "Write the note.",
                 searchEnabled: false,
+                researchEnabled: false,
                 attachmentIds: [],
                 fromDesktop: true,
                 desktopExecutorId: "executor-1",
@@ -3655,6 +3677,7 @@ describe("local tools on the user's machine", () => {
             modelId: textModelId,
             content: "Start work.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             mode: "work",
             fromDesktop: true,
@@ -3684,6 +3707,7 @@ describe("local tools on the user's machine", () => {
               modelId: textModelId,
               content: "Keep going.",
               searchEnabled: false,
+              researchEnabled: false,
               attachmentIds: [],
             }),
           ),
@@ -3713,6 +3737,7 @@ describe("local tools on the user's machine", () => {
             modelId: textModelId,
             content: "Keep going.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
@@ -3741,6 +3766,7 @@ describe("local tools on the user's machine", () => {
             modelId: textModelId,
             content: "Hello.",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
             mode: "work",
             fromDesktop: true,
@@ -3786,6 +3812,7 @@ describe("local tools on the user's machine", () => {
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
             searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
           }),
         ),

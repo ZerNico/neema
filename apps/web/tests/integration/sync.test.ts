@@ -93,7 +93,7 @@ it("keeps internal signals and other accounts out of browser and approval feeds"
       yield* db.transaction((tx) =>
         notifyOnCommit(tx, {
           scope: "internal",
-          event: { type: "research.control", messageId: "private" },
+          event: { type: "knowledge.work", stage: "extraction" },
         }),
       );
       yield* bus.publish("other", { type: "account.approval.changed" });
@@ -101,7 +101,7 @@ it("keeps internal signals and other accounts out of browser and approval feeds"
       yield* bus.publishGlobal({ type: "account.approval.changed" });
       yield* bus.publish("reader", { type: "memory.changed" });
       yield* bus.publish("reader", { type: "account.approval.changed" });
-      expect(yield* internal).toEqual([{ type: "research.control", messageId: "private" }]);
+      expect(yield* internal).toEqual([{ type: "knowledge.work", stage: "extraction" }]);
       expect(yield* privateFeed).toEqual([{ type: "memory.changed" }]);
       expect(yield* privateFeed).toEqual([{ type: "account.approval.changed" }]);
       expect(yield* browser).toEqual([{ type: "resources.changed" }]);

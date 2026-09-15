@@ -37,7 +37,7 @@ export const lockGeneration = (tx: DbTx, fence: GenerationIdentity) =>
         ),
       )
       .pipe(Effect.orDie);
-    if (!message || message.role !== "assistant" || message.generationMode !== "chat")
+    if (!message || message.role !== "assistant")
       return yield* Effect.interrupt;
     return message;
   });

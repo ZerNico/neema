@@ -61,6 +61,14 @@ import {
 import { initialResearchProgress, type ResearchFence, type ResearchStore } from "./repo.ts";
 import { boundedSourceManifest } from "./evidence.ts";
 
+/**
+ * Child rows of a run share `message_tool_calls` with the host turn that made
+ * the call, and that table is unique on (message, turn, call). The run keeps
+ * its own ordinal space above every reachable host turn so the two never
+ * collide; the transcript hides these rows behind the call anyway.
+ */
+const RESEARCH_TURN_BASE = 1000;
+
 const json = (value: unknown) => value as JsonValue;
 
 export class ResearchExecutionError extends Schema.TaggedError<ResearchExecutionError>()(
@@ -119,6 +127,8 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   skillReader?: SkillReader["Service"];
   modelId: string;
   userId: string;
+  /** The `deep_research` row this run answers, and the ordinals it renders under. */
+  call: { readonly rowId: string; readonly turnIndex: number; readonly callIndex: number };
   startedAt: number;
   emit: (event: ToolChunkEnvelope) => Effect.Effect<void>;
   emitCompaction: (event: CompactionChunkEnvelope) => Effect.Effect<void>;
@@ -184,7 +194,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   resultCount: sources.size,
                 }),
               })
-              .where(eq(messageToolCalls.id, fence.runId))
+              .where(eq(messageToolCalls.id, deps.call.rowId))
               .pipe(Effect.orDie);
           }),
         );
@@ -192,11 +202,11 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           v: 1,
           family: "research",
           name: "deep_research",
-          callId: fence.runId,
+          callId: deps.call.rowId,
           runId: fence.runId,
           phase: "progress",
-          turnIndex: 0,
-          callIndex: 0,
+          turnIndex: deps.call.turnIndex,
+          callIndex: deps.call.callIndex,
           textOffset: 0,
           progress: snapshot,
         });
@@ -210,24 +220,28 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
         .set({ modelName: model?.displayName ?? deps.modelId, pricing: model?.pricing ?? null })
         .where(eq(researchRuns.id, fence.runId))
         .pipe(Effect.orDie);
+      // The row is the model's own call, minted by the stream observer. It
+      // carries no `researchRunId`: that marks a row produced *inside* a run,
+      // and the transcript hides those behind this one.
       yield* tx
-        .insert(messageToolCalls)
-        .values({
-          id: fence.runId,
-          messageId: fence.messageId,
-          researchRunId: fence.runId,
-          turnIndex: 0,
-          callIndex: 0,
-          textOffset: 0,
-          providerCallId: fence.runId,
-          toolName: "deep_research",
-          arguments: {},
-          result: json({ progress, sources: [] }),
-          status: "running",
-        })
+        .update(messageToolCalls)
+        .set({ result: json({ progress, sources: [] }) })
+        .where(eq(messageToolCalls.id, deps.call.rowId))
         .pipe(Effect.orDie);
     }),
   );
+  yield* deps.emit({
+    v: 1,
+    family: "research",
+    name: "deep_research",
+    callId: deps.call.rowId,
+    runId: fence.runId,
+    phase: "start",
+    turnIndex: deps.call.turnIndex,
+    callIndex: deps.call.callIndex,
+    textOffset: 0,
+    progress,
+  });
   yield* update();
   const indexer = createSourceIndexer(deps.priorSources);
   const web = yield* prepareWebTools({
@@ -297,7 +311,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           id: rowId,
           messageId: fence.messageId,
           researchRunId: fence.runId,
-          turnIndex: 0,
+          turnIndex: RESEARCH_TURN_BASE,
           callIndex: -5 + index,
           textOffset: 0,
           providerCallId: `skill-context:${rowId}`,
@@ -315,7 +329,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       callId: rowId,
       runId: fence.runId,
       name: "load_skill",
-      turnIndex: 0,
+      turnIndex: RESEARCH_TURN_BASE,
       callIndex: -5 + index,
       textOffset: 0,
       skillId: entry.skillId,
@@ -508,7 +522,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   messageId: fence.messageId,
                   researchRunId: fence.runId,
                   researchTaskId: input.taskId ?? null,
-                  turnIndex: reservation.ordinal,
+                  turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                   callIndex: index,
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
@@ -527,7 +541,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -538,7 +552,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -549,7 +563,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name as AgentDraftToolName,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -566,7 +580,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name as typeof SkillToolName.Type,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
                 skillId: entry?.skillId ?? "",
@@ -587,7 +601,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name as typeof KnowledgeToolName.Type,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -600,7 +614,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name,
-                turnIndex: reservation.ordinal,
+                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
                 callIndex: index,
                 textOffset,
                 args: { targets: args.queries ?? args.urls ?? [] },
@@ -881,7 +895,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       createCompactionEvent: (input) =>
         Effect.gen(function* () {
           const position = {
-            beforeTurnIndex: budget.calls + 1,
+            beforeTurnIndex: RESEARCH_TURN_BASE + budget.calls + 1,
             passIndex: ++compactionPosition,
             scope: input.scope,
             ...(taskId ? { taskId } : {}),

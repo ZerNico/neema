@@ -50,6 +50,7 @@ import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./titl
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
     searchEnabled: boolean;
+    researchEnabled: boolean;
     /** Folders attached on the machine this send came from, by name. */
     desktopFolders?: ReadonlyArray<string> | undefined;
     desktopCommands?: boolean | undefined;
@@ -133,6 +134,7 @@ export class ChatService extends Context.Service<
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        researchEnabled: boolean;
         desktopFolders?: ReadonlyArray<string> | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
@@ -166,7 +168,6 @@ export class ChatService extends Context.Service<
     // answer. `stopped: false` means there was nothing to stop here.
     stopGeneration(input: {
       generationId?: string | undefined;
-      researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
       messageId: string;
@@ -217,7 +218,7 @@ function makeChatService() {
         modelId: string;
         searchEnabled: boolean;
         attachmentIds: ReadonlyArray<string>;
-        generationMode?: "chat" | "research" | undefined;
+        researchEnabled?: boolean | undefined;
       }) {
         if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
           return yield* new InvalidMessage({
@@ -235,15 +236,18 @@ function makeChatService() {
           return yield* new ModelNotFound({ modelId: input.modelId });
         }
 
-        if (input.generationMode === "research") {
-          const reader = Option.isSome(urlReaderOption)
+        // The research toggle only offers the tool, so an instance without
+        // search or a reader degrades to not offering it. Refusing the whole
+        // message would make an unrelated admin setting reject ordinary chat.
+        const reader =
+          input.researchEnabled && Option.isSome(urlReaderOption)
             ? yield* urlReaderOption.value.availability()
             : null;
-          if (!(yield* searchToolEnabled) || !reader?.configured || !reader.enabled)
-            return yield* new InvalidMessage({
-              reason: "Deep research requires enabled search and URL reader.",
-            });
-        }
+        const researchEnabled =
+          !!input.researchEnabled &&
+          !!reader?.configured &&
+          reader.enabled &&
+          (yield* searchToolEnabled);
         if (input.searchEnabled && !(yield* searchToolEnabled)) {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
         }
@@ -254,7 +258,7 @@ function makeChatService() {
           input.attachmentIds,
         );
 
-        return { model, attachmentFileNames };
+        return { model, attachmentFileNames, researchEnabled };
       },
     );
 
@@ -324,8 +328,8 @@ function makeChatService() {
           fromDesktop?: boolean | undefined;
           desktopExecutorId?: string | undefined;
         } & (
-          | { attempt: "retry"; searchEnabled?: never }
-          | { attempt: "send" | "edit"; searchEnabled: boolean }
+          | { attempt: "retry"; searchEnabled?: never; researchEnabled?: never }
+          | { attempt: "send" | "edit"; searchEnabled: boolean; researchEnabled: boolean }
         ),
       ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
@@ -338,6 +342,12 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
+          // Same rule as search: a retry keeps the choice the attempt ran with,
+          // an edit takes the submitted one.
+          const researchEnabled =
+            input.attempt === "retry"
+              ? (continuation?.researchEnabled ?? false)
+              : input.researchEnabled;
           const desktopFolders =
             defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
               ? input.desktopFolders
@@ -368,6 +378,7 @@ function makeChatService() {
                 [],
               ),
               searchEnabled,
+              researchEnabled,
               desktopFolders,
               desktopCommands,
             };
@@ -393,6 +404,7 @@ function makeChatService() {
               ? (editedSkills ?? continuation?.standaloneSkillIds)
               : (continuation?.standaloneSkillIds ?? input.skillIds),
             searchEnabled,
+            researchEnabled,
             desktopFolders,
             desktopCommands,
             model: input.model,
@@ -413,16 +425,9 @@ function makeChatService() {
       }
       // The server stays authoritative even when the composer hides the toggle.
       yield* repo.research?.reap() ?? Effect.void;
-      let generationMode = input.generationMode ?? "chat";
-      if (input.questionResponse && input.conversationId) {
+      if (input.questionResponse && input.conversationId)
         yield* repo.getConversation(input.userId, input.conversationId);
-        generationMode =
-          (yield* repo.listMessages(input.conversationId)).at(-1)?.generationMode ?? "chat";
-      }
-      const { model, attachmentFileNames } = yield* validateGenerationOptions({
-        ...input,
-        generationMode,
-      });
+      const { model, attachmentFileNames, researchEnabled } = yield* validateGenerationOptions(input);
       const searchAvailable = yield* searchToolEnabled;
 
       // The association is fixed at creation; its configuration is live for
@@ -442,6 +447,7 @@ function makeChatService() {
           attempt: "send",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
+          researchEnabled,
           ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
@@ -474,7 +480,6 @@ function makeChatService() {
         userId: input.userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
-        researchRunId: turn.assistant.researchRunId ?? undefined,
         generationId: turn.assistant.generationId ?? undefined,
         modelId: input.modelId,
         searchEnabled: turn.config.searchEnabled,
@@ -516,6 +521,7 @@ function makeChatService() {
           messageId: string;
           attachmentIds: ReadonlyArray<string>;
           searchEnabled: boolean;
+          researchEnabled: boolean;
           desktopFolders?: ReadonlyArray<string> | undefined;
           desktopCommands?: boolean | undefined;
           fromDesktop?: boolean | undefined;
@@ -528,7 +534,7 @@ function makeChatService() {
       const model = yield* providers.getModel(input.modelId);
       if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
       const searchAvailable = yield* searchToolEnabled;
-      const { claimed, orphanedKeys, generationId, researchRunId, searchEnabled } =
+      const { claimed, orphanedKeys, generationId, searchEnabled } =
         yield* repo.resetMessageForRetry({
           expectedMessages: input.expectedMessages,
           userId: input.userId,
@@ -544,6 +550,7 @@ function makeChatService() {
               ? {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
+                  researchEnabled: input.edit.researchEnabled,
                   desktopExecutorId: input.desktopExecutorId,
                   ...(input.edit.desktopFolders !== undefined
                     ? { desktopFolders: input.edit.desktopFolders }
@@ -591,7 +598,6 @@ function makeChatService() {
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: input.assistantMessageId,
-        researchRunId,
         generationId,
         modelId: input.modelId,
         searchEnabled: searchEnabled!,
@@ -687,19 +693,6 @@ function makeChatService() {
           priorAttachments.map((a) => a.id),
         );
       }
-
-      if (message.generationMode === "research")
-        yield* validateGenerationOptions({
-          userId: input.userId,
-          modelId,
-          searchEnabled: false,
-          attachmentIds: [],
-          generationMode: "research",
-        }).pipe(
-          Effect.catchTag("ToolUnavailable", (error) =>
-            Effect.fail(new InvalidMessage({ reason: error.reason })),
-          ),
-        );
 
       const restarted = yield* restartAssistant({
         desktopExecutorId: input.desktopExecutorId,
@@ -857,10 +850,7 @@ function makeChatService() {
       ) {
         return yield* new InvalidMessage({ reason: "message is empty" });
       }
-      const { model } = yield* validateGenerationOptions({
-        ...input,
-        generationMode: message.generationMode,
-      });
+      const { model, researchEnabled } = yield* validateGenerationOptions(input);
       const searchAvailable = yield* searchToolEnabled;
       const edit: EditContent = input.questionResponse
         ? { questionResponse: input.questionResponse }
@@ -893,6 +883,7 @@ function makeChatService() {
             ...edit,
             attachmentIds: input.attachmentIds,
             searchEnabled: input.searchEnabled,
+            researchEnabled,
             fromDesktop: input.fromDesktop,
             desktopExecutorId: input.desktopExecutorId,
             desktopFolders: input.desktopFolders,
@@ -925,6 +916,7 @@ function makeChatService() {
           attempt: "edit",
           userId: input.userId,
           searchEnabled: input.searchEnabled,
+          researchEnabled,
           ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
@@ -955,7 +947,6 @@ function makeChatService() {
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: created.message.id,
-        researchRunId: created.message.researchRunId ?? undefined,
         generationId: created.message.generationId ?? undefined,
         modelId: input.modelId,
         searchEnabled: created.config.searchEnabled,
@@ -968,7 +959,6 @@ function makeChatService() {
 
     const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
       generationId?: string | undefined;
-      researchRunId?: string | undefined;
       userId: string;
       conversationId: string;
       messageId: string;
@@ -987,23 +977,14 @@ function makeChatService() {
       // Already finished (or generating on another instance) — the client
       // learns the real state from the `done` event either way.
       if (message.status !== "streaming") return { stopped: false };
-      if (message.researchRunId && input.researchRunId !== message.researchRunId)
+      if (message.generationId && input.generationId !== message.generationId)
         return { stopped: false };
-      if (
-        !message.researchRunId &&
-        message.generationId &&
-        input.generationId !== message.generationId
-      )
-        return { stopped: false };
+      // Stop ends the attempt; any run it started is cancelled with it.
       const durable =
-        message.researchRunId && repo.research
-          ? yield* repo.research.cancel(message.id, message.researchRunId)
+        message.generationId && repo.research
+          ? yield* repo.research.cancelForGeneration(message.id, message.generationId)
           : false;
-      const stopped =
-        (yield* engine.stopGeneration(
-          input.messageId,
-          input.researchRunId ?? input.generationId,
-        )) || durable;
+      const stopped = (yield* engine.stopGeneration(input.messageId, input.generationId)) || durable;
       return { stopped };
     });
 

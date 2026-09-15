@@ -176,6 +176,8 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    * way. A retry preserves the explicit choice, not new agent defaults.
    */
   searchEnabled: boolean("search_enabled").notNull().default(false),
+  /** Whether `deep_research` was offered to this attempt. The model still chooses. */
+  researchEnabled: boolean("research_enabled").notNull().default(false),
   /**
    * The folders attached on the machine this attempt was sent from, by name.
    * Null means the tools that reach a machine were not offered. Only names:

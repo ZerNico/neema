@@ -4,16 +4,10 @@ import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncEnvelope } from "../events.ts";
 
 // Internal wakeups share the transport, never the browser event contract.
-export const WorkSignal = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literals(["research.chunks", "research.control"]),
-    messageId: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("knowledge.work"),
-    stage: Schema.Literals(["extraction", "embedding"]),
-  }),
-]);
+export const WorkSignal = Schema.Struct({
+  type: Schema.Literal("knowledge.work"),
+  stage: Schema.Literals(["extraction", "embedding"]),
+});
 export type WorkSignal = typeof WorkSignal.Type;
 export const Notification = Schema.Union([
   SyncEnvelope,

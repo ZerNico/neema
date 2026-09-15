@@ -106,8 +106,6 @@ const CitedAnswer = memo(function CitedAnswer({
 export interface DisplayMessage {
   images?: ReadonlyArray<AssistantImage>;
   id: string;
-  /** Durable attempt identity, used to fence live panel updates across retries. */
-  researchRunId?: string | null;
   role: "user" | "assistant" | "system";
   content: string;
   /** Receipt length before smoothing; activity anchors remain in this coordinate space. */
@@ -713,12 +711,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   }, []);
   const openSources = useCallback(() => sourcePanel.current?.(), []);
   const streaming = message.status === "streaming";
-  // A research run writing its answer is no longer "a tool running": the reply
-  // is streaming like any other, so the ordinary pre-text signal applies.
-  const toolRunning = message.toolActivities.some(
-    (a) =>
-      a.status === "running" && !(a.family === "research" && a.progress?.phase === "synthesizing"),
-  );
+  const toolRunning = message.toolActivities.some((a) => a.status === "running");
   // "Thinking" is the phase before any visible answer text arrives — but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive =

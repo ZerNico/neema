@@ -3,7 +3,6 @@ import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
-import type { GenerationMode } from "../research-schema.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
 import { useDesktop, useDesktopOutdated, type FolderState } from "~/modules/desktop/client/bridge.ts";
@@ -24,7 +23,7 @@ interface ComposerProps {
   onSend: (
     content: string,
     attachmentIds: ReadonlyArray<string>,
-    generationMode?: GenerationMode,
+    researchEnabled: boolean,
     skillIds?: ReadonlyArray<string>,
   ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
@@ -159,7 +158,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const request = submitted.onSend(
         content,
         attachmentIds,
-        submitted.researchEnabled ? "research" : undefined,
+        submitted.researchEnabled,
         current.skillIds,
       );
       void request.then(

@@ -144,7 +144,7 @@ describe("upload-queued composer requests", () => {
     await replaceSkill(textbox);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], undefined, [
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], false, [
         "rewrite",
       ]),
     );
@@ -161,7 +161,7 @@ describe("upload-queued composer requests", () => {
       expect(onSend).toHaveBeenCalledExactlyOnceWith(
         "Original draft",
         [attachment.id],
-        undefined,
+        false,
         [],
       ),
     );
@@ -176,7 +176,7 @@ describe("upload-queued composer requests", () => {
       expect(onSend).toHaveBeenCalledExactlyOnceWith(
         "Original draft",
         [attachment.id],
-        undefined,
+        false,
         ["review"],
       ),
     );
@@ -188,7 +188,7 @@ describe("upload-queued composer requests", () => {
     await replaceSkill(textbox);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], undefined, [
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], false, [
         "rewrite",
       ]),
     );

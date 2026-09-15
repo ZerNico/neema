@@ -52,6 +52,7 @@ const fixture = async () => {
     conversationId: uuidv7(),
     messageId: uuidv7(),
     runId: uuidv7(),
+    generationId: uuidv7(),
     owner: uuidv7(),
   };
   const sourceMessageId = uuidv7();
@@ -70,13 +71,14 @@ const fixture = async () => {
             conversationId: fence.conversationId,
             role: "assistant",
             status: "streaming",
-            generationMode: "research",
+            generationId: fence.generationId,
           },
         ]);
         yield* db.insert(researchRuns).values({
           id: fence.runId,
           conversationId: fence.conversationId,
           messageId: fence.messageId,
+          generationId: fence.generationId,
           userId,
           owner: fence.owner,
           status: "running",
@@ -85,10 +87,6 @@ const fixture = async () => {
           modelName: "Test model",
           leaseUntil: sql`clock_timestamp() + interval '5 minutes'`,
         });
-        yield* db
-          .update(messages)
-          .set({ researchRunId: fence.runId })
-          .where(eq(messages.id, fence.messageId));
       }).pipe(Effect.orDie),
     ),
   );
@@ -135,7 +133,7 @@ const waitForBlocked = async (client: Client, blocker: number) => {
   throw new Error("Memory transaction did not reach its lock barrier");
 };
 
-describe("research memory transaction fence", () => {
+describe("memory save transaction fence", () => {
   it("saves with a valid fence and leaves ordinary saves on the default no-op guard", async () => {
     const first = await fixture();
     await expect(
@@ -171,7 +169,7 @@ describe("research memory transaction fence", () => {
     expect(await list()).toEqual([]);
   });
 
-  it.each(["owner", "runId", "messageId", "conversationId"] as const)(
+  it.each(["owner", "runId", "messageId", "conversationId", "generationId"] as const)(
     "rejects a mismatched %s without writing memory",
     async (field) => {
       const { fence, save, list } = await fixture();
@@ -195,7 +193,9 @@ describe("research memory transaction fence", () => {
             if (state === "message-complete" || state === "superseded") {
               yield* db
                 .update(messages)
-                .set(state === "superseded" ? { researchRunId: uuidv7() } : { status: "complete" })
+                // A retry or edit mints a new generation id; that is what ends
+                // this run's claim on the message, not a column pointing at it.
+                .set(state === "superseded" ? { generationId: uuidv7() } : { status: "complete" })
                 .where(eq(messages.id, fence.messageId));
             } else {
               yield* db
@@ -248,7 +248,7 @@ describe("research memory transaction fence", () => {
         [userId],
       );
       expect(rows[0]?.acquired).toBe(true);
-      stop = runtime.runPromise(store.cancel(fence.messageId, fence.runId));
+      stop = runtime.runPromise(store.cancelForGeneration(fence.messageId, fence.generationId));
       await waitForBlocked(client, savingPid);
       await client.query("select pg_advisory_unlock_all()");
       expect(await pendingSave).toMatchObject({ _tag: "Success", value: { outcome: "created" } });
@@ -280,7 +280,7 @@ describe("research memory transaction fence", () => {
           fence.conversationId,
         ]);
         if (change === "retry") {
-          await client.query("update messages set research_run_id = $1 where id = $2", [
+          await client.query("update messages set generation_id = $1 where id = $2", [
             uuidv7(),
             fence.messageId,
           ]);

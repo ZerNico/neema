@@ -505,6 +505,9 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
     yield* update("error");
     return { outcome: "no_evidence" as const };
   }
+  // Limitations collected after the last dispatch round are still the run's.
+  // Nothing outside reads the returned list into the row, so persist them here.
+  yield* update("researching");
   yield* authorize;
   // Append only newly completed reports. Previously compacted/omitted evidence
   // stays projected; the handoff never rebuilds it from durable raw reports.
@@ -529,4 +532,3 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
   };
 });
 
-export type ResearchEvidenceResult = Effect.Success<ReturnType<typeof runResearch>>;

@@ -167,7 +167,7 @@ describe("research composer", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("Investigate this", [], "research", []),
+      expect(onSend).toHaveBeenCalledWith("Investigate this", [], true, []),
     );
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
     expect(researchPill()).toBeTruthy();
@@ -178,7 +178,7 @@ describe("research composer", () => {
     expect(researchPill()).toBeNull();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Thanks" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", [], undefined, []));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", [], false, []));
   });
 
   it("explains disabled research and blocks an already-selected request if availability changes", async () => {
@@ -255,7 +255,7 @@ describe("research composer", () => {
     },
   );
 
-  it("keeps the submitted research mode fixed while attachments finish uploading", async () => {
+  it("keeps the submitted research offer fixed while attachments finish uploading", async () => {
     const onChange = vi.fn();
     const attachments = { items: [], isFull: false, queued: true } as unknown as AttachmentUploads;
     render(

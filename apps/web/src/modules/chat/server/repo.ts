@@ -1,4 +1,3 @@
-import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration } from "./generation-fence.ts";
@@ -28,7 +27,7 @@ import {
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import { projectResearchProgress } from "../research-schema.ts";
-import { createResearchStore, queueResearch, type ResearchStore } from "./research/repo.ts";
+import { createResearchStore, type ResearchStore } from "./research/repo.ts";
 import { researchRuns, researchTasks } from "~/db/schema/research.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -87,6 +86,8 @@ export interface GenerationConfig {
   readonly manifest: ReadonlyArray<ManifestEntry>;
   readonly knowledgeMode: "none" | "context" | "retrieval";
   readonly searchEnabled: boolean;
+  /** Whether `deep_research` was offered; the model still chooses. */
+  readonly researchEnabled: boolean;
   readonly planEnabled: boolean;
   /** Folder names when this attempt could reach a machine; null when it could not. */
   readonly desktopFolders?: ReadonlyArray<string> | null;
@@ -125,12 +126,12 @@ export const PLAIN_GENERATION: GenerationConfig = {
   manifest: [],
   knowledgeMode: "none",
   searchEnabled: false,
+  researchEnabled: false,
   planEnabled: false,
 };
 
 /** Everything about a turn except its content; `CreateTurnInput` adds that. */
 export type TurnFields = {
-  generationMode?: "chat" | "research" | undefined;
   /** Applied only when this turn creates the conversation. */
   mode?: "chat" | "work" | undefined;
   userId: string;
@@ -170,8 +171,6 @@ export type HistorySnapshot = ReadonlyArray<
     | "questionResponse"
     | "editedAt"
     | "completedAt"
-    | "generationMode"
-    | "researchRunId"
     | "generationId"
     | "assistantOutput"
     | "providerReplay"
@@ -185,8 +184,6 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
     return (
       message.id === previous.id &&
       message.status === previous.status &&
-      message.generationMode === previous.generationMode &&
-      message.researchRunId === previous.researchRunId &&
       message.generationId === previous.generationId &&
       JSON.stringify(message.assistantOutput) === JSON.stringify(previous.assistantOutput) &&
       JSON.stringify(message.providerReplay) === JSON.stringify(previous.providerReplay) &&
@@ -324,6 +321,7 @@ const toConfig = (
   })),
   knowledgeMode: row.knowledgeMode,
   searchEnabled: row.searchEnabled,
+  researchEnabled: row.researchEnabled,
   planEnabled: row.planEnabled,
   desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
@@ -420,6 +418,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       knowledgeMode: config.knowledgeMode,
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
+      researchEnabled: config.researchEnabled,
       desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
       collectionIds: [...config.collectionIds],
@@ -583,6 +582,12 @@ export class ChatRepo extends Context.Service<
       status: "complete" | "error";
       error?: { code: string; message: string };
     }): Effect.Effect<void>;
+    // Ends a call whose body was written as it ran, so the stored result stands.
+    settleToolCall(input: {
+      id: string;
+      status: "complete" | "error";
+      error?: { code: string; message: string };
+    }): Effect.Effect<void>;
     // Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
     failRunningToolCalls(messageId: string, message: string): Effect.Effect<void>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
@@ -659,7 +664,6 @@ export class ChatRepo extends Context.Service<
         claimed: boolean;
         orphanedKeys: ReadonlyArray<string>;
         generationId?: string | undefined;
-        researchRunId?: string | undefined;
         searchEnabled?: boolean | undefined;
       },
       AttachmentNotAvailable | ResolveError
@@ -861,7 +865,6 @@ export class ChatRepo extends Context.Service<
                   conversationCreated = true;
                 }
 
-                let generationMode = input.generationMode ?? "chat";
                 let content = input.content;
                 let questionResponse: JsonValue | null = null;
                 let continuation: GenerationConfig | undefined;
@@ -879,7 +882,6 @@ export class ChatRepo extends Context.Service<
                   const batch = yield* questionForMessage(tx, tail);
                   if (!batch || batch.call.id !== callId)
                     return yield* new QuestionUnavailable({ callId });
-                  generationMode = tail!.generationMode;
                   continuation = yield* readConfig(tx, tail!.id);
                   const formatted = yield* questionContent(batch.questions, response);
                   content = formatted.content;
@@ -895,7 +897,6 @@ export class ChatRepo extends Context.Service<
                     status: "complete",
                     content: content!,
                     questionResponse,
-                    generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
@@ -935,22 +936,10 @@ export class ChatRepo extends Context.Service<
                     status: "streaming",
                     generationLeaseUntil: freshLease(),
                     modelId: input.modelId,
-                    generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
-                // Before the research claim can observe the message: the run
-                // reads its configuration from these rows.
                 yield* writeConfig(tx, assistantRows[0]!.id, config);
-
-                if (generationMode === "research") {
-                  assistantRows[0]!.researchRunId = yield* queueResearch(tx, {
-                    userId: input.userId,
-                    conversationId: conversation.id,
-                    messageId: assistantRows[0]!.id,
-                    modelId: input.modelId,
-                  });
-                }
                 yield* tx
                   .update(conversations)
                   .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })
@@ -1046,11 +1035,6 @@ export class ChatRepo extends Context.Service<
                     tx,
                     rows.map((row) => row.id),
                   );
-                  for (const row of rows)
-                    yield* notifyOnCommit(tx, {
-                      scope: "internal",
-                      event: { type: "research.control", messageId: row.id },
-                    });
                   yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
                   return keys;
                 }),
@@ -1157,11 +1141,11 @@ export class ChatRepo extends Context.Service<
                 const taskIds = new Map<string, string>();
                 const clonedProgress = new Map<string, unknown>();
                 for (const message of prefix) {
-                  if (!message.researchRunId) continue;
                   const run = (yield* tx
                     .select()
                     .from(researchRuns)
-                    .where(eq(researchRuns.id, message.researchRunId))
+                    .where(eq(researchRuns.messageId, message.id))
+                    .orderBy(asc(researchRuns.createdAt))
                     .pipe(Effect.orDie))[0];
                   if (!run || run.status !== "terminal") continue;
                   const id = uuidv7();
@@ -1201,11 +1185,6 @@ export class ChatRepo extends Context.Service<
                         tasks.map((task) => ({ ...task, id: taskIds.get(task.id)!, runId: id })),
                       )
                       .pipe(Effect.orDie);
-                  yield* tx
-                    .update(messages)
-                    .set({ researchRunId: id })
-                    .where(eq(messages.id, clonedIds.get(message.id)!))
-                    .pipe(Effect.orDie);
                 }
 
                 // Tool calls are part of the answer, not of its generation:
@@ -1504,7 +1483,6 @@ export class ChatRepo extends Context.Service<
             .where(
               and(
                 eq(messages.status, "streaming"),
-                eq(messages.generationMode, "chat"),
                 // Judged by the database clock, like every other lease here. A
                 // null lease is a row from before the column existed; every
                 // path into "streaming" now grants one.
@@ -1621,6 +1599,15 @@ export class ChatRepo extends Context.Service<
           );
         }),
 
+        settleToolCall: Effect.fn("ChatRepo.settleToolCall")(function* (input) {
+          return yield* generationWrite((db) =>
+            db
+              .update(messageToolCalls)
+              .set({ status: input.status, error: input.error, completedAt: new Date() })
+              .where(eq(messageToolCalls.id, input.id))
+              .pipe(Effect.orDie, Effect.asVoid),
+          );
+        }),
         completeToolCall: Effect.fn("ChatRepo.completeToolCall")(function* (input) {
           return yield* generationWrite((db) =>
             Effect.gen(function* () {
@@ -1848,14 +1835,6 @@ export class ChatRepo extends Context.Service<
                   return { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
                 }
 
-                if (current[index]!.generationMode === "research") {
-                  yield* queueResearch(tx, {
-                    userId: input.userId,
-                    conversationId: target.conversationId,
-                    messageId: input.messageId,
-                    modelId: input.modelId,
-                  });
-                }
                 const orphanedKeys: string[] = [
                   ...(yield* attachments.releaseForMessages(tx, [input.messageId])),
                 ];
@@ -1898,11 +1877,6 @@ export class ChatRepo extends Context.Service<
                     .delete(messages)
                     .where(inArray(messages.id, [...input.deleteMessageIds]))
                     .pipe(Effect.orDie);
-                  for (const messageId of input.deleteMessageIds)
-                    yield* notifyOnCommit(tx, {
-                      scope: "internal",
-                      event: { type: "research.control", messageId },
-                    });
                 }
                 yield* tx
                   .delete(messageChunks)
@@ -1934,19 +1908,9 @@ export class ChatRepo extends Context.Service<
                   .pipe(Effect.orDie);
                 yield* writeConfig(tx, input.messageId, config);
 
-                const [restarted] = yield* tx
-                  .select({ researchRunId: messages.researchRunId })
-                  .from(messages)
-                  .where(eq(messages.id, input.messageId))
-                  .pipe(Effect.orDie);
-                yield* notifyOnCommit(tx, {
-                  scope: "internal",
-                  event: { type: "research.control", messageId: input.messageId },
-                });
                 return {
                   claimed: true,
                   generationId,
-                  researchRunId: restarted?.researchRunId ?? undefined,
                   searchEnabled: config.searchEnabled,
                   orphanedKeys: orphanedKeys as ReadonlyArray<string>,
                 };
@@ -2039,11 +2003,6 @@ export class ChatRepo extends Context.Service<
                     .delete(messages)
                     .where(inArray(messages.id, [...input.deleteMessageIds]))
                     .pipe(Effect.orDie);
-                  for (const messageId of input.deleteMessageIds)
-                    yield* notifyOnCommit(tx, {
-                      scope: "internal",
-                      event: { type: "research.control", messageId },
-                    });
                 }
                 yield* tx
                   .update(conversations)
@@ -2060,18 +2019,10 @@ export class ChatRepo extends Context.Service<
                     status: "streaming",
                     generationLeaseUntil: freshLease(),
                     modelId: input.modelId,
-                    generationMode: current[index]!.generationMode,
                   })
                   .returning()
                   .pipe(Effect.orDie);
                 yield* writeConfig(tx, created[0]!.id, config);
-                if (current[index]!.generationMode === "research")
-                  created[0]!.researchRunId = yield* queueResearch(tx, {
-                    userId: input.userId,
-                    conversationId: input.conversationId,
-                    messageId: created[0]!.id,
-                    modelId: input.modelId,
-                  });
                 return {
                   message: created[0]!,
                   orphanedKeys: orphanedKeys as ReadonlyArray<string>,
@@ -2101,11 +2052,6 @@ export class ChatRepo extends Context.Service<
                     .orderBy(asc(conversations.id))
                     .for("update");
                 const keys = yield* attachments.releaseForMessages(tx, messageIds);
-                for (const messageId of messageIds)
-                  yield* notifyOnCommit(tx, {
-                    scope: "internal",
-                    event: { type: "research.control", messageId },
-                  });
                 yield* tx.delete(messages).where(inArray(messages.id, [...messageIds]));
                 return keys;
               }),

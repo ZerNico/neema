@@ -15,19 +15,23 @@ edit the wrong thing.
   user picks for a conversation. Never a permission, never the coding agent editing
   this repo. Installed once per conversation in `conversation_agents`; no swap.
 - **message / attempt / generation**: one assistant message row can be generated
-  more than once (retry, edit). Each run is an attempt with its own `generationId`;
-  research attempts also carry a `researchRunId`. Client stream identity is
-  message + run, so a stale run's chunks are dropped, not merged.
+  more than once (retry, edit). Each attempt has its own `generationId`. Client
+  stream identity is message + generation, so a stale attempt's chunks are
+  dropped, not merged.
 - **turn**: one user message plus the assistant message answering it, created
   together (`createTurn`).
-- **run**: a deep-research execution: one `research_runs` row, one budget, one
-  lease/fence, one deadline, through to the final answer.
+- **run**: one deep-research execution: a `research_runs` row with one budget,
+  lease and deadline. It is a unit of work owned by the `deep_research` call that
+  started it and fenced by that call's generation — never a kind of message, and
+  one turn may start several. Ending one must not touch anything else on the
+  message.
 - **task / worker / coordinator**: inside a run, the coordinator dispatches tasks;
   each task is investigated by a worker with web tools. Neither sees the
   conversation or memory; they get a brief.
 - **fence**: the tuple that proves a writer still owns a message (`GenerationFence`,
   `ResearchFence`). Every durable write checks it; Stop, retry and lease expiry
-  invalidate it.
+  invalidate it. `ResearchFence` is the ordinary generation fence plus the run's
+  lease and owner.
 - **source / citation**: a source is a numbered web page or document excerpt
   registered during a generation; a citation is a `[^N]` marker in model text that
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
@@ -40,7 +44,7 @@ edit the wrong thing.
 - **memory**: a saved user fact the model may reference or write. One save attempt
   per generation.
 - **structured answer**: a user message that answers an `ask_user` clarification.
-  It inherits research mode; ordinary text does not.
+  It is its own submission and inherits no composer toggle.
 - **branch**: a copy of a conversation prefix into a new conversation. Copies
   messages, tool rows and display snapshots with fresh ids; never copies chunks,
   calls or ledger rows.
@@ -75,10 +79,11 @@ Before finishing, decide for each of these whether it applies, and say so if you
 skipped one on purpose.
 
 - **How the message got there**: send, retry, edit, structured answer to a
-  clarification, research continuation, branch. Retry and edit re-resolve the
-  agent, collections and skills inside the attempt transaction, before any reset.
-- **Mode**: plain chat, agent conversation, deep research. Research has a main
-  assistant stage and an investigation stage; they see different context.
+  clarification, branch. Retry and edit re-resolve the agent, collections and
+  skills inside the attempt transaction, before any reset.
+- **Tool offer**: the composer's search and research toggles only decide what the
+  attempt is *offered*; the model chooses. A `deep_research` call runs an
+  investigation that sees a brief, never the conversation.
 - **Display path**: the live SSE stream, the conversation-detail loader on reload,
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
@@ -152,8 +157,9 @@ skipped one on purpose.
 
 ## Where the depth is
 
-- `docs/internals/research.md`: deep research. Main assistant owns context and the
-  answer; the runner investigates a brief; one budget and fence through the end.
+- `docs/internals/research.md`: deep research as a tool. The host turn owns context
+  and the answer; the runner investigates a brief; the run is fenced by the
+  generation that started it and ends without touching anything else.
 - `docs/internals/knowledge-and-agents.md`: agents, sharing, collections, retrieval
   versus direct context, embedding widths, indexing and repair.
 - `docs/internals/skills.md`: skill packages, revisions, ambient versus pinned,

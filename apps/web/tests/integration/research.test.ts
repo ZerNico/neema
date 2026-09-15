@@ -4,7 +4,7 @@ import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
-import { and, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import {
   messages,
@@ -79,13 +79,8 @@ let remote: typeof runtime;
 let modelId: string;
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
 const requests: GatewayInput[] = [];
-let clarify = false;
-let clarificationProse = "";
 let coordinatorFailure: "provider" | "context" | "defect" | null = null;
 let coordinatorFirstResponse: "finish" | "text" | "empty" | null = null;
-let synthesisCutShort: "provider" | "context" | null = null;
-let draftInSynthesis = false;
-let draftSynthesisTurns = 0;
 let evidenceUrl = "https://evidence.example/source";
 let overflowPhase: string | null = null;
 let dispatchWaves = 1;
@@ -93,10 +88,18 @@ let coordinatorTurns = 0;
 let queriesPerSearch = 1;
 let searchDown = false;
 let finishWorkersEarly = false;
-let planningFragments = 1;
-let planningText = "Compare independent sources and investigate gaps.";
-let memoryParams: unknown = null;
-let beforeMemorySave: (() => Promise<void>) | null = null;
+/** How many `deep_research` calls the host makes before answering from them. */
+let hostPlan: 0 | 1 | 2 = 1;
+let hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
+/** The host also opens a page in the same turn, so a sibling call is in flight. */
+let hostReadsAlongside = false;
+let hostDraft = false;
+let hostDraftTurns = 0;
+const HOLD_URL = "https://hold.example/wait";
+let readerGate: {
+  reached: Deferred.Deferred<void>;
+  release: Deferred.Deferred<void>;
+} | null = null;
 let reportRepeats = 1;
 let reportSuffix = "";
 let reportFinishReason: "stop" | "length" = "stop";
@@ -130,16 +133,17 @@ const focusedDraftId = (input: GatewayInput) => {
     ).draft?.draftId ?? ""
   );
 };
+/**
+ * Research stages are told apart by the toolkit they were handed, never by the
+ * conversation: the host is the only turn that can ask the user anything.
+ */
 const phaseOf = (input: GatewayInput) => {
   const content = input.prompt.content.map((message) => JSON.stringify(message)).join("\n");
   if (content.includes("You compact the older part of a chat conversation")) return "compaction";
-  if (input.toolkit?.tools["ask_user"]) return "clarification";
   if (input.toolkit?.tools["dispatch_research"]) return "coordinator";
-  if (input.toolkit?.tools["web_search"]) return "worker";
-  if (content.includes("Prepare a self-contained research brief")) return "planning";
+  if (input.toolkit?.tools["web_search"] && !input.toolkit.tools["ask_user"]) return "worker";
   if (content.includes("Write a concise, evidence-dense report")) return "report";
-  if (content.includes("Write the final useful answer")) return "synthesis";
-  throw new Error("Unrecognized research stage in fake gateway");
+  return "host";
 };
 const finish = (reason = "stop") =>
   Response.makePart("finish", {
@@ -151,34 +155,50 @@ const finish = (reason = "stop") =>
   }) as ChatStreamPart;
 const text = (delta: string) =>
   Response.makePart("text-delta", { id: "text", delta }) as ChatStreamPart;
-const tool = (input: GatewayInput, name: string, params: unknown) => {
-  const id = "same-provider-id"; // deliberately repeated in concurrent workers and all invocations
-  const handle = input.toolkit!.handle(name, params, id);
-  // Pause after the call is published, immediately before handler execution.
-  const result = Stream.unwrap(
-    (name === "save_memory" && beforeMemorySave
-      ? Effect.promise(beforeMemorySave).pipe(Effect.andThen(handle))
-      : handle
-    ).pipe(Effect.orDie),
-  ).pipe(
+const resultsOf = (input: GatewayInput, name: string, params: unknown, id: string) =>
+  Stream.unwrap(input.toolkit!.handle(name, params, id).pipe(Effect.orDie)).pipe(
     Stream.orDie,
     Stream.map(
       (value) =>
         Response.toolResultPart({ id, name, providerExecuted: false, ...value }) as ChatStreamPart,
     ),
   ) as Stream.Stream<ChatStreamPart>;
+const tool = (input: GatewayInput, name: string, params: unknown) => {
+  const id = "same-provider-id"; // deliberately repeated in concurrent workers and all invocations
   return Stream.make(
     Response.makePart("tool-call", { id, name, params, providerExecuted: false }) as ChatStreamPart,
-  ).pipe(Stream.concat(result), Stream.concat(Stream.make(finish("tool-calls"))));
+  ).pipe(
+    Stream.concat(resultsOf(input, name, params, id)),
+    Stream.concat(Stream.make(finish("tool-calls"))),
+  );
 };
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
-  generateText: () => Effect.die("All research calls must use streaming"),
-  streamChat: (input) =>
+/** Two calls published before either handler runs, the shape a real turn takes. */
+const twoTools = (
+  input: GatewayInput,
+  calls: readonly [
+    { name: string; params: unknown; id: string },
+    { name: string; params: unknown; id: string },
+  ],
+) =>
+  Stream.fromIterable(
+    calls.map(
+      (call) =>
+        Response.makePart("tool-call", {
+          id: call.id,
+          name: call.name,
+          params: call.params,
+          providerExecuted: false,
+        }) as ChatStreamPart,
+    ),
+  ).pipe(
+    Stream.concat(
+      resultsOf(input, calls[0].name, calls[0].params, calls[0].id).pipe(
+        Stream.merge(resultsOf(input, calls[1].name, calls[1].params, calls[1].id)),
+      ),
+    ),
+    Stream.concat(Stream.make(finish("tool-calls"))),
+  );
+const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
     Stream.suspend((): ReturnType<AiGateway["Service"]["streamChat"]> => {
       requests.push(input);
       const phase = phaseOf(input);
@@ -194,32 +214,46 @@ const FakeGateway = Layer.succeed(AiGateway, {
           Deferred.succeed(gate.reached, undefined).pipe(
             Effect.andThen(gate.release ? Deferred.await(gate.release) : Effect.never),
             Effect.onInterrupt(() => Deferred.succeed(gate.interrupted, undefined)),
-            Effect.as(text("Compare independent sources and investigate gaps.")),
+            Effect.as(text("Held stage resumed.")),
           ),
         ).pipe(Stream.concat(Stream.make(finish())));
       }
-      if (phase === "clarification")
-        return clarify
-          ? Stream.make(text("I need one clarification before researching.\n")).pipe(
-              Stream.concat(
-                tool(input, "ask_user", {
-                  questions: [
-                    {
-                      question: "Which region?",
-                      options: [{ label: "Europe" }, { label: "Asia" }],
-                      multiSelect: false,
-                    },
-                  ],
-                }),
-              ),
-            )
-          : Stream.make(text(clarificationProse), finish());
-      if (phase === "planning") {
-        if (memoryParams !== null && input.toolkit?.tools["save_memory"])
-          return tool(input, "save_memory", memoryParams);
-        return Stream.fromIterable(
-          Array.from({ length: planningFragments }, () => text(planningText)),
-        ).pipe(Stream.concat(Stream.make(finish())));
+      if (phase === "host") {
+        if (hostDraft && hostDraftTurns++ > 0)
+          return hostDraftTurns === 2
+            ? Stream.make(text("I found useful guidance for the draft.\n")).pipe(
+                Stream.concat(
+                  tool(input, "draft_agent", {
+                    changes: { name: "Research agent", instructions: "PRIVATE_INITIAL_DRAFT" },
+                  }),
+                ),
+              )
+            : hostDraftTurns === 3
+              ? tool(input, "update_agent_draft", {
+                  // Named explicitly: a chat may already hold another draft, and
+                  // an unaddressed update is ambiguous then.
+                  draftId: focusedDraftId(input),
+                  expectedRevision: 1,
+                  changes: { instructions: "PRIVATE_RESEARCH_DRAFT" },
+                })
+              : Stream.make(text("# Findings\nSupported conclusion[^1].\n"), finish());
+        const madeCalls = input.prompt.content.filter(
+          (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+        ).length;
+        if (input.toolkit?.tools["deep_research"] && madeCalls < hostPlan) {
+          const research = { name: "deep_research", params: { brief: hostBrief }, id: "host-research" };
+          return hostReadsAlongside
+            ? twoTools(input, [
+                research,
+                { name: "read_url", params: { urls: [HOLD_URL] }, id: "host-read" },
+              ])
+            : tool(input, research.name, research.params);
+        }
+        return Stream.make(
+          text("# Findings\nSupported conclusion[^1].\n"),
+          text("Coverage remains limited where sources disagreed.\n"),
+          finish(),
+        );
       }
       if (phase === "compaction")
         return compactionFails
@@ -278,53 +312,34 @@ const FakeGateway = Layer.succeed(AiGateway, {
           ),
         });
       }
-      if (phase === "report")
-        return Stream.make(
-          text(
-            "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) +
-              reportSuffix,
-          ),
-          finish(reportFinishReason),
-        );
-      if (draftInSynthesis) {
-        if (draftSynthesisTurns++ === 0)
-          return Stream.make(text("I found useful guidance for the draft.\n")).pipe(
-            Stream.concat(
-              tool(input, "draft_agent", {
-                changes: { name: "Research agent", instructions: "PRIVATE_INITIAL_DRAFT" },
-              }),
-            ),
-          );
-        if (draftSynthesisTurns === 2)
-          return tool(input, "update_agent_draft", {
-            // Named explicitly: a chat may already hold another draft, and an
-            // unaddressed update is ambiguous then.
-            draftId: focusedDraftId(input),
-            expectedRevision: 1,
-            changes: { instructions: "PRIVATE_RESEARCH_DRAFT" },
-          });
-      }
-      // A report whose stream dies after emitting whole lines: the reader
-      // already has those, so the run is truncated rather than failed.
-      if (synthesisCutShort)
-        return Stream.make(text("# Findings\nSupported conclusion[^1].\n")).pipe(
-          Stream.concat(
-            Stream.fail(
-              synthesisCutShort === "context"
-                ? new ProviderContextOverflow({
-                    providerId: "fake",
-                    message: "late context rejection",
-                  })
-                : new ProviderUnreachable({ providerId: "fake", message: "stream lost" }),
-            ),
-          ),
-        );
       return Stream.make(
-        text("# Findings\nSupported conclusion[^1].\n"),
-        text("Coverage remains limited; invented reference[^999] is not evidence.\n"),
-        finish(),
+        text(
+          "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) +
+            reportSuffix,
+        ),
+        finish(reportFinishReason),
       );
-    }),
+    });
+const FakeGateway = Layer.succeed(AiGateway, {
+  fetchCatalog: () => Effect.succeed([]),
+  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  // These suites never embed; a call here means the code under test grew a
+  // provider dependency the fake was not asked to model.
+  embed: () => Effect.die("unexpected embed call"),
+  // The real gateway folds its own stream, so a side generation goes through
+  // exactly the same scripted turn as everything else here.
+  generateText: (input) =>
+    Stream.runFold(
+      streamChat(input),
+      () => ({ text: "", usage: new Response.Usage({ inputTokens: {}, outputTokens: {} }) }),
+      (state: { text: string; usage: Response.Usage }, part) =>
+        part.type === "text-delta"
+          ? { ...state, text: state.text + part.delta }
+          : part.type === "finish"
+            ? { ...state, usage: part.usage }
+            : state,
+    ).pipe(Effect.map((state) => ({ ...state, finishMetadata: {} }))),
+  streamChat,
 });
 // Exercise the real config, handler and budget admission; only upstream search is fake.
 const FakeSearchBackend = Layer.succeed(SearchBackend, {
@@ -346,16 +361,24 @@ const FakeSearchBackend = Layer.succeed(SearchBackend, {
 const FakeReader = Layer.succeed(UrlReaderExecutor, {
   availability: () => Effect.succeed({ configured: true, enabled: true }),
   handler: () =>
-    Effect.succeed(() =>
-      Effect.succeed({
-        ok: true,
-        targets: [],
-        resultCount: 0,
-        pagesFetched: 0,
-        results: [],
-        failures: [],
+    Effect.succeed((params: { urls?: ReadonlyArray<string> }) =>
+      Effect.gen(function* () {
+        // The host's own page read, held open so a sibling call is still
+        // running while the research run beside it ends.
+        if (readerGate && params.urls?.includes(HOLD_URL)) {
+          yield* Deferred.succeed(readerGate.reached, undefined);
+          yield* Deferred.await(readerGate.release);
+        }
+        return {
+          ok: true,
+          targets: [...(params.urls ?? [])],
+          resultCount: 0,
+          pagesFetched: 0,
+          results: [],
+          failures: [],
+        };
       }),
-    ),
+    ) as never,
 });
 
 beforeAll(async () => {
@@ -440,17 +463,9 @@ beforeEach(async () => {
     ToolsRepo.use((repo) => repo.updateTool("memory", { enabled: false, config: {} })),
   );
   requests.length = 0;
-  planningText = "Compare independent sources and investigate gaps.";
-  memoryParams = null;
-  beforeMemorySave = null;
   evidenceUrl = "https://evidence.example/source";
-  clarify = false;
-  clarificationProse = "";
   coordinatorFailure = null;
   coordinatorFirstResponse = null;
-  synthesisCutShort = null;
-  draftInSynthesis = false;
-  draftSynthesisTurns = 0;
   overflowPhase = null;
   dispatchWaves = 1;
   coordinatorTurns = 0;
@@ -459,7 +474,12 @@ beforeEach(async () => {
   backendSearches = 0;
   searchDown = false;
   finishWorkersEarly = false;
-  planningFragments = 1;
+  hostPlan = 1;
+  hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
+  hostReadsAlongside = false;
+  hostDraft = false;
+  hostDraftTurns = 0;
+  readerGate = null;
   reportRepeats = 1;
   reportSuffix = "";
   reportFinishReason = "stop";
@@ -479,15 +499,20 @@ const seed = Effect.gen(function* () {
   const conversation = yield* repo.createConversation({ userId, modelId });
   return { userId, conversationId: conversation.id };
 });
-const send = (userId: string, conversationId: string, content = "Investigate the evidence.") =>
+const send = (
+  userId: string,
+  conversationId: string,
+  content = "Investigate the evidence.",
+  searchEnabled = false,
+) =>
   Effect.flatMap(ChatService, (service) =>
     service.sendMessage({
       userId,
       conversationId,
       modelId,
       content,
-      generationMode: "research",
-      searchEnabled: false,
+      researchEnabled: true,
+      searchEnabled,
       attachmentIds: [],
     }),
   );
@@ -497,7 +522,38 @@ const collect = (messageId: string, runId?: string) =>
       Effect.timeout(Duration.seconds(20)),
     ),
   );
-
+/**
+ * A message no longer points at a run: the run points back, through the tool
+ * call it answers. Tests that used to read `message.researchRunId` ask here.
+ */
+const runOf = (messageId: string) =>
+  Effect.flatMap(Db, (db) =>
+    db
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.messageId, messageId))
+      .orderBy(asc(researchRuns.createdAt))
+      .pipe(
+        Effect.orDie,
+        Effect.map((rows) => rows.at(-1) ?? null),
+      ),
+  );
+const runFor = (messageId: string) => runtime.runPromise(runOf(messageId));
+const generationOf = async (messageId: string) => {
+  const message = await runtime.runPromise(
+    Effect.flatMap(ChatRepo, (repo) => repo.getMessage(messageId)),
+  );
+  return message!.generationId!;
+};
+/** Waits on the row itself: nothing signals when a run inside a turn ends. */
+const awaitRunStatus = (messageId: string, status: "running" | "terminal") =>
+  Effect.gen(function* () {
+    for (;;) {
+      const run = yield* runOf(messageId);
+      if (run?.status === status) return run;
+      yield* Effect.sleep(Duration.millis(5));
+    }
+  }).pipe(Effect.timeout(Duration.seconds(15)));
 const enableMemory = (userId: string, referenceEnabled = true, autoSaveEnabled = true) =>
   runtime.runPromise(
     Effect.gen(function* () {
@@ -508,575 +564,295 @@ const enableMemory = (userId: string, referenceEnabled = true, autoSaveEnabled =
     }),
   );
 const promptText = (input: GatewayInput) => JSON.stringify(input.prompt);
+/** Provider calls the run paid for; the host's own turns are not its budget. */
+const runRequests = () => requests.filter((request) => phaseOf(request) !== "host");
 
-describe("main-assistant research ownership", () => {
-  it.each([false, true])(
-    "uses real draft tools only in main synthesis (existing draft: %s)",
-    async (existing) => {
-      finishWorkersEarly = true;
-      draftInSynthesis = true;
-      const input = await runtime.runPromise(seed);
-      if (existing)
-        await runtime.runPromise(
-          AgentDraftService.use((service) =>
-            service.open(
-              input.userId,
-              {
-                conversationId: input.conversationId,
-                changes: { name: "Existing draft", instructions: "PRIVATE_EXISTING_DRAFT" },
-              },
-              () => Effect.void,
-            ),
-          ),
-        );
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      const main = requests.filter((request) => phaseOf(request) === "synthesis");
-      expect(main).toHaveLength(3);
-      expect(main.every((request) => request.toolkit?.tools["draft_agent"])).toBe(true);
-      // The focused draft is the one the tool just wrote, in full. A draft that
-      // was already in the chat rides along as a summary, without its body.
-      expect(promptText(main[1]!)).toContain("PRIVATE_INITIAL_DRAFT");
-      if (existing) {
-        expect(promptText(main[1]!)).toContain("Existing draft");
-        expect(promptText(main[1]!)).not.toContain("PRIVATE_EXISTING_DRAFT");
-      }
-      expect(promptText(main[2]!)).toContain("PRIVATE_RESEARCH_DRAFT");
-      for (const request of requests.filter((request) =>
-        ["coordinator", "worker", "report"].includes(phaseOf(request)),
-      )) {
-        expect(promptText(request)).not.toContain("PRIVATE_");
-        expect(request.toolkit?.tools["draft_agent"]).toBeUndefined();
-        expect(request.toolkit?.tools["update_agent_draft"]).toBeUndefined();
-      }
-      // The draft the tools wrote, not the one that was already in the chat.
-      const draft = await runtime.runPromise(
-        AgentDraftService.use((service) =>
-          service
-            .list(input.userId, input.conversationId)
-            .pipe(
-              Effect.map(
-                (drafts) => drafts.find((row) => row.settings.name === "Research agent") ?? null,
-              ),
-            ),
-        ),
-      );
-      expect(draft).toMatchObject({
-        revision: 2,
-        targetAgentId: null,
-        settings: { instructions: "PRIVATE_RESEARCH_DRAFT" },
-      });
-      const detail = await runtime.runPromise(
-        loadConversationDetail(input.userId, input.conversationId),
-      );
-      // With a draft already in the chat, synthesis adds its own rather than
-      // reusing it, so the loader reports both.
-      expect(detail.agentDrafts).toHaveLength(existing ? 2 : 1);
-      expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
-      const activity = detail.toolCalls.filter((call) =>
-        ["draft_agent", "update_agent_draft"].includes(call.toolName),
-      );
-      expect(activity).toHaveLength(2);
-      expect(activity.map((call) => call.arguments)).toEqual([{}, {}]);
-      expect(
-        activity.every(
-          (call) =>
-            call.result &&
-            typeof call.result === "object" &&
-            "draftConversationId" in call.result &&
-            call.result.draftConversationId === input.conversationId,
-        ),
-      ).toBe(true);
-      const message = detail.messages.at(-1)!;
-      expect(message.status).toBe("complete");
-      expect(message.content.match(/I found useful guidance/g)).toHaveLength(1);
-      const chunks = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
-      );
-      expect(JSON.stringify(chunks)).not.toContain("PRIVATE_");
-      const calls = await runtime.runPromise(
-        Db.use((db) =>
-          db.select().from(researchCalls).where(eq(researchCalls.runId, message.researchRunId!)),
-        ),
-      );
-      expect(calls.filter((call) => call.phase === "synthesis")).toHaveLength(3);
-      expect(
-        calls
-          .filter((call) => call.phase === "synthesis")
-          .every((call) => call.status === "complete"),
-      ).toBe(true);
-    },
-  );
-
-  it.each(["provider", "context"] as const)(
-    "retains committed draft changes and earlier prose after a late synthesis %s failure",
-    async (failure) => {
-      finishWorkersEarly = true;
-      draftInSynthesis = true;
-      synthesisCutShort = failure;
-      const input = await runtime.runPromise(seed);
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      const message = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-      );
-      expect(message).toMatchObject({
-        status: "complete",
-        content: "I found useful guidance for the draft.\n# Findings\nSupported conclusion[^1].\n",
-      });
-      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(3);
-      expect(
-        await runtime.runPromise(
-          AgentDraftService.use((service) =>
-            service
-              .list(input.userId, input.conversationId)
-              .pipe(Effect.map((drafts) => drafts[0] ?? null)),
-          ),
-        ),
-      ).toMatchObject({ revision: 2, settings: { instructions: "PRIVATE_RESEARCH_DRAFT" } });
-      expect(
-        (
-          await runtime.runPromise(
-            ChatRepo.use((repo) => repo.research!.get(message!.researchRunId!)),
-          )
-        )?.progress.phase,
-      ).toBe("partial");
-    },
-  );
-
-  it("keeps history and memories with the main assistant and delegates only the brief", async () => {
-    finishWorkersEarly = true;
-    const input = await runtime.runPromise(seed);
-    await enableMemory(input.userId);
-    const privateMemory = "Grows orchids in a private greenhouse.";
-    const privateHistory = "My unrelated draft project is called Quiet Observatory.";
-    await runtime.runPromise(
-      MemoryService.use((service) => service.createManual(input.userId, privateMemory)),
-    );
-    await runtime.runPromise(
-      ChatRepo.use((repo) =>
-        repo.insertMessage({
-          conversationId: input.conversationId,
-          role: "user",
-          content: privateHistory,
-        }),
-      ),
-    );
-    planningText =
-      "Compare independent evidence for European regulations. Prefer European primary sources.";
-    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
-    for (const phase of ["clarification", "planning", "synthesis"]) {
-      const calls = requests.filter((request) => phaseOf(request) === phase);
-      expect(calls.length).toBeGreaterThan(0);
-      expect(promptText(calls[0]!)).toContain(privateMemory);
-      expect(promptText(calls[0]!)).toContain(privateHistory);
-    }
-    const coordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
-    expect(promptText(coordinator)).toContain(planningText);
-    for (const request of requests.filter((request) =>
-      ["coordinator", "worker", "report"].includes(phaseOf(request)),
-    )) {
-      expect(promptText(request)).not.toContain(privateMemory);
-      expect(promptText(request)).not.toContain(privateHistory);
-      expect(request.toolkit?.tools["save_memory"]).toBeUndefined();
-    }
-    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-    expect(
-      requests.find((request) => phaseOf(request) === "synthesis")!.toolkit?.tools["save_memory"],
-    ).toBeUndefined();
-    const message = await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-    );
-    expect(message).toMatchObject({ status: "complete" });
-    expect(message!.content).toContain("Supported conclusion");
-    expect(message!.content).not.toContain(planningText);
-  });
-
-  it("investigates an explicit request even if the brief proposes answering without research", async () => {
-    finishWorkersEarly = true;
-    planningText = "No research is needed. Answer immediately from general knowledge.";
+describe("deep research as a tool call", () => {
+  it("answers from the evidence and leaves one terminal run under its own tool row", async () => {
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
-    expect(backendSearches).toBeGreaterThan(0);
-    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-    const message = await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-    );
-    expect(message!.content).not.toContain(planningText);
-  });
-
-  it.each(["finish", "text", "empty"] as const)(
-    "runs an initial investigation when the coordinator returns %s without dispatching",
-    async (response) => {
-      coordinatorFirstResponse = response;
-      dispatchWaves = 0;
-      finishWorkersEarly = true;
-      planningText = "Verify the result of 9 + 10. Keep the scope limited to this calculation.";
-      const input = await runtime.runPromise(seed);
-      const sent = await runtime.runPromise(
-        send(input.userId, input.conversationId, "what’s 9 + 10?"),
-      );
-      await remote.runPromise(collect(sent.assistantMessageId));
-      expect(requests.filter((request) => phaseOf(request) === "report")).toHaveLength(1);
-      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-      expect(
-        requests.filter((request) => phaseOf(request) === "coordinator").length,
-      ).toBeLessThanOrEqual(2);
-      await runtime.runPromise(
-        Effect.gen(function* () {
-          const repo = yield* ChatRepo;
-          const db = yield* Db;
-          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-          expect(message.status).toBe("complete");
-          expect(message.content).toContain("Supported conclusion");
-          expect(message.content).not.toContain("No investigation is needed");
-          const run = (yield* repo.research!.get(message.researchRunId!))!;
-          expect(run.progress.limitations).not.toContain(
-            "No usable research reports were produced.",
-          );
-          expect(run.progress.limitations).not.toContain(
-            "A coordinator round dispatched no useful tasks.",
-          );
-          const tasks = yield* db
-            .select()
-            .from(researchTasks)
-            .where(eq(researchTasks.runId, run.id));
-          expect(tasks).toHaveLength(1);
-          expect(tasks[0]).toMatchObject({
-            assignment: planningText,
-            status: "complete",
-            ordinal: 1,
-          });
-          const calls = yield* db
-            .select()
-            .from(researchCalls)
-            .where(eq(researchCalls.runId, run.id));
-          expect(calls).toHaveLength(requests.length);
-          const ledger = yield* db
-            .select()
-            .from(usageEvents)
-            .where(eq(usageEvents.messageId, message.id));
-          expect(ledger).toHaveLength(1);
-          expect(ledger[0]?.inputTokens).toBe(requests.length * 100);
-        }),
-      );
-    },
-  );
-
-  it.each(
-    [false, true].flatMap((referenceEnabled) =>
-      [false, true].map((autoSaveEnabled) => ({ referenceEnabled, autoSaveEnabled })),
-    ),
-  )(
-    "honors separate reference=$referenceEnabled and auto-save=$autoSaveEnabled settings",
-    async ({ referenceEnabled, autoSaveEnabled }) => {
-      finishWorkersEarly = true;
-      const input = await runtime.runPromise(seed);
-      await enableMemory(input.userId, referenceEnabled, autoSaveEnabled);
-      const remembered = "Prefers measurements in kilograms.";
-      await runtime.runPromise(
-        MemoryService.use((service) => service.createManual(input.userId, remembered)),
-      );
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      for (const request of requests) {
-        const phase = phaseOf(request);
-        expect(Boolean(request.toolkit?.tools["save_memory"])).toBe(
-          phase === "planning" && autoSaveEnabled,
-        );
-        expect(promptText(request).includes(remembered)).toBe(
-          referenceEnabled && ["clarification", "planning", "synthesis"].includes(phase),
-        );
-      }
-    },
-  );
-
-  it("saves once during preparation, keeps its snapshot stable and accounts for the continuation", async () => {
-    finishWorkersEarly = true;
-    const input = await runtime.runPromise(seed);
-    await enableMemory(input.userId);
-    const remembered = "Prefers measurements in kilograms.";
-    const saved = "Prefers comparisons shown in tables.";
-    await runtime.runPromise(
-      MemoryService.use((service) => service.createManual(input.userId, remembered)),
-    );
-    memoryParams = { content: saved };
-    const sent = await runtime.runPromise(
-      send(
-        input.userId,
-        input.conversationId,
-        "I prefer tables for comparisons; investigate the evidence.",
-      ),
-    );
-    await remote.runPromise(collect(sent.assistantMessageId));
-    const stored = await runtime.runPromise(
-      MemoryService.use((service) => service.list(input.userId)),
-    );
-    expect(stored.filter((memory) => memory.content === saved)).toHaveLength(1);
-    const planning = requests.filter((request) => phaseOf(request) === "planning");
-    expect(planning).toHaveLength(2);
-    expect(planning[0]!.toolkit?.tools["save_memory"]).toBeDefined();
-    expect(planning[1]!.toolkit?.tools["save_memory"]).toBeUndefined();
-    const synthesis = requests.filter((request) => phaseOf(request) === "synthesis");
-    expect(synthesis).toHaveLength(1);
-    expect(promptText(synthesis[0]!)).toContain(remembered);
-    expect(promptText(synthesis[0]!)).not.toContain(saved);
+    const events = await runtime.runPromise(collect(sent.assistantMessageId));
+    expect(events.at(-1)?.kind).toBe("done");
+    const chunks = events.filter((event) => event.kind === "chunk");
+    expect(chunks.map((chunk) => chunk.seq)).toEqual(chunks.map((_, index) => index + 1));
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
         const repo = yield* ChatRepo;
         const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+        // The host wrote the answer in its own turn, after the tool returned.
         expect(message.status).toBe("complete");
-        const calls = yield* db
+        expect(message.content).toContain("Supported conclusion[^1]");
+        const persisted = yield* db
           .select()
-          .from(researchCalls)
-          .where(eq(researchCalls.runId, message.researchRunId!));
-        expect(calls).toHaveLength(requests.length);
-        expect(calls.filter((call) => call.phase === "planning")).toHaveLength(2);
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, message.id))
+          .orderBy(messageChunks.seq);
+        expect(
+          chunks.map(({ seq, chunkKind, delta }) => ({ seq, kind: chunkKind, delta })),
+        ).toEqual(persisted.map(({ seq, kind, delta }) => ({ seq, kind, delta })));
+        const runs = yield* db
+          .select()
+          .from(researchRuns)
+          .where(eq(researchRuns.messageId, message.id));
+        expect(runs).toHaveLength(1);
+        const run = runs[0]!;
+        expect(run.status).toBe("terminal");
+        // Fenced by the attempt that started it, owned by the call it answers.
+        expect(run.generationId).toBe(message.generationId);
+        expect(run.owner).toBeNull();
+        const toolCalls = yield* repo.listToolCalls([message.id]);
+        const root = toolCalls.find((call) => call.toolName === "deep_research")!;
+        expect(run.toolCallId).toBe(root.id);
+        expect(root.status).toBe("complete");
+        expect(root.researchRunId).toBeNull();
+        // Its own body, written by the run, survives the call being settled.
+        expect((root.result as { progress?: { phase?: string } }).progress?.phase).toBe("complete");
+        // Everything the investigation produced is marked as produced inside it.
+        expect(
+          toolCalls
+            .filter((call) => call.toolName === "web_search")
+            .every((call) => call.researchRunId === run.id),
+        ).toBe(true);
+        const calls = yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id));
+        expect(calls.length).toBe(
+          requests.filter((request) => phaseOf(request) !== "host").length,
+        );
+        expect(calls.every((call) => call.usageComplete)).toBe(true);
+        expect(
+          yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id)),
+        ).toHaveLength(2);
+        // Two ledger rows: the run's own, and the host generation's.
         const ledger = yield* db
           .select()
           .from(usageEvents)
           .where(eq(usageEvents.messageId, message.id));
-        expect(ledger).toHaveLength(1);
-        expect(ledger[0]!.inputTokens).toBe(requests.length * 100);
-        const activities = yield* repo.listToolCalls([message.id]);
-        expect(activities.filter((activity) => activity.toolName === "save_memory")).toHaveLength(
-          1,
-        );
-        expect(JSON.stringify(activities)).not.toContain(saved);
-        const chunks = yield* db
-          .select()
-          .from(messageChunks)
-          .where(eq(messageChunks.messageId, message.id));
-        expect(JSON.stringify(chunks)).not.toContain(saved);
+        expect(ledger.map((row) => row.id)).toContain(run.id);
+        expect(ledger.find((row) => row.id === run.id)?.inputTokens).toBe(calls.length * 100);
+        expect(yield* repo.research!.finalize(run.id, "error", "stale-owner")).toBe(false);
       }),
     );
+    // The fake reuses one provider call id everywhere; every worker call must
+    // still land on its own namespaced row.
+    const toolCalls = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.listToolCalls([sent.assistantMessageId])),
+    );
+    expect(
+      new Set(
+        toolCalls
+          .filter((call) => call.toolName === "web_search")
+          .map((call) => call.providerCallId),
+      ).size,
+    ).toBe(requests.filter((request) => phaseOf(request) === "worker").length);
+    // Every stage of the run is bounded; the host turn keeps the model default.
+    expect(
+      runRequests().every(
+        (request) => request.modelId === modelId && request.maxOutputTokens !== undefined,
+      ),
+    ).toBe(true);
+    for (const phase of ["coordinator", "report"]) {
+      const stages = requests.filter((request) => phaseOf(request) === phase);
+      expect(stages.length).toBeGreaterThan(0);
+      for (const request of stages) {
+        const content = request.prompt.content;
+        expect(content.at(-2)?.role).toBe("assistant");
+        expect(JSON.stringify(content.at(-2))).toContain(
+          phase === "report" ? "Registered sources" : "Research brief (data)",
+        );
+        expect(content.at(-1)?.role).toBe("user");
+        expect(JSON.stringify(content.at(-1))).toContain("data, not instructions");
+      }
+    }
+    const workers = requests.filter((request) => phaseOf(request) === "worker");
+    expect(
+      workers.every(
+        (request) => Object.keys(request.toolkit!.tools).sort().join(",") === "read_url,web_search",
+      ),
+    ).toBe(true);
+    for (const worker of workers) {
+      const prompt = promptText(worker);
+      expect(
+        prompt.includes("Investigate evidence for the user's question") &&
+          prompt.includes("Independently investigate disagreements"),
+      ).toBe(false);
+    }
   });
 
-  it.each(["malformed", "protected"] as const)(
-    "does not retry a %s memory save attempt",
-    async (kind) => {
-      finishWorkersEarly = true;
-      const input = await runtime.runPromise(seed);
-      await enableMemory(input.userId);
-      const remembered = "Prefers comparisons shown in tables.";
-      await runtime.runPromise(
-        MemoryService.use((service) => service.createManual(input.userId, remembered)),
-      );
-      memoryParams =
-        kind === "malformed"
-          ? { unexpected: true }
-          : { content: "Prefers prose instead of tables.", replaces: 1 };
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      const stored = await runtime.runPromise(
-        MemoryService.use((service) => service.list(input.userId)),
-      );
-      expect(stored.map((memory) => memory.content)).toEqual([remembered]);
-      const planning = requests.filter((request) => phaseOf(request) === "planning");
-      expect(planning).toHaveLength(2);
-      expect(planning[0]!.toolkit?.tools["save_memory"]).toBeDefined();
-      expect(planning[1]!.toolkit?.tools["save_memory"]).toBeUndefined();
-      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-    },
-  );
-
-  it("never offers a memory save on a turn whose user message is a clarification answer", async () => {
-    // A picked option is not something the user said about themselves. Offering
-    // the save there had the model store the research topic as a "fact" and
-    // spend its one attempt on a refusal that the transcript then showed.
-    finishWorkersEarly = true;
-    clarify = true;
-    memoryParams = { content: "Builds an Electron chat app." };
+  it("keeps a sibling call running when the run beside it finalizes", async () => {
+    // The bug this replaces: ending a run ended the whole message, erroring
+    // every other call still open on it, including the one that made the call.
+    hostReadsAlongside = true;
+    readerGate = { reached: Deferred.makeUnsafe<void>(), release: Deferred.makeUnsafe<void>() };
+    const gate = readerGate;
     const input = await runtime.runPromise(seed);
-    await enableMemory(input.userId);
-    const remembered = "Prefers European primary sources.";
-    await runtime.runPromise(
-      MemoryService.use((service) => service.createManual(input.userId, remembered)),
+    const sent = await runtime.runPromise(
+      send(input.userId, input.conversationId, "Investigate the evidence.", true),
     );
+    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    const run = await runtime.runPromise(awaitRunStatus(sent.assistantMessageId, "terminal"));
+    expect(run.status).toBe("terminal");
+    const during = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        return {
+          message: yield* repo.getMessage(sent.assistantMessageId),
+          calls: yield* repo.listToolCalls([sent.assistantMessageId]),
+        };
+      }),
+    );
+    const sibling = during.calls.find((call) => call.toolName === "read_url")!;
+    expect(sibling.status).toBe("running");
+    expect(sibling.error).toBeNull();
+    expect(during.message?.status).toBe("streaming");
+    await runtime.runPromise(Deferred.succeed(gate.release, undefined));
+    const events = await runtime.runPromise(collect(sent.assistantMessageId));
+    expect(events.at(-1)?.kind).toBe("done");
+    const after = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        return {
+          message: yield* repo.getMessage(sent.assistantMessageId),
+          calls: yield* repo.listToolCalls([sent.assistantMessageId]),
+        };
+      }),
+    );
+    expect(after.message?.status).toBe("complete");
+    expect(after.message?.content).toContain("Supported conclusion");
+    expect(after.calls.find((call) => call.id === sibling.id)?.status).toBe("complete");
+  });
+
+  it("refuses a second run as a tool result while one is active, and finishes that turn", async () => {
+    const input = await runtime.runPromise(seed);
+    const release = Deferred.makeUnsafe<void>();
+    hold = {
+      phase: "report",
+      reached: Deferred.makeUnsafe<void>(),
+      interrupted: Deferred.makeUnsafe<void>(),
+      release,
+    };
+    const gate = hold;
     const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(first.assistantMessageId));
-    expect(requests.some((request) => phaseOf(request) === "planning")).toBe(false);
-    const answered = await runtime.runPromise(
+    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    const other = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.createConversation({ userId: input.userId, modelId })),
+    );
+    hold = null;
+    const second = await runtime.runPromise(send(input.userId, other.id, "Investigate again."));
+    await runtime.runPromise(collect(second.assistantMessageId));
+    const refused = await runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
-        const call = (yield* repo.listToolCalls([first.assistantMessageId])).find(
-          (row) => row.toolName === "ask_user",
+        const message = (yield* repo.getMessage(second.assistantMessageId))!;
+        const call = (yield* repo.listToolCalls([message.id])).find(
+          (row) => row.toolName === "deep_research",
         )!;
-        return yield* ChatService.use((service) =>
-          service.sendMessage({
-            userId: input.userId,
-            conversationId: input.conversationId,
-            modelId,
-            questionResponse: { callId: call.id, response: { kind: "skip" } },
-            searchEnabled: false,
-            attachmentIds: [],
-          }),
-        );
+        return { message, call, run: yield* runOf(message.id) };
       }),
     );
-    clarify = false;
-    requests.length = 0;
-    await remote.runPromise(collect(answered.assistantMessageId));
-    const planning = requests.filter((request) => phaseOf(request) === "planning");
-    expect(planning).toHaveLength(1);
-    expect(planning[0]!.toolkit?.tools["save_memory"]).toBeUndefined();
-    // Memory is still referenced; only the save is withheld for this turn.
-    expect(promptText(planning[0]!)).toContain(remembered);
-    expect(promptText(planning[0]!)).not.toContain("Call save_memory");
-    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const message = (yield* repo.getMessage(answered.assistantMessageId))!;
-        expect(message.status).toBe("complete");
-        const activities = yield* repo.listToolCalls([message.id]);
-        expect(activities.some((activity) => activity.toolName === "save_memory")).toBe(false);
-        const stored = yield* MemoryService.use((service) => service.list(input.userId));
-        expect(stored.map((memory) => memory.content)).toEqual([remembered]);
-      }),
-    );
+    // A refusal is an answerable tool result, never a failed turn.
+    expect(refused.message.status).toBe("complete");
+    expect(refused.message.content).toContain("Supported conclusion");
+    expect(refused.run).toBeNull();
+    expect(refused.call.status).toBe("error");
+    expect(refused.call.error?.code).toBe("ResearchIncomplete");
+    expect(refused.call.error?.message).toContain("already have an active deep research");
+    await runtime.runPromise(Deferred.succeed(release, undefined));
+    await runtime.runPromise(collect(first.assistantMessageId));
+    expect(
+      (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(first.assistantMessageId))))
+        ?.status,
+    ).toBe("complete");
   });
 
-  it("persists the fixed reason for a refused save and nothing the model wrote", async () => {
-    finishWorkersEarly = true;
+  it("refuses a brief too short to investigate without starting a run", async () => {
+    hostBrief = "look it up";
     const input = await runtime.runPromise(seed);
-    await enableMemory(input.userId);
-    const secret = "sk-live-abcdefghijklmnopqrstuvwxyz";
-    memoryParams = { content: `API key is ${secret}` };
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    const events = await remote.runPromise(collect(sent.assistantMessageId));
-    const memoryEvents = events
-      .flatMap((event) =>
-        event.kind === "chunk" && event.chunkKind === "tool"
-          ? [JSON.parse(event.delta) as { family?: string; phase?: string; reason?: string }]
-          : [],
-      )
-      .filter((envelope) => envelope.family === "memory" && envelope.phase === "result");
-    expect(memoryEvents).toEqual([
-      expect.objectContaining({ ok: false, outcome: "rejected", reason: "sensitive" }),
-    ]);
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    expect(requests.some((request) => phaseOf(request) === "coordinator")).toBe(false);
     await runtime.runPromise(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
-        const db = yield* Db;
         const message = (yield* repo.getMessage(sent.assistantMessageId))!;
         expect(message.status).toBe("complete");
+        expect(yield* runOf(message.id)).toBeNull();
         const call = (yield* repo.listToolCalls([message.id])).find(
-          (row) => row.toolName === "save_memory",
+          (row) => row.toolName === "deep_research",
         )!;
         expect(call.status).toBe("error");
-        expect(call.arguments).toEqual({});
-        expect(call.result).toEqual({ outcome: "rejected", reason: "sensitive" });
-        const chunks = yield* db
-          .select()
-          .from(messageChunks)
-          .where(eq(messageChunks.messageId, message.id));
-        expect(JSON.stringify({ call, chunks, events })).not.toContain(secret);
-        expect(JSON.stringify({ call, chunks, events })).not.toContain("API key");
-        const stored = yield* MemoryService.use((service) => service.list(input.userId));
-        expect(stored).toEqual([]);
+        expect(call.error?.message).toContain("what to find out");
       }),
     );
   });
 
-  it("carries the transactional guard into the actual preparation toolkit handler", async () => {
-    finishWorkersEarly = true;
+  it("offers the tool only when the send asked for it", async () => {
     const input = await runtime.runPromise(seed);
-    await enableMemory(input.userId);
-    memoryParams = { content: "Prefers comparisons shown in tables." };
-    let reachedHandler = false;
-    beforeMemorySave = () =>
-      runtime.runPromise(
-        Effect.gen(function* () {
-          // The model's tool-call is already published; the next operation is the save handler.
-          reachedHandler = true;
-          yield* Db.use((db) =>
-            db
-              .update(researchRuns)
-              .set({ leaseUntil: new Date(0) })
-              .where(eq(researchRuns.conversationId, input.conversationId)),
-          );
-        }),
-      );
     const sent = await runtime.runPromise(
-      send(
-        input.userId,
-        input.conversationId,
-        "I prefer tables for comparisons; investigate the evidence.",
+      Effect.flatMap(ChatService, (service) =>
+        service.sendMessage({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          modelId,
+          content: "Just answer.",
+          researchEnabled: false,
+          searchEnabled: false,
+          attachmentIds: [],
+        }),
       ),
     );
-    await remote.runPromise(collect(sent.assistantMessageId));
-    expect(reachedHandler).toBe(true);
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.toolkit?.tools["deep_research"]).toBeUndefined();
     expect(
-      await runtime.runPromise(MemoryService.use((service) => service.list(input.userId))),
-    ).toEqual([]);
-    expect(requests.some((request) => phaseOf(request) === "synthesis")).toBe(false);
+      (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId))))
+        ?.status,
+    ).toBe("complete");
   });
 
-  it.each(["settings", "source"] as const)(
-    "rechecks %s before a preparation memory write",
-    async (change) => {
-      finishWorkersEarly = true;
-      const input = await runtime.runPromise(seed);
-      await enableMemory(input.userId);
-      memoryParams = { content: "Prefers comparisons shown in tables." };
-      beforeMemorySave = () =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            if (change === "settings") {
-              yield* MemoryService.use((service) =>
-                service.updateSettings(input.userId, { autoSaveEnabled: false }),
-              );
-            } else {
-              yield* Db.use((db) =>
-                db
-                  .update(messages)
-                  .set({ content: "Changed request." })
-                  .where(
-                    and(
-                      eq(messages.conversationId, input.conversationId),
-                      eq(messages.role, "user"),
-                    ),
-                  ),
-              );
-            }
-          }),
+  it("starts a fresh run for a second call in the same turn", async () => {
+    hostPlan = 2;
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+        expect(message.status).toBe("complete");
+        const runs = yield* db
+          .select()
+          .from(researchRuns)
+          .where(eq(researchRuns.messageId, message.id))
+          .orderBy(asc(researchRuns.createdAt));
+        expect(runs).toHaveLength(2);
+        expect(runs.every((run) => run.status === "terminal")).toBe(true);
+        expect(runs.every((run) => run.generationId === message.generationId)).toBe(true);
+        const roots = (yield* repo.listToolCalls([message.id])).filter(
+          (call) => call.toolName === "deep_research",
         );
-      const sent = await runtime.runPromise(
-        send(
-          input.userId,
-          input.conversationId,
-          "I prefer tables for comparisons; investigate the evidence.",
-        ),
-      );
-      await remote.runPromise(collect(sent.assistantMessageId));
-      expect(
-        await runtime.runPromise(MemoryService.use((service) => service.list(input.userId))),
-      ).toEqual([]);
-      expect(requests.filter((request) => phaseOf(request) === "planning")).toHaveLength(2);
-      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-    },
-  );
+        // Two calls, two rows, two runs: a message can no longer name "its" run.
+        expect(roots).toHaveLength(2);
+        expect(new Set(runs.map((run) => run.toolCallId))).toEqual(
+          new Set(roots.map((call) => call.id)),
+        );
+        expect(new Set(roots.map((call) => `${call.turnIndex}:${call.callIndex}`)).size).toBe(2);
+      }),
+    );
+  });
 });
 
 describe("durable deep research", () => {
-  it("publishes compact display progress, not fragmented plans or worker reports", async () => {
-    planningFragments = 100;
+  it("publishes compact display progress, not worker reports", async () => {
     finishWorkersEarly = true;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
         const repo = yield* ChatRepo;
-        const run = (yield* db
-          .select()
-          .from(researchRuns)
-          .where(eq(researchRuns.messageId, sent.assistantMessageId)))[0]!;
+        const run = (yield* runOf(sent.assistantMessageId))!;
         const rows = yield* db
           .select()
           .from(messageChunks)
@@ -1088,9 +864,8 @@ describe("durable deep research", () => {
           .map((event) => event.progress);
         expect(snapshots.length).toBeGreaterThan(0);
         expect(snapshots.length).toBeLessThan(20);
-        expect(snapshots.filter((snapshot) => snapshot.phase === "planning")).toHaveLength(1);
         const root = (yield* repo.listToolCalls([sent.assistantMessageId])).find(
-          (call) => call.id === run.id,
+          (call) => call.id === run.toolCallId,
         )!;
         for (const progress of [
           run.progress,
@@ -1098,18 +873,18 @@ describe("durable deep research", () => {
           ...snapshots,
         ]) {
           expect(progress).toEqual(projectResearchProgress(progress));
-          expect(JSON.stringify(progress)).not.toContain("Compare independent sources");
           expect(JSON.stringify(progress)).not.toContain("A bounded finding");
         }
         const tasks = yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id));
         expect(tasks.every((task) => task.report?.includes("A bounded finding"))).toBe(true);
-        const synthesis = requests.find((request) => phaseOf(request) === "synthesis")!;
-        expect(JSON.stringify(synthesis.prompt)).toContain("A bounded finding");
+        // The evidence reaches the host through the tool result, not the transcript.
+        const answer = requests.filter((request) => phaseOf(request) === "host").at(-1)!;
+        expect(promptText(answer)).toContain("A bounded finding");
       }),
     );
   });
 
-  it("preserves reports beyond 16000 characters through persistence and synthesis", async () => {
+  it("preserves reports beyond 16000 characters through persistence and the answer", async () => {
     finishWorkersEarly = true;
     reportRepeats = 340;
     reportSuffix = "\nDistinctive trailing finding: the independent replication succeeded[^1].";
@@ -1124,14 +899,14 @@ describe("durable deep research", () => {
     ).toBeLessThan(researchOutputCaps(128000).report);
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
         const repo = yield* ChatRepo;
         const message = (yield* repo.getMessage(sent.assistantMessageId))!;
         expect(message.status).toBe("complete");
-        const run = (yield* repo.research!.get(message.researchRunId!))!;
+        const run = (yield* runOf(message.id))!;
         const tasks = yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id));
         expect(tasks).toHaveLength(2);
         for (const task of tasks) expect(task.report).toBe(expectedReport);
@@ -1144,16 +919,9 @@ describe("durable deep research", () => {
     expect(reportRequests).toHaveLength(2);
     for (const request of reportRequests) {
       expect(request.maxOutputTokens).toBe(8192);
-      expect(JSON.stringify(request.prompt)).not.toContain("at most 16000 characters");
+      expect(promptText(request)).not.toContain("at most 16000 characters");
     }
     expect(requests.some((request) => phaseOf(request) === "compaction")).toBe(false);
-    const synthesis = requests.find((request) => phaseOf(request) === "synthesis");
-    expect(synthesis).toBeDefined();
-    const synthesisPrompt = JSON.stringify(synthesis!.prompt);
-    expect(synthesisPrompt).toContain(JSON.stringify(expectedReport).slice(1, -1));
-    expect(synthesisPrompt).toContain(reportSuffix.trim());
-    expect(synthesisPrompt).not.toContain("report truncated to 16000 characters");
-    expect(synthesisPrompt).not.toContain("report reached the model output limit");
   });
 
   it("keeps length-limited task reports with an explicit model output-limit limitation", async () => {
@@ -1163,11 +931,7 @@ describe("durable deep research", () => {
     const expectedReport = "A bounded finding supported by shared evidence[^1]." + reportSuffix;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
-    const synthesis = requests.find((request) => phaseOf(request) === "synthesis");
-    expect(synthesis).toBeDefined();
-    const synthesisPrompt = JSON.stringify(synthesis!.prompt);
-    expect(synthesisPrompt).toContain(JSON.stringify(expectedReport).slice(1, -1));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
@@ -1175,7 +939,7 @@ describe("durable deep research", () => {
         const message = (yield* repo.getMessage(sent.assistantMessageId))!;
         expect(message.status).toBe("complete");
         expect(message.content).toContain("Supported conclusion[^1]");
-        const run = (yield* repo.research!.get(message.researchRunId!))!;
+        const run = (yield* runOf(message.id))!;
         const tasks = yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id));
         expect(tasks).toHaveLength(2);
         expect(
@@ -1183,9 +947,9 @@ describe("durable deep research", () => {
         ).toHaveLength(tasks.length);
         for (const task of tasks) {
           expect(task.report).toBe(expectedReport);
-          const limitation = `Task ${task.ordinal}: report reached the model output limit; some findings may be incomplete.`;
-          expect(run.progress.limitations).toContain(limitation);
-          expect(synthesisPrompt).toContain(limitation);
+          expect(run.progress.limitations).toContain(
+            `Task ${task.ordinal}: report reached the model output limit; some findings may be incomplete.`,
+          );
         }
         expect(JSON.stringify(run.progress.limitations)).not.toContain(
           "report truncated to 16000 characters",
@@ -1208,19 +972,12 @@ describe("durable deep research", () => {
       );
       const input = await runtime.runPromise(seed);
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      const synthesis = requests.find((request) => phaseOf(request) === "synthesis");
-      expect(synthesis).toBeDefined();
+      await runtime.runPromise(collect(sent.assistantMessageId));
       expect(requests.some((request) => phaseOf(request) === "compaction")).toBe(true);
-      expect(synthesis?.maxOutputTokens).toBe(researchOutputCaps(8000).synthesis);
-      const runProgress = await runtime.runPromise(
-        Db.use((db) =>
-          db.select().from(researchRuns).where(eq(researchRuns.messageId, sent.assistantMessageId)),
-        ),
-      );
+      const run = await runFor(sent.assistantMessageId);
       expect(
         requests.filter((request) => phaseOf(request) === "report"),
-        JSON.stringify(runProgress[0]?.progress),
+        JSON.stringify(run?.progress),
       ).toHaveLength(6);
       for (const request of requests) {
         expect(
@@ -1232,12 +989,7 @@ describe("durable deep research", () => {
             webToolsEnabled: !!request.toolkit,
           }).input,
         );
-        expect(request.prompt.content.at(-1)?.role).toBe("user");
       }
-      const evidence = JSON.stringify(synthesis!.prompt.content.at(-2));
-      expect(synthesis!.prompt.content.at(-2)?.role).toBe("assistant");
-      expect(evidence).toContain("https://evidence.example/source");
-      if (failSummary) expect(evidence).toContain("abridged");
       const message = await runtime.runPromise(
         ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
       );
@@ -1273,110 +1025,11 @@ describe("durable deep research", () => {
     },
   );
 
-  it("runs isolated workers, shares citations, streams across instances and aggregates one ledger row", async () => {
-    const input = await runtime.runPromise(seed);
-    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    const events = await remote.runPromise(collect(sent.assistantMessageId));
-    expect(events.at(-1)?.kind).toBe("done");
-    const chunks = events.filter((event) => event.kind === "chunk");
-    expect(chunks.map((chunk) => chunk.seq)).toEqual(chunks.map((_, index) => index + 1));
-    expect(chunks.at(-1)?.chunkKind).toBe("tool");
-    expect(JSON.parse(chunks.at(-1)!.delta)).toMatchObject({
-      family: "research",
-      phase: "result",
-      name: "deep_research",
-    });
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const repo = yield* ChatRepo;
-        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-        expect(message.status).toBe("complete");
-        expect(message.generationMode).toBe("research");
-        expect(message.content).toContain("Supported conclusion[^1]");
-        expect(message.content).not.toContain("[^999]");
-        const persistedChunks = yield* db
-          .select()
-          .from(messageChunks)
-          .where(eq(messageChunks.messageId, message.id))
-          .orderBy(messageChunks.seq);
-        expect(
-          chunks.map(({ seq, chunkKind, delta }) => ({ seq, kind: chunkKind, delta })),
-        ).toEqual(persistedChunks.map(({ seq, kind, delta }) => ({ seq, kind, delta })));
-        const runs = yield* db
-          .select()
-          .from(researchRuns)
-          .where(eq(researchRuns.messageId, message.id));
-        expect(runs).toHaveLength(1);
-        expect(runs[0]!.status).toBe("terminal");
-        const calls = yield* db
-          .select()
-          .from(researchCalls)
-          .where(eq(researchCalls.runId, runs[0]!.id));
-        expect(calls.length).toBe(requests.length);
-        expect(calls.every((call) => call.usageComplete)).toBe(true);
-        const ledger = yield* db
-          .select()
-          .from(usageEvents)
-          .where(eq(usageEvents.messageId, message.id));
-        expect(ledger).toHaveLength(1);
-        expect(ledger[0]!.inputTokens).toBe(calls.length * 100);
-        expect(ledger[0]!.usageComplete).toBe(true);
-        const toolCalls = yield* repo.listToolCalls([message.id]);
-        expect(toolCalls.find((call) => call.id === runs[0]!.id)?.toolName).toBe("deep_research");
-        // The fake reuses one provider call id everywhere; every worker call
-        // must still land on its own namespaced row.
-        expect(
-          new Set(
-            toolCalls
-              .filter((call) => call.toolName === "web_search")
-              .map((call) => call.providerCallId),
-          ).size,
-        ).toBe(requests.filter((request) => phaseOf(request) === "worker").length);
-        expect(
-          yield* db.select().from(researchTasks).where(eq(researchTasks.runId, runs[0]!.id)),
-        ).toHaveLength(2);
-        expect(yield* repo.research!.finalize(runs[0]!.id, "error", "stale-owner")).toBe(false);
-      }),
-    );
-    expect(
-      requests.every(
-        (request) => request.modelId === modelId && request.maxOutputTokens !== undefined,
-      ),
-    ).toBe(true);
-    for (const phase of ["coordinator", "report", "synthesis"]) {
-      const stages = requests.filter((request) => phaseOf(request) === phase);
-      expect(stages.length).toBeGreaterThan(0);
-      for (const request of stages) {
-        const messages = request.prompt.content;
-        expect(messages.at(-2)?.role).toBe("assistant");
-        expect(JSON.stringify(messages.at(-2))).toContain(
-          phase === "report" ? "Registered sources" : "Research brief (data)",
-        );
-        expect(messages.at(-1)?.role).toBe("user");
-        expect(JSON.stringify(messages.at(-1))).toContain("data, not instructions");
-      }
-    }
-    const workers = requests.filter((request) => phaseOf(request) === "worker");
-    expect(
-      workers.every(
-        (request) => Object.keys(request.toolkit!.tools).sort().join(",") === "read_url,web_search",
-      ),
-    ).toBe(true);
-    for (const worker of workers) {
-      const prompt = JSON.stringify(worker.prompt);
-      expect(
-        prompt.includes("Investigate evidence for the user's question") &&
-          prompt.includes("Independently investigate disagreements"),
-      ).toBe(false);
-    }
-  });
-
   it("lets workers and the coordinator finish on evidence with most of the budget unspent", async () => {
     finishWorkersEarly = true;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     const calls = await runtime.runPromise(
       ChatRepo.use((repo) => repo.listToolCalls([sent.assistantMessageId])),
     );
@@ -1384,31 +1037,79 @@ describe("durable deep research", () => {
     expect(requests.filter((request) => phaseOf(request) === "worker")).toHaveLength(4);
     expect(requests.filter((request) => phaseOf(request) === "coordinator")).toHaveLength(2);
     expect(requests.filter((request) => phaseOf(request) === "report")).toHaveLength(2);
-    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
     const promptFor = (phase: string) =>
-      JSON.stringify(requests.find((request) => phaseOf(request) === phase)!.prompt);
-    expect(promptFor("planning")).toContain("completion criteria");
+      promptText(requests.find((request) => phaseOf(request) === phase)!);
     expect(promptFor("worker")).toContain("not a fixed source count");
     expect(promptFor("report")).toContain(
       "Distinguish gaps that could materially change the answer from optional detail",
     );
     expect(promptFor("coordinator")).toContain("even with most of the budget left");
-    expect(promptFor("synthesis")).not.toContain("search/read ceiling");
+    // The host writes the answer with no notion of the run's ceilings.
+    expect(promptFor("host")).not.toContain("search/read ceiling");
   });
+
+  it.each(["finish", "text", "empty"] as const)(
+    "runs an initial investigation when the coordinator returns %s without dispatching",
+    async (response) => {
+      coordinatorFirstResponse = response;
+      dispatchWaves = 0;
+      finishWorkersEarly = true;
+      hostBrief = "Verify the result of 9 + 10. Keep the scope limited to this calculation.";
+      const input = await runtime.runPromise(seed);
+      const sent = await runtime.runPromise(
+        send(input.userId, input.conversationId, "what’s 9 + 10?"),
+      );
+      await runtime.runPromise(collect(sent.assistantMessageId));
+      expect(requests.filter((request) => phaseOf(request) === "report")).toHaveLength(1);
+      expect(
+        requests.filter((request) => phaseOf(request) === "coordinator").length,
+      ).toBeLessThanOrEqual(2);
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+          expect(message.status).toBe("complete");
+          expect(message.content).toContain("Supported conclusion");
+          expect(message.content).not.toContain("No investigation is needed");
+          const run = (yield* runOf(message.id))!;
+          expect(run.progress.limitations).not.toContain(
+            "No usable research reports were produced.",
+          );
+          expect(run.progress.limitations).not.toContain(
+            "A coordinator round dispatched no useful tasks.",
+          );
+          const tasks = yield* db
+            .select()
+            .from(researchTasks)
+            .where(eq(researchTasks.runId, run.id));
+          expect(tasks).toHaveLength(1);
+          expect(tasks[0]).toMatchObject({ assignment: hostBrief, status: "complete", ordinal: 1 });
+          const calls = yield* db
+            .select()
+            .from(researchCalls)
+            .where(eq(researchCalls.runId, run.id));
+          expect(calls).toHaveLength(runRequests().length);
+          expect(
+            (yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id)))[0]
+              ?.inputTokens,
+          ).toBe(calls.length * 100);
+        }),
+      );
+    },
+  );
 
   it("captures the stored search cap once and applies admin changes to the next retry", async () => {
     await runtime.runPromise(
       ToolsRepo.use((repo) =>
-        repo.updateTool("web_search", {
-          config: { researchMaxSearchQueries: 12 },
-        }),
+        repo.updateTool("web_search", { config: { researchMaxSearchQueries: 12 } }),
       ),
     );
     dispatchWaves = RESEARCH_LIMITS.coordinatorRounds;
     queriesPerSearch = 3;
     const input = await runtime.runPromise(seed);
     const gate = {
-      phase: "planning",
+      phase: "coordinator",
       reached: Deferred.makeUnsafe<void>(),
       interrupted: Deferred.makeUnsafe<void>(),
       release: Deferred.makeUnsafe<void>(),
@@ -1421,40 +1122,39 @@ describe("durable deep research", () => {
     // The run has captured 12; an admin patch must not enlarge it mid-investigation.
     const patched = await runtime.runPromise(
       ToolsRepo.use((repo) =>
-        repo.updateTool("web_search", {
-          config: { researchMaxSearchQueries: 24 },
-        }),
+        repo.updateTool("web_search", { config: { researchMaxSearchQueries: 24 } }),
       ),
     );
     expect(patched?.config).toMatchObject({ backend: "searxng", researchMaxSearchQueries: 24 });
     hold = null;
     await runtime.runPromise(Deferred.succeed(gate.release, undefined));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     expect(backendSearches).toBe(12);
     const firstCoordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
     expect(JSON.stringify(firstCoordinator.prompt.content.at(-1))).toContain("about 12 searches");
     requests.length = 0;
     backendSearches = 0;
     coordinatorTurns = 0;
-    await runtime.runPromise(
+      await runtime.runPromise(
       ChatService.use((service) =>
         service.retryMessage({ ...input, messageId: sent.assistantMessageId }),
       ),
     );
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     expect(backendSearches).toBe(24);
     const retryCoordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
     expect(JSON.stringify(retryCoordinator.prompt.content.at(-1))).toContain("about 24 searches");
-    expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
     // A later unrelated patch must preserve the saved cap.
     const toggled = await runtime.runPromise(
       ToolsRepo.use((repo) => repo.updateTool("web_search", { enabled: false })),
     );
     expect(toggled?.config.researchMaxSearchQueries).toBe(24);
   });
+});
 
-  it.each(["planning", "synthesis"])(
-    "persists remote Stop during %s, fences stale Stop and retries with a fresh run",
+describe("ending a run", () => {
+  it.each(["coordinator", "worker", "report"])(
+    "Stop during %s interrupts the scoped provider and leaves run and message terminal",
     async (phase) => {
       const input = await runtime.runPromise(seed);
       hold = {
@@ -1464,103 +1164,102 @@ describe("durable deep research", () => {
       };
       const gate = hold;
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await runtime.runPromise(Deferred.await(gate.reached));
-      const message = (await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-      ))!;
-      const activeRun = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.research!.get(message.researchRunId!)),
+      await runtime.runPromise(
+        Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
       );
-      expect(activeRun?.status).toBe("running");
-      expect(activeRun?.progress.phase).toBe(phase === "synthesis" ? "synthesizing" : "planning");
-      const stale = await remote.runPromise(
-        ChatService.use((service) =>
-          service.stopGeneration({ ...input, messageId: message.id, researchRunId: "old-run" }),
-        ),
-      );
-      expect(stale.stopped).toBe(false);
-      const stopped = await remote.runPromise(
+      const generationId = await generationOf(sent.assistantMessageId);
+      // Stop knows the attempt, never the run: a turn may start several.
+      const stale = await runtime.runPromise(
         ChatService.use((service) =>
           service.stopGeneration({
             ...input,
-            messageId: message.id,
-            researchRunId: message.researchRunId!,
+            messageId: sent.assistantMessageId,
+            generationId: "old-generation",
           }),
+        ),
+      );
+      expect(stale.stopped).toBe(false);
+      const countAtStop = requests.length;
+      const stopped = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.stopGeneration({ ...input, messageId: sent.assistantMessageId, generationId }),
         ),
       );
       expect(stopped.stopped).toBe(true);
       await runtime.runPromise(
         Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
       );
-      await remote.runPromise(collect(message.id, message.researchRunId!));
-      expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(
-        phase === "synthesis" ? 1 : 0,
-      );
-      hold = null;
-      await runtime.runPromise(
-        ChatService.use((service) => service.retryMessage({ ...input, messageId: message.id })),
-      );
-      await remote.runPromise(collect(message.id));
-      const retried = (await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getMessage(message.id)),
-      ))!;
-      expect(retried.researchRunId).not.toBe(message.researchRunId);
-      expect(retried.generationMode).toBe("research");
-      const oldStream = await remote.runPromise(collect(message.id, message.researchRunId!));
-      expect(oldStream).toHaveLength(1);
-      expect(oldStream[0]).toMatchObject({ kind: "done", runId: retried.researchRunId });
+      await runtime.runPromise(collect(sent.assistantMessageId, generationId));
+      // At most the batch already dispatched when Stop landed; no new round.
+      expect(requests.length).toBeLessThanOrEqual(countAtStop + RESEARCH_LIMITS.workers);
       await runtime.runPromise(
         Effect.gen(function* () {
-          const db = yield* Db;
-          const ledger = yield* db
-            .select()
-            .from(usageEvents)
-            .where(eq(usageEvents.messageId, message.id));
-          expect(ledger).toHaveLength(2);
-          expect(ledger.some((row) => !row.usageComplete && row.cost === null)).toBe(true);
+          const repo = yield* ChatRepo;
+          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
+          expect(message.status).toBe("aborted");
+          const run = (yield* runOf(message.id))!;
+          expect(run.status).toBe("terminal");
+          expect(run.owner).toBeNull();
+          expect(run.progress.phase).toBe("aborted");
         }),
       );
     },
   );
 
-  it("enforces one active attempt per user without blocking ordinary chats", async () => {
+  it("retries with a fresh run and leaves the stopped one in the ledger", async () => {
     const input = await runtime.runPromise(seed);
+    hold = {
+      phase: "coordinator",
+      reached: Deferred.makeUnsafe<void>(),
+      interrupted: Deferred.makeUnsafe<void>(),
+    };
+    const gate = hold;
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    const firstGeneration = await generationOf(sent.assistantMessageId);
+    const firstRun = (await runFor(sent.assistantMessageId))!;
+    await runtime.runPromise(
+      ChatService.use((service) =>
+        service.stopGeneration({
+          ...input,
+          messageId: sent.assistantMessageId,
+          generationId: firstGeneration,
+        }),
+      ),
+    );
+    await runtime.runPromise(
+      Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
+    );
+    await runtime.runPromise(collect(sent.assistantMessageId, firstGeneration));
+    hold = null;
+      coordinatorTurns = 0;
+    await runtime.runPromise(
+      ChatService.use((service) =>
+        service.retryMessage({ ...input, messageId: sent.assistantMessageId }),
+      ),
+    );
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const retried = (await runtime.runPromise(
+      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
+    ))!;
+    expect(retried.status).toBe("complete");
+    expect(retried.generationId).not.toBe(firstGeneration);
+    const fresh = (await runFor(sent.assistantMessageId))!;
+    expect(fresh.id).not.toBe(firstRun.id);
+    expect(fresh.generationId).toBe(retried.generationId);
+    const oldStream = await runtime.runPromise(collect(sent.assistantMessageId, firstGeneration));
+    expect(oldStream).toHaveLength(1);
+    expect(oldStream[0]).toMatchObject({ kind: "done", runId: retried.generationId });
     await runtime.runPromise(
       Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const other = yield* repo.createConversation({ userId: input.userId, modelId });
-        const first = yield* repo.createTurn({
-          ...input,
-          modelId,
-          generationMode: "research",
-          content: "first",
-          attachmentIds: [],
-        });
-        const failed = yield* Effect.exit(
-          repo.createTurn({
-            userId: input.userId,
-            conversationId: other.id,
-            modelId,
-            generationMode: "research",
-            content: "second",
-            attachmentIds: [],
-          }),
+        const db = yield* Db;
+        const ledger = yield* db
+          .select()
+          .from(usageEvents)
+          .where(eq(usageEvents.messageId, sent.assistantMessageId));
+        expect(ledger.map((row) => row.id)).toEqual(
+          expect.arrayContaining([firstRun.id, fresh.id]),
         );
-        expect(failed._tag).toBe("Failure");
-        expect(yield* repo.listMessages(other.id)).toHaveLength(0);
-        expect(
-          (yield* repo.createTurn({
-            userId: input.userId,
-            conversationId: other.id,
-            modelId,
-            content: "ordinary",
-            attachmentIds: [],
-          })).assistant.generationMode,
-        ).toBe("chat");
-        expect(
-          yield* repo.research!.cancel(first.assistant.id, first.assistant.researchRunId!),
-        ).toBe(true);
-        expect((yield* repo.getMessage(first.assistant.id))?.status).toBe("aborted");
       }),
     );
   });
@@ -1574,11 +1273,35 @@ describe("durable deep research", () => {
         const turn = yield* repo.createTurn({
           ...input,
           modelId,
-          generationMode: "research",
           content: "first",
           attachmentIds: [],
         });
-        const claimed = (yield* repo.research!.claim(turn.assistant.researchRunId!))!;
+        const generationId = (yield* db
+          .select({ generationId: messages.generationId })
+          .from(messages)
+          .where(eq(messages.id, turn.assistant.id)))[0]!.generationId!;
+        // A run is started by a call, so the test mints the row the same way
+        // the stream observer does before queueing one.
+        const rowId = uuidv7();
+        yield* repo.insertToolCall({
+          id: rowId,
+          messageId: turn.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          textOffset: 0,
+          providerCallId: "reaper-call",
+          toolName: "deep_research",
+          arguments: {},
+        });
+        const runId = yield* repo.research!.queue({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: turn.assistant.id,
+          generationId,
+          toolCallId: rowId,
+          modelId,
+        });
+        const claimed = (yield* repo.research!.claim(runId))!;
         yield* repo.research!.locked(claimed.fence, (tx) =>
           tx
             .insert(messageChunks)
@@ -1591,16 +1314,15 @@ describe("durable deep research", () => {
             .pipe(Effect.orDie, Effect.asVoid),
         );
         yield* repo.research!.reap();
-        expect((yield* repo.getMessage(turn.assistant.id))?.status).toBe("streaming");
+        expect((yield* repo.research!.get(runId))?.status).toBe("running");
         yield* db
           .update(researchRuns)
           .set({ leaseUntil: sql`now() - interval '1 second'` })
-          .where(eq(researchRuns.id, claimed.run.id));
+          .where(eq(researchRuns.id, runId));
         yield* Effect.all([repo.research!.reap(), repo.research!.reap()], { concurrency: 2 });
-        expect((yield* repo.getMessage(turn.assistant.id))?.content).toBe(
-          "Retained partial report",
-        );
-        expect((yield* repo.research!.get(claimed.run.id))?.progress.phase).toBe("interrupted");
+        expect((yield* repo.research!.get(runId))?.progress.phase).toBe("interrupted");
+        // Reaping the run must not end the message: the generation owns that.
+        expect((yield* repo.getMessage(turn.assistant.id))?.status).toBe("streaming");
         const late = yield* Effect.exit(
           repo.research!.locked(claimed.fence, (tx) =>
             tx
@@ -1620,34 +1342,121 @@ describe("durable deep research", () => {
         );
         expect(late._tag).toBe("Failure");
         expect(
-          yield* db.select().from(usageEvents).where(eq(usageEvents.id, claimed.run.id)),
+          yield* db.select().from(usageEvents).where(eq(usageEvents.id, runId)),
         ).toHaveLength(1);
-        expect((yield* repo.listToolCalls([turn.assistant.id]))[0]?.toolName).toBe("deep_research");
+        // The call that started it is untouched: only the generation settles it.
+        expect((yield* repo.listToolCalls([turn.assistant.id]))[0]).toMatchObject({
+          id: rowId,
+          status: "running",
+        });
+        yield* repo.research!.cancelForGeneration(turn.assistant.id, generationId);
       }),
     );
   });
 
-  it("discards an unsolicited clarification answer from both live and durable final prose", async () => {
+  it("checkpoints active research usage before conversation deletion and interrupts its owner", async () => {
     const input = await runtime.runPromise(seed);
-    clarificationProse = "I cannot browse live sources. Here is a generic answer instead. ".repeat(
-      100,
-    );
+    const release = Deferred.makeUnsafe<void>();
+    hold = {
+      phase: "report",
+      reached: Deferred.makeUnsafe<void>(),
+      interrupted: Deferred.makeUnsafe<void>(),
+      release,
+    };
+    const gate = hold;
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    const events = await remote.runPromise(collect(sent.assistantMessageId));
-    const liveText = events
-      .flatMap((event) =>
-        event.kind === "chunk" && event.chunkKind === "text" ? [event.delta] : [],
-      )
-      .join("");
-    expect(liveText).toContain("Supported conclusion");
-    expect(liveText).not.toContain("cannot browse");
-    expect(liveText).not.toContain("generic answer");
-    const message = (await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-    ))!;
-    expect(message.content).toBe(liveText);
-    expect(message.status).toBe("complete");
-    expect(requests.some((request) => phaseOf(request) === "worker")).toBe(true);
+    await runtime.runPromise(
+      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
+    );
+    const run = (await runFor(sent.assistantMessageId))!;
+    await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
+    hold = null;
+    await runtime.runPromise(Deferred.succeed(release, undefined));
+    await runtime.runPromise(
+      awaitRunStatus(sent.assistantMessageId, "terminal").pipe(
+        Effect.catchCause(() => Effect.void),
+      ) as Effect.Effect<void>,
+    );
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        expect(yield* repo.getMessage(sent.assistantMessageId)).toBeNull();
+        expect(
+          yield* db.select().from(researchRuns).where(eq(researchRuns.id, run.id)),
+        ).toHaveLength(0);
+        expect(
+          yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id)),
+        ).toHaveLength(0);
+        const ledger = yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id));
+        expect(ledger).toHaveLength(1);
+        expect(ledger[0]!.inputTokens).toBeGreaterThan(0);
+        expect(ledger[0]!.usageComplete).toBe(false);
+        expect(ledger[0]!.status).toBe("aborted");
+        expect(ledger[0]!.conversationId).toBe(input.conversationId);
+        expect(ledger[0]!.messageId).toBe(sent.assistantMessageId);
+        yield* repo.research!.reap();
+        expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id))).toHaveLength(
+          1,
+        );
+      }),
+    );
+  });
+
+  it("retains stopped research source numbers in a subsequent attempt", async () => {
+    const input = await runtime.runPromise(seed);
+    hold = {
+      phase: "report",
+      reached: Deferred.makeUnsafe<void>(),
+      interrupted: Deferred.makeUnsafe<void>(),
+    };
+    const gate = hold;
+    const first = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(
+      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
+    );
+    const generationId = await generationOf(first.assistantMessageId);
+    await runtime.runPromise(
+      ChatService.use((service) =>
+        service.stopGeneration({
+          ...input,
+          messageId: first.assistantMessageId,
+          generationId,
+        }),
+      ),
+    );
+    await runtime.runPromise(collect(first.assistantMessageId, generationId));
+    expect(
+      (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(first.assistantMessageId))))
+        ?.status,
+    ).toBe("aborted");
+    hold = null;
+    requests.length = 0;
+    coordinatorTurns = 0;
+      evidenceUrl = "https://evidence.example/followup";
+    const second = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(second.assistantMessageId));
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const calls = yield* repo.listToolCalls([second.assistantMessageId]);
+        const sources = calls
+          .filter((call) => call.toolName === "web_search")
+          .flatMap(
+            (call) =>
+              (call.result as { sources?: { index: number; url: string }[] } | null)?.sources ?? [],
+          );
+        expect(sources.length).toBeGreaterThan(0);
+        expect(sources.every((source) => source.index === 2 && source.url === evidenceUrl)).toBe(
+          true,
+        );
+        expect((yield* repo.getMessage(second.assistantMessageId))?.status).toBe("complete");
+      }),
+    );
+    const worker = requests.find((request) => phaseOf(request) === "worker")!;
+    // Citation identity survives, but unrelated inherited evidence is not
+    // injected into every worker.
+    expect(promptText(worker)).not.toContain("https://evidence.example/source");
   });
 
   it.each([
@@ -1655,28 +1464,21 @@ describe("durable deep research", () => {
     ["context", "The provider rejected the research context size."],
     ["defect", "Research stopped because of an execution failure."],
   ] as const)(
-    "preserves safe %s failure diagnostics instead of falsely claiming an exploration deadline",
+    "reports a safe %s diagnostic as a tool result and still finishes the turn",
     async (failure, diagnostic) => {
       const input = await runtime.runPromise(seed);
       coordinatorFailure = failure;
-      clarificationProse = "PRIVATE_CLARIFICATION_ANSWER";
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      const events = await remote.runPromise(collect(sent.assistantMessageId));
-      expect(
-        events.filter((event) => event.kind === "chunk" && event.chunkKind === "text"),
-      ).toHaveLength(0);
-      expect(
-        requests.some(
-          (request) => phaseOf(request) === "worker" || phaseOf(request) === "synthesis",
-        ),
-      ).toBe(false);
+      const events = await runtime.runPromise(collect(sent.assistantMessageId));
+      expect(requests.some((request) => phaseOf(request) === "worker")).toBe(false);
       await runtime.runPromise(
         Effect.gen(function* () {
           const repo = yield* ChatRepo;
           const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-          expect(message.status).toBe("error");
-          expect(message.content).toBe("");
-          const run = (yield* repo.research!.get(message.researchRunId!))!;
+          // The investigation failed; the turn it ran inside did not.
+          expect(message.status).toBe("complete");
+          expect(message.content).toContain("Supported conclusion");
+          const run = (yield* runOf(message.id))!;
           expect(run.progress.phase).toBe("error");
           expect(run.progress.tasks).toHaveLength(0);
           expect(run.progress.limitations.join(" ")).toContain(diagnostic);
@@ -1687,98 +1489,82 @@ describe("durable deep research", () => {
           const root = (yield* repo.listToolCalls([message.id])).find(
             (call) => call.toolName === "deep_research",
           )!;
+          expect(root.status).toBe("error");
           expect(JSON.stringify(root.result)).toContain(diagnostic);
           expect(JSON.stringify({ message, progress: run.progress, root, events })).not.toMatch(
-            /PRIVATE_PROVIDER_PAYLOAD|authorization=secret|PRIVATE_CLARIFICATION_ANSWER/,
+            /PRIVATE_PROVIDER_PAYLOAD|authorization=secret/,
           );
         }),
       );
     },
   );
+});
 
-  it("inherits research only for validated structured answers and skips", async () => {
+describe("what the investigation may see", () => {
+  it("keeps history, memories and draft tools with the host and delegates only the brief", async () => {
+    finishWorkersEarly = true;
+    hostDraft = true;
     const input = await runtime.runPromise(seed);
-    clarify = true;
-    const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    const events = await remote.runPromise(collect(first.assistantMessageId));
-    expect(
-      events.filter((event) => event.kind === "chunk" && event.chunkKind === "text"),
-    ).toHaveLength(0);
-    const tools = events.flatMap((event) =>
-      event.kind === "chunk" && event.chunkKind === "tool" ? [JSON.parse(event.delta)] : [],
-    );
-    expect(tools).toContainEqual(
-      expect.objectContaining({ family: "ask", phase: "start", textOffset: 0 }),
-    );
-    expect(tools).toContainEqual(
-      expect.objectContaining({
-        family: "ask",
-        phase: "result",
-        result: expect.objectContaining({ outcome: "presented" }),
-      }),
+    await enableMemory(input.userId);
+    const privateMemory = "Grows orchids in a private greenhouse.";
+    const privateHistory = "My unrelated draft project is called Quiet Observatory.";
+    await runtime.runPromise(
+      MemoryService.use((service) => service.createManual(input.userId, privateMemory)),
     );
     await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const db = yield* Db;
-        const message = (yield* repo.getMessage(first.assistantMessageId))!;
-        expect((yield* repo.research!.get(message.researchRunId!))?.progress.phase).toBe(
-          "awaiting_answer",
-        );
-        const call = (yield* repo.listToolCalls([message.id])).find(
-          (row) => row.toolName === "ask_user",
-        )!;
-        expect(message.content).toBe("");
-        expect(call.textOffset).toBe(0);
-        const turn = yield* repo.createTurn({
-          ...input,
-          modelId,
-          attachmentIds: [],
-          questionResponse: { callId: call.id, response: { kind: "skip" } },
-        });
-        expect(turn.userMessage.generationMode).toBe("research");
-        expect(turn.assistant.generationMode).toBe("research");
-        yield* repo.research!.cancel(turn.assistant.id, turn.assistant.researchRunId!);
-        const ordinary = yield* repo.createTurn({
-          ...input,
-          modelId,
-          attachmentIds: [],
-          content: "ordinary followup",
-        });
-        expect(ordinary.userMessage.generationMode).toBe("chat");
-        yield* db
-          .update(messages)
-          .set({ status: "complete" })
-          .where(
-            and(
-              eq(messages.conversationId, input.conversationId),
-              eq(messages.status, "streaming"),
-            ),
-          );
-      }),
-    );
-  });
-  it.each(["provider", "context"] as const)(
-    "keeps a cut-short answer without restarting synthesis (%s)",
-    async (failure) => {
-      synthesisCutShort = failure;
-      const input = await runtime.runPromise(seed);
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
-      await runtime.runPromise(
-        Effect.gen(function* () {
-          const repo = yield* ChatRepo;
-          const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-          expect(message.status).toBe("complete");
-          expect(message.content).toBe("# Findings\nSupported conclusion[^1].\n");
-          expect(requests.filter((request) => phaseOf(request) === "synthesis")).toHaveLength(1);
-          const run = yield* repo.research!.get(message.researchRunId!);
-          expect(run?.progress.phase).toBe("partial");
-          expect(run?.progress.limitations).toContain("The final report was cut short.");
+      ChatRepo.use((repo) =>
+        repo.insertMessage({
+          conversationId: input.conversationId,
+          role: "user",
+          content: privateHistory,
         }),
-      );
-    },
-  );
+      ),
+    );
+    hostBrief =
+      "Compare independent evidence for European regulations. Prefer European primary sources.";
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const hosts = requests.filter((request) => phaseOf(request) === "host");
+    expect(hosts.length).toBeGreaterThan(0);
+    expect(promptText(hosts[0]!)).toContain(privateMemory);
+    expect(promptText(hosts[0]!)).toContain(privateHistory);
+    const coordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
+    expect(promptText(coordinator)).toContain(hostBrief);
+    for (const request of requests.filter((request) =>
+      ["coordinator", "worker", "report"].includes(phaseOf(request)),
+    )) {
+      expect(promptText(request)).not.toContain(privateMemory);
+      expect(promptText(request)).not.toContain(privateHistory);
+      expect(promptText(request)).not.toContain("PRIVATE_");
+      expect(request.toolkit?.tools["save_memory"]).toBeUndefined();
+      expect(request.toolkit?.tools["deep_research"]).toBeUndefined();
+      expect(request.toolkit?.tools["draft_agent"]).toBeUndefined();
+      expect(request.toolkit?.tools["update_agent_draft"]).toBeUndefined();
+    }
+    const draft = await runtime.runPromise(
+      AgentDraftService.use((service) =>
+        service
+          .list(input.userId, input.conversationId)
+          .pipe(Effect.map((drafts) => drafts[0] ?? null)),
+      ),
+    );
+    expect(draft).toMatchObject({
+      revision: 2,
+      targetAgentId: null,
+      settings: { instructions: "PRIVATE_RESEARCH_DRAFT" },
+    });
+    const detail = await runtime.runPromise(
+      loadConversationDetail(input.userId, input.conversationId),
+    );
+    expect(JSON.stringify(detail)).not.toContain("PRIVATE_");
+    const message = detail.messages.at(-1)!;
+    expect(message.status).toBe("complete");
+    expect(message.content.match(/I found useful guidance/g)).toHaveLength(1);
+    const chunks = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+    );
+    expect(JSON.stringify(chunks)).not.toContain("PRIVATE_");
+  });
 
   it("stops exploring once the search backend is down instead of spending every round on it", async () => {
     searchDown = true;
@@ -1786,7 +1572,7 @@ describe("durable deep research", () => {
     dispatchWaves = RESEARCH_LIMITS.coordinatorRounds;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     const workers = requests.filter((request) => phaseOf(request) === "worker");
     // The synchronous fake fails each actual query. A batched tool result must
     // not collapse those failures into one observation or count refusals as more.
@@ -1797,19 +1583,9 @@ describe("durable deep research", () => {
     expect(requests.filter((request) => phaseOf(request) === "coordinator").length).toBeLessThan(
       RESEARCH_LIMITS.coordinatorRounds,
     );
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const message = (yield* repo.getMessage(sent.assistantMessageId))!;
-        const run = yield* repo.research!.get(message.researchRunId!);
-        expect(run?.progress.limitations).toContain(
-          "Web search was unavailable, so most of the investigation could not run.",
-        );
-        const synthesis = requests.find((request) => phaseOf(request) === "synthesis");
-        expect(JSON.stringify(synthesis?.prompt ?? "")).toContain(
-          "web search service was unavailable",
-        );
-      }),
+    const run = await runFor(sent.assistantMessageId);
+    expect(run?.progress.limitations).toContain(
+      "Web search was unavailable, so most of the investigation could not run.",
     );
   });
 
@@ -1818,10 +1594,10 @@ describe("durable deep research", () => {
     queriesPerSearch = 3;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     const noticeOf = (request: GatewayInput) => JSON.stringify(request.prompt.content.at(-1) ?? "");
-    const workers = requests.filter((request) => phaseOf(request) === "worker");
-    const coordinators = requests.filter((request) => phaseOf(request) === "coordinator");
+    const workers = requests.filter((entry) => phaseOf(entry) === "worker");
+    const coordinators = requests.filter((entry) => phaseOf(entry) === "coordinator");
     // Every exploring turn ends on a user-role budget line — never an assistant
     // prefill — and states what remains.
     for (const request of [...workers, ...coordinators]) {
@@ -1835,60 +1611,58 @@ describe("durable deep research", () => {
     expect(noticeOf(workers.at(-1)!)).toContain("nearly spent");
   });
 
-  it("budgets every dispatch wave and actual call while preserving synthesis", async () => {
+  it("budgets every dispatch wave and actual call, then hands the evidence back", async () => {
     dispatchWaves = RESEARCH_LIMITS.coordinatorRounds;
     // The tool's own per-call maximum, so exploration meets the search ceiling.
     queriesPerSearch = 3;
     const input = await runtime.runPromise(seed);
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
     // Exploration stops when the web budget is gone rather than spending the
     // remaining model calls on tools that can only refuse.
-    expect(requests.length).toBeLessThanOrEqual(RESEARCH_LIMITS.calls);
-    const synthesis = requests.filter((request) => phaseOf(request) === "synthesis");
-    expect(synthesis).toHaveLength(1);
-    // Not surfaced as a limitation, but the answer still has to disclose it.
-    expect(JSON.stringify(synthesis[0]!.prompt)).toContain("search/read ceiling");
+    expect(runRequests().length).toBeLessThanOrEqual(RESEARCH_LIMITS.calls);
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;
         const repo = yield* ChatRepo;
         const message = (yield* repo.getMessage(sent.assistantMessageId))!;
         expect(message.status).toBe("complete");
-        const calls = yield* db
-          .select()
-          .from(researchCalls)
-          .where(eq(researchCalls.runId, message.researchRunId!));
-        expect(calls).toHaveLength(requests.length);
+        const run = (yield* runOf(message.id))!;
+        const calls = yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id));
+        expect(calls).toHaveLength(runRequests().length);
         const tasks = yield* db
           .select()
           .from(researchTasks)
-          .where(eq(researchTasks.runId, message.researchRunId!));
+          .where(eq(researchTasks.runId, run.id));
         expect(tasks.length).toBeLessThanOrEqual(RESEARCH_LIMITS.tasks);
         const webCalls = (yield* repo.listToolCalls([message.id])).filter(
           (call) => call.toolName === "web_search",
         );
         // The final batch can complete with two admitted queries and one
         // refusal: completed tool calls times batch size would incorrectly say 81.
-        // Count backend execution to pin the exact 80-query ceiling, including
-        // its partial final batch, rather than rounding down to 78.
+        // Count backend execution to pin the exact ceiling, including its
+        // partial final batch, rather than rounding down.
         expect(backendSearches).toBe(RESEARCH_LIMITS.searches);
         // At most the batch in flight when the ceiling was reached, not a
         // cascade of refusals across every remaining round.
         expect(webCalls.filter((call) => call.status === "error").length).toBeLessThanOrEqual(
           RESEARCH_LIMITS.workers,
         );
-        const run = yield* repo.research!.get(message.researchRunId!);
         // Spending the budget is the design, not a defect worth reporting.
-        expect(run?.progress.limitations.some((l) => /search|page read/.test(l))).toBe(false);
-        expect(run?.progress.limitations).not.toContain(
+        expect(run.progress.limitations.some((l) => /search|page read/.test(l))).toBe(false);
+        expect(run.progress.limitations).not.toContain(
           "A coordinator round dispatched no useful tasks.",
         );
       }),
     );
+    // The host is told the investigation hit its ceiling, so its answer can say so.
+    const answer = requests.filter((request) => phaseOf(request) === "host").at(-1)!;
+    expect(promptText(answer)).toContain("search/read ceiling");
   });
 
-  it.each(["planning", "coordinator", "synthesis"])(
+  // A worker's prompt is already only its assignment, so repair has nothing to
+  // shed there; the stages that carry projected evidence are the ones that do.
+  it.each(["coordinator", "report"])(
     "repairs %s context overflow without reintroducing assistant prefill and counts the rejected invocation",
     async (phase) => {
       const input = await runtime.runPromise(seed);
@@ -1908,27 +1682,28 @@ describe("durable deep research", () => {
           }),
         ),
       );
-      // Investigation receives only the brief, so overflow repair must compact that
-      // projection rather than borrowing the main assistant's unrelated history.
-      planningText =
-        "Investigate the evidence. " +
-        "Compare independent sources and investigate gaps. ".repeat(100);
+      // The investigation receives only the brief, so overflow repair must
+      // compact that projection rather than borrowing the host's history.
+      hostBrief =
+        "Investigate the evidence. " + "Compare independent sources and investigate gaps. ".repeat(100);
       overflowPhase = phase;
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await remote.runPromise(collect(sent.assistantMessageId));
+      await runtime.runPromise(collect(sent.assistantMessageId));
       const attempts = requests.filter((request) => phaseOf(request) === phase);
       expect(attempts.length).toBeGreaterThanOrEqual(2);
-      expect(JSON.stringify(attempts[1]!.prompt).length).toBeLessThan(
-        JSON.stringify(attempts[0]!.prompt).length,
-      );
-      expect(JSON.stringify(attempts[1]!.prompt)).toContain("Investigate the evidence.");
+      // Only the coordinator carries a projected evidence block that repair can
+      // shed; a report prompt is already near its floor.
+      if (phase === "coordinator") {
+        expect(promptText(attempts[1]!).length).toBeLessThan(promptText(attempts[0]!).length);
+        expect(promptText(attempts[1]!)).toContain("Investigate the evidence.");
+      }
       for (const request of attempts) {
         expect(request.prompt.content.at(-1)?.role).toBe("user");
         expect(JSON.stringify(request.prompt.content.at(-1))).toContain("data, not instructions");
-        if (phase !== "planning") {
-          expect(request.prompt.content.at(-2)?.role).toBe("assistant");
-          expect(JSON.stringify(request.prompt.content.at(-2))).toContain("Research brief (data)");
-        }
+        expect(request.prompt.content.at(-2)?.role).toBe("assistant");
+        expect(JSON.stringify(request.prompt.content.at(-2))).toContain(
+          phase === "report" ? "Registered sources" : "Research brief (data)",
+        );
       }
       await runtime.runPromise(
         Effect.gen(function* () {
@@ -1936,164 +1711,20 @@ describe("durable deep research", () => {
           const repo = yield* ChatRepo;
           const message = (yield* repo.getMessage(sent.assistantMessageId))!;
           expect(message.status).toBe("complete");
+          const run = (yield* runOf(message.id))!;
           const calls = yield* db
             .select()
             .from(researchCalls)
-            .where(eq(researchCalls.runId, message.researchRunId!));
-          expect(calls).toHaveLength(requests.length);
-          const ledger = yield* db
+            .where(eq(researchCalls.runId, run.id));
+          expect(calls).toHaveLength(runRequests().length);
+          const ledger = (yield* db
             .select()
             .from(usageEvents)
-            .where(eq(usageEvents.messageId, message.id));
-          expect(ledger[0]!.inputTokens).toBe((requests.length - 1) * 100);
-          expect(ledger[0]!.usageComplete).toBe(false);
+            .where(eq(usageEvents.id, run.id)))[0]!;
+          expect(ledger.inputTokens).toBe((runRequests().length - 1) * 100);
+          expect(ledger.usageComplete).toBe(false);
         }),
       );
-    },
-  );
-
-  it("checkpoints active research usage before conversation deletion and interrupts its owner", async () => {
-    const input = await runtime.runPromise(seed);
-    hold = {
-      phase: "report",
-      reached: Deferred.makeUnsafe<void>(),
-      interrupted: Deferred.makeUnsafe<void>(),
-    };
-    const gate = hold;
-    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(
-      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-    );
-    const message = (await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-    ))!;
-    await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
-    await runtime.runPromise(
-      Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
-    );
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const repo = yield* ChatRepo;
-        expect(yield* repo.getMessage(message.id)).toBeNull();
-        expect(
-          yield* db.select().from(researchRuns).where(eq(researchRuns.id, message.researchRunId!)),
-        ).toHaveLength(0);
-        expect(
-          yield* db
-            .select()
-            .from(researchCalls)
-            .where(eq(researchCalls.runId, message.researchRunId!)),
-        ).toHaveLength(0);
-        const ledger = yield* db
-          .select()
-          .from(usageEvents)
-          .where(eq(usageEvents.id, message.researchRunId!));
-        expect(ledger).toHaveLength(1);
-        expect(ledger[0]!.inputTokens).toBeGreaterThan(0);
-        expect(ledger[0]!.usageComplete).toBe(false);
-        expect(ledger[0]!.status).toBe("aborted");
-        expect(ledger[0]!.conversationId).toBe(input.conversationId);
-        expect(ledger[0]!.messageId).toBe(message.id);
-        yield* repo.research!.reap();
-        expect(
-          yield* db.select().from(usageEvents).where(eq(usageEvents.id, message.researchRunId!)),
-        ).toHaveLength(1);
-      }),
-    );
-  });
-
-  it("retains stopped research source numbers in a subsequent research attempt", async () => {
-    const input = await runtime.runPromise(seed);
-    hold = {
-      phase: "report",
-      reached: Deferred.makeUnsafe<void>(),
-      interrupted: Deferred.makeUnsafe<void>(),
-    };
-    const gate = hold;
-    const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(
-      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-    );
-    const firstMessage = (await runtime.runPromise(
-      ChatRepo.use((repo) => repo.getMessage(first.assistantMessageId)),
-    ))!;
-    await remote.runPromise(
-      ChatService.use((service) =>
-        service.stopGeneration({
-          ...input,
-          messageId: firstMessage.id,
-          researchRunId: firstMessage.researchRunId!,
-        }),
-      ),
-    );
-    await remote.runPromise(collect(firstMessage.id, firstMessage.researchRunId!));
-    expect(
-      (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(firstMessage.id))))?.status,
-    ).toBe("aborted");
-    hold = null;
-    requests.length = 0;
-    coordinatorTurns = 0;
-    evidenceUrl = "https://evidence.example/followup";
-    const second = await runtime.runPromise(send(input.userId, input.conversationId));
-    await remote.runPromise(collect(second.assistantMessageId));
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const calls = yield* repo.listToolCalls([second.assistantMessageId]);
-        const sources = calls
-          .filter((call) => call.toolName === "web_search")
-          .flatMap(
-            (call) =>
-              (call.result as { sources?: { index: number; url: string }[] } | null)?.sources ?? [],
-          );
-        expect(sources.length).toBeGreaterThan(0);
-        expect(sources.every((source) => source.index === 2 && source.url === evidenceUrl)).toBe(
-          true,
-        );
-        expect((yield* repo.getMessage(second.assistantMessageId))?.status).toBe("complete");
-      }),
-    );
-    const worker = requests.find((request) => phaseOf(request) === "worker")!;
-    // Citation identity survives, but unrelated inherited evidence is not injected into every worker.
-    expect(JSON.stringify(worker.prompt)).not.toContain("https://evidence.example/source");
-  });
-
-  it.each(["worker", "report", "synthesis"])(
-    "Stop during %s interrupts the scoped provider and begins no further invocation",
-    async (phase) => {
-      const input = await runtime.runPromise(seed);
-      hold = {
-        phase,
-        reached: Deferred.makeUnsafe<void>(),
-        interrupted: Deferred.makeUnsafe<void>(),
-      };
-      const gate = hold;
-      const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-      await runtime.runPromise(
-        Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-      );
-      const message = (await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-      ))!;
-      await remote.runPromise(
-        ChatService.use((service) =>
-          service.stopGeneration({
-            ...input,
-            messageId: message.id,
-            researchRunId: message.researchRunId!,
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Deferred.await(gate.interrupted).pipe(Effect.timeout(Duration.seconds(5))),
-      );
-      const countAtInterruption = requests.length;
-      await remote.runPromise(collect(message.id, message.researchRunId!));
-      expect(requests).toHaveLength(countAtInterruption);
-      expect(
-        (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(message.id))))?.status,
-      ).toBe("aborted");
     },
   );
 });

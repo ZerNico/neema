@@ -71,18 +71,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
         // persisted so far; ship them inline so the first paint is complete.
         pendingChunks: !streaming
           ? Effect.succeed([])
-          : repo.research
-            ? repo.research
-                .tail(streaming.id, 0)
-                .pipe(
-                  Effect.map((snapshot) =>
-                    snapshot?.message.generationId === streaming.generationId &&
-                    snapshot?.message.researchRunId === streaming.researchRunId
-                      ? snapshot.chunks
-                      : [],
-                  ),
-                )
-            : repo.chunksAfter(streaming.id, 0),
+          : repo.chunksAfter(streaming.id, 0),
         // Durable generation activity for all assistant messages. Research
         // compaction bodies stay private; ordinary chat summaries are displayable.
         toolCalls: repo.listToolCalls(assistantIds),
