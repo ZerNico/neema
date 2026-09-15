@@ -423,7 +423,9 @@ export function applyToolChunk(
     if (
       !progress ||
       e.name !== "deep_research" ||
-      progress.runId !== e.callId ||
+      // The row id and the run id are different things: the call is minted by
+      // the stream observer, the run by the handler it released. Only the
+      // envelope's own `runId` correlates with the progress it carries.
       (e.runId !== undefined && e.runId !== progress.runId) ||
       (e.phase !== "start" && e.phase !== "progress" && e.phase !== "result")
     )

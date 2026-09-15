@@ -75,7 +75,8 @@ const envelope = (phase: string, progress: unknown) =>
     v: 1,
     family: "research",
     name: "deep_research",
-    callId: "run-1",
+    // Deliberately unequal: the observer mints the row, the handler the run.
+    callId: "call-1",
     runId: "run-1",
     phase,
     textOffset: 4,
