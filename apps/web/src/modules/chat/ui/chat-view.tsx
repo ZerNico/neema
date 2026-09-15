@@ -385,7 +385,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const { data } = useSuspenseQuery(conversationQuery(conversationId));
+  const { data, dataUpdatedAt } = useSuspenseQuery(conversationQuery(conversationId));
   // Stays in step with an asynchronously generated title: `conversation.updated`
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
@@ -846,12 +846,24 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // or a generation this client just started. Deliberately not `generating`,
   // whose stream status stays "streaming" while the smoothed text drains long
   // after the answer is complete.
-  const documentsLocked =
-    streamingMessage !== undefined ||
+  const generationRequested =
     sendMutation.isPending ||
     answerMutation.isPending ||
     retryMutation.isPending ||
     editMutation.isPending;
+  // The request settles before the refetch that reports the row it started, and
+  // an unlocked frame in that gap flickers the panel. Hold from the request
+  // until either the row appears or a later read proves there is none.
+  const [awaitingGeneration, setAwaitingGeneration] = useState<number | null>(null);
+  if (generationRequested && awaitingGeneration === null) setAwaitingGeneration(dataUpdatedAt);
+  else if (
+    !generationRequested &&
+    awaitingGeneration !== null &&
+    (streamingMessage !== undefined || dataUpdatedAt > awaitingGeneration)
+  )
+    setAwaitingGeneration(null);
+  const documentsLocked =
+    streamingMessage !== undefined || generationRequested || awaitingGeneration !== null;
   const mutationPending =
     answerMutation.isPending ||
     questionNeedsRefresh ||

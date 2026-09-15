@@ -1688,6 +1688,59 @@ describe("ChatView documents", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("holds the document lock from the send until the streaming row appears", async () => {
+    const { client } = renderView(null, { toolCalls: [documentReference()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Open document: Trip plan" }));
+    expect(
+      screen.queryByText("Read-only while the assistant is answering."),
+    ).not.toBeInTheDocument();
+
+    // The send resolves before the refetch reports the row it started; the lock
+    // must not drop in that gap.
+    const gate = draftWriteGate();
+    sendMock.mockImplementationOnce((async () => {
+      await gate.promise;
+      return {};
+    }) as never);
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+    // Presence, not visibility: the notice animates its height in.
+    expect(
+      await screen.findByText("Read-only while the assistant is answering."),
+    ).toBeInTheDocument();
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText("Read-only while the assistant is answering."),
+    ).toBeInTheDocument();
+
+    // Only a read that shows no streaming row releases it.
+    act(() =>
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, {
+          toolCalls: [documentReference()],
+          messages: [
+            message("m-user", "user", "u1"),
+            { ...message("m-answer", "assistant", ""), status: "streaming" },
+          ],
+        }),
+      ),
+    );
+    expect(
+      screen.getByText("Read-only while the assistant is answering."),
+    ).toBeInTheDocument();
+    act(() =>
+      client.setQueryData(["conversation", "c1"], payload(null, { toolCalls: [documentReference()] })),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Read-only while the assistant is answering."),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("drops the card once a retry has deleted the document that answer created", async () => {
     renderView(null, { toolCalls: [documentReference()] });
     expect(await screen.findByRole("button", { name: "Open document: Trip plan" })).toBeVisible();
