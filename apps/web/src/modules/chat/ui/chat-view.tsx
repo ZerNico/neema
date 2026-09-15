@@ -77,6 +77,7 @@ import { mergeSource } from "~/modules/tools/sources.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { prefersReducedMotion } from "~/ui/motion.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
@@ -1553,10 +1554,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 // the bottom. Navigation waits this out, so a fast first response cannot swap
 // the route in mid-slide — which would read as a jump rather than a move.
 const SLIDE_MS = 380;
-
-const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
 
 export function NewChatView({
   user,
