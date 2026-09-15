@@ -385,6 +385,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   useDocumentTitle(data.conversation.title);
   const [modelId, setModelId] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editResearchEnabled, setEditResearchEnabled] = useState(false);
   // One instance, mounted for the whole view: an edit opens by seeding it, so
   // the chips survive the ChatInput remount that swapping the bubble causes.
   const editUploads = useAttachmentUploads();
@@ -617,6 +618,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     if (!editingMessageId) return;
     setEditingMessageId(null);
     setEditSkillIds([]);
+    setEditResearchEnabled(false);
     settleEditContext();
     // Structured edits have no upload lifecycle of their own.
     if (!questionResponses.hiddenMessageIds.has(editingMessageId)) resetEditUploads();
@@ -783,6 +785,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        researchEnabled?: boolean;
         attachmentIds: ReadonlyArray<string>;
         skillIds?: ReadonlyArray<string>;
         collectionIds?: ReadonlyArray<string>;
@@ -794,8 +797,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       editMessage({
         data: {
           conversationId,
-          ...input,
           researchEnabled: false,
+          ...input,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
@@ -1082,6 +1085,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           content,
           modelId: effectiveModelId,
           searchEnabled,
+          researchEnabled: editResearchEnabled,
           attachmentIds,
           skillIds: editSkillIds,
           collectionIds: editContext.sendFields.collectionIds,
@@ -1096,6 +1100,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       effectiveModelId,
       mutateEdit,
       searchEnabled,
+      editResearchEnabled,
       submitEditUploads,
       editSkillIds,
       editContext,
@@ -1152,6 +1157,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const openEdit = useCallback(
     (messageId: string) => {
       setEditingMessageId(messageId);
+      // The offer belongs to the edit being written, not to the one before it.
+      setEditResearchEnabled(false);
       if (questionResponses.hiddenMessageIds.has(messageId)) {
         // An answer edit has no uploads of its own, so there is nothing to seed.
         // Only a switch away from another editor leaves chips needing clearing.
@@ -1326,7 +1333,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             ...projected,
             editState: {
               initialDraft: activeEditingMessage.content,
-              researchEnabled: false,
+              researchEnabled: editResearchEnabled,
+              onResearchEnabledChange: setEditResearchEnabled,
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
               saveDisabled: editPending || work.readOnly,
@@ -1382,6 +1390,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       saveEdit,
       searchEnabled,
       setSearchEnabled,
+      editResearchEnabled,
       stream.compactions,
       stream.rawTextLength,
       stream.reasoning,

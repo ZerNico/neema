@@ -157,6 +157,7 @@ export interface DisplayMessage {
     searchEnabled: boolean;
     researchEnabled?: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
+    onResearchEnabledChange?: (enabled: boolean) => void;
     /** The view-level upload state, seeded with the message's own files. */
     attachments: AttachmentUploads;
     /** Seeded with the message's own selections, so `/` and `#` work in an edit. */
@@ -283,6 +284,9 @@ function InlineMessageEditor({
         searchEnabled={editState.searchEnabled}
         researchEnabled={editState.researchEnabled ?? false}
         onSearchEnabledChange={editState.onSearchEnabledChange}
+        {...(editState.onResearchEnabledChange
+          ? { onResearchEnabledChange: editState.onResearchEnabledChange }
+          : {})}
         attachments={editState.attachments}
         {...(editState.skills ? { skills: editState.skills } : {})}
         {...(editState.context ? { context: editState.context } : {})}

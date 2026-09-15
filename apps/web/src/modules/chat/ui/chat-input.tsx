@@ -557,25 +557,7 @@ export const ChatInput = forwardRef<
             </ToggleGroupItem>
           </ToggleGroup>
         ) : null}
-        {researchEnabled ? (
-          // The only control the row still needs while research is on: the
-          // choice itself lives in the menu, this just leaves it again.
-          <Button
-            size="sm"
-            variant="default"
-            aria-label="Deep research"
-            aria-pressed
-            disabled={modeDisabled}
-            onClick={() => onResearchEnabledChange?.(false)}
-            className="shrink-0"
-          >
-            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span>
-              <span className="max-[420px]:sr-only">Deep </span>research
-            </span>
-          </Button>
-        ) : null}
-        {!researchEnabled && searchAvailable ? (
+        {searchAvailable ? (
           <Button
             size="sm"
             variant={searchEnabled ? "default" : "ghost"}

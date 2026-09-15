@@ -69,7 +69,14 @@ function Harness({ onSend }: { onSend: React.ComponentProps<typeof Composer>["on
   );
 }
 const menu = () => screen.getByRole("button", { name: "Add files or tools" });
-const researchPill = () => screen.queryByRole("button", { name: "Deep research" });
+/** The offer lives only in the plus menu, so its state is read there. */
+const researchItem = async () => {
+  const open = screen.queryByRole("menuitemcheckbox", { name: "Deep research" });
+  if (open) return open;
+  fireEvent.click(menu());
+  return screen.findByRole("menuitemcheckbox", { name: "Deep research" });
+};
+const searchPill = () => screen.queryByRole("button", { name: "Search the web" });
 // A checkbox item leaves the menu open, so only open it when it is not already.
 async function toggleResearch() {
   const open = screen.queryByRole("menuitemcheckbox", { name: "Deep research" });
@@ -86,7 +93,7 @@ const disableResearch = toggleResearch;
 describe("research composer", () => {
   it.each([false, true])(
     "preserves locked controls without an optional research handler (research=%s)",
-    (researchEnabled) => {
+    async (researchEnabled) => {
       render(
         <QueryClientProvider client={client()}>
           <ChatInput
@@ -102,35 +109,34 @@ describe("research composer", () => {
           />
         </QueryClientProvider>,
       );
+      // Search is an independent offer either way: research no longer takes
+      // its place, so its own control never disappears.
+      expect(searchPill()).toHaveAttribute("aria-pressed", "true");
       if (researchEnabled) {
-        // No handler to change it with, so the pill states the mode and stays put.
-        expect(researchPill()).toBeDisabled();
-        expect(screen.queryByRole("button", { name: "Search the web" })).not.toBeInTheDocument();
+        // No handler to change it with: the state is still readable, not editable.
+        fireEvent.click(menu());
+        const item = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
+        expect(item).toHaveAttribute("aria-checked", "true");
+        expect(item).toHaveAttribute("aria-disabled", "true");
       } else {
-        expect(researchPill()).toBeNull();
-        expect(screen.getByRole("button", { name: "Search the web" })).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        );
+        // Nothing to offer and nothing on: the menu is only an attachment button.
+        expect(screen.getByRole("button", { name: "Add attachment" })).toBeInTheDocument();
       }
     },
   );
 
-  it("restores the ordinary search preference when research is switched off", async () => {
+  it("leaves the ordinary search preference alone when research is switched on", async () => {
     render(
       <QueryClientProvider client={client()}>
         <Harness onSend={vi.fn()} />
       </QueryClientProvider>,
     );
-    expect(
-      screen.getByRole("button", { name: "Search the web" }).getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(searchPill()).toHaveAttribute("aria-pressed", "false");
     await enableResearch();
-    expect(screen.queryByRole("button", { name: "Search the web" })).toBeNull();
+    expect(await researchItem()).toHaveAttribute("aria-checked", "true");
+    expect(searchPill()).toHaveAttribute("aria-pressed", "false");
     await disableResearch();
-    expect(
-      screen.getByRole("button", { name: "Search the web" }).getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(searchPill()).toHaveAttribute("aria-pressed", "false");
   });
 
   it("preserves enabled search through keyboard research selection and back", async () => {
@@ -146,14 +152,12 @@ describe("research composer", () => {
     const research = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
     research.focus();
     await user.keyboard("{Enter}");
-    expect(screen.queryByRole("button", { name: "Search the web" })).not.toBeInTheDocument();
     await waitFor(() => expect(research).toHaveAttribute("aria-checked", "true"));
+    expect(searchPill()).toHaveAttribute("aria-pressed", "true");
     research.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Search the web" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await waitFor(() => expect(research).toHaveAttribute("aria-checked", "false"));
+    expect(searchPill()).toHaveAttribute("aria-pressed", "true");
   });
 
   it("retains a failed research draft, resets after success, and sends the next message normally", async () => {
@@ -170,12 +174,14 @@ describe("research composer", () => {
       expect(onSend).toHaveBeenCalledWith("Investigate this", [], true, []),
     );
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
-    expect(researchPill()).toBeTruthy();
+    expect(await researchItem()).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
       expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""),
     );
-    expect(researchPill()).toBeNull();
+    await waitFor(async () =>
+      expect(await researchItem()).toHaveAttribute("aria-checked", "false"),
+    );
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Thanks" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", [], false, []));
@@ -275,12 +281,10 @@ describe("research composer", () => {
         />
       </QueryClientProvider>,
     );
-    const pill = researchPill() as HTMLButtonElement;
-    expect(pill.disabled).toBe(true);
-    fireEvent.click(pill);
-    expect(onChange).not.toHaveBeenCalled();
     // The menu still opens, but every mode option is refused while uploading.
     fireEvent.click(menu());
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Deep research" }));
+    expect(onChange).not.toHaveBeenCalled();
     for (const option of await screen.findAllByRole("menuitemcheckbox"))
       expect(option).toHaveAttribute("aria-disabled", "true");
   });

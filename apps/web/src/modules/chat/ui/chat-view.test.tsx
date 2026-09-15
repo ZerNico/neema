@@ -178,6 +178,19 @@ vi.mock("./virtual-message-list.tsx", () => ({
               >
                 Save message edit
               </button>
+              <button
+                type="button"
+                aria-label={`Offer research in edit ${String(message.id)}`}
+                onClick={() =>
+                  (
+                    message.editState as {
+                      onResearchEnabledChange?: (enabled: boolean) => void;
+                    }
+                  ).onResearchEnabledChange?.(true)
+                }
+              >
+                Offer research
+              </button>
               <output data-testid={`edit-selection-${String(message.id)}`}>
                 {(
                   message.editState as { skills?: { selectedIds: readonly string[] } }
@@ -1854,6 +1867,30 @@ describe("ChatView documents", () => {
         });
     },
   );
+});
+
+describe("ChatView edit offers", () => {
+  it("sends the research offer the edit asked for, and forgets it on the next edit", async () => {
+    editMock.mockResolvedValue({ conversationId: "c1", assistantMessageId: "next" } as never);
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Offer research in edit m-user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save message edit" }));
+    await waitFor(() =>
+      expect(editMock).toHaveBeenCalledWith({
+        data: expect.objectContaining({ researchEnabled: true }),
+      }),
+    );
+    // The offer belongs to the edit that was written, not to the editor.
+    editMock.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save message edit" }));
+    await waitFor(() =>
+      expect(editMock).toHaveBeenCalledWith({
+        data: expect.objectContaining({ researchEnabled: false }),
+      }),
+    );
+  });
 });
 
 describe("ChatView branching", () => {
