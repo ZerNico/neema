@@ -226,11 +226,13 @@ function restorePanelFocus(root: HTMLElement, opener: HTMLElement | null) {
  */
 function DetailPanelResizer({
   width,
+  dragging,
   onResize,
   onReset,
   onDraggingChange,
 }: {
   width: number;
+  dragging: boolean;
   onResize: (width: number, persist?: boolean) => void;
   onReset: () => void;
   onDraggingChange: (dragging: boolean) => void;
@@ -245,13 +247,11 @@ function DetailPanelResizer({
       aria-valuemin={DETAIL_PANEL_MIN}
       aria-valuemax={detailPanelMax(typeof window === "undefined" ? width * 2 : window.innerWidth)}
       tabIndex={0}
-      // Sits wholly inside the rail: the shell clips its overflow, so a handle
-      // straddling the edge loses its outer half and the cursor with it.
-      className={cn(
-        "absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize",
-        "hover:bg-border focus-visible:bg-ring focus-visible:outline-none",
-        "touch-none transition-colors",
-      )}
+      // A grabbable strip that draws nothing itself: the rail already has a
+      // border there, so the only mark is the line below, tinting that edge.
+      // Sits wholly inside the rail, whose overflow is clipped, or it would
+      // lose its outer half and the cursor with it.
+      className="group absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize touch-none focus-visible:outline-none"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         start.current = { x: event.clientX, width };
@@ -285,7 +285,16 @@ function DetailPanelResizer({
         else return;
         event.preventDefault();
       }}
-    />
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-0 left-0 w-0.5 transition-colors",
+          dragging ? "bg-primary" : "bg-transparent group-hover:bg-primary/60",
+          "group-focus-visible:bg-primary",
+        )}
+      />
+    </div>
   );
 }
 
@@ -391,6 +400,7 @@ function DesktopPanel({ className }: { className: string | undefined }) {
       >
         <DetailPanelResizer
           width={width}
+          dragging={dragging}
           onResize={resize}
           onReset={reset}
           onDraggingChange={setDragging}
