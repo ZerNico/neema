@@ -4,15 +4,13 @@ import type { AssistantImage } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ComponentProps } from "react";
-import { Streamdown } from "streamdown";
 import {
   type CompactionActivity,
   type ResearchToolActivity,
   type ToolActivity,
   type ToolSource,
 } from "../client/use-message-stream.ts";
-import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
+import { AssistantMarkdown, type MarkdownComponents } from "./assistant-markdown.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
 import { projectAssistantBody } from "./assistant-body.ts";
 import { CitationChip } from "./citation-chip.tsx";
@@ -31,6 +29,7 @@ import { agentIcon, CollectionChip, ContextChip, type ComposerContext } from "./
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
+import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
@@ -41,7 +40,6 @@ import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
-import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -53,8 +51,6 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
-
-type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
 
 // Renders GFM footnote references as citation chips linking to their source,
 // and hides the footnote list streamdown would otherwise append (the detail
@@ -105,37 +101,7 @@ const CitedAnswer = memo(function CitedAnswer({
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
 });
 
-const AssistantMarkdown = memo(function AssistantMarkdown({
-  content: rawContent,
-  components,
-  streaming,
-}: {
-  content: string;
-  components?: MarkdownComponents;
-  streaming: boolean;
-}) {
-  // No source list (no components override) means any `[^N]` the model wrote
-  // has nothing to resolve against and would render as literal text — the
-  // model sometimes imitates cited turns earlier in the conversation. Markers
-  // it backed with its own definitions are real footnotes and stay.
-  const content = useMemo(
-    () => (components ? rawContent : stripUndefinedCitationMarkers(rawContent)),
-    [components, rawContent],
-  );
-  return (
-    <Streamdown
-      mode={streaming ? "streaming" : "static"}
-      parseIncompleteMarkdown
-      plugins={markdownPlugins}
-      isAnimating={streaming}
-      animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
-      {...(components ? { components } : {})}
-      className={cn("space-y-3 [&_pre]:overflow-x-auto")}
-    >
-      {content}
-    </Streamdown>
-  );
-});
+
 
 export interface DisplayMessage {
   images?: ReadonlyArray<AssistantImage>;
@@ -534,6 +500,8 @@ const AssistantBody = memo(function AssistantBody({
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "agent-draft")
       return <AgentDraftActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "document")
+      return <DocumentActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }

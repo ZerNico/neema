@@ -4,6 +4,12 @@ import {
   agentDraftResultOk,
   type AgentDraftActivityResult,
 } from "~/modules/agents/tool-schema.ts";
+import {
+  DocumentToolEnvelope,
+  documentResultOk,
+  projectDocumentResult,
+  type DocumentActivityResult,
+} from "~/modules/documents/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
 import {
@@ -101,6 +107,11 @@ export interface AgentDraftToolActivity extends ToolActivityBase {
   result?: AgentDraftActivityResult;
 }
 
+export interface DocumentToolActivity extends ToolActivityBase {
+  family: "document";
+  result?: DocumentActivityResult;
+}
+
 export interface DesktopToolActivity extends ToolActivityBase {
   family: "desktop";
   /** Narrowed from the base so the transcript can switch on it exhaustively. */
@@ -112,6 +123,7 @@ export interface DesktopToolActivity extends ToolActivityBase {
 
 export type ToolActivity =
   | AgentDraftToolActivity
+  | DocumentToolActivity
   | DesktopToolActivity
   | WebToolActivity
   | MemoryToolActivity
@@ -250,6 +262,7 @@ export function applyToolChunk(
   if (e.v !== 1 || !e.callId || !e.name) return tools;
   if (
     e.family !== "agent-draft" &&
+    e.family !== "document" &&
     e.family !== "web" &&
     e.family !== "memory" &&
     e.family !== "ask" &&
@@ -286,6 +299,26 @@ export function applyToolChunk(
       callIndex:
         existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
       status: result ? (agentDraftResultOk(result) ? "complete" : "error") : "running",
+      ...(result ? { result } : {}),
+      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "document") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(DocumentToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const result = parsed.phase === "result" ? projectDocumentResult(parsed) : undefined;
+    const next: DocumentToolActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: result ? (documentResultOk(result) ? "complete" : "error") : "running",
       ...(result ? { result } : {}),
       ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
     };
@@ -806,6 +839,13 @@ export function useMessageStream(
       };
       if (!acceptsRun(data.runId)) return;
       dispatch({ kind: "chunk", seq: data.seq, chunkKind: data.kind ?? "text", delta: data.delta });
+      if (data.kind === "tool") {
+        const activity = applyToolChunk([], data.delta, "document").at(0);
+        if (activity?.family === "document" && activity.result?.documentId)
+          void queryClient.invalidateQueries({
+            queryKey: ["documents", activity.result.documentId],
+          });
+      }
     });
 
     source.addEventListener("done", (raw) => {

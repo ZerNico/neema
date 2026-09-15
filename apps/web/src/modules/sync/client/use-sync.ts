@@ -127,6 +127,14 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           // A tool can create the draft after this chat’s loader snapshot.
           void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
           break;
+        case "document.changed":
+          void queryClient.invalidateQueries({ queryKey: ["documents", event.documentId] });
+          void queryClient.invalidateQueries({
+            queryKey: ["documents", "list", event.conversationId],
+          });
+          // Creation, rename and deletion change the loader's summary list.
+          void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
+          break;
         case "conversation.created":
         case "conversation.updated":
         case "conversation.deleted":

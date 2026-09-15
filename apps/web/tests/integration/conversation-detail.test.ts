@@ -5,7 +5,7 @@ import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, models } from "~/db/schema/index.ts";
+import { conversationDocuments, conversations, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -153,6 +153,49 @@ describe("loadConversationDetail", () => {
     const detail = await run(loadConversationDetail(userId, thread.conversationId));
 
     expect(detail.branchedFrom).toBeNull();
+  });
+
+  it("projects conversation document summaries without their source", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedThread(userId, "Document thread"));
+    const firstId = uuidv7();
+    const secondId = uuidv7();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.insert(conversationDocuments).values([
+          {
+            id: secondId,
+            conversationId: thread.conversationId,
+            title: "Second",
+            content: "PRIVATE SECOND SOURCE",
+            lastEditedBy: "model",
+          },
+          {
+            id: firstId,
+            conversationId: thread.conversationId,
+            title: "First",
+            content: "PRIVATE FIRST SOURCE",
+            lastEditedBy: "user",
+          },
+        ]),
+      ),
+    );
+
+    const detail = await run(loadConversationDetail(userId, thread.conversationId));
+
+    const expectedDocuments =
+      firstId.localeCompare(secondId) < 0
+        ? [
+            { id: firstId, title: "First", messageId: null },
+            { id: secondId, title: "Second", messageId: null },
+          ]
+        : [
+            { id: secondId, title: "Second", messageId: null },
+            { id: firstId, title: "First", messageId: null },
+          ];
+    expect(detail.documents).toEqual(expectedDocuments);
+    expect(JSON.stringify(detail)).not.toContain("PRIVATE FIRST SOURCE");
+    expect(JSON.stringify(detail)).not.toContain("PRIVATE SECOND SOURCE");
   });
 
   it("attaches generation activity to the assistant messages it belongs to", async () => {

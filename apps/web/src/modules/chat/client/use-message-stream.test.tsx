@@ -28,6 +28,32 @@ afterEach(() => {
 });
 
 describe("useMessageStream ask replay", () => {
+  it.each(["updated", "read", "conflict"] as const)(
+    "invalidates a document query when a streamed %s result identifies it",
+    (outcome) => {
+      const { source, invalidate } = renderStream();
+      const delta = JSON.stringify({
+        v: 1,
+        family: "document",
+        phase: "result",
+        callId: "document-1",
+        name:
+          outcome === "read"
+            ? "read_chat_document"
+            : outcome === "conflict"
+              ? "replace_document"
+              : "edit_document",
+        outcome,
+        documentId: "doc-1",
+        documentConversationId: "c1",
+        title: "Plan",
+        revision: 2,
+      });
+      act(() => source.emit("chunk", { seq: 1, kind: "tool", delta }));
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["documents", "doc-1"] });
+    },
+  );
+
   it("deduplicates question chunks, advances malformed cursors, and completes tool-only responses", () => {
     const { result, source, invalidate } = renderStream();
     const questions = [{ question: "What matters most?", options: [], multiSelect: false }];

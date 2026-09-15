@@ -36,6 +36,7 @@ import {
   conversationAgents,
   conversationAgentDrafts,
   conversationCompactionCheckpoints,
+  conversationDocuments,
   conversations,
   messageChunks,
   messageAttachments,
@@ -99,6 +100,8 @@ export interface ConversationDefaults {
   readonly mode?: "chat" | "work";
   /** Every draft this conversation owns, oldest first. Names are already public. */
   readonly agentDrafts?: ReadonlyArray<{ id: string; name: string }>;
+  /** Mutable chat documents stay out of history; the loader carries summaries only. */
+  readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
 }
 export type ResolveError =
   | AgentNotAvailable
@@ -341,6 +344,18 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationAgentDrafts.conversationId, conversationId))
     .orderBy(asc(conversationAgentDrafts.id))
     .pipe(Effect.orDie);
+  const documents = yield* tx
+    .select({
+      id: conversationDocuments.id,
+      title: conversationDocuments.title,
+      // The answer it belongs to, so the transcript can place a card whose
+      // creating tool row a rewind took with it. Never any content.
+      messageId: conversationDocuments.createdByMessageId,
+    })
+    .from(conversationDocuments)
+    .where(eq(conversationDocuments.conversationId, conversationId))
+    .orderBy(asc(conversationDocuments.id))
+    .pipe(Effect.orDie);
   const [conversation] = yield* tx
     .select({ mode: conversations.mode })
     .from(conversations)
@@ -349,6 +364,7 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
   return {
     agent: agent ? { agentId: agent.agentId } : null,
     agentDrafts: drafts.map((draft) => ({ id: draft.id, name: draft.settings.name })),
+    documents,
     mode: conversation?.mode ?? "chat",
   } satisfies ConversationDefaults;
 });
@@ -1897,6 +1913,14 @@ export class ChatRepo extends Context.Service<
                 yield* tx
                   .delete(messageToolCalls)
                   .where(eq(messageToolCalls.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                // This answer is being generated again, so what it produced goes
+                // with it. Messages that are deleted outright take their
+                // documents through the foreign key instead; retry keeps the row
+                // id, so the document has to be removed explicitly.
+                yield* tx
+                  .delete(conversationDocuments)
+                  .where(eq(conversationDocuments.createdByMessageId, input.messageId))
                   .pipe(Effect.orDie);
                 yield* tx
                   .delete(messageCompactionEvents)

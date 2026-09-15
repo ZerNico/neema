@@ -107,6 +107,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   return {
     conversation,
     agentDrafts: defaults.agentDrafts ?? [],
+    documents: defaults.documents ?? [],
     messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
     pendingChunks,
     toolCalls,

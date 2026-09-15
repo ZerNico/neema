@@ -13,6 +13,11 @@ export const SyncEvent = Schema.Union([
     conversationId: Schema.String,
     draftId: Schema.String,
   }),
+  Schema.Struct({
+    type: Schema.Literal("document.changed"),
+    conversationId: Schema.String,
+    documentId: Schema.String,
+  }),
   // No resource ids or titles: every client refetches only its authorized view.
   Schema.Struct({ type: Schema.Literal("resources.changed") }),
   // Frequent worker transitions affect knowledge status only, not access policy.

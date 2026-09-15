@@ -58,6 +58,8 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     /** See `ExternalOwner.deviceSessionId`; read from the session, never the body. */
     deviceSessionId?: string | undefined;
     timeZone?: string | undefined;
+    /** The document open in the panel; the model reads it first. */
+    openDocumentId?: string | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
   };
@@ -96,6 +98,7 @@ export class ChatService extends Context.Service<
         modelId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
       },
     ): Effect.Effect<
       { assistantMessageId: string },
@@ -136,6 +139,7 @@ export class ChatService extends Context.Service<
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
         skillIds?: ReadonlyArray<string> | undefined;
@@ -473,6 +477,7 @@ function makeChatService() {
         modelId: input.modelId,
         searchEnabled: turn.config.searchEnabled,
         timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
       });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -502,6 +507,7 @@ function makeChatService() {
         assistantMessageId: string;
         modelId: string;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
         deleteMessageIds: ReadonlyArray<string>;
         invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
         edit?: EditContent & {
@@ -588,6 +594,7 @@ function makeChatService() {
         modelId: input.modelId,
         searchEnabled: searchEnabled!,
         timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
       });
 
       return { assistantMessageId: input.assistantMessageId };
@@ -604,6 +611,7 @@ function makeChatService() {
         modelId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
       },
     ) {
       yield* repo.research?.reap() ?? Effect.void;
@@ -703,6 +711,7 @@ function makeChatService() {
         assistantMessageId: message.id,
         modelId,
         timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
         deleteMessageIds: after.map((m) => m.id),
         // From the retried answer onward: a summary that ends at this message
         // describes the response about to be thrown away. Rows after it are
@@ -809,6 +818,7 @@ function makeChatService() {
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
         skillIds?: ReadonlyArray<string> | undefined;
@@ -871,6 +881,7 @@ function makeChatService() {
           assistantMessageId: assistant.id,
           modelId: input.modelId,
           timeZone: input.timeZone,
+          openDocumentId: input.openDocumentId,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
           // From the edited user message onward — its text changes while the
           // row survives, so any summary covering it is stale.
@@ -947,6 +958,7 @@ function makeChatService() {
         modelId: input.modelId,
         searchEnabled: created.config.searchEnabled,
         timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
       });
 
       return { assistantMessageId: created.message.id };

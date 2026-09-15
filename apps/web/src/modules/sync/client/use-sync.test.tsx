@@ -71,6 +71,16 @@ describe("useSync", () => {
     ]);
   });
 
+  it("refreshes one document and both summary lists when a document changes", () => {
+    const { invalidate, source } = renderSync();
+    source.emit("sync", { type: "document.changed", conversationId: "c1", documentId: "doc1" });
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ["documents", "doc1"] }],
+      [{ queryKey: ["documents", "list", "c1"] }],
+      [{ queryKey: ["conversation", "c1"] }],
+    ]);
+  });
+
   it("coalesces indexing bursts into knowledge-only invalidation without starving refresh", async () => {
     vi.useFakeTimers();
     const { invalidate, source } = renderSync();

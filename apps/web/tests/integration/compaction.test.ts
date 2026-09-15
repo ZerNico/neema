@@ -64,6 +64,8 @@ let container: StartedPostgreSqlContainer;
 let modelId: string;
 /** A window small enough that a handful of long turns overflow it. */
 let smallModelId: string;
+/** Enough room for the full tool catalog before an active round expands it. */
+let toolModelId: string;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | AnalyticsRepo | StreamEngine | Db, unknown>;
 
 /**
@@ -278,6 +280,7 @@ beforeAll(async () => {
 
   modelId = uuidv7();
   smallModelId = uuidv7();
+  toolModelId = uuidv7();
   const providerId = uuidv7();
   await runtime.runPromise(
     Effect.gen(function* () {
@@ -295,6 +298,15 @@ beforeAll(async () => {
           displayName: "Small Window",
           type: "chat",
           contextLength: TINY_CONTEXT,
+          capabilities: { reasoning: false, tools: true, vision: false, files: false },
+        },
+        {
+          id: toolModelId,
+          providerId,
+          modelKey: "tool-small",
+          displayName: "Small Tool Window",
+          type: "chat",
+          contextLength: 8_000,
           capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
       ]);
@@ -1355,7 +1367,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           userId,
           conversationId: null,
-          modelId: smallModelId,
+          modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
         });
@@ -1363,7 +1375,7 @@ describe("compaction inside a generation", () => {
           userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,
-          modelId: smallModelId,
+          modelId: toolModelId,
           searchEnabled: true,
         });
 
@@ -1445,7 +1457,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           userId,
           conversationId: null,
-          modelId: smallModelId,
+          modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
         });
@@ -1453,7 +1465,7 @@ describe("compaction inside a generation", () => {
           userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,
-          modelId: smallModelId,
+          modelId: toolModelId,
           searchEnabled: true,
         });
         return {
@@ -1496,7 +1508,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           userId,
           conversationId: null,
-          modelId: smallModelId,
+          modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
         });
@@ -1504,7 +1516,7 @@ describe("compaction inside a generation", () => {
           userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,
-          modelId: smallModelId,
+          modelId: toolModelId,
           searchEnabled: true,
         });
         return {

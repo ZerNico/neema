@@ -350,6 +350,7 @@ describe("branching a conversation", () => {
           mode: "chat",
           agent: { agentId: null },
           agentDrafts: [],
+          documents: [],
         });
         expect(forked.messages.map((message) => message.content)).toEqual(["u", "a"]);
         yield* db.execute(
@@ -359,6 +360,7 @@ describe("branching a conversation", () => {
           mode: "chat",
           agent: { agentId: null },
           agentDrafts: [],
+          documents: [],
         });
       }),
     );

@@ -31,8 +31,10 @@ edit the wrong thing.
 - **source / citation**: a source is a numbered web page or document excerpt
   registered during a generation; a citation is a `[^N]` marker in model text that
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
-- **collection / document / version**: knowledge is collections of documents; each
-  document has immutable versions; search runs over the current version's chunks.
+- **collection / knowledge document / version**: knowledge is collections of documents;
+  each document has immutable versions; search runs over the current version's chunks.
+- **conversation document**: editable Markdown owned by one chat. It has one current row
+  and a revision token, never knowledge versions or transcript content.
 - **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
   permission. `ambient` skills are offered automatically; explicit ones are pinned.
 - **memory**: a saved user fact the model may reference or write. One save attempt
@@ -81,7 +83,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  desktop.
+  document, desktop.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -158,6 +160,8 @@ skipped one on purpose.
   import safety.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
+- `docs/internals/documents.md`: editable conversation Markdown, transcript boundaries,
+  exact-match patches, focus and client reconciliation.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
@@ -219,6 +223,11 @@ Differs from most Effect 3 material online.
 - `ctx.preliminary(result)` streams progress as `tool-result` parts marked
   `preliminary: true`. UI only; keep them out of the continuation transcript.
 - No-argument tools use `Tool.EmptyParams`, not `Schema.Struct({})`.
+- A tool whose handler explains malformed input must make **every** parameter
+  `Schema.optionalKey`. `streamText` decodes each part against the toolkit, so a
+  required key the model omits or renames fails the whole generation with
+  `Invalid output: Missing key` before any handler or alias table runs. A
+  permissive value type does not cover an absent key.
 - `capabilities.tools` means native tool calling and gates nothing; a model
   without it goes through the Hermes polyfill (`hermes-tools.ts`), which must stay
   inside the provider boundary and return encoded parts. Malformed JSON and fenced

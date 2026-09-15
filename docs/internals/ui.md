@@ -129,21 +129,24 @@ false`), so a page body is written against data already there. This includes loc
   remounting the composer or overwriting input typed before consumption; SSR has no browser
   history state. An edit link names the target, never copies its private instructions or installs
   it as the conversation’s agent.
-- An agent-draft activity opens the editor; it never owns the form or auto-opens the panel.
-  `AgentDraftOwner` mounts one controller per draft at conversation level, above the virtualiser,
-  so a widget scrolling out of view cannot take unsaved edits with it; widgets look their
-  controller up by draft id and a send flushes every one. A session publishes on every commit
-  because the controller is a fresh object each render, so only a visible change may set state.
-  The owner refreshes only its selected panel, so closing it or opening Sources cannot discard
-  edits or steal selection back. Loader,
-  matching live references and sync discover lazy creation; the same existence predicate enables
-  the controller and flush-before-action gate. A measured transcript recovery widget keeps the
-  canonical draft reachable after retry/edit removes its tool rows. Branch references stay
-  historical even if the branch later acquires its own draft.
-- Draft reconciliation accepts clean remote fields and disjoint edits, but differing edits to
-  one field require an inline choice. Flush before send/answer/retry/edit/branch/save, never Stop.
-  If flushing changes what the user reviewed, saving needs another click. Failed local edits
-  remain protected on navigation/unload. The manual agent editor similarly pins its dirty
+- Transcript activity for an editable conversation resource opens its detail; it never owns the
+  editor or auto-opens the panel. `AgentDraftOwner` and `DocumentOwner` mount one controller per
+  known id at conversation level, above the virtualiser, so a widget scrolling out of view, a
+  panel replacement or a removed tool row cannot take local edits with it. Widgets only look the
+  controller up by id. Owners refresh only the selected detail and publish only visible entry
+  changes, rather than letting every fresh controller object replace panel state.
+- Loader summaries, matching persisted rows, live activity and sync discover owned editors. The
+  same owned-id predicate enables the controller and flush-before-action gate. Transcript recovery
+  widgets keep canonical resources reachable after retry/edit removes their tool rows. Branch
+  references stay historical and inert even if the branch later acquires a resource of its own.
+- Agent-draft reconciliation accepts clean remote fields and disjoint edits, but differing edits
+  to one field require an inline choice. Conversation-document source uses whole-document CAS:
+  clean source adopts a remote revision, while dirty source shows **Keep mine** and **Take theirs**.
+  Document task ticks patch their own source line optimistically and serialize behind source saves.
+  A document panel is read-only while its assistant answer is generating. Flush every owned editor
+  before send, structured answer, retry, edit, branch or save, never Stop. A document belongs to its
+  creating answer, so rewinding that answer removes it; its rich card stays at the creating tool
+  call's text offset, never in a transcript footer. The manual agent editor similarly pins its dirty
   baseline rather than treating a background refetch as permission to overwrite newer settings.
 - Upload-queued composer sends dispatch the current draft and selections together. `Composer` keeps one
   effect-updated request ref, including `onSend`, so an upload can't pair fresh text with stale skills or

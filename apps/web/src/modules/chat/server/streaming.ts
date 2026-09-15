@@ -3,6 +3,16 @@ import { wakeOn } from "~/modules/sync/server/wakeup.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
+import { DocumentService } from "~/modules/documents/server/document-service.ts";
+import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
+import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
+import {
+  DocumentToolName,
+  documentFailureReason,
+  projectDocumentResult,
+  documentResultOk,
+  redactDocumentPart,
+} from "~/modules/documents/tool-schema.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
@@ -58,7 +68,7 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
@@ -199,6 +209,8 @@ export class StreamEngine extends Context.Service<
       /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
+      /** The document open in the panel, so it is the one the model reads first. */
+      openDocumentId?: string | undefined;
     }): Effect.Effect<void>;
     // Winds a running generation down early, keeping whatever it has already
     // produced. False when this instance is not the one running it — the same
@@ -236,6 +248,7 @@ export class StreamEngine extends Context.Service<
         skills: yield* SkillRepo,
         knowledge: yield* KnowledgeRepo,
       };
+      const documentService = yield* DocumentService;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
       const knowledgeSearch = yield* KnowledgeSearch;
@@ -320,6 +333,7 @@ export class StreamEngine extends Context.Service<
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
         abort: Deferred.Deferred<void>;
       }) {
         const fence = yield* GenerationFence;
@@ -578,17 +592,26 @@ export class StreamEngine extends Context.Service<
         let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
+          const writeGuard = (tx: DbTx) =>
+            research
+              ? lockResearchFence(tx, research.fence)
+              : fence
+                ? lockGeneration(tx, fence)
+                : Effect.interrupt;
           const authoring = yield* prepareAgentDraftTools({
             services: authoringServices,
             userId: input.userId,
             conversationId: input.conversationId,
             currentModelId: input.modelId,
-            writeGuard: (tx) =>
-              research
-                ? lockResearchFence(tx, research.fence)
-                : fence
-                  ? lockGeneration(tx, fence)
-                  : Effect.interrupt,
+            writeGuard,
+          });
+          const documents = yield* prepareDocumentTools({
+            service: documentService,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            messageId: input.messageId,
+            openDocumentId: input.openDocumentId,
+            writeGuard,
           });
           if (research) {
             // Research reads the same frozen configuration; its knowledge
@@ -766,6 +789,7 @@ export class StreamEngine extends Context.Service<
           const { memoryTools } = conversationContext;
           const commonGroups = [
             authoring.group,
+            documents.group,
             ...(desktopTools ? [desktopTools] : []),
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
@@ -898,6 +922,7 @@ export class StreamEngine extends Context.Service<
           // after history keeps the cacheable prefix intact when they do.
           const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
             ...authoring.messages(),
+            ...documents.messages(),
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             runtimeContext,
@@ -914,6 +939,7 @@ export class StreamEngine extends Context.Service<
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
             { role: "system" as const, content: AGENT_APP_POLICY },
+            { role: "system" as const, content: DOCUMENT_APP_POLICY },
             ...(knowledgeSession
               ? [{ role: "system" as const, content: KNOWLEDGE_SYSTEM_HINT }]
               : []),
@@ -1215,6 +1241,7 @@ export class StreamEngine extends Context.Service<
           let questionPresented = false;
           for (let turn = 0; turn <= maxToolRounds; turn++) {
             yield* authoring.refresh();
+            yield* documents.refresh();
             // Direct edits can land between calls. Rebuild before budgeting, not
             // just after the previous batch, so the next call sees current data.
             transcript = buildTranscript();
@@ -1361,7 +1388,7 @@ export class StreamEngine extends Context.Service<
                                           }
                                         : part.encodedResult,
                                   }
-                                : redactAgentDraftPart(part),
+                                : redactDocumentPart(redactAgentDraftPart(part)),
                         );
                       }
                       switch (part.type) {
@@ -1423,21 +1450,23 @@ export class StreamEngine extends Context.Service<
                           const args = part.params as Record<string, unknown>;
                           const family = Schema.is(AgentDraftToolName)(part.name)
                             ? "agent-draft"
-                            : Schema.is(DesktopToolName)(part.name)
-                              ? "desktop"
-                              : part.name === "save_memory"
-                                ? "memory"
-                                : part.name === "ask_user"
-                                  ? "ask"
-                                  : part.name === "update_plan"
-                                    ? "plan"
-                                    : Schema.is(SkillToolName)(part.name)
-                                      ? "skill"
-                                      : Schema.is(KnowledgeToolName)(part.name)
-                                        ? "knowledge"
-                                        : part.name === "web_search" || part.name === "read_url"
-                                          ? "web"
-                                          : null;
+                            : Schema.is(DocumentToolName)(part.name)
+                              ? "document"
+                              : Schema.is(DesktopToolName)(part.name)
+                                ? "desktop"
+                                : part.name === "save_memory"
+                                  ? "memory"
+                                  : part.name === "ask_user"
+                                    ? "ask"
+                                    : part.name === "update_plan"
+                                      ? "plan"
+                                      : Schema.is(SkillToolName)(part.name)
+                                        ? "skill"
+                                        : Schema.is(KnowledgeToolName)(part.name)
+                                          ? "knowledge"
+                                          : part.name === "web_search" || part.name === "read_url"
+                                            ? "web"
+                                            : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1458,7 +1487,10 @@ export class StreamEngine extends Context.Service<
                             // of proposed content. Chat activity stores only that
                             // the tool ran, so deleting memory actually removes it.
                             arguments:
-                              family === "memory" || family === "skill" || family === "agent-draft"
+                              family === "memory" ||
+                              family === "skill" ||
+                              family === "agent-draft" ||
+                              family === "document"
                                 ? {}
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
@@ -1534,6 +1566,19 @@ export class StreamEngine extends Context.Service<
                               phase: "start",
                               callId: rowId,
                               name: part.name as AgentDraftToolName,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "document") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as DocumentToolName,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -1625,6 +1670,33 @@ export class StreamEngine extends Context.Service<
                             yield* pushToolChunk({
                               v: 1,
                               family: "agent-draft",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                              ...(reason ? { reason } : {}),
+                            });
+                            return;
+                          }
+                          if (Schema.is(DocumentToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = projectDocumentResult(
+                              part.isFailure ? null : part.result,
+                            );
+                            const reason = part.isFailure
+                              ? "The document tool failed before it could respond."
+                              : documentFailureReason(part.result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: documentResultOk(activity) ? "complete" : "error",
+                              ...(reason
+                                ? { error: { code: "DocumentNotUpdated", message: reason } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "document",
                               phase: "result",
                               callId: rowId,
                               name: part.name,
@@ -2178,6 +2250,7 @@ export class StreamEngine extends Context.Service<
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
       }) {
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
@@ -2377,6 +2450,7 @@ export class StreamEngine extends Context.Service<
     }),
   ).pipe(
     Layer.provideMerge(AgentDraftService.layer),
+    Layer.provideMerge(DocumentService.layer),
     Layer.provideMerge(AgentRepo.layer),
     Layer.provideMerge(KnowledgeRepo.layer),
     Layer.provideMerge(SkillReader.layer),

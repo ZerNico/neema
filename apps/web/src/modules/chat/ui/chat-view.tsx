@@ -1,5 +1,15 @@
 import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
+import {
+  DocumentOwner,
+  type DocumentOwnerHandle,
+} from "~/modules/documents/ui/document-owner.tsx";
+import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 import { AgentDraftWidget } from "./agent-draft-activity-block.tsx";
+import {
+  DocumentToolName,
+  documentResultOk,
+  projectDocumentResult,
+} from "~/modules/documents/tool-schema.ts";
 import {
   AgentDraftToolName,
   projectAgentDraftResult,
@@ -106,6 +116,21 @@ export function toActivity(row: {
       callIndex: row.callIndex,
       status:
         row.status === "running" ? "running" : agentDraftResultOk(result) ? "complete" : "error",
+      ...(row.status === "running" ? {} : { result }),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+  if (Schema.is(DocumentToolName)(row.toolName)) {
+    const result = projectDocumentResult(row.result);
+    return {
+      family: "document",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status:
+        row.status === "running" ? "running" : documentResultOk(result) ? "complete" : "error",
       ...(row.status === "running" ? {} : { result }),
       ...(row.error ? { error: row.error.message } : {}),
     };
@@ -282,8 +307,74 @@ function toCompactionActivity(row: {
   };
 }
 
+/**
+ * Puts back a document whose `create_document` row a rewind deleted. It goes at
+ * the end of the answer that made it, so a document is always part of the
+ * conversation rather than a widget hanging under the whole transcript.
+ */
+function placeStrandedDocuments({
+  messages,
+  conversationId,
+  documentIds,
+  shown,
+  summaries,
+}: {
+  messages: DisplayMessage[];
+  conversationId: string;
+  documentIds: ReadonlyArray<string>;
+  shown: ReadonlySet<string>;
+  summaries: ReadonlyArray<{ id: string; title: string; messageId?: string | null }>;
+}): DisplayMessage[] {
+  const stranded = documentIds.filter((documentId) => !shown.has(documentId));
+  if (stranded.length === 0) return messages;
+  const summary = new Map(summaries.map((document) => [document.id, document]));
+  const answers = messages.filter((message) => message.role === "assistant");
+  const fallback = answers.at(-1)?.id;
+  const byMessage = new Map<string, string[]>();
+  for (const documentId of stranded) {
+    const anchor = summary.get(documentId)?.messageId;
+    const host = (anchor && answers.some((message) => message.id === anchor) ? anchor : fallback);
+    if (!host) continue;
+    const list = byMessage.get(host);
+    if (list) list.push(documentId);
+    else byMessage.set(host, [documentId]);
+  }
+  if (byMessage.size === 0) return messages;
+  return messages.map((message) => {
+    const ids = byMessage.get(message.id);
+    if (!ids) return message;
+    return {
+      ...message,
+      toolActivities: [
+        ...message.toolActivities,
+        ...ids.map(
+          (documentId, index): ToolActivity => ({
+            family: "document",
+            callId: `document:${documentId}`,
+            name: "create_document",
+            status: "complete",
+            turnIndex: Number.MAX_SAFE_INTEGER,
+            callIndex: index,
+            textOffset: message.content.length,
+            result: {
+              outcome: "created",
+              documentId,
+              documentConversationId: conversationId,
+              ...(summary.get(documentId)?.title
+                ? { title: summary.get(documentId)!.title }
+                : {}),
+            },
+          }),
+        ),
+      ],
+    };
+  });
+}
+
 export function ChatView({ conversationId }: { conversationId: string }) {
   const agentDraft = useRef<AgentDraftHandle>(null);
+  const documents = useRef<DocumentOwnerHandle>(null);
+  const selectedPanelId = useDetailPanelSelectedId();
   const composer = useRef<ComposerHandle>(null);
   const isMobile = useIsMobile();
   // Opening a chat should leave the caret ready to type. Not on a phone: that
@@ -416,6 +507,18 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (activity.family === "agent-draft" && activity.result) mine(activity.result);
     return ids;
   }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
+  const discoveredDocuments = useMemo(() => {
+    const ids = new Set((data.documents ?? []).map((document) => document.id));
+    const mine = (result: { documentId?: string; documentConversationId?: string }) => {
+      if (result.documentId && result.documentConversationId === conversationId)
+        ids.add(result.documentId);
+    };
+    for (const row of data.toolCalls)
+      if (Schema.is(DocumentToolName)(row.toolName)) mine(projectDocumentResult(row.result));
+    for (const activity of stream.tools)
+      if (activity.family === "document" && activity.result) mine(activity.result);
+    return ids;
+  }, [conversationId, data.documents, data.toolCalls, stream.tools]);
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
     mutationFn: (patch: { permissionLevel?: PermissionLevel; networkLevel?: NetworkLevel }) =>
@@ -457,6 +560,44 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     [],
   );
   const hasAgentDraft = draftIds.length > 0;
+  // Unlike a draft, a document does not outlive the answer that created it: a
+  // rewind deletes it, so the loader summary plus live results are the whole
+  // truth and there is nothing to retain across a retry.
+  const [forgottenDocuments, setForgottenDocuments] = useState<{
+    conversationId: string;
+    ids: ReadonlySet<string>;
+  }>({ conversationId, ids: new Set() });
+  const scopedForgottenDocuments =
+    forgottenDocuments.conversationId === conversationId
+      ? forgottenDocuments.ids
+      : new Set<string>();
+  const documentIds = useMemo(
+    () =>
+      [...discoveredDocuments]
+        .filter((documentId) => !scopedForgottenDocuments.has(documentId))
+        .sort(),
+    [discoveredDocuments, scopedForgottenDocuments],
+  );
+  const forgetDocument = useCallback(
+    (documentId: string) =>
+      setForgottenDocuments((current) => {
+        const ids =
+          current.conversationId === conversationId ? new Set(current.ids) : new Set<string>();
+        ids.add(documentId);
+        return { conversationId, ids };
+      }),
+    [conversationId],
+  );
+  const hasDocument = documentIds.length > 0;
+  const openDocumentId =
+    selectedPanelId?.startsWith("document:") &&
+    documentIds.includes(selectedPanelId.slice("document:".length))
+      ? selectedPanelId.slice("document:".length)
+      : undefined;
+  const openDocument = useRef<string | undefined>(undefined);
+  openDocument.current = openDocumentId;
+  const documentFocus = () =>
+    openDocument.current ? { openDocumentId: openDocument.current } : {};
 
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
@@ -499,6 +640,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       throw new Error("agent draft has unresolved changes");
     }
   };
+  const flushDocuments = async () => {
+    if (hasDocument && !(await documents.current?.flush())) {
+      toast.error("Resolve the changes in your document before continuing.");
+      throw new Error("document has unresolved changes");
+    }
+  };
   const checkWorkReady = () => {
     if (workReadOnly) {
       toast.error("Wait for the folder check before continuing this work chat.");
@@ -508,6 +655,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const beforeGeneration = async () => {
     checkWorkReady();
     await flushAgentDraft();
+    await flushDocuments();
     closeEdit();
   };
   const sendMutation = useMutation({
@@ -526,6 +674,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           searchEnabled,
           ...(await attemptFields()),
           timeZone: browserTimeZone(),
+          ...documentFocus(),
           attachmentIds: input.attachmentIds,
           ...(input.generationMode ? { generationMode: input.generationMode } : {}),
           skillIds: [...(input.skillIds ?? [])],
@@ -574,6 +723,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           searchEnabled,
           ...(await attemptFields()),
           timeZone: browserTimeZone(),
+          ...documentFocus(),
         },
       }),
     onError: () => toast.error("Could not send your answers."),
@@ -594,6 +744,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           ...(await attemptFields()),
           timeZone: browserTimeZone(),
+          ...documentFocus(),
         },
       }),
     onSuccess: async (_result, input) => {
@@ -611,6 +762,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const branchMutation = useMutation({
     onMutate: async () => {
       await flushAgentDraft();
+      await flushDocuments();
       closeEdit();
     },
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
@@ -634,6 +786,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     onMutate: async () => {
       checkWorkReady();
       await flushAgentDraft();
+      await flushDocuments();
     },
     mutationFn: async (
       input: {
@@ -654,6 +807,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           ...(await attemptFields()),
           timeZone: browserTimeZone(),
+          ...documentFocus(),
         },
       }),
     onSuccess: async (_result, input) => {
@@ -723,13 +877,34 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // oxlint-enable react-hooks/exhaustive-deps
   const tailMessageId = data.messages.at(-1)?.id;
 
+  // A rewind takes the documents those answers created with it, so the dialog
+  // names them: a checklist someone has been ticking is not a silent casualty.
+  const documentLoss = useCallback(
+    (fromMessageId: string, inclusive: boolean) => {
+      const index = data.messages.findIndex((message) => message.id === fromMessageId);
+      if (index < 0) return "";
+      const removed = new Set(
+        data.messages.slice(inclusive ? index : index + 1).map((message) => message.id),
+      );
+      const titles = (data.documents ?? [])
+        .filter((document) => document.messageId && removed.has(document.messageId))
+        .map((document) => document.title);
+      if (titles.length === 0) return "";
+      return titles.length === 1
+        ? ` The document “${titles[0]}” will also be deleted.`
+        : ` ${titles.length} documents will also be deleted.`;
+    },
+    [data.documents, data.messages],
+  );
+
   const retry = useCallback(
     async (messageId: string, pickedModelId?: string) => {
+      const losing = documentLoss(messageId, true);
       if (
-        messageId !== lastAssistantId &&
+        (messageId !== lastAssistantId || losing) &&
         !(await confirm({
           title: "Retry this response?",
-          description: "All messages after it will be removed.",
+          description: `All messages after it will be removed.${losing}`,
           confirmLabel: "Retry",
         }))
       ) {
@@ -739,7 +914,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         pickedModelId === undefined ? { messageId } : { messageId, modelId: pickedModelId },
       );
     },
-    [confirm, lastAssistantId, mutateRetry],
+    [confirm, documentLoss, lastAssistantId, mutateRetry],
   );
   const branchAt = useCallback((messageId: string) => mutateBranch(messageId), [mutateBranch]);
 
@@ -826,16 +1001,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       const responseIndex = after.findIndex((message) => message.role === "assistant");
       const removesLaterTurns =
         responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
+      const losing = documentLoss(messageId, false);
       return (
-        !removesLaterTurns ||
+        (!removesLaterTurns && !losing) ||
         (await confirm({
           title: "Edit this message?",
-          description: "All messages after its response will be removed.",
+          description: `All messages after its response will be removed.${losing}`,
           confirmLabel: "Save and regenerate",
         }))
       );
     },
-    [data.messages, confirm],
+    [confirm, data.messages, documentLoss],
   );
 
   const saveQuestionEdit = useCallback(
@@ -1215,10 +1391,39 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     ),
   );
   const orphaned = draftIds.filter((draftId) => !shown.has(draftId));
+  // A document card lives on the create_document call that made it, at that
+  // call's place in the answer. Only a document whose creating row a rewind
+  // removed needs placing, and its own answer is where it belongs.
+  const shownDocuments = new Set(
+    display.flatMap((message) =>
+      message.toolActivities.flatMap((activity) =>
+        activity.family === "document" &&
+        activity.name === "create_document" &&
+        activity.result?.documentId &&
+        activity.result.documentConversationId === conversationId
+          ? [activity.result.documentId]
+          : [],
+      ),
+    ),
+  );
+  const withDocuments = placeStrandedDocuments({
+    messages: display,
+    conversationId,
+    documentIds,
+    shown: shownDocuments,
+    summaries: data.documents ?? [],
+  });
 
   return (
-    <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
-      <div className="flex h-full flex-col">
+    <DocumentOwner
+      documentIds={documentIds}
+      goneIds={scopedForgottenDocuments}
+      locked={generating}
+      onGone={forgetDocument}
+      ref={documents}
+    >
+      <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
+        <div className="flex h-full flex-col">
         {data.branchedFrom ? (
           // Outside the scroller, on the message column's geometry: lineage is a
           // property of the conversation, not of its first message.
@@ -1243,7 +1448,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               resolves against. */}
           <LocalFileConversationProvider conversationId={conversationId}>
             <VirtualMessageList
-              messages={display}
+              messages={withDocuments}
               followKey={stream.lastSeq}
               footer={
                 orphaned.length ? (
@@ -1316,8 +1521,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             />
           </div>
         </div>
-      </div>
-    </AgentDraftOwner>
+        </div>
+      </AgentDraftOwner>
+    </DocumentOwner>
   );
 }
 

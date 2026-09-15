@@ -11,6 +11,8 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
+/** The document open in the panel when the message was sent; the model reads it first. */
+const OpenDocumentId = Schema.optionalKey(ResourceId);
 export const desktopSubmissionFields = {
   desktopFolder: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
   desktopCommands: Schema.optionalKey(Schema.Boolean),
@@ -25,6 +27,7 @@ export type DesktopSubmission = {
 const generationFields = {
   generationMode: Schema.optionalKey(GenerationMode),
   timeZone: TimeZone,
+  openDocumentId: OpenDocumentId,
   modelId: Schema.String,
   content: MessageContent,
   searchEnabled: Schema.Boolean,
@@ -61,6 +64,7 @@ export const AnswerQuestionInput = Schema.Struct({
   searchEnabled: Schema.Boolean,
   ...desktopSubmissionFields,
   timeZone: TimeZone,
+  openDocumentId: OpenDocumentId,
 });
 
 export const ConversationIdInput = Schema.Struct({
@@ -96,6 +100,7 @@ export const RetryMessageInput = Schema.Struct({
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
   timeZone: TimeZone,
+  openDocumentId: OpenDocumentId,
 });
 
 // Forks the conversation at this assistant message into a new one.
@@ -118,6 +123,7 @@ export const EditMessageInput = Schema.Union([
     searchEnabled: Schema.Boolean,
     ...desktopSubmissionFields,
     timeZone: TimeZone,
+    openDocumentId: OpenDocumentId,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,
     content: Schema.optionalKey(Schema.Never),

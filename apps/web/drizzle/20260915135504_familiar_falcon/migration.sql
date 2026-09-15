@@ -1,0 +1,2 @@
+ALTER TABLE "conversation_documents" ADD COLUMN "created_by_message_id" text;--> statement-breakpoint
+ALTER TABLE "conversation_documents" ADD CONSTRAINT "conversation_documents_created_by_message_id_messages_id_fkey" FOREIGN KEY ("created_by_message_id") REFERENCES "messages"("id") ON DELETE CASCADE;

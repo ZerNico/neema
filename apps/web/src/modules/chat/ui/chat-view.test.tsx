@@ -31,6 +31,13 @@ import {
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+import type { ConversationDocument } from "~/modules/documents/schema.ts";
+import {
+  getDocument,
+  saveDocument,
+  toggleDocumentTask,
+} from "~/modules/documents/server/document-functions.ts";
+import { DocumentActivityBlock } from "./document-activity-block.tsx";
 
 const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -49,6 +56,25 @@ vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
   patchAgentDraft: vi.fn(),
   saveAgentDraft: vi.fn(),
   reloadAgentDraft: vi.fn(),
+}));
+vi.mock("~/modules/documents/server/document-functions.ts", () => ({
+  getDocument: vi.fn(),
+  saveDocument: vi.fn(),
+  toggleDocumentTask: vi.fn(),
+  listDocuments: vi.fn(),
+}));
+vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
+  default: ({
+    value,
+    onChange,
+    label,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    label: string;
+  }) => (
+    <textarea aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />
+  ),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -128,6 +154,8 @@ vi.mock("./virtual-message-list.tsx", () => ({
               />
             ) : activity.family === "agent-draft" ? (
               <AgentDraftActivityBlock key={activity.callId} activity={activity} />
+            ) : activity.family === "document" ? (
+              <DocumentActivityBlock key={activity.callId} activity={activity} />
             ) : null,
           )}
           {(message.compactionActivities as ReadonlyArray<{ summary?: string }> | undefined)?.map(
@@ -356,6 +384,7 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     available: boolean;
   } | null,
   agentDrafts: [] as ReadonlyArray<{ id: string; name: string }>,
+  documents: [] as ReadonlyArray<{ id: string; title: string }>,
   collectionIds: [] as string[],
   generations: [] as Array<{
     messageId: string;
@@ -1515,6 +1544,231 @@ describe("ChatView agent drafts", () => {
     await act(async () => blocked.release());
     await waitFor(() => expect(current.settings.name).toBe("Still persisting"));
   });
+});
+
+const documentReference = (
+  conversationId = "c1",
+  documentId = "document-1",
+): Payload["toolCalls"][number] => ({
+  id: "document-call",
+  messageId: "m-answer",
+  toolName: "create_document",
+  arguments: {},
+  result: {
+    outcome: "created",
+    documentId,
+    documentConversationId: conversationId,
+    title: "Trip plan",
+    revision: 1,
+  },
+  status: "complete",
+  turnIndex: 0,
+  callIndex: 0,
+  error: null,
+});
+
+describe("ChatView documents", () => {
+  let current: ConversationDocument;
+  beforeEach(() => {
+    for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
+      rpc.mockReset();
+    current = {
+      id: "document-1",
+      conversationId: "c1",
+      title: "Trip plan",
+      content: "Original source",
+      revision: 1,
+      lastEditedBy: "model",
+      createdAt: BASE.toISOString(),
+      updatedAt: BASE.toISOString(),
+    };
+    vi.mocked(getDocument)
+      .mockReset()
+      .mockImplementation(async ({ data }) =>
+        data.documentId === "document-2"
+          ? { ...current, id: "document-2", title: "Meeting notes" }
+          : current,
+      );
+    vi.mocked(saveDocument)
+      .mockReset()
+      .mockImplementation(async ({ data }) => {
+        if (data.expectedRevision !== current.revision)
+          return { outcome: "conflict" as const, document: current };
+        current = {
+          ...current,
+          content: data.content,
+          revision: current.revision + 1,
+          lastEditedBy: "user",
+        };
+        return { outcome: "updated" as const, document: current };
+      });
+    vi.mocked(toggleDocumentTask).mockReset().mockRejectedValue(new Error("not used"));
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  });
+  afterEach(() => {
+    for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
+      rpc.mockReset();
+  });
+
+  it("discovers a live tool-created document without a loader summary or automatic opening", async () => {
+    const { client, container } = renderView();
+    expect(getDocument).not.toHaveBeenCalled();
+    liveDraft.tools = [toActivity(documentReference())];
+    act(() =>
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, {
+          messages: [
+            message("m-user", "user", "u1"),
+            { ...message("m-answer", "assistant", ""), status: "streaming" },
+          ],
+        }),
+      ),
+    );
+    const widget = await screen.findByRole("button", { name: "Open document: Trip plan" });
+    expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
+    expect(screen.queryByRole("textbox", { name: "Document source" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
+    fireEvent.click(widget);
+    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
+    expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
+      "Original source",
+    );
+    expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-1" } });
+  });
+
+  it("places a legacy loader summary in the final answer, never below the transcript", async () => {
+    const { container } = renderView(null, {
+      toolCalls: [documentReference()],
+      documents: [{ id: "document-2", title: "Meeting notes" }],
+    });
+    const transcript = await screen.findByRole("button", { name: "Open document: Trip plan" });
+    const legacy = await screen.findByRole("button", { name: "Open document: Meeting notes" });
+    const answer = container.querySelector('[data-message-id="m-answer"]')!;
+    expect(answer).toContainElement(transcript);
+    expect(answer).toContainElement(legacy);
+    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
+    expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-1" } });
+    expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-2" } });
+  });
+
+  it("drops the card once a retry has deleted the document that answer created", async () => {
+    renderView(null, { toolCalls: [documentReference()] });
+    expect(await screen.findByRole("button", { name: "Open document: Trip plan" })).toBeVisible();
+    retryMock.mockResolvedValueOnce({} as never);
+    // Retrying the creating answer deletes its document server-side, so the
+    // row the card was reading is gone.
+    vi.mocked(getDocument).mockResolvedValue(null);
+    conversationMock.mockResolvedValueOnce(payload(null) as never);
+    fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+    await waitFor(() => expect(retryMock).toHaveBeenCalled());
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Open document: Trip plan" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
+  });
+
+  it("keeps branch-copied references inert beside documents owned by this conversation", async () => {
+    const { client, container } = renderView(
+      { conversationId: "original", title: "Original" },
+      { toolCalls: [documentReference("original", "other-document")] },
+    );
+    expect(screen.getByText("From another chat")).toBeVisible();
+    expect(getDocument).not.toHaveBeenCalled();
+    act(() =>
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, {
+          toolCalls: [documentReference("original", "other-document")],
+          documents: [{ id: "document-1", title: "Trip plan" }],
+        }),
+      ),
+    );
+    const widget = await screen.findByRole("button", { name: "Open document: Trip plan" });
+    expect(screen.getAllByRole("button", { name: /Open document/ })).toHaveLength(1);
+    expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
+    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
+    expect(screen.getByText("From another chat")).toBeVisible();
+    expect(getDocument).not.toHaveBeenCalledWith({ data: { documentId: "other-document" } });
+  });
+
+  it.each(["send", "retry", "branch", "edit", "answer", "answer edit"] as const)(
+    "flushes local source before %s reaches its RPC and focuses the open document",
+    async (action) => {
+      const start =
+        action === "answer edit"
+          ? resolvedPayload()
+          : payload(null, action === "answer" ? { toolCalls: [askRow] } : {});
+      const withDocument = {
+        ...start,
+        documents: [{ id: "document-1", title: "Trip plan" }],
+      };
+      renderView(null, withDocument);
+      conversationMock.mockResolvedValue(withDocument as never);
+      sendMock.mockResolvedValueOnce({} as never);
+      retryMock.mockResolvedValueOnce({} as never);
+      branchMock.mockResolvedValueOnce({ conversationId: "branch" } as never);
+      editMock.mockResolvedValueOnce({} as never);
+      answerMock.mockResolvedValueOnce({} as never);
+      fireEvent.click(await screen.findByRole("button", { name: "Open document: Trip plan" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Source" }));
+      const blocked = draftWriteGate();
+      vi.mocked(saveDocument).mockImplementationOnce(async ({ data }) => {
+        await blocked.promise;
+        current = {
+          ...current,
+          content: data.content,
+          revision: 2,
+          lastEditedBy: "user",
+        };
+        return { outcome: "updated", document: current };
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Document source" }), {
+        target: { value: "Reviewed source" },
+      });
+      const rpc =
+        action === "send"
+          ? sendMock
+          : action === "retry"
+            ? retryMock
+            : action === "branch"
+              ? branchMock
+              : action === "answer"
+                ? answerMock
+                : editMock;
+      if (action === "edit") fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
+      if (action === "answer edit")
+        fireEvent.click(screen.getByRole("button", { name: "Edit answers" }));
+      const label = {
+        send: "Send test message",
+        retry: "Retry m-answer",
+        branch: "Branch off m-answer",
+        edit: "Save message edit",
+        answer: "Skip and continue",
+        "answer edit": "Save answers",
+      }[action];
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(saveDocument).toHaveBeenCalledTimes(1));
+      expect(rpc).not.toHaveBeenCalled();
+      await act(async () => blocked.release());
+      await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+      expect(current.content).toBe("Reviewed source");
+      if (action !== "branch")
+        expect(rpc).toHaveBeenCalledWith({
+          data: expect.objectContaining({ openDocumentId: "document-1" }),
+        });
+    },
+  );
 });
 
 describe("ChatView branching", () => {

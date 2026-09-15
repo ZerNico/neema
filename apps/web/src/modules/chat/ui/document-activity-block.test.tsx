@@ -1,0 +1,73 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import type { DocumentToolActivity } from "../client/use-message-stream.ts";
+import { DocumentActivityBlock, documentActivityLabel } from "./document-activity-block.tsx";
+
+const activity = (overrides: Partial<DocumentToolActivity> = {}): DocumentToolActivity => ({
+  family: "document",
+  name: "create_document",
+  callId: "call-1",
+  turnIndex: 0,
+  callIndex: 0,
+  status: "complete",
+  result: {
+    outcome: "created",
+    documentId: "document-1",
+    documentConversationId: "original-chat",
+    title: "Trip plan",
+    revision: 1,
+  },
+  ...overrides,
+});
+
+describe("document activity", () => {
+  it("renders a branch-copied document reference as inert", () => {
+    render(<DocumentActivityBlock activity={activity()} />);
+    expect(screen.getByText("Trip plan")).toBeVisible();
+    expect(screen.getByText("From another chat")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Open document/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed patch compact instead of duplicating the creation card", () => {
+    render(
+      <DocumentActivityBlock
+        activity={activity({
+          status: "error",
+          name: "edit_document",
+          error: "Use a larger anchor.",
+          result: {
+            outcome: "ambiguous",
+            documentId: "document-1",
+            documentConversationId: "original-chat",
+            title: "Trip plan",
+            revision: 2,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Document not updated: Use a larger anchor.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Open document/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps non-reference and running outcomes as compact activity labels", () => {
+    expect(
+      documentActivityLabel({
+        family: "document",
+        name: "edit_document",
+        callId: "running",
+        turnIndex: 0,
+        callIndex: 0,
+        status: "running",
+      }),
+    ).toBe("Updating document…");
+    expect(
+      documentActivityLabel(
+        activity({
+          status: "error",
+          name: "edit_document",
+          result: { outcome: "no_match", title: "Trip plan" },
+        }),
+      ),
+    ).toBe("Document not updated");
+  });
+});

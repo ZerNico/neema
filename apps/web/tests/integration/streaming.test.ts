@@ -34,6 +34,7 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -75,6 +76,7 @@ let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
   | AgentRepo
   | AgentDraftService
+  | DocumentService
   | ChatRepo
   | ChatService
   | StreamEngine
@@ -1177,6 +1179,360 @@ describe("conversational agent authoring", () => {
         code: "AgentDraftNotUpdated",
         message: "That agent is not available to edit.",
       });
+    } finally {
+      authoringScript = null;
+    }
+  });
+});
+
+describe("conversation documents", () => {
+  const CHECKLIST = "# Release\n- [ ] write notes\n- [ ] tag build\n- [ ] ship";
+  const ordinaryChat = Effect.gen(function* () {
+    const seed = yield* setupConversation;
+    const conversation = yield* (yield* ChatRepo).createConversation({
+      userId: seed.userId,
+      modelId: textModelId,
+    });
+    return { ...seed, conversation };
+  });
+  const reply = () =>
+    Stream.make(
+      AiResponse.makePart("text-delta", { id: "t", delta: "The checklist is ready." }),
+      authoringFinish(),
+    );
+  const settle = (id: string) =>
+    runtime.runPromise(
+      Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(id, 0))),
+    );
+  const send = (seed: Effect.Success<typeof ordinaryChat>, openDocumentId?: string) =>
+    runtime.runPromise(
+      Effect.flatMap(ChatService, (service) =>
+        service.sendMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          modelId: textModelId,
+          content: "Make me a release checklist.",
+          searchEnabled: false,
+          attachmentIds: [],
+          openDocumentId,
+        }),
+      ),
+    );
+  const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
+    runtime.runPromise(
+      Effect.flatMap(DocumentService, (service) => service.list(seed.userId, seed.conversation.id)),
+    );
+  // The tool-role messages of a prompt: what the continuation transcript feeds
+  // back, as opposed to the trailing data, which carries the document on purpose.
+  const toolMessages = (input: GatewayInput) =>
+    JSON.stringify(input.prompt.content.filter((message) => message.role === "tool"));
+  const trailing = (input: GatewayInput) => {
+    const message = [...input.prompt.content]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.role === "assistant" &&
+          JSON.stringify(candidate.content).includes("Application-provided documents"),
+      );
+    if (!message) return null;
+    const text = (message.content as ReadonlyArray<{ text?: string }>)
+      .map((part) => part.text ?? "")
+      .join("");
+    return JSON.parse(text.split("\n").slice(1).join("\n")) as {
+      focused: {
+        id: string;
+        title: string;
+        revision: number;
+        lastEditedBy: string;
+        editedSinceYourLastWrite: boolean;
+        content: string;
+      } | null;
+      others: ReadonlyArray<{ id: string; title: string; chars: number }>;
+    };
+  };
+
+  it.each([false, true])(
+    "creates and patches a document without content in the transcript (Hermes: %s)",
+    async (hermes) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const prompts: GatewayInput[] = [];
+      authoringScript = (input) => {
+        prompts.push(input);
+        if (prompts.length === 1)
+          return authoringTool(
+            input,
+            "create_document",
+            { title: "Release checklist", content: CHECKLIST },
+            hermes,
+          );
+        if (prompts.length === 2)
+          return authoringTool(
+            input,
+            "edit_document",
+            { old: "- [ ] ship", new: "- [ ] ship\n- [ ] announce", expectedRevision: 1 },
+            hermes,
+          );
+        return reply();
+      };
+      try {
+        const sent = await send(seed);
+        await settle(sent.assistantMessageId);
+        expect(prompts).toHaveLength(3);
+        // Before any document exists the long policy stays out of the prompt.
+        expect(JSON.stringify(prompts[0]!.prompt)).not.toContain("DATA TO EDIT");
+        expect(trailing(prompts[0]!)).toBeNull();
+        expect(trailing(prompts[1]!)).toMatchObject({
+          focused: { title: "Release checklist", revision: 1, content: CHECKLIST },
+          others: [],
+        });
+        expect(trailing(prompts[2]!)!.focused).toMatchObject({
+          revision: 2,
+          lastEditedBy: "model",
+          editedSinceYourLastWrite: false,
+          content: `${CHECKLIST}\n- [ ] announce`,
+        });
+        // The continuation carries pointers, never the document.
+        expect(toolMessages(prompts[2]!)).toContain("trailing application data");
+        expect(toolMessages(prompts[2]!)).not.toContain("write notes");
+        expect(toolMessages(prompts[2]!)).not.toContain("announce");
+        const [document] = await documentsOf(seed);
+        expect(document).toMatchObject({
+          title: "Release checklist",
+          revision: 2,
+          lastEditedBy: "model",
+          content: `${CHECKLIST}\n- [ ] announce`,
+        });
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, seed.conversation.id),
+        );
+        expect(document!.createdByMessageId).toBe(detail.messages.at(-1)?.id);
+        expect(detail.messages.at(-1)?.status).toBe("complete");
+        expect(detail.toolCalls.map((call) => call.arguments)).toEqual([{}, {}]);
+        expect(detail.toolCalls.map((call) => call.result)).toEqual([
+          {
+            outcome: "created",
+            documentId: document!.id,
+            documentConversationId: seed.conversation.id,
+            title: "Release checklist",
+            revision: 1,
+          },
+          {
+            outcome: "updated",
+            documentId: document!.id,
+            documentConversationId: seed.conversation.id,
+            title: "Release checklist",
+            revision: 2,
+          },
+        ]);
+        expect(detail.toolCalls.every((call) => call.status === "complete")).toBe(true);
+        expect(JSON.stringify(detail)).not.toContain("write notes");
+        const chunks = await runtime.runPromise(
+          ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+        );
+        expect(JSON.stringify(chunks)).not.toContain("write notes");
+        const envelopes = chunks
+          .filter((chunk) => chunk.kind === "tool")
+          .map((chunk) => JSON.parse(chunk.delta) as { family: string; phase: string });
+        expect(envelopes.map((envelope) => `${envelope.family}:${envelope.phase}`)).toEqual([
+          "document:start",
+          "document:result",
+          "document:start",
+          "document:result",
+        ]);
+        expect(envelopes.every((envelope) => Schema.is(ToolChunkEnvelope)(envelope))).toBe(true);
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
+
+  it("shows a person's edit between rounds and returns a preview when the anchor is gone", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    // Resolved when it runs: the document only exists once round one has landed.
+    const personTicks = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.flatMap(DocumentService, (service) =>
+          service.list(seed.userId, seed.conversation.id).pipe(
+            Effect.flatMap(([document]) =>
+              service.toggleTask(seed.userId, {
+                documentId: document!.id,
+                ordinal: 0,
+                checked: true,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      if (prompts.length === 2)
+        return authoringTool(input, "edit_document", {
+          old: "- [ ] tag build",
+          new: "- [ ] tag build\n- [ ] run tests",
+        }).pipe(Stream.concat(Stream.fromEffectDrain(personTicks)));
+      if (prompts.length === 3)
+        return authoringTool(input, "edit_document", {
+          old: "- [ ] write notes",
+          new: "- [ ] write release notes",
+          expectedRevision: 2,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      expect(prompts).toHaveLength(4);
+      expect(trailing(prompts[2]!)!.focused).toMatchObject({
+        revision: 3,
+        lastEditedBy: "user",
+        editedSinceYourLastWrite: true,
+        content: "# Release\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
+      });
+      // Having seen the current revision through the failed edit, the flag clears.
+      expect(trailing(prompts[3]!)!.focused).toMatchObject({
+        revision: 3,
+        editedSinceYourLastWrite: false,
+      });
+      const [document] = await documentsOf(seed);
+      expect(document).toMatchObject({ revision: 3, lastEditedBy: "user" });
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      const missed = detail.toolCalls[2]!;
+      expect(missed.status).toBe("error");
+      expect(missed.result).toMatchObject({
+        outcome: "no_match",
+        documentId: document!.id,
+        documentConversationId: seed.conversation.id,
+        title: "Release checklist",
+        revision: 3,
+      });
+      expect(Object.keys(missed.result as object).sort()).toEqual([
+        "documentConversationId",
+        "documentId",
+        "message",
+        "outcome",
+        "revision",
+        "title",
+      ]);
+      expect(missed.error?.code).toBe("DocumentNotUpdated");
+      expect(missed.error?.message).toContain("does not occur");
+      expect(missed.error?.message).toContain("changed since revision 2");
+      // The preview reached the model in the tool result of its own round, and
+      // is then dropped from the continuation like the rest of the content.
+      expect(JSON.stringify(detail)).not.toContain("[x] write notes");
+      expect(toolMessages(prompts[3]!)).not.toContain("[x] write notes");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("interrupts a stale generation's write once a retry has claimed the message", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    const retried = Deferred.makeUnsafe<string>();
+    // The first attempt lapses and is retried while its second tool round is
+    // still in flight; the edit it then makes must not land.
+    const supersede = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const repo = yield* ChatRepo;
+          const assistant = (yield* repo.listMessages(seed.conversation.id)).find(
+            (message) => message.role === "assistant",
+          )!;
+          yield* db
+            .update(messages)
+            .set({
+              generationId: uuidv7(),
+              generationLeaseUntil: sql`clock_timestamp() - interval '1 second'`,
+            })
+            .where(eq(messages.id, assistant.id));
+          yield* (yield* StreamEngine).reapOrphans;
+          yield* Effect.flatMap(ChatService, (service) =>
+            service.retryMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: assistant.id,
+            }),
+          );
+          yield* Deferred.succeed(retried, assistant.id);
+        }),
+      ),
+    );
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      if (round === 2)
+        return Stream.fromEffectDrain(supersede).pipe(
+          Stream.concat(
+            authoringTool(input, "edit_document", { old: "- [ ] ship", new: "- [ ] STALE" }),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      // Only once the retry has reset the row does a subscription follow the
+      // new attempt rather than end on the reaped one.
+      const assistantMessageId = await runtime.runPromise(Deferred.await(retried));
+      expect(assistantMessageId).toBe(sent.assistantMessageId);
+      await settle(assistantMessageId);
+      // Retrying the answer discards what that answer created. The stale edit
+      // is fenced, and the fresh answer did not create a replacement.
+      expect(await documentsOf(seed)).toEqual([]);
+      const message = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getMessage(assistantMessageId)),
+      );
+      expect(message).toMatchObject({ status: "complete", content: "The checklist is ready." });
+      expect(round).toBe(3);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("reads the document the person has open first", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const [first, second] = await runtime.runPromise(
+      DocumentService.use((service) =>
+        Effect.all([
+          service.create(seed.userId, {
+            conversationId: seed.conversation.id,
+            title: "First",
+            content: "one",
+          }),
+          service.create(seed.userId, {
+            conversationId: seed.conversation.id,
+            title: "Second",
+            content: "two",
+          }),
+        ]),
+      ),
+    );
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return reply();
+    };
+    try {
+      const sent = await send(seed, first.document.id);
+      await settle(sent.assistantMessageId);
+      expect(trailing(prompts[0]!)).toMatchObject({
+        focused: { id: first.document.id, content: "one" },
+        others: [{ id: second.document.id, title: "Second", chars: 3 }],
+      });
+      expect(JSON.stringify(trailing(prompts[0]!)!.others)).not.toContain("two");
     } finally {
       authoringScript = null;
     }

@@ -86,6 +86,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           deviceSessionId: context.session.session.id,
           mode: data.mode,
           timeZone: data.timeZone,
+          openDocumentId: data.openDocumentId,
           attachmentIds: data.attachmentIds,
           agentId: data.agentId,
           collectionIds: data.collectionIds,
@@ -138,6 +139,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           desktopExecutorId: data.desktopExecutorId,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
+          openDocumentId: data.openDocumentId,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
         }),
@@ -194,6 +196,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           messageId: data.messageId,
           modelId: data.modelId,
           timeZone: data.timeZone,
+          openDocumentId: data.openDocumentId,
         }),
       ).pipe(
         Effect.catchTags({

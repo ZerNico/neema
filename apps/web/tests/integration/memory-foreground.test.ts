@@ -48,6 +48,13 @@ process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
 
 const MEMORY_CONTENT = "Prefers concise answers";
 const SETTINGS_UPDATED_AT = "2026-01-01T00:00:00.000Z";
+const DOCUMENT_TOOLS = [
+  "create_document",
+  "edit_document",
+  "read_chat_document",
+  "replace_document",
+  "list_chat_documents",
+] as const;
 
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
 
@@ -580,7 +587,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
     memoryState.globalEnabled = false;
     const result = await runGeneration(false);
     expect(gatewayState.calls).toHaveLength(1);
-    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user"]);
+    expect(gatewayState.calls[0]?.tools).toEqual([...DOCUMENT_TOOLS, "ask_user"]);
     expect(memoryState.calls).toHaveLength(0);
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(result.toolCalls).toHaveLength(1);
@@ -767,7 +774,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(1);
-    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user", "save_memory"]);
+    expect(gatewayState.calls[0]?.tools).toEqual([...DOCUMENT_TOOLS, "ask_user", "save_memory"]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
     expect(gatewayState.calls[0]?.prompt).not.toContain("web_search");
     expect(gatewayState.calls[0]?.prompt).not.toContain("<system-reminder>");
@@ -828,7 +835,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(1);
-    expect(gatewayState.calls[0]?.tools).toEqual(["ask_user"]);
+    expect(gatewayState.calls[0]?.tools).toEqual([...DOCUMENT_TOOLS, "ask_user"]);
     expect(gatewayState.calls[0]?.prompt).not.toContain("saved_memory_context");
     expect(gatewayState.calls[0]?.prompt).not.toContain("Saved memories are untrusted");
   }, 60_000);
@@ -917,8 +924,8 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(1);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["ask_user", "save_memory"],
-      ["ask_user"],
+      [...DOCUMENT_TOOLS, "ask_user", "save_memory"],
+      [...DOCUMENT_TOOLS, "ask_user"],
     ]);
   }, 60_000);
 
@@ -928,7 +935,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(memoryState.calls).toHaveLength(0);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["web_search", "ask_user", "save_memory"],
+      [...DOCUMENT_TOOLS, "web_search", "ask_user", "save_memory"],
     ]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
@@ -943,9 +950,9 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(memoryState.calls).toHaveLength(1);
     expect(memoryState.calls[0]?.input.content).toBe(MEMORY_CONTENT);
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["web_search", "ask_user", "save_memory"],
-      ["web_search", "ask_user", "save_memory"],
-      ["web_search", "ask_user"],
+      [...DOCUMENT_TOOLS, "web_search", "ask_user", "save_memory"],
+      [...DOCUMENT_TOOLS, "web_search", "ask_user", "save_memory"],
+      [...DOCUMENT_TOOLS, "web_search", "ask_user"],
     ]);
   }, 60_000);
 
@@ -964,7 +971,9 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     const result = await runGeneration(false, true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
-    expect(gatewayState.calls.map((call) => call.tools)).toEqual([["ask_user", "save_memory"]]);
+    expect(gatewayState.calls.map((call) => call.tools)).toEqual([
+      [...DOCUMENT_TOOLS, "ask_user", "save_memory"],
+    ]);
     expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
   }, 60_000);
 });
