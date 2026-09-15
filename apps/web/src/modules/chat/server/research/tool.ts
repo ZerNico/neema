@@ -45,6 +45,21 @@ export type ToolCallRowRef = {
   readonly callIndex: number;
 };
 
+/**
+ * Added to the system prompt only where the tool is offered. Without it the
+ * only guidance the host has is the web hint, which tells it to search for
+ * current information: the very case this tool exists for.
+ */
+export const RESEARCH_APP_POLICY =
+  "The person turned on deep research for this message. Prefer deep_research over searching " +
+  "and reading pages yourself whenever the answer needs evidence from several sources, " +
+  "current information, or a comparison between them: it runs a team of investigators on " +
+  "their own budget and hands back their evidence. Use web_search and read_url directly only " +
+  "for a single quick fact or a page you were pointed at. The investigators never see this " +
+  "conversation, so write the brief yourself: say what to find out and what would settle it. " +
+  "Deciding not to call it is still yours to make, but say so rather than quietly doing a " +
+  "shallower job. Answer from the evidence it returns and cite the source numbers it registers.";
+
 export interface PreparedResearchTool {
   readonly group: ToolGroup;
 }

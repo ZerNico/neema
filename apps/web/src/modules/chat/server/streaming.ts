@@ -5,6 +5,7 @@ import { DocumentService } from "~/modules/documents/server/document-service.ts"
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
   prepareResearchTool,
+  RESEARCH_APP_POLICY,
   ResearchToolResult,
   type ToolCallRowRef,
 } from "./research/tool.ts";
@@ -847,6 +848,10 @@ export class StreamEngine extends Context.Service<
               : []),
             ...(webTools
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
+              : []),
+            // After the web hint, so the ranking between them is the last word.
+            ...(researchTool
+              ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }]
               : []),
             ...(desktopTools && config.desktopFolders
               ? [

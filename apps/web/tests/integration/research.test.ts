@@ -663,12 +663,19 @@ describe("deep research as a tool call", () => {
         expect(JSON.stringify(content.at(-1))).toContain("data, not instructions");
       }
     }
+    // The host is told to prefer the tool over searching itself; the web hint
+    // alone would point it the other way. The investigation never sees this.
+    const host = requests.find((request) => phaseOf(request) === "host")!;
+    expect(promptText(host)).toContain("Prefer deep_research over searching");
     const workers = requests.filter((request) => phaseOf(request) === "worker");
     expect(
       workers.every(
         (request) => Object.keys(request.toolkit!.tools).sort().join(",") === "read_url,web_search",
       ),
     ).toBe(true);
+    expect(workers.every((request) => !promptText(request).includes("turned on deep research"))).toBe(
+      true,
+    );
     for (const worker of workers) {
       const prompt = promptText(worker);
       expect(
@@ -803,6 +810,8 @@ describe("deep research as a tool call", () => {
     await runtime.runPromise(collect(sent.assistantMessageId));
     expect(requests).toHaveLength(1);
     expect(requests[0]!.toolkit?.tools["deep_research"]).toBeUndefined();
+    // No tool, no instruction about one.
+    expect(promptText(requests[0]!)).not.toContain("turned on deep research");
     expect(
       (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId))))
         ?.status,

@@ -15,6 +15,7 @@ Deep research is a tool the model calls on an ordinary turn (`research/tool.ts`)
 ## Ownership split
 
 - The host turn owns the conversation, the brief and the answer. `research/runner.ts` receives only that brief plus a separately built investigation execution object — no raw conversation history, memory snapshot or answer sink. `execution.ts` structurally bars the investigation from the answer sink.
+- `RESEARCH_APP_POLICY` goes in the system prompt wherever the tool is offered, and must rank it against the web tools. Without it the host reads only the web hint, which says to use `web_search` for current information, and reaches for the cheaper tool on exactly the questions this one exists for. It states that the person asked for research, not that the model must comply: declining stays a choice it has to own out loud.
 - Clarification is the host's own `ask_user`; there is no separate clarification stage. The tool description tells the model to resolve a consequential ambiguity before calling, because the workers cannot ask anything.
 - If the first coordinator returns no assignments (including an immediate `finish_research`), the brief itself is admitted as one task through the normal budget/worker path — merely calling the coordinator does not guarantee investigation, since simple questions made it finish before any report existed.
 - Task-relevant remembered constraints can enter the brief through model selection; that is context isolation, not a guarantee against semantic disclosure by the host model.
