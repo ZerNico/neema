@@ -170,7 +170,10 @@ export function DocumentPanelBody({
         <Suspense
           fallback={<Spinner aria-label="Loading source editor" className="text-muted-foreground" />}
         >
-          <div className="-mx-4">
+          {/* Bounded to the rail rather than the editor's default 40rem: it
+              uses the height it has while keeping its own scrollbars, the
+              sideways one included, on screen. */}
+          <div className="-mx-4 [--editor-max-height:calc(100vh-13rem)] [--editor-min-height:12rem]">
             <DocumentSourceEditor controller={controller} />
           </div>
         </Suspense>

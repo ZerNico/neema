@@ -5,18 +5,19 @@ import { LanguageDescription, LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 
 const theme = EditorView.theme({
-  // A bounded pane that scrolls its own content, rather than a block that
-  // grows until the page scrolls — the same shape an editor has.
+  // A bounded pane that scrolls its own content, rather than a block that grows
+  // until the page scrolls, which is the shape an editor has. A host that is
+  // itself a scroller overrides these, or the two nest.
   "&": {
     color: "var(--foreground)",
     backgroundColor: "transparent",
     fontSize: "0.875rem",
-    maxHeight: "min(70vh, 40rem)",
+    maxHeight: "var(--editor-max-height, min(70vh, 40rem))",
   },
   ".cm-content": {
     fontFamily: "var(--font-mono, monospace)",
     padding: "1rem",
-    minHeight: "24rem",
+    minHeight: "var(--editor-min-height, 24rem)",
     caretColor: "var(--foreground)",
     // CodeMirror leaves this to the host stylesheet, and ours resets it, so the
     // one surface in the app you type into showed an arrow.
@@ -34,9 +35,6 @@ const theme = EditorView.theme({
   },
   "&.cm-focused": { outline: "none" },
 });
-// No line wrapping: long lines scroll sideways in the pane, the way they do in
-// an editor, instead of reflowing the file being read.
-//
 // A package is not only Markdown — `scripts/*.py` and other code files travel
 // with it — so the grammar follows the file name. `language-data` loads each
 // one on demand, which also highlights fenced code inside SKILL.md.
