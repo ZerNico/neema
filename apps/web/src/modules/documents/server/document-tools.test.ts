@@ -211,6 +211,29 @@ describe("document tools trailing data", () => {
     expect(edited).toMatchObject({ outcome: "updated", revision: 3, staleRead: true });
     expect(data(tools.messages()).focused?.editedSinceYourLastWrite).toBe(false);
   });
+  it("says when a read adds nothing, but not when it moves the window or catches up", async () => {
+    const { service, userWrite } = fakeService();
+    const tools = await prepare(service);
+    await Effect.runPromise(
+      tools.group.handlers.create_document({ title: "Plan", content: "a\nb\nc" }),
+    );
+    // Creating already focused it, so the first read is the redundant one.
+    const repeat = await Effect.runPromise(tools.group.handlers.read_chat_document({}));
+    expect(repeat).toMatchObject({ outcome: "read", revision: 1 });
+    expect(repeat.message).toContain("Already focused at revision 1");
+
+    // Moving the window is the one reason to ask again.
+    const moved = await Effect.runPromise(
+      tools.group.handlers.read_chat_document({ fromLine: 1 }),
+    );
+    expect(moved.message).toBeUndefined();
+
+    // So is catching up with the person.
+    userWrite("doc-1", "a\nb\nc\nd");
+    const caughtUp = await Effect.runPromise(tools.group.handlers.read_chat_document({}));
+    expect(caughtUp).toMatchObject({ outcome: "read", revision: 2 });
+    expect(caughtUp.message).toBeUndefined();
+  });
   it("windows a long document instead of sending it whole", async () => {
     const { service } = fakeService();
     const tools = await prepare(service);
