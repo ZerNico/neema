@@ -342,12 +342,15 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.searchEnabled && input.searchAvailable
                 : (continuation?.searchEnabled ?? input.searchEnabled);
-          // Same rule as search: a retry keeps the choice the attempt ran with,
-          // an edit takes the submitted one.
+          // Same three cases as search. The third matters most here: the tool
+          // cannot ask anything itself, so a clarification round would
+          // otherwise answer into a turn that can no longer research.
           const researchEnabled =
             input.attempt === "retry"
               ? (continuation?.researchEnabled ?? false)
-              : input.researchEnabled;
+              : input.attempt === "edit"
+                ? input.researchEnabled
+                : (continuation?.researchEnabled ?? input.researchEnabled);
           const desktopFolders =
             defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
               ? input.desktopFolders

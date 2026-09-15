@@ -91,6 +91,9 @@ let finishWorkersEarly = false;
 /** How many `deep_research` calls the host makes before answering from them. */
 let hostPlan: 0 | 1 | 2 = 1;
 let hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
+/** The host asks one question before it is willing to write a brief. */
+let hostAsksFirst = false;
+let hostAsks = 0;
 /** The host also opens a page in the same turn, so a sibling call is in flight. */
 let hostReadsAlongside = false;
 let hostDraft = false;
@@ -219,6 +222,18 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
         ).pipe(Stream.concat(Stream.make(finish())));
       }
       if (phase === "host") {
+        // Counted rather than read back from the prompt: the next turn renders
+        // the question as prose, not as the tool name.
+        if (hostAsksFirst && hostAsks++ === 0)
+          return tool(input, "ask_user", {
+            questions: [
+              {
+                question: "Which region?",
+                options: [{ label: "Europe" }, { label: "Asia" }],
+                multiSelect: false,
+              },
+            ],
+          });
         if (hostDraft && hostDraftTurns++ > 0)
           return hostDraftTurns === 2
             ? Stream.make(text("I found useful guidance for the draft.\n")).pipe(
@@ -476,6 +491,8 @@ beforeEach(async () => {
   finishWorkersEarly = false;
   hostPlan = 1;
   hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
+  hostAsksFirst = false;
+  hostAsks = 0;
   hostReadsAlongside = false;
   hostDraft = false;
   hostDraftTurns = 0;
@@ -769,6 +786,49 @@ describe("deep research as a tool call", () => {
       (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(first.assistantMessageId))))
         ?.status,
     ).toBe("complete");
+  });
+
+  it("keeps the offer through a clarification round so the answer can research", async () => {
+    hostAsksFirst = true;
+    const input = await runtime.runPromise(seed);
+    const first = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(first.assistantMessageId));
+    // It asked instead of guessing, so no run started yet.
+    expect(await runFor(first.assistantMessageId)).toBeNull();
+    const answered = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const call = (yield* repo.listToolCalls([first.assistantMessageId])).find(
+          (row) => row.toolName === "ask_user",
+        )!;
+        return yield* ChatService.use((service) =>
+          service.sendMessage({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            modelId,
+            questionResponse: { callId: call.id, response: { kind: "skip" } },
+            searchEnabled: false,
+            // What the answering surface sends: it has no toggle of its own.
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        );
+      }),
+    );
+    await runtime.runPromise(collect(answered.assistantMessageId));
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const message = (yield* repo.getMessage(answered.assistantMessageId))!;
+        expect(message.status).toBe("complete");
+        // The offer survived the round trip, so the answer turn could research.
+        const run = yield* runOf(message.id);
+        expect(run?.status).toBe("terminal");
+        expect(
+          (yield* repo.listToolCalls([message.id])).some((c) => c.toolName === "deep_research"),
+        ).toBe(true);
+      }),
+    );
   });
 
   it("refuses a brief too short to investigate without starting a run", async () => {

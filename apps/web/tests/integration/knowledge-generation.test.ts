@@ -1010,15 +1010,15 @@ describe("knowledge-backed generations", () => {
         collection_ids: [current.collectionId],
         standalone_collection_ids: [],
       });
-      // Answering a clarification is its own submission: it does not inherit
-      // the offer the original send made.
+      // The offer survives the clarification round it caused: the tool cannot
+      // ask anything, so answering must land on a turn that can still research.
       expect(
         (
           await exec(
             `select research_enabled from message_generation_config where message_id = '${next.assistantMessageId}'`,
           )
         ).rows,
-      ).toEqual([{ research_enabled: false }]);
+      ).toEqual([{ research_enabled: researchEnabled }]);
     },
   );
 

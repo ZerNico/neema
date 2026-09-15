@@ -710,9 +710,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...input,
           modelId: effectiveModelId!,
           searchEnabled,
-          // The composer's research toggle belongs to a send. Answering a
-          // clarification and editing are their own submissions, and neither
-          // surface offers the toggle, so neither asks for the tool.
+          // The composer's research toggle belongs to a send, and no other
+          // surface offers it. An answer to a clarification still keeps the
+          // offer: the server inherits it from the attempt that asked.
           researchEnabled: false,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),

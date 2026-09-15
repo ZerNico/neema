@@ -58,7 +58,12 @@ export const RESEARCH_APP_POLICY =
   "for a single quick fact or a page you were pointed at. The investigators never see this " +
   "conversation, so write the brief yourself: say what to find out and what would settle it. " +
   "Deciding not to call it is still yours to make, but say so rather than quietly doing a " +
-  "shallower job. Answer from the evidence it returns and cite the source numbers it registers.";
+  "shallower job. Answer from the evidence it returns and cite the source numbers it registers.\n" +
+  "A run costs real time and money and cannot ask anything once it starts, so a brief built on a " +
+  "guess wastes all of it. Where the scope is genuinely open, and the answer would differ by a lot " +
+  "depending on the reading, ask_user once first: region, timeframe, depth or who it is for. Ask " +
+  "only what changes the brief, and only when a sensible default would not do. Your question ends " +
+  "the turn, and the answer comes back with this tool still offered.";
 
 export interface PreparedResearchTool {
   readonly group: ToolGroup;
