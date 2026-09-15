@@ -170,7 +170,15 @@ const MAX_KNOWLEDGE_TOOL_ROUNDS = 24;
 
 // Projected activities are literal structs; one widening at the boundary
 // beats an assertion chain at every persistence site.
+/**
+ * Schema-validated tool output is plain JSON at runtime, but readonly arrays
+ * and optional keys keep TS from proving that against the recursive JsonValue
+ * type. Stated here once rather than at every row that stores a result.
+ */
 const json = (value: unknown) => value as JsonValue;
+/** Same boundary for a decoded Prompt: its content is already message-shaped. */
+const promptMessages = (prompt: { content: unknown }) =>
+  prompt.content as ReadonlyArray<Prompt.MessageEncoded>;
 
 // Message and tool-call rows are shipped to the client wholesale, so the
 // stored error must not carry provider stack traces or internal URLs — the
@@ -963,7 +971,7 @@ export class StreamEngine extends Context.Service<
                 );
               yield* repo.completeToolCall({
                 id: rowId,
-                result: prepared.activity as unknown as JsonValue,
+                result: json(prepared.activity),
                 status: "complete",
               });
               yield* pushToolChunk({
@@ -1089,9 +1097,9 @@ export class StreamEngine extends Context.Service<
           const estimateRequestPrompt = (lastCycle: boolean) => {
             const trailing = reminderPrompt(lastCycle);
             return estimatePromptTokens([
-              ...(transcript.content as unknown as ReadonlyArray<Prompt.MessageEncoded>),
+              ...promptMessages(transcript),
               ...(trailing
-                ? (trailing.content as unknown as ReadonlyArray<Prompt.MessageEncoded>)
+                ? promptMessages(trailing)
                 : []),
             ]);
           };
@@ -1396,7 +1404,7 @@ export class StreamEngine extends Context.Service<
                                 ? {}
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
-                                    ? (askArgs.value as unknown as JsonValue)
+                                    ? json(askArgs.value)
                                     : {}
                                   : (args as JsonValue),
                           });
@@ -1764,7 +1772,7 @@ export class StreamEngine extends Context.Service<
                             const ok = result.outcome === "presented";
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: result as unknown as JsonValue,
+                              result: json(result),
                               status: ok ? "complete" : "error",
                               ...(ok
                                 ? {}
@@ -1797,7 +1805,7 @@ export class StreamEngine extends Context.Service<
                             // the model continuation compacts old lists.
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: result as unknown as JsonValue,
+                              result: json(result),
                               status: ok ? "complete" : "error",
                               ...(ok
                                 ? {}
@@ -1867,7 +1875,7 @@ export class StreamEngine extends Context.Service<
                             };
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: activity as unknown as JsonValue,
+                              result: json(activity),
                               status: activity.status === "complete" ? "complete" : "error",
                             });
                             yield* pushToolChunk({
@@ -1892,7 +1900,7 @@ export class StreamEngine extends Context.Service<
                               );
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: activity as unknown as JsonValue,
+                              result: json(activity),
                               status: activity.ok ? "complete" : "error",
                               ...(activity.ok
                                 ? {}
@@ -1962,15 +1970,12 @@ export class StreamEngine extends Context.Service<
                           };
                           yield* repo.completeToolCall({
                             id: rowId,
-                            // Schema-validated tool output — plain JSON at runtime,
-                            // but readonly arrays and optional keys keep TS from
-                            // proving it against the recursive JsonValue type.
-                            result: {
+                            result: json({
                               ...summary,
                               ...(pages.length > 0 ? { pages } : {}),
                               ...(sources.length > 0 ? { sources } : {}),
                               ...(failures.length > 0 ? { failures } : {}),
-                            } as unknown as JsonValue,
+                            }),
                             status: ok ? "complete" : "error",
                             ...(ok
                               ? {}
@@ -2121,7 +2126,7 @@ export class StreamEngine extends Context.Service<
                       renderedMessageGroups: historyGroups,
                       fixedPrefix: [
                         ...fixedPrefix,
-                        ...(activeOnly.content as unknown as ReadonlyArray<Prompt.MessageEncoded>),
+                        ...promptMessages(activeOnly),
                       ],
                       trailingMessages: historyBudgetTail(!toolRoundsLeft),
                       calibrationFactor: factor,
