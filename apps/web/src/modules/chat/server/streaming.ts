@@ -1620,6 +1620,11 @@ export class StreamEngine extends Context.Service<
                               });
                             return;
                           }
+                          // This branch and the document one below it are the same
+                          // eight steps with different words. They stay apart on
+                          // purpose: the envelope union correlates `family` with
+                          // the activity shape, and one parameterised path can
+                          // only satisfy it through a cast.
                           if (Schema.is(AgentDraftToolName)(part.name)) {
                             if (isPreliminary) return;
                             const activity = projectAgentDraftResult(
