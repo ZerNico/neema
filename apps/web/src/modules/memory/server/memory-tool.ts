@@ -7,7 +7,6 @@ import {
   type SaveModelMemoryOutcome,
 } from "../schema.ts";
 import type { MemoryService } from "./service.ts";
-import { isMemorySaveGuardFailure } from "./save-guard.ts";
 
 // The transport shape accepts anything the model emits. A tool call that omits
 // `content`, sends the wrong type, overruns the length cap or invents a
@@ -215,7 +214,10 @@ export function prepareMemoryTool(input: {
       .pipe(
         Effect.map(resultFor),
         Effect.catchCause((cause) =>
-          isMemorySaveGuardFailure(cause) || Cause.hasInterrupts(cause)
+          // A lost fence interrupts rather than fails: the attempt this save
+          // belonged to is over, so the turn ends instead of reporting a
+          // rejected save to a model that is no longer running.
+          Cause.hasInterrupts(cause)
             ? Effect.failCause(cause)
             : Effect.succeed(rejected("failed", "Memory could not be saved.")),
         ),

@@ -9,7 +9,6 @@ import {
   type SaveMemoryResult,
 } from "./memory-tool.ts";
 import type { MemoryService } from "./service.ts";
-import { isMemorySaveGuardFailure, MemorySaveGuardFailure } from "./save-guard.ts";
 
 type Handler = (params: SaveMemoryParams) => Effect.Effect<SaveMemoryResult>;
 
@@ -146,36 +145,25 @@ describe("prepareMemoryTool", () => {
     });
   });
 
-  it.each(["fence", "interruption"] as const)(
-    "keeps %s failures terminal rather than returning a recoverable memory result",
-    async (failure) => {
-      const saveModel = vi.fn(() =>
-        failure === "fence"
-          ? Effect.die(new MemorySaveGuardFailure(Cause.die(new Error("Research stopped"))))
-          : Effect.interrupt,
-      );
-      const prepared = prepareMemoryTool({
-        memory: { saveModel } as unknown as MemoryService["Service"],
-        userId: "user-1",
-        conversationId: "conversation-1",
-        sourceMessageId: "message-1",
-        sourceMessageHash: "source-hash",
-        ordinals: new Map(),
-      });
-      const result = await Effect.runPromiseExit(
-        (prepared.group.handlers["save_memory"] as Handler)({ content: "Remember this" }),
-      );
-      expect(Exit.isFailure(result)).toBe(true);
-      if (Exit.isFailure(result)) {
-        expect(
-          failure === "fence"
-            ? isMemorySaveGuardFailure(result.cause)
-            : Cause.hasInterrupts(result.cause),
-        ).toBe(true);
-      }
-      expect(prepared.attempted()).toBe(true);
-    },
-  );
+  // A lost generation fence interrupts, so both cases are the same signal: the
+  // attempt is over, and the turn must end rather than hear about a save.
+  it("keeps a lost fence terminal rather than returning a recoverable memory result", async () => {
+    const saveModel = vi.fn(() => Effect.interrupt);
+    const prepared = prepareMemoryTool({
+      memory: Object.assign({} as MemoryService["Service"], { saveModel }),
+      userId: "user-1",
+      conversationId: "conversation-1",
+      sourceMessageId: "message-1",
+      sourceMessageHash: "source-hash",
+      ordinals: new Map(),
+    });
+    const result = await Effect.runPromiseExit(
+      (prepared.group.handlers["save_memory"] as Handler)({ content: "Remember this" }),
+    );
+    expect(Exit.isFailure(result)).toBe(true);
+    if (Exit.isFailure(result)) expect(Cause.hasInterrupts(result.cause)).toBe(true);
+    expect(prepared.attempted()).toBe(true);
+  });
 
   it("turns persistence defects into a tool result instead of failing chat", async () => {
     const saveModel = vi.fn(() => Effect.die("database unavailable"));

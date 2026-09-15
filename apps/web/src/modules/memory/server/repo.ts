@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, getTableColumns, ne, sql } from "drizzle-orm";
-import { Cause, Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { conversations, memories, memorySettings, messages, tools } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
@@ -12,8 +12,8 @@ import {
   type SaveModelMemoryOutcome,
   type UpdateMemoryOutcome,
 } from "../schema.ts";
+import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "./content-hash.ts";
-import { MemorySaveGuard, MemorySaveGuardFailure } from "./save-guard.ts";
 
 export type MemoryRow = typeof memories.$inferSelect;
 type DbTx = Parameters<Parameters<Db["Service"]["transaction"]>[0]>[0];
@@ -385,20 +385,16 @@ export class MemoryRepo extends Context.Service<
           sourceMessageHash: string;
         },
       ) {
+        const fence = yield* GenerationFence;
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              // Research and ordinary saves share this transaction, never an outer
-              // transaction around it. The conversation fence must precede the
-              // user advisory and source locks to serialize correctly with Stop.
-              const guard = yield* MemorySaveGuard;
-              yield* guard(tx).pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterrupts(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.die(new MemorySaveGuardFailure(cause)),
-                ),
-              );
+              // The same fence every durable write in a generation takes
+              // (`ChatRepo.generationWrite`), inside this transaction rather
+              // than around it, and before the user advisory and source locks
+              // so it serializes with Stop, retry and the reaper. Null outside
+              // a generation: a manual save has no attempt to belong to.
+              if (fence) yield* lockGeneration(tx, fence);
               yield* lockUser(tx, userId);
 
               // Hold a shared row lock through the write. Admin updates take an
