@@ -44,15 +44,14 @@ export function FolderStrip({
 }) {
   if (folder.readiness !== "ready") {
     return (
-      <div className="bg-muted/60 text-muted-foreground mx-3 -mt-3 flex items-center gap-2 rounded-b-[1.375rem] border border-t-0 px-3 pt-4 pb-1.5 text-xs">
+      <div className="bg-muted/60 text-muted-foreground mx-3 -mt-3 flex items-center gap-2 rounded-b-composer border border-t-0 px-3 pt-4 pb-1.5 text-xs">
         <span role="status" className="flex min-h-6 items-center">
           {folder.readiness === "loading" ? "Checking folders…" : "Could not check folders."}
         </span>
         {folder.readiness === "error" ? (
           <Button
-            size="sm"
+            size="xs"
             variant="ghost"
-            className="h-6 text-xs"
             onClick={folder.refresh}
             disabled={folder.busy}
           >
@@ -72,7 +71,7 @@ export function FolderStrip({
       <div
         className={cn(
           "bg-muted/60 text-muted-foreground flex min-w-0 flex-1 flex-wrap items-center gap-1",
-          "rounded-b-[1.375rem] border border-t-0 px-3 pt-4 pb-1.5 text-xs",
+          "rounded-b-composer border border-t-0 px-3 pt-4 pb-1.5 text-xs",
           attention && "text-foreground border-warning/50 bg-warning/10",
         )}
       >
@@ -82,10 +81,10 @@ export function FolderStrip({
               render={
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="xs"
                   disabled={busy}
                   className={cn(
-                    "h-6 min-w-0 gap-1.5 px-1.5 text-xs",
+                    "min-w-0",
                     item.alive && "text-muted-foreground hover:text-foreground",
                   )}
                   title={item.alive ? undefined : "This folder is no longer where it was."}
@@ -112,9 +111,9 @@ export function FolderStrip({
           </DropdownMenu>
         ))}
         <Button
-          size="sm"
+          size="xs"
           variant="ghost"
-          className="text-muted-foreground hover:text-foreground h-6 gap-1.5 px-1.5 text-xs"
+          className="text-muted-foreground hover:text-foreground"
           disabled={busy}
           onClick={() => folder.choose()}
         >
@@ -156,9 +155,9 @@ function SandboxNotice({
   if (state.kind === "setup-needed") {
     return (
       <Button
-        size="sm"
+        size="xs"
         variant="ghost"
-        className="ml-auto h-6 gap-1.5 px-1.5 text-xs"
+        className="ml-auto"
         disabled={busy}
         onClick={onSetUp}
       >
@@ -195,8 +194,8 @@ function PermissionPicker({
         render={
           <Button
             variant="ghost"
-            size="sm"
-            className="text-muted-foreground hover:text-foreground ml-auto h-6 min-w-0 gap-1.5 px-1.5 text-xs"
+            size="xs"
+            className="text-muted-foreground hover:text-foreground ml-auto min-w-0"
             aria-label={`Permissions: ${current.label}`}
           />
         }

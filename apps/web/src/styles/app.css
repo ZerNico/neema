@@ -53,6 +53,11 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* The composer's corner, off Tailwind's scale. The folder strip tucks under it
+     and the drop overlay sits inset-1 within it, so both derive from this rather
+     than repeating the number. */
+  --radius-composer: 1.375rem;
+  --radius-composer-inner: calc(var(--radius-composer) - 0.25rem);
 }
 
 :root {

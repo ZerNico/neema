@@ -580,6 +580,7 @@ export const ChatInput = forwardRef<
             <Button
               variant="ghost"
               size="sm"
+              // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
               className="text-muted-foreground hover:text-foreground hover:bg-accent min-w-0 max-w-52 gap-1.5"
             />
           }
@@ -609,7 +610,7 @@ export const ChatInput = forwardRef<
                 {onStop ? (
                   <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
                 ) : attachments?.queued ? (
-                  <Spinner aria-hidden className="size-4 motion-reduce:animate-none" />
+                  <Spinner aria-hidden className="size-4" />
                 ) : (
                   <HugeiconsIcon
                     icon={ArrowUp02Icon}
@@ -641,7 +642,7 @@ export const ChatInput = forwardRef<
         initial={false}
         animate={{ opacity: dragging ? 1 : 0 }}
         transition={{ duration: reduced ? 0 : 0.12 }}
-        className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[calc(1.375rem-0.25rem)] border-2 border-dashed backdrop-blur-[2px]"
+        className="border-ring/70 bg-background/85 pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-composer-inner border-2 border-dashed backdrop-blur-[2px]"
       >
         <span className="text-foreground flex items-center gap-2 text-sm font-medium">
           <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
