@@ -116,6 +116,13 @@ skipped one on purpose.
   classes. Fix the line; do not widen the window or disable the rule for the file.
   It uses `recent-changes` (baseline `HEAD~5`). The temporary monorepo-rename
   exception has ended now that the move is outside that window.
+- `@shadcn/lint` is the other JS plugin: it rejects a call site that changes a
+  component's own spacing, shape or type scale, which means the wrong component
+  was chosen or a variant is missing. `src/ui/**` is exempt, being the design
+  system restating its own primitives. These are errors, and the count is zero:
+  fix the call site, add the variant, or justify the exception in place with
+  `// oxlint-disable-next-line shadcn/no-restyle -- why`. Widening the allow list
+  buries the decision where nobody reads it. See [ui](docs/internals/ui.md).
 - Lint config is `oxlint.config.ts`, typed through `defineConfig` and checked by
   `pnpm typecheck`, so a misspelled rule or plugin name fails there instead of
   being silently ignored. Adding `.oxlintrc.json` beside it is a hard error.
