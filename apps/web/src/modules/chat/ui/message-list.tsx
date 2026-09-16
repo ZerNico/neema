@@ -51,6 +51,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 // Renders GFM footnote references as citation chips linking to their source,
 // and hides the footnote list streamdown would otherwise append (the detail
@@ -399,7 +400,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
             alt="Generated image"
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
-            className="max-h-[36rem] max-w-full rounded-2xl object-contain"
+            className="max-h-144 max-w-full rounded-2xl object-contain"
           />
         </a>
       )}
@@ -659,7 +660,9 @@ function GenerationFailure({
                 <DisclosureTrigger
                   className={cn(
                     disclosureTriggerClassName,
-                    "focus-visible:ring-ring/30 w-fit gap-1 rounded-lg text-xs font-medium outline-none focus-visible:ring-3",
+                    focusRingClassName,
+                    // oxlint-disable-next-line shadcn/no-restyle -- the details toggle stays secondary to the error above it
+                    "w-fit gap-1 rounded-lg text-xs font-medium",
                   )}
                 >
                   <HugeiconsIcon

@@ -21,6 +21,7 @@ import { ViewToggle } from "~/ui/view-toggle.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { cn } from "~/ui/utils.ts";
 import { validateSkillPath, type SkillFile, type SkillFinding } from "../package.ts";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 const TextEditor = lazy(() => import("./text-editor.tsx"));
 const noFindings: SkillFinding[] = [];
@@ -89,8 +90,10 @@ const chevronClassName =
   "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none";
 // `w-max min-w-full` keeps hover and selection spanning the full width while
 // letting a deep path extend past the rail, which scrolls sideways for it.
-const rowClassName =
-  "focus-visible:ring-ring/30 flex h-7 w-max min-w-full items-center gap-1.5 rounded-lg pr-2 pl-1.5 text-left text-xs whitespace-nowrap outline-none focus-visible:ring-3";
+const rowClassName = cn(
+  focusRingClassName,
+  "flex h-7 w-max min-w-full items-center gap-1.5 rounded-lg pr-2 pl-1.5 text-left text-xs whitespace-nowrap",
+);
 
 /** The inline name field: Enter commits, Escape cancels, blur commits like VS Code. */
 function DraftRow({
@@ -152,6 +155,7 @@ function DraftRow({
           }}
         />
       </div>
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the row this belongs to is an h-6 text-xs input, so the default would outsize the name */}
       {error ? <FieldError className="text-2xs px-2 pt-1 pb-0.5">{error}</FieldError> : null}
     </div>
   );

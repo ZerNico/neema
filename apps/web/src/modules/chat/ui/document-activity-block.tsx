@@ -4,7 +4,12 @@ import { useDocumentPanel } from "~/modules/documents/ui/document-owner.tsx";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import { activityRowClassName } from "./activity-row.ts";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
+import {
+  activityCardClassName,
+  activityCardInteractiveClassName,
+  activityRowClassName,
+} from "./activity-row.ts";
 
 export function documentActivityLabel(activity: DocumentToolActivity) {
   const title = activity.result?.title;
@@ -52,25 +57,24 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
         <span className="text-muted-foreground block truncate text-xs">{status}</span>
       </span>
       {entry?.open ? (
-        <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="text-muted-foreground shrink-0" aria-hidden />
+        <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="text-muted-foreground size-4 shrink-0" aria-hidden />
       ) : null}
     </>
   );
-  const className = "mb-3 flex h-auto w-full max-w-sm items-center gap-3 rounded-2xl border px-3 py-3";
   if (entry?.open)
     return (
-      <Button
-        variant="outline"
-        className={className}
+      <button
+        type="button"
+        className={cn(activityCardClassName, activityCardInteractiveClassName)}
         aria-label={`Open document: ${name}`}
         aria-expanded={entry.expanded}
         onClick={entry.open}
       >
         {contents}
-      </Button>
+      </button>
     );
   return (
-    <div className={className}>
+    <div className={activityCardClassName}>
       {contents}
       {entry?.retry ? (
         <Button size="sm" variant="ghost" onClick={entry.retry}>
@@ -111,7 +115,8 @@ function DocumentActivityRow({
         aria-expanded={entry.expanded}
         className={cn(
           activityRowClassName,
-          "mb-2 rounded-lg text-left hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none",
+          focusRingClassName,
+          "mb-2 rounded-lg text-left hover:text-foreground",
         )}
       >
         {icon}

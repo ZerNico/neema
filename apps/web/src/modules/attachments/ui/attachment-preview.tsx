@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { Spinner } from "~/ui/primitives/spinner";
-import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { cn } from "~/ui/utils";
 
 /** What the preview needs to render an attachment's content. */
@@ -201,7 +201,7 @@ function ViewToggle({
 }) {
   return (
     <div className="flex justify-end">
-      <ToggleGroup
+      <SegmentedControl
         aria-label="Preview mode"
         value={[rendered ? "rendered" : "plain"]}
         multiple={false}
@@ -210,15 +210,10 @@ function ViewToggle({
         }}
         size="sm"
         spacing={0.5}
-        className="bg-muted rounded-full p-0.5"
       >
-        <ToggleGroupItem value="rendered" className="h-7 rounded-full px-2.5 text-xs">
-          Rendered
-        </ToggleGroupItem>
-        <ToggleGroupItem value="plain" className="h-7 rounded-full px-2.5 text-xs">
-          Plain
-        </ToggleGroupItem>
-      </ToggleGroup>
+        <SegmentedControlItem value="rendered">Rendered</SegmentedControlItem>
+        <SegmentedControlItem value="plain">Plain</SegmentedControlItem>
+      </SegmentedControl>
     </div>
   );
 }

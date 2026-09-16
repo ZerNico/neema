@@ -5,7 +5,7 @@ import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
 
 // An inline citation rendered in place of a GFM footnote reference: the
 // source's favicon and title, linking straight to the page. Citation numbers
@@ -32,10 +32,10 @@ function CitationPreview({ source, onClick }: { source: ToolSource; onClick?: ()
     <Favicon url={source.url} className="size-3" />
   );
   const className =
-    "bg-muted text-muted-foreground hover:bg-foreground/15 hover:text-foreground hover:ring-foreground/20 focus-visible:ring-ring mx-0.5 inline-flex max-w-[12rem] translate-y-[-1px] items-center gap-1 rounded-full py-0.5 pr-2 pl-1 align-middle text-[0.7rem] leading-none font-medium no-underline ring-1 ring-transparent transition-colors duration-100 outline-none select-none focus-visible:ring-2";
+    "bg-muted text-muted-foreground hover:bg-foreground/15 hover:text-foreground hover:ring-foreground/20 focus-visible:ring-ring mx-0.5 inline-flex max-w-48 translate-y-[-1px] items-center gap-1 rounded-full py-0.5 pr-2 pl-1 align-middle text-2xs leading-none font-medium no-underline ring-1 ring-transparent transition-colors duration-100 outline-none select-none focus-visible:ring-2";
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <HoverCard>
+      <HoverCardTrigger
         delay={0}
         closeDelay={100}
         render={
@@ -59,13 +59,8 @@ function CitationPreview({ source, onClick }: { source: ToolSource; onClick?: ()
       >
         {icon}
         <span className="min-w-0 truncate">{label}</span>
-      </TooltipTrigger>
-      <TooltipContent
-        align="start"
-        sideOffset={8}
-        showArrow={false}
-        className="bg-popover text-popover-foreground block w-80 max-w-[calc(100vw-2rem)] rounded-2xl border p-3.5 shadow-md duration-100 motion-reduce:animate-none"
-      >
+      </HoverCardTrigger>
+      <HoverCardContent align="start" sideOffset={8}>
         <div className="text-muted-foreground mb-2 flex min-w-0 items-center gap-2 text-xs">
           {icon}
           <span className="truncate">{location}</span>
@@ -76,7 +71,7 @@ function CitationPreview({ source, onClick }: { source: ToolSource; onClick?: ()
             {source.snippet}
           </p>
         ) : null}
-      </TooltipContent>
-    </Tooltip>
+      </HoverCardContent>
+    </HoverCard>
   );
 }

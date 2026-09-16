@@ -7,6 +7,7 @@ import { hostOf } from "./favicon.tsx";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 // Deliberately one line. What a reader wants inline is "is it still going, and
 // on what", then "what did it read". The plan, task list and per-task activity
@@ -68,8 +69,10 @@ export function ResearchActivityBlock({
   // URL, a query without spaces) would size it past the bubble before the
   // detail span ever got the chance to truncate.
   const rowClassName = "mb-3 flex max-w-full min-w-0 items-center gap-2 text-sm";
-  const buttonClassName =
-    "hover:text-foreground focus-visible:ring-ring/30 rounded-lg text-left transition-colors outline-none focus-visible:ring-3";
+  const buttonClassName = cn(
+    focusRingClassName,
+    "hover:text-foreground rounded-lg text-left transition-colors",
+  );
 
   // The row settles when the call returns; the answer streams in below it like
   // any other reply.
@@ -91,7 +94,7 @@ export function ResearchActivityBlock({
     <>
       <MotionSwap value={running ? "running" : "settled"} kind="icon" className="size-4 shrink-0">
         {running ? (
-          <Spinner aria-hidden className="size-4 motion-reduce:animate-none" />
+          <Spinner aria-hidden className="size-4" />
         ) : (
           <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />
         )}

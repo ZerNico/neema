@@ -4,7 +4,11 @@ import { useAgentDraftPanel } from "~/modules/agents/ui/agent-draft-owner.tsx";
 import type { AgentDraftToolActivity } from "../client/use-message-stream.ts";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import { activityRowClassName } from "./activity-row.ts";
+import {
+  activityCardClassName,
+  activityCardInteractiveClassName,
+  activityRowClassName,
+} from "./activity-row.ts";
 
 /**
  * Only rows without a draft reference reach this: anything naming a draft
@@ -57,22 +61,20 @@ export function AgentDraftWidget({ draftId }: { draftId: string }) {
       ) : null}
     </>
   );
-  const className =
-    "mb-3 flex h-auto w-full max-w-sm items-center gap-3 rounded-xl border px-3 py-2.5";
   if (current?.open)
     return (
-      <Button
-        variant="outline"
-        className={className}
+      <button
+        type="button"
+        className={cn(activityCardClassName, activityCardInteractiveClassName)}
         aria-label={`Open agent draft: ${current.name}`}
         aria-expanded={current.expanded}
         onClick={current.open}
       >
         {contents}
-      </Button>
+      </button>
     );
   return (
-    <div className={className}>
+    <div className={activityCardClassName}>
       {contents}
       {current?.retry ? (
         <Button size="sm" variant="ghost" onClick={current.retry}>

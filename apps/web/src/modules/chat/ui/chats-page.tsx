@@ -14,6 +14,7 @@ import { EmptyState, Page, Section } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 // Only consumer of a debounce in the repo, so it lives here rather than
 // becoming another shared helper.
@@ -96,7 +97,10 @@ export function ChatsPage() {
                     <Link
                       to="/chat/$conversationId"
                       params={{ conversationId: conversation.id }}
-                      className="hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/30 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors outline-none focus-visible:ring-3"
+                      className={cn(
+                        focusRingClassName,
+                        "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors",
+                      )}
                       title={describeActivity(conversation)}
                     >
                       <span className="flex min-w-0 flex-1 items-center">

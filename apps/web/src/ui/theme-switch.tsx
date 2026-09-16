@@ -1,9 +1,9 @@
 import { ComputerIcon, Moon02Icon, Sun03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { IconSvgElement } from "@hugeicons/react";
-import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { SegmentedControl } from "~/ui/segmented-control.tsx";
 import { type Theme, setTheme, useTheme } from "./theme.tsx";
-import { cn } from "./utils";
 
 const OPTIONS: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
   { value: "light", label: "Light", icon: Sun03Icon },
@@ -18,7 +18,7 @@ export function ThemeSwitch({ className }: { className?: string }) {
   const theme = useTheme();
 
   return (
-    <ToggleGroup
+    <SegmentedControl
       aria-label="Theme"
       value={[theme]}
       multiple={false}
@@ -29,7 +29,7 @@ export function ThemeSwitch({ className }: { className?: string }) {
       }}
       size="sm"
       spacing={0.5}
-      className={cn("bg-muted rounded-full p-0.5", className)}
+      className={className}
     >
       {OPTIONS.map((option) => (
         <ToggleGroupItem
@@ -42,6 +42,6 @@ export function ThemeSwitch({ className }: { className?: string }) {
           <HugeiconsIcon icon={option.icon} strokeWidth={2} />
         </ToggleGroupItem>
       ))}
-    </ToggleGroup>
+    </SegmentedControl>
   );
 }

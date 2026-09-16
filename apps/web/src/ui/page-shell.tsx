@@ -15,6 +15,7 @@ import {
 } from "~/ui/primitives/empty";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { cn } from "~/ui/utils";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 export interface SectionNavItem {
   to: string;
@@ -71,7 +72,8 @@ export function SectionShell({
                 to={item.to}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "focus-visible:ring-ring/30 flex h-9 items-center gap-2.5 rounded-2xl px-2.5 text-sm transition-colors outline-none focus-visible:ring-3",
+                  focusRingClassName,
+                  "flex h-9 items-center gap-2.5 rounded-2xl px-2.5 text-sm transition-colors",
                   active
                     ? "bg-accent text-accent-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -128,8 +130,10 @@ export function Page({
   const back = backTo
     ? { to: backTo, label: backLabel ?? "Back", mobileOnly: false }
     : { to: rootPath, label: rootLabel, mobileOnly: true };
-  const backClassName =
-    "text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 -ml-1 mb-1 flex w-fit items-center gap-1 rounded-2xl text-sm transition-colors outline-none focus-visible:ring-3";
+  const backClassName = cn(
+    focusRingClassName,
+    "text-muted-foreground hover:text-foreground -ml-1 mb-1 flex w-fit items-center gap-1 rounded-2xl text-sm transition-colors",
+  );
   return (
     <div className="h-full overflow-y-auto">
       <div

@@ -7,6 +7,7 @@ import { AttachmentPreviewDialog } from "./attachment-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 /** The subset of an upload / stored attachment a chip renders. */
 export interface AttachmentChipItem {
@@ -108,7 +109,8 @@ export function AttachmentChip({
           title={problem ?? item.fileName}
           className={cn(
             shell,
-            "hover:bg-accent focus-visible:ring-ring/30 transition-colors outline-none focus-visible:ring-3",
+            focusRingClassName,
+            "hover:bg-accent transition-colors",
           )}
           // Plain click previews in place; modified clicks keep the browser's
           // open-in-new-tab behavior for the raw file.
@@ -140,7 +142,8 @@ export function AttachmentChip({
           onClick={preview ? () => setPreviewOpen(true) : undefined}
           disabled={!preview}
           className={cn(
-            "focus-visible:ring-ring/30 flex min-w-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-3",
+            focusRingClassName,
+            "flex min-w-0 items-center gap-2 rounded-xl",
             preview ? "cursor-pointer" : "cursor-default",
           )}
         >
@@ -152,7 +155,7 @@ export function AttachmentChip({
             variant="ghost"
             aria-label={`Remove ${item.fileName}`}
             onClick={onRemove}
-            className="text-muted-foreground hover:text-foreground -mr-1 size-5 shrink-0 rounded-full"
+            className="text-muted-foreground hover:text-foreground -mr-1 size-5 shrink-0"
           >
             <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3.5" />
           </Button>
