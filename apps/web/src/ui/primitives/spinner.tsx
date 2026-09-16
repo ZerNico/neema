@@ -18,7 +18,7 @@ function Spinner({
       role={hidden ? undefined : "status"}
       aria-label={hidden ? undefined : "Loading"}
       aria-hidden={hidden}
-      className={cn("size-4 animate-spin", className)}
+      className={cn("size-4 animate-spin motion-reduce:animate-none", className)}
       {...props}
     />
   );

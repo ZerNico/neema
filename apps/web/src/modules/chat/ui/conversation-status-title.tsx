@@ -36,7 +36,7 @@ export function ConversationStatusTitle({
           className="size-4 shrink-0 text-muted-foreground"
         >
           {generating ? (
-            <Spinner aria-label="Generating" className="size-4 motion-reduce:animate-none" />
+            <Spinner aria-label="Generating" className="size-4" />
           ) : branched ? (
             <HugeiconsIcon
               icon={GitBranchIcon}
