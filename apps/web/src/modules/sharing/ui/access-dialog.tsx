@@ -332,7 +332,7 @@ export function AccessDialog({
                   </ComboboxList>
                 </ComboboxContent>
               </Combobox>
-              {addError ? <FieldError className="text-xs">{addError}</FieldError> : null}
+              {addError ? <FieldError>{addError}</FieldError> : null}
             </div>
 
             <div className="flex min-h-0 flex-col gap-2">

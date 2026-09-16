@@ -1718,7 +1718,7 @@ export function NewChatView({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="max-w-72 rounded-3xl"
+                  className="max-w-72"
                   onClick={() => composer.current?.seedDraft(starter)}
                 >
                   <span className="truncate">{starter}</span>

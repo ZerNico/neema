@@ -485,7 +485,7 @@ export function ContextChip({
           variant="ghost"
           aria-label={`Remove ${label}`}
           onClick={onRemove}
-          className="-mr-1 size-6 shrink-0 rounded-full"
+          className="-mr-1 size-6 shrink-0"
         >
           <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3" />
         </Button>

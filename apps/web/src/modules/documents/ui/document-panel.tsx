@@ -150,7 +150,7 @@ export function DocumentPanelBody({
           </div>
         </section>
       ) : null}
-      {controller.error ? <FieldError className="text-sm">{controller.error}</FieldError> : null}
+      {controller.error ? <FieldError>{controller.error}</FieldError> : null}
       {/* Dimmed while locked so "you cannot edit this right now" is visible
           without reading the line above. */}
       <div className={cn("min-w-0", controller.locked && "opacity-60")}>

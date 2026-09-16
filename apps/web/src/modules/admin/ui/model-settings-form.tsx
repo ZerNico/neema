@@ -197,6 +197,7 @@ export function ModelSettingsFields({
 
   return (
     <>
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
       <FieldSet className="gap-4" disabled={disabled}>
         <FieldLegend variant="label">General</FieldLegend>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -320,7 +321,8 @@ export function ModelSettingsFields({
         </FieldLabel>
       </FieldSet>
 
-      <FieldSet className="gap-3" disabled={disabled}>
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
+      <FieldSet className="gap-4" disabled={disabled}>
         <FieldLegend variant="label">Capabilities</FieldLegend>
         {draft.type === "embedding" ? (
           <FieldDescription>
@@ -364,7 +366,8 @@ export function ModelSettingsFields({
         </div>
       </FieldSet>
 
-      <FieldSet className="gap-3" disabled={disabled}>
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
+      <FieldSet className="gap-4" disabled={disabled}>
         <FieldLegend variant="label">Pricing</FieldLegend>
         <FieldDescription>
           USD per 1M tokens, used when the provider doesn’t report a cost.
@@ -397,6 +400,7 @@ export function ModelSettingsFields({
         </div>
       </FieldSet>
 
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
       <FieldSet className="gap-4" disabled={disabled}>
         <FieldLegend variant="label">Access</FieldLegend>
         <Field>

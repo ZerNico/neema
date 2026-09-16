@@ -135,7 +135,7 @@ export function VirtualMessageList({
         aria-label="Jump to bottom"
         onClick={() => scrollToBottom("smooth")}
         className={cn(
-          "absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full transition-opacity",
+          "absolute bottom-3 left-1/2 -translate-x-1/2 transition-opacity",
           atBottom ? "pointer-events-none opacity-0" : "opacity-100",
         )}
       >

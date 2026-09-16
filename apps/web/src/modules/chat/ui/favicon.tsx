@@ -31,7 +31,7 @@ export function Favicon({ url, className }: { url: string; className?: string })
       alt=""
       loading="lazy"
       onError={() => setFailed(true)}
-      className={cn("size-4 shrink-0 rounded-[4px]", className)}
+      className={cn("size-4 shrink-0 rounded-sm", className)}
     />
   );
 }

@@ -129,10 +129,7 @@ function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
       <span className="flex h-lh shrink-0 items-center">
         <MotionSwap value={activity.status} kind="icon" className="size-3.5">
           {activity.status === "running" ? (
-            <Spinner
-              aria-hidden
-              className="text-muted-foreground size-3.5 motion-reduce:animate-none"
-            />
+            <Spinner aria-hidden className="text-muted-foreground size-3.5" />
           ) : failed ? (
             <HugeiconsIcon
               icon={Alert02Icon}
@@ -180,7 +177,7 @@ function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
                     image's bottom edge and push the label off the line. */}
                 <Favicon
                   url={item.url}
-                  className="mr-1 inline-block size-3 rounded-[3px] align-[-2px]"
+                  className="mr-1 inline-block size-3 align-[-2px]"
                 />
                 {item.label}
               </a>
