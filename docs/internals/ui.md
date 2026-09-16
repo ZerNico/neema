@@ -21,24 +21,28 @@ render={<Link/>} nativeButton={false}>` for navigation — Base UI forces `role=
 className={buttonVariants({...})}>`.
 - Radius scale is 2xl/3xl/4xl for app-authored chrome only, not generated primitive density or
   chart/favicon geometry. Semantic colour tokens only — `success`/`warning` exist beside `destructive`.
-- `@shadcn/lint` (`no-restyle`, `no-raw-colors` and `no-unknown-classes`, configured in
-  `oxlint.config.ts`) enforces the rule
-  this file opens with: a call site may lay a component out, tint it to a semantic foreground, reveal it
-  and control how its text wraps, but anything that changes a component's own spacing, shape or type
-  scale means the wrong component was chosen or the design system is missing a variant. The whole of
-  `src/ui/**` is exempt, because that is where the design system is entitled to restate its primitives.
-  They run at `error` and the count is zero, so anything new is genuinely new. The twenty standing
-  exceptions each carry an `oxlint-disable-next-line` naming the reason, which is the one place a reader
-  of that line will find it; widening the allow list instead hides the decision from them.
+- `@shadcn/lint` enforces the rule this file opens with: a call site may lay a component out, tint it to
+  a semantic foreground, reveal it and say how its text fills the box, but changing a component's own
+  spacing, shape or type scale means the wrong component was chosen or a variant is missing. That list
+  is `callSiteMayDo` in `oxlint.config.ts`; `Card` and its parts also take padding, because `card.tsx`
+  is shared by padded cards and unpadded ListCards. `src/ui/**` is exempt, being the design system
+  restating its own primitives, and so are tests, which need a sentinel class no build emits.
+- It runs at `error` with a count of zero, so anything new is genuinely new. The standing exceptions
+  each carry an `oxlint-disable-next-line` naming the reason, next to the line it applies to. Add one
+  there rather than widening `callSiteMayDo`, which would hide the decision from everyone who reads
+  that line later.
+- Only `no-restyle`, `no-raw-colors` and `no-unknown-classes` are enabled; the plugin's rules are opt
+  in. `no-arbitrary-values` and `no-inline-styles` were tried and dropped: this app needs viewport math,
+  mask gradients and Base UI's anchor variables, and its inline styles hold measured values a class
+  cannot carry, so between them the two wanted sixty exemptions to catch two real magic numbers.
+  `require-static-classes` cannot see through a variable, so it rejects the shared row constants every
+  activity block composes.
 - Three surfaces exist only because several screens had each rebuilt them inline, which is the drift this
   file warns about: `segmented-control.tsx` (the pill form of a toggle group — the primitive's own shape
   is a joined bar), `hover-card.tsx` (a preview on hover — `TooltipContent` is a small inverted label,
   not a card) and `focus-ring.ts` (the ring a focusable surface takes when it is not a Button, which
   carries its own). `--radius-composer` is the composer's corner, off Tailwind's scale, with
   `--radius-composer-inner` the concentric radius for anything sitting `inset-1` within it.
-- `no-arbitrary-values` and `no-inline-styles` are off. This app needs viewport math, mask gradients
-  and Base UI's anchor variables, and its inline styles hold measured values a class cannot carry, so
-  between them the two rules wanted sixty exemptions to catch two real magic numbers.
 - `Button` already has an `xs` size (24px tall). Reach for it before writing `h-6` and a padding
   override; five call sites in the folder strip had hand-rolled it while the size went unused.
 
