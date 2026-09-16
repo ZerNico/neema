@@ -173,6 +173,7 @@ export function AskUserBlock({
                               key={option.label}
                               value={String(choice)}
                               aria-label={option.label}
+                              // oxlint-disable-next-line shadcn/no-restyle -- a choice carries a label and an optional description, so it wraps to as many lines as it needs
                               className="h-auto min-h-10 min-w-0 max-w-full shrink rounded-2xl px-3 py-2 text-left whitespace-normal aria-pressed:border-primary aria-pressed:bg-primary/10 aria-pressed:text-foreground"
                             >
                               <span className="min-w-0 [overflow-wrap:anywhere]">
@@ -188,6 +189,7 @@ export function AskUserBlock({
                         </ToggleGroup>
                       ) : null}
                       <div className="space-y-1.5">
+                        {/* oxlint-disable-next-line shadcn/no-restyle -- a secondary prompt under the options, not a field label */}
                         <Label htmlFor={customId} className="text-xs">
                           {question.options.length === 0
                             ? "Your answer"
@@ -201,7 +203,7 @@ export function AskUserBlock({
                           disabled={locked}
                           maxLength={4000}
                           rows={2}
-                          className="min-h-16 resize-y rounded-2xl"
+                          className="min-h-16 resize-y"
                           onChange={(event) => {
                             const custom = event.target.value;
                             setAnswers((current) =>

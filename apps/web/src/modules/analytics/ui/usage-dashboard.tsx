@@ -114,6 +114,7 @@ export function UsageRangePicker({
           </Button>
         }
       />
+      {/* oxlint-disable-next-line shadcn/no-restyle -- holds a menu whose rows carry their own padding and span the full width */}
       <PopoverContent align="end" className={cn(custom ? "w-auto" : "w-56 p-1.5")}>
         {custom ? (
           <div className="flex flex-col gap-3">
@@ -207,7 +208,7 @@ function StatTile({
           {sub ? <span className="min-w-0 break-words">{sub}</span> : null}
         </div>
         {spark ? (
-          <div className="mt-auto flex h-[22px] w-full min-w-0 justify-end overflow-hidden pt-1">
+          <div className="mt-auto flex h-5.5 w-full min-w-0 justify-end overflow-hidden pt-1">
             <UsageSparkline values={spark} />
           </div>
         ) : null}
@@ -474,10 +475,12 @@ export function UsageTable({
   return (
     <Table>
       <TableHeader>
+        {/* oxlint-disable-next-line shadcn/no-restyle -- nothing in this table is selectable, so hover would promise an action that is not there */}
         <TableRow className="hover:bg-transparent">
           {head.map((label, i) => (
             <TableHead
               key={label}
+              // oxlint-disable-next-line shadcn/no-restyle -- a flush metrics summary, not a data grid
               className={cn("text-muted-foreground h-9 px-0 text-xs", i > 0 && "text-right")}
             >
               {label}
@@ -494,6 +497,7 @@ export function UsageTable({
               <TableCell
                 key={head[i]}
                 className={cn(
+                  // oxlint-disable-next-line shadcn/no-restyle -- a flush metrics summary, not a data grid
                   "px-0 py-2",
                   i > 0 ? "text-right tabular-nums" : "max-w-48 truncate whitespace-normal",
                 )}

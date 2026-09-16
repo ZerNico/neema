@@ -110,6 +110,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       backLabel="Providers"
       actions={
         <>
+          {/* oxlint-disable-next-line shadcn/no-restyle -- an inline toggle in the page header, not a stacked form row */}
           <Field orientation="horizontal" className="w-auto gap-2">
             <FieldLabel htmlFor={`${id}-enabled`} className="text-muted-foreground max-sm:sr-only">
               Enabled

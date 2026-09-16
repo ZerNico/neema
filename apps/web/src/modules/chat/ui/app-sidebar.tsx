@@ -86,6 +86,7 @@ export function AppSidebar({
       </SidebarHeader>
       {/* Match the chat scroller's soft edge; padding keeps the first and last
           items outside the fade when the list is scrolled to either end. */}
+      {/* oxlint-disable-next-line shadcn/no-restyle -- the padding keeps items clear of the mask */}
       <SidebarContent className="py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
         {/* The route loader prefetches the first page, so this only shows on
             a cold cache (e.g. right after sign-out emptied it). */}
@@ -160,6 +161,7 @@ function ConversationList() {
                 <SidebarMenuItem key={conversation.id}>
                   <SidebarMenuButton
                     isActive={conversation.id === activeId}
+                    // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between status icon and title
                     className="gap-0 [&>span:last-child]:!text-clip"
                     render={
                       <Link

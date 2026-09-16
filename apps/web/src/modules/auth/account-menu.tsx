@@ -79,6 +79,7 @@ export function AccountMenu({
         render={<SidebarMenuButton size="lg" tooltip={accountLabel} />}
         aria-label={accountLabel}
       >
+        {/* oxlint-disable-next-line shadcn/no-restyle -- marks an impersonated session, so it is a state signal rather than decoration */}
         <Avatar className={impersonating ? "size-8 ring-2 ring-warning" : "size-8"}>
           <AvatarFallback>
             {user.name.slice(0, 2).toUpperCase() || (

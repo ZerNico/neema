@@ -87,6 +87,7 @@ export function DesktopSignInPage({
           <CardFooter>
             <Button
               variant="link"
+              // oxlint-disable-next-line shadcn/no-restyle -- the link variant has to sit inline with the sentence around it
               className="h-auto p-0"
               disabled={signingOut}
               onClick={async () => {

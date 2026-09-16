@@ -212,6 +212,7 @@ export function ConversationTitle({
         align="center"
         sideOffset={48}
         showArrow={false}
+        // oxlint-disable-next-line shadcn/no-restyle -- a two line tooltip; the default padding is tuned for one
         className="max-w-80 flex-col items-start gap-0.5 whitespace-normal py-2"
       >
         <span className="font-medium leading-snug">{title}</span>
