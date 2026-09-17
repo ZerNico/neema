@@ -29,7 +29,7 @@ import {
   saveAgentDraft,
 } from "~/modules/agents/server/draft-functions.ts";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
-import type { ToolActivity } from "../client/use-message-stream.ts";
+import { applyToolChunk, type ToolActivity } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import type { ConversationDocument } from "~/modules/documents/schema.ts";
 import {
@@ -453,7 +453,7 @@ const renderView = (
   overrides: Partial<Payload> = {},
 ) => {
   const client = new QueryClient({
-    // The payload is seeded, not fetched — the server functions are mocks.
+    // The payload is seeded, not fetched. The server functions are mocks.
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   client.setQueryData(["conversation", "c1"], payload(branchedFrom, overrides));
@@ -554,6 +554,58 @@ describe("toActivity", () => {
     callIndex: 2,
     error: null,
   };
+
+  it("accepts live research progress after loading a running row without progress", () => {
+    const initial = toActivity({
+      ...row,
+      toolName: "deep_research",
+      status: "running",
+      result: null,
+    });
+    const progress = {
+      runId: "run-1",
+      phase: "researching",
+      usageComplete: true,
+      limitations: [],
+      tasks: [],
+    };
+    const tools = applyToolChunk(
+      [initial],
+      JSON.stringify({
+        v: 1,
+        family: "research",
+        name: "deep_research",
+        callId: row.id,
+        runId: progress.runId,
+        phase: "progress",
+        progress,
+      }),
+    );
+    expect(initial.status).toBe("running");
+    expect(tools[0]).toMatchObject({ status: "running", runId: "run-1", progress });
+    const completed = applyToolChunk(
+      tools,
+      JSON.stringify({
+        v: 1,
+        family: "research",
+        name: "deep_research",
+        callId: row.id,
+        runId: progress.runId,
+        phase: "result",
+        progress: { ...progress, phase: "complete" },
+      }),
+    );
+    expect(completed[0]).toMatchObject({ status: "complete", runId: "run-1" });
+  });
+
+  it.each(["complete", "error"] as const)(
+    "keeps %s research without progress terminal",
+    (status) => {
+      expect(toActivity({ ...row, toolName: "deep_research", status, result: null }).status).toBe(
+        "error",
+      );
+    },
+  );
 
   it("hydrates save_memory as summary-only memory activity", () => {
     expect(
@@ -1740,9 +1792,7 @@ describe("ChatView documents", () => {
       gate.release();
       await Promise.resolve();
     });
-    expect(
-      screen.getByText("Read-only while the assistant is answering."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Read-only while the assistant is answering.")).toBeInTheDocument();
 
     // Only a read that shows no streaming row releases it.
     act(() =>
@@ -1757,11 +1807,12 @@ describe("ChatView documents", () => {
         }),
       ),
     );
-    expect(
-      screen.getByText("Read-only while the assistant is answering."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Read-only while the assistant is answering.")).toBeInTheDocument();
     act(() =>
-      client.setQueryData(["conversation", "c1"], payload(null, { toolCalls: [documentReference()] })),
+      client.setQueryData(
+        ["conversation", "c1"],
+        payload(null, { toolCalls: [documentReference()] }),
+      ),
     );
     await waitFor(() =>
       expect(

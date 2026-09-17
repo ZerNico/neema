@@ -1,8 +1,5 @@
 import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
-import {
-  DocumentOwner,
-  type DocumentOwnerHandle,
-} from "~/modules/documents/ui/document-owner.tsx";
+import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 import { AgentDraftWidget } from "./agent-draft-activity-block.tsx";
 import {
@@ -82,9 +79,11 @@ import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
 
-// Durable message_tool_calls row → the same family-discriminated shape used by
-// live chunks. The tool name is the durable discriminator; old web rows never
-// carried a family field of their own.
+/**
+ * Durable message_tool_calls row → the same family-discriminated shape used by
+ * live chunks. The tool name is the durable discriminator; old web rows never
+ * carried a family field of their own.
+ */
 export function toActivity(row: {
   id: string;
   toolName: string;
@@ -190,7 +189,9 @@ export function toActivity(row: {
       name: row.toolName,
       turnIndex: row.turnIndex,
       callIndex: row.callIndex,
-      status: progress ? row.status : "error",
+      // A running row has not received its first progress yet; forcing a
+      // terminal status here would make the reducer reject every later update.
+      status: row.status === "complete" && !progress ? "error" : row.status,
       ...(progress ? { progress, runId: progress.runId } : {}),
       ...(result.sources ? { sources: result.sources } : {}),
       ...(row.error ? { error: row.error.message } : {}),
@@ -328,7 +329,7 @@ function placeStrandedDocuments({
   const byMessage = new Map<string, string[]>();
   for (const documentId of stranded) {
     const anchor = summary.get(documentId)?.messageId;
-    const host = (anchor && answers.some((message) => message.id === anchor) ? anchor : fallback);
+    const host = anchor && answers.some((message) => message.id === anchor) ? anchor : fallback;
     if (!host) continue;
     const list = byMessage.get(host);
     if (list) list.push(documentId);
@@ -342,25 +343,21 @@ function placeStrandedDocuments({
       ...message,
       toolActivities: [
         ...message.toolActivities,
-        ...ids.map(
-          (documentId, index): ToolActivity => ({
-            family: "document",
-            callId: `document:${documentId}`,
-            name: "create_document",
-            status: "complete",
-            turnIndex: Number.MAX_SAFE_INTEGER,
-            callIndex: index,
-            textOffset: message.content.length,
-            result: {
-              outcome: "created",
-              documentId,
-              documentConversationId: conversationId,
-              ...(summary.get(documentId)?.title
-                ? { title: summary.get(documentId)!.title }
-                : {}),
-            },
-          }),
-        ),
+        ...ids.map((documentId, index): ToolActivity => ({
+          family: "document",
+          callId: `document:${documentId}`,
+          name: "create_document",
+          status: "complete",
+          turnIndex: Number.MAX_SAFE_INTEGER,
+          callIndex: index,
+          textOffset: message.content.length,
+          result: {
+            outcome: "created",
+            documentId,
+            documentConversationId: conversationId,
+            ...(summary.get(documentId)?.title ? { title: summary.get(documentId)!.title } : {}),
+          },
+        })),
       ],
     };
   });
@@ -411,10 +408,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
-  // when the generation finishes, the sync bus refetches the conversation and
-  // the row flips to complete with its full content BEFORE the smoothed text
-  // has drained — dropping the overlay at that moment would pop the tail in,
-  // exactly what smoothing exists to prevent. (Guarded render-time adjust.)
+  // when the generation finishes, the sync bus refetches and the row flips to
+  // complete before the smoothed text drains. Dropping the overlay at that
+  // moment would pop the tail in, exactly what smoothing exists to prevent.
+  // (Guarded render-time adjust.)
   const [overlayId, setOverlayId] = useState<string | null>(null);
   if (streamingMessage && streamingMessage.id !== overlayId) {
     setOverlayId(streamingMessage.id);
@@ -466,11 +463,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       compactions,
       lastSeq,
     };
-  }, [
-    streamingMessage?.id,
-    streamingMessage?.generationId,
-    retryEpoch,
-  ]);
+  }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
   // oxlint-enable react/memo-dependencies
 
   // A sync refresh can see the terminal row before SSE has delivered its last
@@ -951,7 +944,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     return grouped;
   }, [data.attachments]);
 
-  // Grouped once per query result — the display map below runs on every
+  // Grouped once per query result, since the display map below runs on every
   // stream chunk and must not rescan the flat list per message.
   const toolCallsByMessage = useMemo(() => {
     const grouped = new Map<string, ToolActivity[]>();
@@ -1007,7 +1000,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     return next;
   }, [data.messages]);
 
-  // Which model wrote each answer — null once its row is gone. The retry menu
+  // Which model wrote each answer, null once its row is gone. The retry menu
   // marks it, and a retry that omits a model reuses it server-side.
   const modelByMessage = useMemo(
     () => new Map(data.messages.map((m) => [m.id, m.modelId])),
@@ -1078,7 +1071,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (!(await confirmEdit(activeEditingMessage.id))) return;
 
       // Queues behind any upload still in flight, then sends the full ordered
-      // replacement set — omitted ids are released server-side.
+      // replacement set. Omitted ids are released server-side.
       submitEditUploads((attachmentIds) => {
         if (!content && attachmentIds.length === 0) return;
         mutateEdit({
@@ -1264,8 +1257,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               editDisabled: generationDisabled,
             }
           : {}),
-        // Only the answer itself can be forked, and only once it is finished —
-        // the server insists on the same, this just keeps the row honest.
+        // Only the answer itself can be forked, and only once it is finished.
+        // The server insists on the same, this just keeps the row honest.
         ...(message.role === "assistant" && message.status !== "streaming"
           ? {
               onBranch: () => branchAt(message.id),
@@ -1452,101 +1445,101 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     >
       <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
         <div className="flex h-full flex-col">
-        {data.branchedFrom ? (
-          // Outside the scroller, on the message column's geometry: lineage is a
-          // property of the conversation, not of its first message.
-          <div className="[scrollbar-gutter:stable_both-edges]">
-            <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
-              <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
-              <span className="shrink-0">Branched from</span>
-              <Link
-                to="/chat/$conversationId"
-                params={{ conversationId: data.branchedFrom.conversationId }}
-                className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
-              >
-                {data.branchedFrom.title ?? "New chat…"}
-              </Link>
+          {data.branchedFrom ? (
+            // Outside the scroller, on the message column's geometry: lineage is a
+            // property of the conversation, not of its first message.
+            <div className="[scrollbar-gutter:stable_both-edges]">
+              <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
+                <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
+                <span className="shrink-0">Branched from</span>
+                <Link
+                  to="/chat/$conversationId"
+                  params={{ conversationId: data.branchedFrom.conversationId }}
+                  className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
+                >
+                  {data.branchedFrom.title ?? "New chat…"}
+                </Link>
+              </div>
             </div>
-          </div>
-        ) : null}
-        <div className="min-h-0 flex-1">
-          {/* lastSeq covers tool-activity-only updates too */}
-          <ResearchPanelOwner messages={display} />
-          {/* A Work row names a path; only this view knows whose folders it
+          ) : null}
+          <div className="min-h-0 flex-1">
+            {/* lastSeq covers tool-activity-only updates too */}
+            <ResearchPanelOwner messages={display} />
+            {/* A Work row names a path; only this view knows whose folders it
               resolves against. */}
-          <LocalFileConversationProvider conversationId={conversationId}>
-            <VirtualMessageList
-              messages={withDocuments}
-              followKey={stream.lastSeq}
-              footer={
-                orphaned.length ? (
-                  <div className="flex flex-col">
-                    {orphaned.map((draftId) => (
-                      <AgentDraftWidget key={draftId} draftId={draftId} />
-                    ))}
-                  </div>
-                ) : null
-              }
-            />
-          </LocalFileConversationProvider>
-        </div>
-        {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
+            <LocalFileConversationProvider conversationId={conversationId}>
+              <VirtualMessageList
+                messages={withDocuments}
+                followKey={stream.lastSeq}
+                footer={
+                  orphaned.length ? (
+                    <div className="flex flex-col">
+                      {orphaned.map((draftId) => (
+                        <AgentDraftWidget key={draftId} draftId={draftId} />
+                      ))}
+                    </div>
+                  ) : null
+                }
+              />
+            </LocalFileConversationProvider>
+          </div>
+          {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
           composer edges align exactly with message content above. No top
           padding: the scroller's fade mask handles the visual transition. */}
-        <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
-          <div className="mx-auto w-full max-w-3xl px-4">
-            {questionNeedsRefresh ? (
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
-                <span>Your answers may not have been sent.</span>
-                <PendingButton
-                  size="sm"
-                  variant="outline"
-                  pending={refreshQuestionMutation.isPending}
-                  onClick={() => refreshQuestionMutation.mutate()}
-                >
-                  Refresh chat
-                </PendingButton>
-              </div>
-            ) : null}
-            <Composer
-              ref={composer}
-              folder={folder}
-              readOnly={work.readOnly}
-              mode={{ kind: "fixed", value: data.conversation.mode }}
-              settings={{
-                permissionLevel: data.conversation.permissionLevel,
-                onChange: (level) => workSettingsMutation.mutate(level),
-              }}
-              onSend={(content, attachmentIds, researchEnabled, skillIds) =>
-                sendMutation.mutateAsync({
-                  content,
-                  attachmentIds,
-                  researchEnabled,
-                  ...(skillIds ? { skillIds } : {}),
-                })
-              }
-              {...(stoppableId
-                ? {
-                    onStop: () =>
-                      stopMutation.mutate({
-                        messageId: stoppableId,
-                        ...(streamingMessage?.generationId
-                          ? { generationId: streamingMessage.generationId }
-                          : {}),
-                      }),
-                  }
-                : {})}
-              disabled={actionsDisabled}
-              textareaDisabled={editPending}
-              controlsDisabled={mutationPending}
-              modelId={effectiveModelId}
-              onModelChange={setModelId}
-              searchEnabled={searchEnabled}
-              onSearchEnabledChange={setSearchEnabled}
-              context={context}
-            />
+          <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
+            <div className="mx-auto w-full max-w-3xl px-4">
+              {questionNeedsRefresh ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
+                  <span>Your answers may not have been sent.</span>
+                  <PendingButton
+                    size="sm"
+                    variant="outline"
+                    pending={refreshQuestionMutation.isPending}
+                    onClick={() => refreshQuestionMutation.mutate()}
+                  >
+                    Refresh chat
+                  </PendingButton>
+                </div>
+              ) : null}
+              <Composer
+                ref={composer}
+                folder={folder}
+                readOnly={work.readOnly}
+                mode={{ kind: "fixed", value: data.conversation.mode }}
+                settings={{
+                  permissionLevel: data.conversation.permissionLevel,
+                  onChange: (level) => workSettingsMutation.mutate(level),
+                }}
+                onSend={(content, attachmentIds, researchEnabled, skillIds) =>
+                  sendMutation.mutateAsync({
+                    content,
+                    attachmentIds,
+                    researchEnabled,
+                    ...(skillIds ? { skillIds } : {}),
+                  })
+                }
+                {...(stoppableId
+                  ? {
+                      onStop: () =>
+                        stopMutation.mutate({
+                          messageId: stoppableId,
+                          ...(streamingMessage?.generationId
+                            ? { generationId: streamingMessage.generationId }
+                            : {}),
+                        }),
+                    }
+                  : {})}
+                disabled={actionsDisabled}
+                textareaDisabled={editPending}
+                controlsDisabled={mutationPending}
+                modelId={effectiveModelId}
+                onModelChange={setModelId}
+                searchEnabled={searchEnabled}
+                onSearchEnabledChange={setSearchEnabled}
+                context={context}
+              />
+            </div>
           </div>
-        </div>
         </div>
       </AgentDraftOwner>
     </DocumentOwner>
@@ -1555,7 +1548,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
 // How long the composer takes to travel from the middle of the column down to
 // the bottom. Navigation waits this out, so a fast first response cannot swap
-// the route in mid-slide — which would read as a jump rather than a move.
+// the route in mid-slide, which would read as a jump rather than a move.
 const SLIDE_MS = 380;
 
 export function NewChatView({
@@ -1650,7 +1643,7 @@ export function NewChatView({
           }),
         queryClient,
       ),
-    // Fires when the request starts, i.e. after any queued upload settled —
+    // Fires when the request starts, i.e. after any queued upload settled.
     // the composer should not move while it is still waiting on those.
     onMutate: (input) => {
       work.check(input.mode === "work");
@@ -1728,8 +1721,8 @@ export function NewChatView({
           </ul>
         ) : null}
       </div>
-      {/* Mirrors ChatView's composer wrapper exactly — same scrollbar gutter,
-          max width and bottom padding — so the slide ends on the next route's
+      {/* Mirrors ChatView's composer wrapper exactly: same scrollbar gutter,
+          max width and bottom padding, so the slide ends on the next route's
           resting position instead of near it. */}
       <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-3xl px-4">
