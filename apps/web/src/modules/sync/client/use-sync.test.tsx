@@ -153,13 +153,14 @@ describe("useSync", () => {
     const { invalidate, source } = renderSync();
     source.emit("open");
 
-    // The gap between these two opens is where events are lost for good —
-    // the bus has no replay, so the reopen must assume it missed some.
+    // The gap between these two opens is where events are lost for good,
+    // since the bus has no replay, so the reopen must assume it missed some.
     source.emit("open");
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["documents"] });
   });
 
   it("refetches authorized models and admin order after a policy change or reconnect", () => {

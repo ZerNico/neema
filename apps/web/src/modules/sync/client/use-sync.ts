@@ -3,8 +3,10 @@ import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import type { SyncEvent } from "../events.ts";
 
-// One SSE connection per tab. Applies this user's domain events (from any
-// browser/instance) to the query cache so sidebar and open chats stay in sync.
+/**
+ * One SSE connection per tab. Applies this user's domain events (from any
+ * browser/instance) to the query cache so sidebar and open chats stay in sync.
+ */
 export function useSync(reconcileIdentity?: () => Promise<boolean>) {
   const queryClient = useQueryClient();
 
@@ -89,6 +91,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["documents"] });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
         void queryClient.invalidateQueries({ queryKey: ["sharing"] });
         void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
@@ -144,7 +147,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
             // Prefix, not this id alone: a branch's detail embeds its source's
             // title, so renaming or deleting one conversation can stale
             // another's. Only active queries refetch, and these events fire
-            // per rename/title/delete — not per token.
+            // per rename/title/delete, not per token.
             void queryClient.invalidateQueries({ queryKey: ["conversation"] });
             // Saved memories embed source titles and whether the source still
             // exists, so rename/delete events must refresh their provenance.
