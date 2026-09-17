@@ -1,0 +1,231 @@
+import { createHash, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
+import { parseEnv } from "node:util";
+import { spawn, execFileSync } from "node:child_process";
+import { constants, createReadStream } from "node:fs";
+import { mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { activateSnapshot, instanceEnv, loadInstance, safeError } from "./dev-state.mjs";
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(join(root, "apps/web/package.json"));
+const { Client } = require("pg");
+export const compose = ["compose", "--project-name", "chat-development", "--file", join(root, "infra/dev-postgres.compose.yml")];
+const interrupted = "Interrupted by development snapshot import.";
+
+export async function connect(url, readonly = false) {
+  const connection = new URL(url);
+  if (readonly) connection.searchParams.set("options", "-c default_transaction_read_only=on");
+  const client = new Client({ connectionString: connection.toString(), connectionTimeoutMillis: 10000 });
+  await client.connect();
+  return client;
+}
+
+export async function sourceConfig(checkoutRoot) {
+  // Parse data, never source a shell script or merge the source environment into the runner.
+  let web = join(checkoutRoot, "apps/web");
+  let env;
+  try { env = parseEnv(await readFile(join(web, ".env"), "utf8")); }
+  catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    // Linked worktrees normally lack ignored env files. Resolve relative blob paths at the source.
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: checkoutRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    web = join(dirname(common), "apps/web");
+    try { env = parseEnv(await readFile(join(web, ".env"), "utf8")); }
+    catch (cause) { throw safeError("No source apps/web/.env found in this checkout or the primary checkout.", { cause }); }
+  }
+  if (!env.DATABASE_URL) throw safeError("apps/web/.env must specify DATABASE_URL for snapshot import.");
+  const url = new URL(env.DATABASE_URL);
+  if (!["postgres:", "postgresql:"].includes(url.protocol)) throw safeError("Snapshot source must be PostgreSQL.");
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(env.PROVIDER_KEY_SECRET ?? "")) throw safeError("Source PROVIDER_KEY_SECRET must be a 32-byte base64 key.");
+  return {
+    url: url.toString(),
+    providerSecret: env.PROVIDER_KEY_SECRET,
+    blobs: await realpath(resolve(web, env.BLOB_STORE_ROOT || ".data/storage")).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+      throw safeError("Source blob directory does not exist; nothing to import.");
+    }),
+  };
+}
+
+export async function checkMigrations(client, migrations = join(root, "apps/web/drizzle")) {
+  const { rows } = await client.query('SELECT name, hash FROM drizzle.__drizzle_migrations ORDER BY id');
+  const local = new Set(await readdir(migrations));
+  for (const row of rows) {
+    if (!row.name || !local.has(row.name)) throw new Error("Snapshot contains migrations not present in this checkout.");
+    const sql = await readFile(join(migrations, row.name, "migration.sql"));
+    if (createHash("sha256").update(sql).digest("hex") !== row.hash) throw new Error(`Migration differs from source: ${row.name}`);
+  }
+}
+
+export async function assertIdle(admin, instance) {
+  const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [instance.database]);
+  if (rows[0].n !== 0) throw new Error("The destination database has active connections. Stop its server and database tools first.");
+}
+
+export async function sanitize(client) {
+  await client.query("BEGIN");
+  try {
+    // OAuth is disabled in the copy, so an OAuth-only snapshot would lose its sign-in path.
+    const { rows } = await client.query(`SELECT EXISTS (SELECT 1 FROM "user") AND NOT EXISTS (
+      SELECT 1 FROM account WHERE provider_id = 'credential' AND nullif(password, '') IS NOT NULL
+    ) AS locked_out`);
+    if (rows[0].locked_out) throw safeError("Snapshot has no password sign-in account. OAuth is disabled in development copies; import refused. Previous state retained.");
+    await client.query(`DELETE FROM session; DELETE FROM verification;
+      UPDATE account SET access_token = NULL, refresh_token = NULL, id_token = NULL,
+        access_token_expires_at = NULL, refresh_token_expires_at = NULL;
+      UPDATE oauth_providers SET enabled = false;
+      DELETE FROM blob_cleanup_intents;`);
+    await client.query(`UPDATE messages m SET status = 'error', generation_lease_until = NULL,
+      content = coalesce((SELECT string_agg(delta, '' ORDER BY seq) FROM message_chunks WHERE message_id=m.id AND kind='text'), m.content),
+      reasoning = coalesce((SELECT string_agg(delta, '' ORDER BY seq) FROM message_chunks WHERE message_id=m.id AND kind='reasoning'), m.reasoning),
+      error = jsonb_build_object('tag', 'GenerationFailed', 'message', $1::text), completed_at = now()
+      WHERE status = 'streaming'`, [interrupted]);
+    for (const table of ["message_tool_calls", "message_compaction_events"]) {
+      await client.query(`UPDATE ${table} SET status = 'error', completed_at = now(),
+        error = jsonb_build_object('code', 'GenerationFailed', 'message', $1::text) WHERE status = 'running'`, [interrupted]);
+    }
+    await client.query(`UPDATE research_runs SET status='terminal', owner=NULL, lease_until=now(),
+      cancel_requested=true, completed_at=now(), progress=progress || '{"phase":"error"}'::jsonb
+      WHERE status IN ('queued','running');
+      UPDATE research_tasks SET status='aborted' WHERE status IN ('queued','running');
+      UPDATE research_calls SET status='error' WHERE status='running';`);
+    await client.query(`UPDATE knowledge_document_versions SET status='failed', lease_token=NULL, lease_until=NULL, error=$1
+      WHERE status IN ('queued','extracting')`, [interrupted]);
+    await client.query(`UPDATE knowledge_embedding_jobs SET status='failed', lease_token=NULL, lease_until=NULL, error=$1, updated_at=now()
+      WHERE status IN ('queued','running')`, [interrupted]);
+    await client.query("COMMIT");
+  } catch (error) { await client.query("ROLLBACK"); throw error; }
+}
+
+export async function copyBlobs(client, sourceRoot, targetRoot) {
+  const source = await realpath(sourceRoot);
+  await mkdir(targetRoot, { recursive: true, mode: 0o700 });
+  const target = await realpath(targetRoot);
+  if (source === target || target.startsWith(source + sep) || source.startsWith(target + sep)) throw new Error("Source and target blob roots overlap.");
+  const { rows } = await client.query("SELECT storage_key, sha256, size FROM attachment_blobs");
+  for (const row of rows) {
+    const key = row.storage_key;
+    if (typeof key !== "string" || !key.startsWith("blobs/") || key.split("/").some((part) => !part || part === "." || part === "..") || key.includes("\\") || key.includes("\0")) throw new Error("Invalid source blob key.");
+    const path = await realpath(join(source, key));
+    if (!path.startsWith(source + sep)) throw new Error("Source blob escapes storage root.");
+    const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const destination = join(target, key);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    let output;
+    try {
+      if (!(await input.stat()).isFile()) throw new Error("Source blob is not a regular file.");
+      output = await open(destination, "wx", 0o600);
+      const hash = createHash("sha256");
+      let size = 0;
+      for await (const chunk of input.createReadStream({ autoClose: false })) {
+        hash.update(chunk);
+        size += chunk.length;
+        await output.writeFile(chunk);
+      }
+      if (size !== Number(row.size) || hash.digest("hex") !== row.sha256) throw new Error("Source blob is missing or changed; retry from a quiescent source.");
+    } finally { await input.close(); await output?.close(); }
+  }
+  return rows.length;
+}
+
+// Connection fields travel over stdin, not argv or Docker's persisted environment.
+async function archiveCommand(kind, url, archive, run, transport) {
+  const connection = new URL(url);
+  if (kind === "dump") {
+    if (transport.sourceLocal) { connection.hostname = "127.0.0.1"; connection.port = "5432"; }
+    else if (["localhost", "127.0.0.1", "[::1]"].includes(connection.hostname)) connection.hostname = "host.docker.internal";
+  } else { connection.hostname = "127.0.0.1"; connection.port = "5432"; }
+  const fields = [connection.hostname, connection.port || "5432", decodeURIComponent(connection.username), decodeURIComponent(connection.password), decodeURIComponent(connection.pathname.slice(1)), connection.searchParams.get("sslmode") || "prefer"];
+  if (fields.some((field) => /[\r\n\0]/.test(field))) throw new Error("Unsupported PostgreSQL connection field.");
+  const file = await open(archive, kind === "dump" ? "wx" : "r", 0o600);
+  try {
+    await run("docker", [...transport.exec, "sh", "-c",
+      'IFS= read -r PGHOST; IFS= read -r PGPORT; IFS= read -r PGUSER; IFS= read -r PGPASSWORD; IFS= read -r PGDATABASE; IFS= read -r PGSSLMODE; export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE PGSSLMODE; export PGCONNECT_TIMEOUT=10; ' +
+      (kind === "dump"
+        ? 'export PGOPTIONS="-c default_transaction_read_only=on"; exec pg_dump --format=custom --no-owner --no-acl'
+        : 'exec pg_restore --no-owner --no-acl --no-comments --exit-on-error --dbname="$PGDATABASE"')],
+      { input: fields.join("\n") + "\n", archive: file.fd, restoring: kind !== "dump", quiet: true });
+  } finally { await file.close(); }
+}
+
+export async function importSnapshot(instance, source, run, adminUrl = "postgres://chat_dev_admin:local-development-only@127.0.0.1:5433/postgres", transport = { exec: [...compose, "exec", "-T", "postgres"] }) {
+  const admin = await connect(adminUrl);
+  let sourceClient;
+  let stagedClient;
+  let created = false;
+  let activated = false;
+  const snapshot = randomBytes(8).toString("hex");
+  const database = `chat_dev_${instance.id}_${snapshot}`;
+  const directory = join(instance.directory, "snapshots", snapshot);
+  const staged = { ...instance, database, blobs: join(directory, "storage"), profile: join(directory, "desktop"), providerSecret: source.providerSecret };
+  const archive = join(directory, "snapshot.dump");
+  try {
+    await assertIdle(admin, instance);
+    sourceClient = await connect(source.url, true);
+    // Database names are unique per checkout on our dedicated server; reject them even through aliases.
+    const { rows: identity } = await sourceClient.query("SELECT current_database() AS name");
+    if (identity[0].name.startsWith(`chat_dev_${instance.id}`)) throw safeError("Cannot import this checkout's own database.");
+    await checkMigrations(sourceClient);
+    await sourceClient.end(); sourceClient = null;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    console.log("Reading source snapshot (source is read-only)…");
+    await archiveCommand("dump", source.url, archive, run, transport);
+    await admin.query(`CREATE DATABASE ${database} OWNER chat_dev_${instance.id}`);
+    created = true;
+    await admin.query(`REVOKE ALL ON DATABASE ${database} FROM PUBLIC`);
+    const extensionUrl = new URL(adminUrl);
+    extensionUrl.pathname = `/${database}`;
+    const extensionClient = await connect(extensionUrl.toString());
+    try { await extensionClient.query("CREATE EXTENSION IF NOT EXISTS vector"); } finally { await extensionClient.end(); }
+    const env = instanceEnv(staged);
+    const targetUrl = new URL(env.DATABASE_URL);
+    targetUrl.hostname = extensionUrl.hostname;
+    targetUrl.port = extensionUrl.port;
+    env.DATABASE_URL = targetUrl.toString();
+    console.log("Restoring and migrating isolated copy…");
+    await archiveCommand("restore", env.DATABASE_URL, archive, run, transport);
+    stagedClient = await connect(env.DATABASE_URL);
+    await checkMigrations(stagedClient);
+    await run("pnpm", ["--filter", "@chat/web", "db:migrate"], { env, quiet: true });
+    await sanitize(stagedClient);
+    const count = await copyBlobs(stagedClient, source.blobs, staged.blobs);
+    await stagedClient.end(); stagedClient = null;
+    await rm(archive);
+    await assertIdle(admin, instance);
+    // All root entrypoints hold the same lifecycle gate while this manifest is replaced.
+    await activateSnapshot(instance, snapshot, source.providerSecret);
+    activated = true;
+    console.log(`Imported snapshot with ${count} blobs. Previous state retained.\nRun pnpm dev; sign in with your existing email/password. OAuth sign-in is disabled in the copy.`);
+    return await loadInstance(instance.root);
+  } finally {
+    await sourceClient?.end();
+    await stagedClient?.end();
+    try {
+      if (!activated && created) await admin.query(`DROP DATABASE ${database}`);
+      if (!activated) await rm(directory, { recursive: true, force: true });
+    } finally { await admin.end(); }
+  }
+}
+
+export function runImportCommand(executable, args, options = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, args, {
+      cwd: root, env: options.env ?? process.env,
+      stdio: options.archive !== undefined && !options.restoring ? ["pipe", options.archive, "pipe"] : ["pipe", options.quiet ? "pipe" : "inherit", "pipe"],
+    });
+    child.stdout?.resume();
+    child.stderr.resume();
+    child.stdin.on("error", () => {});
+    child.once("error", () => reject(new Error(`Could not launch ${executable}.`)));
+    child.once("close", (code) => code === 0 ? resolvePromise() : reject(new Error(`${executable} failed during snapshot import (exit ${code}); connection details suppressed.`)));
+    if (options.restoring) {
+      // Preserve stdin ordering: the shell consumes one URL line, pg_restore consumes the archive.
+      child.stdin.write(options.input);
+      const stream = createReadStream("", { fd: options.archive, autoClose: false });
+      stream.on("error", (error) => child.stdin.destroy(error));
+      stream.pipe(child.stdin);
+    } else child.stdin.end(options.input);
+  });
+}

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "vite dev",
     "build": "vite build && node scripts/check-production-build.mjs && node scripts/check-production-start.mjs",
     "start": "node scripts/start.mjs",
     "test": "vitest run",

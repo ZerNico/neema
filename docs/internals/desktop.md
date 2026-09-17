@@ -47,7 +47,10 @@ previous compose-time folders; durable conversation mappings stay on the
 machine. `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
 preload through a process argument, the site and recovery page then show no
 switch at all, the menu item is absent, and the IPC still refuses as a backstop.
-`connect-flow.ts` holds this logic electron-free.
+`connect-flow.ts` holds this logic electron-free. During dev reload,
+`CHAT_DESKTOP_PROFILE` selects userData before services or sessions open; the root
+dev runner supplies a checkout-local directory. The installed profile is unchanged.
+See [development isolation](development.md).
 
 ## Sign-in happens in the browser
 

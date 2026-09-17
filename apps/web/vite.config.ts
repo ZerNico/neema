@@ -25,7 +25,10 @@ const apiRoutesAreNeverAssets = (): Plugin => ({
 
 export default defineConfig({
   server: {
-    port: 3000,
+    port: Number(process.env.PORT ?? 3000),
+    host: "127.0.0.1",
+    strictPort: true,
+    allowedHosts: process.env.PORTLESS_URL ? [new URL(process.env.PORTLESS_URL).hostname] : [],
   },
   resolve: {
     tsconfigPaths: true,

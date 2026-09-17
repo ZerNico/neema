@@ -15,18 +15,48 @@ A self-hosted, ChatGPT-style chat app built as a modular monolith.
 ## Getting started
 
 ```sh
-docker compose up -d          # local Postgres
-cp .env.example .env          # then fill in real secrets:
-                              #   BETTER_AUTH_SECRET: openssl rand -hex 32
-                              #   PROVIDER_KEY_SECRET: openssl rand -base64 32
 pnpm install
-pnpm db:migrate
-pnpm dev
+pnpm dev:setup               # Docker required; isolated Postgres on 127.0.0.1:5433
+pnpm dev                    # Portless web URL and an isolated desktop profile
 ```
 
-Register at `http://localhost:3000/register` — the first account is the admin. Open the
-user menu (bottom-left) → **Admin** → add a provider (e.g. OpenRouter + API key), pick
-models from the autocomplete, then start chatting.
+Portless creates a local HTTPS certificate and may prompt for sudo on first use.
+Run `pnpm exec portless proxy start` in a terminal first if launching through an
+agent. For an unprivileged proxy, use
+`pnpm exec portless proxy start --port 1355 --https`; URLs then include `:1355`.
+
+Open the printed URL and register: the first account is the admin. Open the
+user menu (bottom-left) → **Admin** → add a provider and pick models.
+Development starts empty by default. To copy your personal instance, stop the dev
+app with `pnpm dev:stop`, then run `pnpm dev:import` and confirm. It reads
+`apps/web/.env` (falling back to the primary checkout in a linked worktree), copies
+the database and blobs, and reuses the provider encryption key. The source stays
+unchanged; the previous dev state is retained. Imported provider keys are real, so
+new generations can incur charges. Sign in with an existing email/password;
+OAuth is disabled in the copy, and OAuth-only snapshots are refused.
+
+### Worktrees
+
+Run `pnpm install --frozen-lockfile && pnpm dev:setup` in each new checkout.
+T3 Code does this through `t3.json`. Plain Git worktrees work the same way.
+Portless names the main checkout `chat.localhost` and prefixes linked worktrees
+with their branch name. Each checkout has a separate database, blob directory,
+secrets and Electron profile. The shared development container is independent of
+`docker-compose.yml` and its personal database on port 5432.
+
+`pnpm dev:setup` is safe to repeat and applies pending migrations. `pnpm dev:info`
+prints the database, storage paths and last launched URL, without credentials.
+Generated state stays in `.data/dev/`; do not copy it between checkouts or delete
+its secrets while retaining its database. The existing `apps/web/.env` is untouched.
+Root `db:migrate`, `db:push` and `db:studio` target this isolated development database.
+For intentional deployment migrations, invoke the web package’s `db:migrate`
+with an explicitly supplied `DATABASE_URL` instead.
+
+SearXNG is optional and shared: `docker compose up -d searxng`, then configure
+`http://localhost:8081` under Admin → Tools in each development instance.
+OAuth providers may reject `.localhost` callbacks; use local email/password login,
+or configure Portless with a domain accepted by your provider.
+See [development isolation](docs/internals/development.md) for lifecycle and safety constraints.
 
 ## Architecture
 
@@ -77,9 +107,13 @@ the ways to hurt yourself, what to check before finishing, and how to verify.
 ## Commands
 
 ```sh
-pnpm dev            # web on :3000 and the desktop shell, rebuilt and relaunched on change
+pnpm dev:setup      # provision this checkout and apply its migrations
+pnpm dev:info       # show isolated paths, runtime status and last launched URL
+pnpm dev:stop       # stop this checkout’s registered web and desktop runners
+pnpm dev:import     # explicitly import the personal instance into isolated dev state
+pnpm dev            # Portless web app and desktop shell, rebuilt and relaunched on change
 pnpm dev:web        # the web app alone
-pnpm dev:desktop    # the shell alone, pointed at localhost:3000 (CHAT_DESKTOP_SERVER to change)
+pnpm dev:desktop    # the shell alone, using this checkout’s last web origin
 pnpm build          # production build (nitro) -> .output/
 pnpm start          # run production server
 pnpm test           # all vitest projects (unit, integration*, ui)

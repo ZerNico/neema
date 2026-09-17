@@ -1,0 +1,83 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { connect, importSnapshot, runImportCommand } from "./dev-import.mjs";
+import { loadInstance } from "./dev-state.mjs";
+
+const require = createRequire(new URL("../apps/web/package.json", import.meta.url));
+const { PostgreSqlContainer } = require("@testcontainers/postgresql");
+const image = "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f";
+
+test("real dump/restore imports a tiny snapshot and preserves previous state on failure", { timeout: 180000 }, async () => {
+  const container = await new PostgreSqlContainer(image).start();
+  const directory = await mkdtemp(join(tmpdir(), "chat-import-test-"));
+  const instance = await loadInstance(directory, true);
+  const adminUrl = new URL(container.getConnectionUri());
+  adminUrl.pathname = "/postgres";
+  const admin = await connect(adminUrl.toString());
+  let sourceClient;
+  let target;
+  const run = runImportCommand;
+  const transport = { exec: ["exec", "-i", container.getId()], sourceLocal: true };
+  try {
+    await admin.query(`CREATE ROLE chat_dev_${instance.id} LOGIN PASSWORD '${instance.databasePassword}'`);
+    await admin.query(`CREATE DATABASE ${instance.database} OWNER chat_dev_${instance.id}`);
+    await run("pnpm", ["--filter", "@chat/web", "db:migrate"], { env: { ...process.env, DATABASE_URL: container.getConnectionUri() }, quiet: true });
+    sourceClient = await connect(container.getConnectionUri());
+    await sourceClient.query(`INSERT INTO "user" (id,name,email) VALUES ('u','Test','fixture@example.test');
+      INSERT INTO conversations (id,user_id,title) VALUES ('c','u','Fixture');
+      INSERT INTO messages (id,conversation_id,role,status,generation_id,generation_lease_until) VALUES ('m','c','assistant','streaming','g',now()+interval '1 hour');
+      INSERT INTO message_chunks (message_id,seq,kind,delta) VALUES ('m',1,'text','partial answer');
+      INSERT INTO session (id,user_id,token,expires_at) VALUES ('s','u','test-token',now()+interval '1 hour');
+      INSERT INTO verification (id,identifier,value,expires_at) VALUES ('v','desktop-ticket:test','test',now()+interval '1 hour');`);
+    const bytes = Buffer.from("tiny attachment");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const key = `blobs/u/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest}.00000000-0000-4000-8000-000000000000`;
+    const blobs = join(directory, "source-storage");
+    await mkdir(join(blobs, key, ".."), { recursive: true });
+    await writeFile(join(blobs, key), bytes);
+    await sourceClient.query("INSERT INTO attachment_blobs (id,user_id,sha256,storage_key,size,media_type) VALUES ('b','u',$1,$2,$3,'text/plain')", [digest,key,bytes.length]);
+    const source = { url: container.getConnectionUri(), blobs, providerSecret: Buffer.alloc(32, 7).toString("base64") };
+    const originalManifest = await readFile(instance.config, "utf8");
+    await assert.rejects(importSnapshot(instance, source, run, adminUrl.toString(), transport), (error) => {
+      assert.equal(error.safe, true);
+      assert.match(error.message, /password sign-in/);
+      return true;
+    });
+    assert.equal(await readFile(instance.config, "utf8"), originalManifest);
+    assert.equal((await sourceClient.query("SELECT * FROM session")).rowCount, 1);
+    assert.deepEqual(await readFile(join(blobs, key)), bytes);
+    assert.equal((await admin.query("SELECT datname FROM pg_database WHERE datname LIKE $1", [`chat_dev_${instance.id}%`])).rowCount, 1);
+    const { hashPassword } = await import(require.resolve("better-auth/crypto"));
+    await sourceClient.query("INSERT INTO account (id,user_id,account_id,provider_id,password) VALUES ('a','u','u','credential',$1)", [await hashPassword("fixture-password")]);
+    const imported = await importSnapshot(instance, source, run, adminUrl.toString(), transport);
+    const targetUrl = new URL(container.getConnectionUri());
+    targetUrl.pathname = `/${imported.database}`;
+    target = await connect(targetUrl.toString());
+    assert.deepEqual((await target.query("SELECT status,content,generation_lease_until FROM messages")).rows, [{ status: "error", content: "partial answer", generation_lease_until: null }]);
+    assert.equal((await target.query("SELECT * FROM session")).rowCount, 0);
+    assert.equal((await target.query("SELECT * FROM verification")).rowCount, 0);
+    assert.equal((await sourceClient.query("SELECT status FROM messages")).rows[0].status, "streaming");
+    assert.equal((await sourceClient.query("SELECT * FROM session")).rowCount, 1);
+    assert.deepEqual(await readFile(join(imported.blobs, key)), bytes);
+    assert.equal(imported.providerSecret, source.providerSecret);
+    await target.end(); target = null;
+    const manifest = await readFile(instance.config, "utf8");
+    await writeFile(join(blobs, key), "corrupt");
+    await assert.rejects(importSnapshot(imported, source, run, adminUrl.toString(), transport), /Source blob/);
+    assert.equal(await readFile(instance.config, "utf8"), manifest);
+    assert.deepEqual(await readFile(join(imported.blobs, key)), bytes);
+    const databases = (await admin.query("SELECT datname FROM pg_database WHERE datname LIKE $1", [`chat_dev_${instance.id}%`])).rows;
+    assert.equal(databases.length, 2);
+  } finally {
+    await target?.end();
+    await sourceClient?.end();
+    await admin.end();
+    await container.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

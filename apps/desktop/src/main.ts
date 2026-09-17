@@ -55,6 +55,10 @@ const recoveryFile = join(here, "..", "static", "recovery.html");
 const connectUrl = pathToFileURL(connectFile).href;
 const recoveryUrl = pathToFileURL(recoveryFile).href;
 const devReload = process.env.CHAT_DESKTOP_DEV_RELOAD === "1";
+// Select the profile before services capture paths or Electron opens a session.
+if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
+  app.setPath("userData", resolve(process.env.CHAT_DESKTOP_PROFILE));
+}
 // The server keys the desktop session policy on this token; set before any window exists.
 app.userAgentFallback = `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`;
 const windowChrome = new WeakMap<BrowserWindow, ReturnType<typeof attachChrome>>();

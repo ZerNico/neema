@@ -51,10 +51,11 @@ edit the wrong thing.
 
 ## The ways to hurt yourself
 
-1. **`.env` points at a real database.** `pnpm dev` and any script that loads
-   `.env` writes to `DATABASE_URL`, which on a dev machine is the developer's
-   actual instance with their conversations and provider keys. Read is fine.
-   Never run migrations, `db:push`, or destructive SQL against it to test something.
+1. **`apps/web/.env` points at a real database.** Direct package commands can
+   load it; never use them for testing migrations or destructive SQL. Root dev
+   and database commands use checkout-isolated state on a dedicated Postgres at
+   `127.0.0.1:5433`, provisioned by `pnpm dev:setup`. They never modify that env
+   file. See [development isolation](docs/internals/development.md).
    Integration tests get their own throwaway Postgres from Testcontainers.
 2. **Integration tests need the pinned image.** `tests/integration/postgres-image.ts`
    pins a pgvector image. `postgres:17-alpine` fails migrations with a bare
@@ -99,8 +100,9 @@ skipped one on purpose.
 
 ## Running and verifying
 
-- `docker compose up -d` for Postgres, `pnpm dev` for the web app on `:3000`
-  and the desktop shell together (`dev:web`, `dev:desktop` for one). Server
+- `pnpm dev:setup` provisions checkout-isolated Postgres state, then `pnpm dev`
+  starts the web app through Portless and its isolated desktop shell together
+  (`dev:web`, `dev:desktop` for one). `dev:info` prints paths and the last URL. Server
   module edits hot-swap the Effect runtime; no restart. The shell has no HMR:
   `dev:desktop` rebuilds and relaunches Electron on every change, and logs its
   build stamp (short sha and time) on start, so "is it running my change" has
