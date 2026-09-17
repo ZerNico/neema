@@ -1,3 +1,4 @@
+import type { UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration } from "./generation-fence.ts";
@@ -45,6 +46,7 @@ import {
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
+  usageEvents,
 } from "~/db/schema/index.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -205,7 +207,9 @@ export const INTERRUPTED_MESSAGE = "The response was interrupted before it finis
 
 export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "image";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
-// Durable tool-call projection safe for clients (summaries only, no page bodies).
+/**
+ * Durable tool-call projection safe for clients (summaries only, no page bodies).
+ */
 export type ToolCallRow = typeof messageToolCalls.$inferSelect;
 export type CompactionCheckpointRow = typeof conversationCompactionCheckpoints.$inferSelect;
 export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
@@ -468,7 +472,7 @@ export class ChatRepo extends Context.Service<
     /**
      * One page of a user's conversations, newest activity first. Ordered by
      * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the
-     * order is total — the cursor rides on exactly that pair.
+     * order is total, so the cursor rides on exactly that pair.
      */
     listConversations(input: {
       userId: string;
@@ -489,7 +493,7 @@ export class ChatRepo extends Context.Service<
     /**
      * One atomic turn: resolve (or create) the conversation, write the user
      * message, claim its attachments, and open the assistant row. Claiming has
-     * to share the transaction — an attachment another tab grabbed first must
+     * to share the transaction, since an attachment another tab grabbed first must
      * take the whole turn down rather than leave a half-written one.
      */
     createTurn(input: CreateTurnInput): Effect.Effect<
@@ -531,11 +535,13 @@ export class ChatRepo extends Context.Service<
       }>,
     ): Effect.Effect<void>;
     /**
-     * Resolves a pending title. False when the row is gone or already titled —
-     * a manual rename that landed first must not be overwritten.
+     * Resolves a pending title. False when the row is gone or already titled,
+     * since a manual rename that landed first must not be overwritten.
      */
     setTitleIfPending(conversationId: string, title: string): Effect.Effect<boolean>;
-    // Returns storage keys the caller must delete after the commit.
+    /**
+     * Returns storage keys the caller must delete after the commit.
+     */
     deleteConversation(
       userId: string,
       conversationId: string,
@@ -582,13 +588,17 @@ export class ChatRepo extends Context.Service<
       status: "complete" | "error";
       error?: { code: string; message: string };
     }): Effect.Effect<void>;
-    // Ends a call whose body was written as it ran, so the stored result stands.
+    /**
+     * Ends a call whose body was written as it ran, so the stored result stands.
+     */
     settleToolCall(input: {
       id: string;
       status: "complete" | "error";
       error?: { code: string; message: string };
     }): Effect.Effect<void>;
-    // Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
+    /**
+     * Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
+     */
     failRunningToolCalls(messageId: string, message: string): Effect.Effect<void>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
     createCompactionEvent(input: {
@@ -607,7 +617,9 @@ export class ChatRepo extends Context.Service<
       summary?: string;
       error?: { code: string; message: string };
     }): Effect.Effect<void>;
-    // Marks an interrupted compaction terminal alongside interrupted tools.
+    /**
+     * Marks an interrupted compaction terminal alongside interrupted tools.
+     */
     failRunningCompactionEvents(messageId: string, message: string): Effect.Effect<void>;
     /**
      * Renews a streaming row's lease without taking the conversation lock: the
@@ -626,6 +638,7 @@ export class ChatRepo extends Context.Service<
     >;
     listCompactionEvents(messageIds: ReadonlyArray<string>): Effect.Effect<CompactionEventRow[]>;
     finalizeMessage(input: {
+      ledger?: UsageEventInput & { conversationId: string };
       messageId: string;
       status: "complete" | "error" | "aborted";
       content: string;
@@ -638,8 +651,10 @@ export class ChatRepo extends Context.Service<
       };
       error?: { tag: string; message: string };
     }): Effect.Effect<void>;
-    // Claims and wipes a finished assistant back to a fresh streaming state.
-    // The claim, rewind deletes, and optional user edit commit atomically.
+    /**
+     * Claims and wipes a finished assistant back to a fresh streaming state.
+     * The claim, rewind deletes, and optional user edit commit atomically.
+     */
     resetMessageForRetry(input: {
       expectedMessages: HistorySnapshot;
       userId: string;
@@ -649,8 +664,8 @@ export class ChatRepo extends Context.Service<
       /**
        * Compaction boundaries this rewind invalidates. Deleted messages take
        * their checkpoints with them via cascade, but a retried assistant and
-       * an edited user message keep their ids — a summary ending there now
-       * describes text that no longer exists, so it has to go explicitly.
+       * an edited user message keep their ids, so a summary ending there now
+       * describes text that no longer exists and has to go explicitly.
        */
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: EditContent & {
@@ -687,8 +702,10 @@ export class ChatRepo extends Context.Service<
       { message: MessageRow; orphanedKeys: ReadonlyArray<string>; config: GenerationConfig } | null,
       ResolveError | AttachmentNotAvailable
     >;
-    // Removes messages entirely (chunks/tool calls go via FK cascade).
-    // Returns storage keys to delete after the commit.
+    /**
+     * Removes messages entirely (chunks/tool calls go via FK cascade).
+     * Returns storage keys to delete after the commit.
+     */
     deleteMessages(messageIds: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>>;
     /**
      * Every compaction checkpoint of a conversation, oldest first. Superseded
@@ -767,8 +784,8 @@ export class ChatRepo extends Context.Service<
                       ),
                     )
                   : undefined,
-                // A title still being generated is null, so it matches nothing
-                // — correct: there is not yet anything to match against.
+                // A title still being generated is null, so it matches nothing,
+                // which is correct: there is not yet anything to match against.
                 title ? ilike(conversations.title, `%${escapeLike(title)}%`) : undefined,
               ),
             )
@@ -1013,7 +1030,7 @@ export class ChatRepo extends Context.Service<
               .transaction((tx) =>
                 Effect.gen(function* () {
                   // Ownership gates everything below, not just the final
-                  // delete — the attachment release must never run for a
+                  // delete. The attachment release must never run for a
                   // conversation the caller does not own.
                   const owned = yield* tx
                     .select({ id: conversations.id })
@@ -1030,7 +1047,7 @@ export class ChatRepo extends Context.Service<
                     .from(messages)
                     .where(eq(messages.conversationId, conversationId));
                   // message_attachments cascades, but the attachment rows it
-                  // points at do not — release them explicitly.
+                  // points at do not, so release them explicitly.
                   const keys = yield* attachments.releaseForMessages(
                     tx,
                     rows.map((row) => row.id),
@@ -1103,7 +1120,7 @@ export class ChatRepo extends Context.Service<
                   .values({
                     id: uuidv7(),
                     userId: source.userId,
-                    // Whatever the locked row says — a title that resolved
+                    // Whatever the locked row says is used: a title that resolved
                     // between the service's read and this lock counts.
                     title: source.title,
                     modelId: source.modelId,
@@ -1301,8 +1318,8 @@ export class ChatRepo extends Context.Service<
                 }
 
                 // Compaction checkpoints follow the prefix they describe. Only
-                // those whose boundary is inside the copied range are eligible
-                // — a summary ending past the branch point covers messages
+                // those whose boundary is inside the copied range are eligible,
+                // since a summary ending past the branch point covers messages
                 // this conversation does not have. createdAt is preserved so
                 // the clones keep their relative age.
                 const checkpoints = yield* tx
@@ -1361,7 +1378,7 @@ export class ChatRepo extends Context.Service<
                     .pipe(Effect.orDie);
                 }
 
-                // message_chunks are deliberately not copied — they exist so a
+                // message_chunks are deliberately not copied. They exist so a
                 // reconnecting client can replay a live stream, and nothing in
                 // the branch is live.
                 return branch;
@@ -1744,6 +1761,18 @@ export class ChatRepo extends Context.Service<
                 })
                 .where(eq(messages.id, input.messageId))
                 .pipe(Effect.orDie);
+              if (input.ledger) {
+                // Terminal state and accounting must either both commit or both roll back.
+                yield* db
+                  .insert(usageEvents)
+                  .values({ id: uuidv7(), ...input.ledger })
+                  .pipe(Effect.orDie);
+                yield* db
+                  .update(conversations)
+                  .set({ lastMessageAt: new Date() })
+                  .where(eq(conversations.id, input.ledger.conversationId))
+                  .pipe(Effect.orDie);
+              }
             }),
           );
         }),

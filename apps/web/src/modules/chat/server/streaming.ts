@@ -131,9 +131,11 @@ import {
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 
-// Live chunk events fanned out to SSE subscribers on this instance.
-// Replay across instances/reloads always comes from Postgres, so this PubSub
-// only needs to carry chunks for in-flight generations.
+/**
+ * Live chunk events fanned out to SSE subscribers on this instance.
+ * Replay across instances/reloads always comes from Postgres, so this PubSub
+ * only needs to carry chunks for in-flight generations.
+ */
 export interface ChunkEvent {
   readonly messageId: string;
   readonly runId?: string;
@@ -181,7 +183,7 @@ const promptMessages = (prompt: { content: unknown }) =>
   prompt.content as ReadonlyArray<Prompt.MessageEncoded>;
 
 // Message and tool-call rows are shipped to the client wholesale, so the
-// stored error must not carry provider stack traces or internal URLs — the
+// stored error must not carry provider stack traces or internal URLs. The
 // full cause goes to the server log instead (see finalize).
 const shortErrorMessage = (error: unknown): string =>
   String(error).split("\n", 1)[0]!.slice(0, 200);
@@ -197,13 +199,17 @@ const withoutDesktopFile = (part: Response.AnyPart): Response.AnyPart => {
   return { ...part, result: rest, encodedResult: rest };
 };
 
-// Runs assistant generations detached from any HTTP request, persists chunks
-// for resumability, and republishes them for live subscribers.
+/**
+ * Runs assistant generations detached from any HTTP request, persists chunks
+ * for resumability, and republishes them for live subscribers.
+ */
 export class StreamEngine extends Context.Service<
   StreamEngine,
   {
-    // Fire-and-forget: start generating the assistant message. Returns once
-    // the generation fiber is forked (not when it finishes).
+    /**
+     * Fire-and-forget: start generating the assistant message. Returns once
+     * the generation fiber is forked (not when it finishes).
+     */
     startGeneration(input: {
       userId: string;
       conversationId: string;
@@ -218,18 +224,22 @@ export class StreamEngine extends Context.Service<
       /** The document open in the panel, so it is the one the model reads first. */
       openDocumentId?: string | undefined;
     }): Effect.Effect<void>;
-    // Winds a running generation down early, keeping whatever it has already
-    // produced. False when this instance is not the one running it — the same
-    // single-instance constraint the live chunk tail has (replay is durable,
-    // the in-flight fiber is not).
+    /**
+     * Winds a running generation down early, keeping whatever it has already
+     * produced. False when this instance is not the one running it, the same
+     * single-instance constraint the live chunk tail has (replay is durable,
+     * the in-flight fiber is not).
+     */
     stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
     /**
      * Settles ordinary generations whose lease lapsed (their process is gone)
      * and notifies subscribers. Runs on a timer; callers may run it on demand.
      */
     reapOrphans: Effect.Effect<void>;
-    // Chunks already persisted after `afterSeq`, then live chunks, then done.
-    // Terminates when the message reaches a terminal status.
+    /**
+     * Chunks already persisted after `afterSeq`, then live chunks, then done.
+     * Terminates when the message reaches a terminal status.
+     */
     subscribe(
       messageId: string,
       afterSeq: number,
@@ -268,7 +278,7 @@ export class StreamEngine extends Context.Service<
       };
       // Sliding, not unbounded: a subscriber that stops reading (stalled SSE
       // connection) must not buffer every in-flight generation's chunks
-      // forever. Dropped events are recoverable — resume replays from
+      // forever. Dropped events are recoverable: resume replays from
       // Postgres by seq, and `done` re-syncs the final row.
       const pubsub = yield* PubSub.sliding<StreamEvent>(4096);
       const imageAttachments = yield* Effect.serviceOption(AttachmentService);
@@ -364,7 +374,7 @@ export class StreamEngine extends Context.Service<
         // earlier messages' persisted tool calls. They seed the numbering (so
         // new searches continue the sequence) and, when search is on, a recap
         // block that makes earlier indexes legitimately citable again. History
-        // keeps its markers — with the recap present they resolve.
+        // keeps its markers, which resolve once the recap is present.
         const priorToolCalls = yield* repo.listToolCalls(
           history
             .filter((m) => m.id !== input.messageId && m.role === "assistant")
@@ -395,12 +405,11 @@ export class StreamEngine extends Context.Service<
         let modelCallOpen = false;
         let buffer: Array<{ seq: number; kind: ChunkKind; delta: string }> = [];
 
-        // Persist FIRST, then publish: a subscriber's one-shot DB replay must
-        // never miss a chunk that was already announced live.
-        // Uninterruptible from the buffer swap on: the periodic flusher loses
-        // a race against the generation finishing, and an interrupt between
-        // clearing the buffer and the insert would lose that seq range for
-        // good (breaking chunk contiguity, which resume relies on).
+        // Persist first, then publish: a subscriber's one-shot DB replay must
+        // never miss a chunk already announced live. Uninterruptible from the
+        // buffer swap on: the flusher races the generation finishing, and an
+        // interrupt between clearing the buffer and inserting would lose that
+        // seq range, breaking the contiguity resume relies on.
         const writer = yield* Semaphore.make(1);
         const flush = writer.withPermits(1)(
           Effect.uninterruptible(
@@ -490,32 +499,29 @@ export class StreamEngine extends Context.Service<
               ...(error
                 ? { error: { tag: "GenerationFailed", message: shortErrorMessage(error) } }
                 : {}),
+              ledger: {
+                userId: input.userId,
+                kind: "chat",
+                modelId: model ? input.modelId : null,
+                modelName: model?.displayName ?? input.modelId,
+                conversationId: input.conversationId,
+                messageId: input.messageId,
+                status,
+                inputTokens: totals.inputTokens,
+                outputTokens: totals.outputTokens,
+                cachedInputTokens: totals.cachedInputTokens,
+                reasoningTokens: totals.reasoningTokens,
+                ...resolveCost(
+                  totals,
+                  model?.pricing,
+                  imageOutput && (imageCostIncomplete || modelCallOpen)
+                    ? "incomplete-images"
+                    : imageOutput
+                      ? "images"
+                      : "text",
+                ),
+              },
             });
-            // Append-only ledger row for this attempt — a retry writes a new
-            // one rather than touching this record.
-            yield* analytics.record({
-              userId: input.userId,
-              kind: "chat",
-              modelId: model ? input.modelId : null,
-              modelName: model?.displayName ?? input.modelId,
-              conversationId: input.conversationId,
-              messageId: input.messageId,
-              status,
-              inputTokens: totals.inputTokens,
-              outputTokens: totals.outputTokens,
-              cachedInputTokens: totals.cachedInputTokens,
-              reasoningTokens: totals.reasoningTokens,
-              ...resolveCost(
-                totals,
-                model?.pricing,
-                imageOutput && (imageCostIncomplete || modelCallOpen)
-                  ? "incomplete-images"
-                  : imageOutput
-                    ? "images"
-                    : "text",
-              ),
-            });
-            yield* repo.updateConversation(input.conversationId, { lastMessageAt: new Date() });
             yield* PubSub.publish(pubsub, {
               kind: "done",
               messageId: input.messageId,
@@ -532,12 +538,12 @@ export class StreamEngine extends Context.Service<
 
         // Outside `generate`: a stopped generation is interrupted mid-effect,
         // and the tokens it already burned still have to be recorded. A turn
-        // interrupted before its finish part contributes nothing — the
+        // interrupted before its finish part contributes nothing, since the
         // provider never sent the numbers.
         const totals = emptyUsageTotals();
         // The estimator's calibration pair, persisted at finalize: what the
         // provider counted for the first model call, and what we predicted for
-        // that same prompt. Only the first call maps onto one prompt —
+        // that same prompt. Only the first call maps onto one prompt;
         // `totals.inputTokens` sums every tool round.
         let sawFirstFinish = false;
         let firstInputTokens: number | undefined;
@@ -560,11 +566,6 @@ export class StreamEngine extends Context.Service<
             openDocumentId: input.openDocumentId,
             writeGuard,
           });
-          // Attachments resolve here, inside the generation: a missing blob or
-          // an unparseable PDF then finalizes the message as an error like any
-          // other generation failure.
-          const model = yield* providers.getModel(input.modelId);
-
           // One indexer and one URL authority for the whole generation. Search
           // hits extend the reader's authority immediately, while user URLs and
           // earlier persisted sources seed it for direct reads and follow-ups.
@@ -793,7 +794,7 @@ export class StreamEngine extends Context.Service<
           };
           const sourceManifest = () =>
             recapSources()
-              .map((source) => `[${source.index}] ${source.title} — ${sourceTarget(source)}`)
+              .map((source) => `[${source.index}] ${source.title}: ${sourceTarget(source)}`)
               .join("\n");
           // The knowledge budget line is per-turn state: it belongs in the
           // trailing reminder, never in the cacheable prefix.
@@ -817,11 +818,11 @@ export class StreamEngine extends Context.Service<
               ? Prompt.make([systemReminderMessage(sections.join("\n\n"))])
               : null;
           };
-          // Everything that sits after retained history, in order. It is the one
-          // list the transcript and the compaction budget both read, so a block
-          // added here cannot end up in the prompt without being budgeted.
-          // Rebuilt per call: loaded skills and the clock change, and being
-          // after history keeps the cacheable prefix intact when they do.
+          // Everything after retained history, in order. It is the one list both
+          // the transcript and the compaction budget read, so anything added
+          // here is automatically budgeted. Rebuilt per call since loaded skills
+          // and the clock change; being after history keeps the cacheable prefix
+          // intact when they do.
           const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
             ...authoring.messages(),
             ...documents.messages(),
@@ -858,9 +859,7 @@ export class StreamEngine extends Context.Service<
               ? [{ role: "system" as const, content: webToolsSystemHint(webTools.tools) }]
               : []),
             // After the web hint, so the ranking between them is the last word.
-            ...(researchTool
-              ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }]
-              : []),
+            ...(researchTool ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }] : []),
             ...(desktopTools && config.desktopFolders
               ? [
                   {
@@ -913,10 +912,10 @@ export class StreamEngine extends Context.Service<
 
           // Selected knowledge, decided against the exact rendered prompt: the
           // turn-time mode is a ceiling ("context" may still downgrade to
-          // retrieval here), never the other way round. It sits after the
-          // retained history and before the runtime block, and is itself part of
-          // the protected trailing context — overflow repair drops history
-          // turns, not document bodies.
+          // retrieval here), never the reverse. Sits after retained history and
+          // before the runtime block, itself part of the protected trailing
+          // context, so overflow repair drops history turns, not document
+          // bodies.
           if (knowledgeSession && config) {
             const prepared = yield* prepareKnowledgeContext({
               userId: input.userId,
@@ -1098,9 +1097,7 @@ export class StreamEngine extends Context.Service<
             const trailing = reminderPrompt(lastCycle);
             return estimatePromptTokens([
               ...promptMessages(transcript),
-              ...(trailing
-                ? promptMessages(trailing)
-                : []),
+              ...(trailing ? promptMessages(trailing) : []),
             ]);
           };
           // Persist the raw estimate of the exact first request. The provider's
@@ -1267,7 +1264,7 @@ export class StreamEngine extends Context.Service<
                 .pipe(
                   Stream.mapEffect((part) =>
                     Effect.gen(function* () {
-                      // Preliminary tool results are UI progress only — keep them
+                      // Preliminary tool results are UI progress only, so keep them
                       // out of the continuation transcript.
                       const isPreliminary =
                         part.type === "tool-result" &&
@@ -1372,8 +1369,7 @@ export class StreamEngine extends Context.Service<
                                           ? "knowledge"
                                           : part.name === "deep_research"
                                             ? "research"
-                                            : part.name === "web_search" ||
-                                                part.name === "read_url"
+                                            : part.name === "web_search" || part.name === "read_url"
                                               ? "web"
                                               : null;
                           if (!family) return;
@@ -1963,7 +1959,7 @@ export class StreamEngine extends Context.Service<
                           }
 
                           const ok = !part.isFailure && result?.ok !== false;
-                          // Persist summary + source list only — never page bodies.
+                          // Persist summary + source list only, never page bodies.
                           const summary = {
                             targets: result?.targets ?? [],
                             ...(result?.resultCount !== undefined
@@ -2129,10 +2125,7 @@ export class StreamEngine extends Context.Service<
                       messages: historySuffix,
                       renderedMessages: historyMessages,
                       renderedMessageGroups: historyGroups,
-                      fixedPrefix: [
-                        ...fixedPrefix,
-                        ...promptMessages(activeOnly),
-                      ],
+                      fixedPrefix: [...fixedPrefix, ...promptMessages(activeOnly)],
                       trailingMessages: historyBudgetTail(!toolRoundsLeft),
                       calibrationFactor: factor,
                     });
@@ -2228,15 +2221,14 @@ export class StreamEngine extends Context.Service<
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
         if (!input.generationId || message?.generationId !== input.generationId) return;
-        const fence: GenerationIdentity | null =
-          input.generationId
-            ? {
-                userId: input.userId,
-                conversationId: input.conversationId,
-                messageId: input.messageId,
-                generationId: input.generationId,
-              }
-            : null;
+        const fence: GenerationIdentity | null = input.generationId
+          ? {
+              userId: input.userId,
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              generationId: input.generationId,
+            }
+          : null;
         const owner: ExternalOwner | null =
           input.desktopExecutorId && input.generationId
             ? {
@@ -2313,6 +2305,16 @@ export class StreamEngine extends Context.Service<
                 status: "error" as const,
               });
             const persisted = yield* repo.chunksAfter(messageId, afterSeq);
+            // Retry replaces chunks and identity atomically. Check again before
+            // labeling replay, so rows read across that commit cannot be mixed.
+            const afterReplay = yield* repo.getMessage(messageId).pipe(Effect.orDie);
+            if (!afterReplay || afterReplay.generationId !== current.generationId)
+              return Stream.make({
+                kind: "done" as const,
+                messageId,
+                ...(afterReplay?.generationId ? { runId: afterReplay.generationId } : {}),
+                status: "error" as const,
+              });
             let lastSeq = persisted.at(-1)?.seq ?? afterSeq;
 
             const replay: Stream.Stream<StreamEvent> = Stream.fromIterable(

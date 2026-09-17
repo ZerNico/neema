@@ -1,5 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
@@ -78,6 +78,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | AgentDraftService
   | DocumentService
   | ChatRepo
+  | ProviderRepo
   | ChatService
   | StreamEngine
   | SyncBus
@@ -231,7 +232,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
             type: "finish",
             reason: "stop",
             usage: { inputTokens: {}, outputTokens: {} },
-          } as never as ChatStreamPart),
+          } as ChatStreamPart),
         ),
       );
     }),
@@ -332,7 +333,7 @@ const setupConversation = Effect.gen(function* () {
   const repo = yield* ChatRepo;
   const db = yield* Db;
   const userId = uuidv7();
-  // repo has no user creation — insert the auth user row directly
+  // repo has no user creation, so insert the auth user row directly
   yield* db.execute(
     `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
   );
@@ -769,7 +770,11 @@ describe("conversational agent authoring", () => {
     try {
       const sent = await runtime.runPromise(
         ChatService.use((service) =>
-          service.sendMessage({ ...answerInput(seed), searchEnabled: false, researchEnabled: false }),
+          service.sendMessage({
+            ...answerInput(seed),
+            searchEnabled: false,
+            researchEnabled: false,
+          }),
         ),
       );
       await collectDraftTurn(sent.assistantMessageId);
@@ -1934,7 +1939,12 @@ describe("atomic question answers", () => {
         const engine = yield* StreamEngine;
         const seed = yield* setupQuestion;
         const unknown = yield* service
-          .sendMessage({ ...answerInput(seed), modelId: uuidv7(), searchEnabled: false, researchEnabled: false })
+          .sendMessage({
+            ...answerInput(seed),
+            modelId: uuidv7(),
+            searchEnabled: false,
+            researchEnabled: false,
+          })
           .pipe(Effect.flip);
         const before = yield* repo.listMessages(seed.conversation.id);
         const reply = yield* service.sendMessage({
@@ -1999,6 +2009,150 @@ const seedAnswered = (originalModelId: string) =>
   });
 
 describe("resumable streaming pipeline", () => {
+  it("loads the generation model once for capabilities and accounting", async () => {
+    const providers = await runtime.runPromise(ProviderRepo);
+    const lookup = vi.spyOn(providers, "getModel");
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const engine = yield* StreamEngine;
+          const seed = yield* setupConversation;
+          yield* engine.startGeneration({
+            generationId: seed.assistant.generationId ?? undefined,
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            modelId: "fake",
+            searchEnabled: false,
+          });
+          yield* engine.subscribe(seed.assistant.id, 0).pipe(Stream.runDrain);
+        }),
+      );
+      expect(lookup).toHaveBeenCalledExactlyOnceWith("fake");
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
+  it("does not label retry chunks with the previous generation during replay", async () => {
+    const repo = await runtime.runPromise(ChatRepo);
+    const db = await runtime.runPromise(Db);
+    const seed = await runtime.runPromise(setupConversation);
+    const nextRunId = uuidv7();
+    const chunksAfter = repo.chunksAfter;
+    const replayRead = vi.spyOn(repo, "chunksAfter").mockImplementationOnce((messageId, afterSeq) =>
+      Effect.gen(function* () {
+        // Commit the retry replacement exactly between the identity and chunk reads.
+        yield* db.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx
+              .update(messages)
+              .set({ generationId: nextRunId, status: "complete" })
+              .where(eq(messages.id, messageId));
+            yield* tx.delete(messageChunks).where(eq(messageChunks.messageId, messageId));
+            yield* tx
+              .insert(messageChunks)
+              .values({ messageId, seq: 1, kind: "text", delta: "new attempt" });
+          }),
+        );
+        return yield* chunksAfter(messageId, afterSeq);
+      }).pipe(Effect.orDie),
+    );
+    try {
+      const events = await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          engine
+            .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+            .pipe(Stream.take(1), Stream.runCollect, Effect.timeout("10 seconds")),
+        ),
+      );
+      expect(Array.from(events)).toEqual([
+        { kind: "done", messageId: seed.assistant.id, runId: nextRunId, status: "error" },
+      ]);
+      expect(replayRead).toHaveBeenCalledTimes(1);
+    } finally {
+      replayRead.mockRestore();
+    }
+  });
+
+  it.each(["ledger", "conversation"] as const)(
+    "settles live subscribers when the final %s write fails",
+    async (target) => {
+      const seed = await runtime.runPromise(setupConversation);
+      const table = target === "ledger" ? "usage_events" : "conversations";
+      const condition =
+        target === "ledger"
+          ? `NEW.message_id = '${seed.assistant.id}' AND NEW.status = 'complete'`
+          : `NEW.id = '${seed.conversation.id}' AND EXISTS (SELECT 1 FROM messages WHERE id = '${seed.assistant.id}' AND status = 'complete')`;
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db.execute(
+            sql.raw(`CREATE FUNCTION reject_terminal_write() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF ${condition} THEN RAISE EXCEPTION 'injected finalization failure'; END IF;
+            RETURN NEW;
+          END $$`),
+          );
+          yield* db.execute(
+            sql.raw(`CREATE TRIGGER reject_terminal_write BEFORE INSERT OR UPDATE ON ${table}
+          FOR EACH ROW EXECUTE FUNCTION reject_terminal_write()`),
+          );
+        }),
+      );
+      try {
+        const result = await runtime.runPromise(
+          Effect.gen(function* () {
+            const engine = yield* StreamEngine;
+            const repo = yield* ChatRepo;
+            const db = yield* Db;
+            const reached = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            hold = { after: 2, reached, release };
+            yield* engine.startGeneration({
+              generationId: seed.assistant.generationId ?? undefined,
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: seed.assistant.id,
+              modelId: "fake",
+              searchEnabled: false,
+            });
+            const events = yield* engine.subscribe(seed.assistant.id, 0).pipe(
+              Stream.tap((event) =>
+                event.kind === "chunk" ? Deferred.succeed(release, undefined) : Effect.void,
+              ),
+              Stream.runCollect,
+              Effect.timeout("10 seconds"),
+            );
+            return {
+              events: Array.from(events),
+              final: yield* repo.getMessage(seed.assistant.id),
+              ledger: yield* db
+                .select()
+                .from(usageEvents)
+                .where(eq(usageEvents.messageId, seed.assistant.id)),
+            };
+          }),
+        );
+        expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "error" });
+        expect(result.final?.status).toBe("error");
+        expect(result.final?.content).toBe("alpha beta gamma delta epsilon");
+        expect(result.ledger).toHaveLength(1);
+        expect(result.ledger[0]?.status).toBe("error");
+      } finally {
+        hold = null;
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            yield* db.execute(sql.raw(`DROP TRIGGER reject_terminal_write ON ${table}`));
+            yield* db.execute(sql.raw("DROP FUNCTION reject_terminal_write()"));
+          }),
+        );
+      }
+    },
+    30_000,
+  );
+
   it("persists chunks, finalizes the message, and replays for late subscribers", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -2100,7 +2254,7 @@ describe("resumable streaming pipeline", () => {
     expect(result.final?.content).not.toBe("");
     expect("alpha beta gamma delta epsilon".startsWith(result.final?.content ?? "")).toBe(true);
     expect(result.final?.content).not.toBe("alpha beta gamma delta epsilon");
-    // Contiguous from seq 1 and exactly the persisted content — resume relies
+    // Contiguous from seq 1 and exactly the persisted content, since resume relies
     // on both, and the stop path has its own flush.
     expect(result.chunks.map((c) => c.seq)).toEqual(result.chunks.map((_, index) => index + 1));
     expect(result.chunks.map((c) => c.delta).join("")).toBe(result.final?.content);
@@ -2343,7 +2497,7 @@ describe("resumable streaming pipeline", () => {
             attachmentIds: [],
           });
 
-        // The seeded assistant is still streaming — same rule as retry/edit.
+        // The seeded assistant is still streaming, same rule as retry/edit.
         const busy = yield* turn("second tab").pipe(Effect.flip);
         const messagesAfterBusy = (yield* repo.listMessages(conversation.id)).length;
 
@@ -2363,7 +2517,7 @@ describe("resumable streaming pipeline", () => {
     );
 
     expect(result.busy).toBe("ConversationBusy");
-    // The refused turn wrote nothing — just the seeded user + assistant.
+    // The refused turn wrote nothing, just the seeded user + assistant.
     expect(result.messagesAfterBusy).toBe(2);
     expect(result.followUpStatus).toBe("streaming");
   });
@@ -2621,7 +2775,7 @@ describe("retry with a different model", () => {
       modelId: visionModelId,
       content: "alpha beta gamma delta epsilon",
     });
-    // The switch is for this attempt only — the composer's default is untouched.
+    // The switch is for this attempt only, so the composer's default is untouched.
     expect(result.conversation.modelId).toBe(textModelId);
   }, 60_000);
 
