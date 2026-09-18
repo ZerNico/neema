@@ -51,11 +51,11 @@ edit the wrong thing.
 
 ## The ways to hurt yourself
 
-1. **`apps/web/.env` points at a real database.** Direct package commands can
-   load it; never use them for testing migrations or destructive SQL. Root dev
-   and database commands use checkout-isolated state on a dedicated Postgres at
-   `127.0.0.1:5433`, provisioned by `pnpm dev:setup`. They never modify that env
-   file. See [development isolation](docs/internals/development.md).
+1. **Direct package database commands need an explicit URL.** Never use them for
+   testing migrations or destructive SQL against a real database. Root dev and
+   database commands use checkout-isolated state on a dedicated Postgres at
+   `127.0.0.1:5433`, provisioned by `pnpm dev:setup`; they do not read `.env`.
+   See [development isolation](docs/internals/development.md).
    Integration tests get their own throwaway Postgres from Testcontainers.
 2. **Integration tests need the pinned image.** `tests/integration/postgres-image.ts`
    pins a pgvector image. `postgres:17-alpine` fails migrations with a bare

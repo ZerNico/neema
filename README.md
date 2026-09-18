@@ -27,17 +27,15 @@ agent. For an unprivileged proxy, use
 
 Open the printed URL and register: the first account is the admin. Open the
 user menu (bottom-left) → **Admin** → add a provider and pick models.
-Development starts empty by default. To copy your personal instance, stop the dev
-app with Ctrl-C, then run `pnpm dev:import` and confirm. In a T3 Code worktree,
-choose **Seed development data** from its scripts menu to run the same safe staged
-copy without a prompt. It imports real provider keys, so generations can incur
-costs. The automatic worktree hook stays empty by default. It reads
-`apps/web/.env` (falling back to the primary checkout in a linked worktree), copies
-the database and blobs, and reuses the provider encryption key. The source stays
-unchanged; a failed import keeps the current dev state, and a successful one
-replaces it and removes the copy it superseded. Imported provider keys are real, so
-new generations can incur charges. Sign in with an existing email/password;
-OAuth is disabled in the copy, and OAuth-only snapshots are refused.
+Development starts empty by default. The primary checkout’s selected generated dev
+instance is the seed source for every worktree. Stop the primary app with Ctrl-C,
+then run `pnpm dev:import` in a worktree and confirm. In a T3 Code worktree, choose
+**Seed development data** from its scripts menu to run the same staged copy without
+a prompt. It copies the primary database and blobs and reuses its provider encryption
+key. The source stays unchanged; a failed import keeps the current dev state, and a
+successful one replaces it and removes the copy it superseded. Imported provider keys
+are real, so new generations can incur charges. Sign in with an existing
+email/password; OAuth is disabled in the copy, and OAuth-only snapshots are refused.
 
 ### Worktrees
 
@@ -45,8 +43,9 @@ Run `pnpm install --frozen-lockfile && pnpm dev:setup` in each new checkout.
 T3 Code does this through `t3.json`. Plain Git worktrees work the same way.
 Portless names the main checkout `chat.localhost` and prefixes linked worktrees
 with their branch name. Each checkout has a separate database, blob directory,
-secrets and Electron profile. The shared development container is independent of
-`docker-compose.yml` and its personal database on port 5432.
+secrets and Electron profile in the shared development stack defined by root
+`docker-compose.yml`. That stack is local development only, named `chat-development`,
+and binds Postgres only on port 5433.
 
 `pnpm dev:setup` is safe to repeat and applies pending migrations. `pnpm dev:info`
 prints the database, storage paths and last launched URL, without credentials.
@@ -56,12 +55,12 @@ missed, `pnpm dev:destroy --orphans` reports tagged databases whose recorded che
 path is gone and asks before dropping them. Untagged legacy databases are reported,
 never deleted. The shared container and every other checkout are untouched.
 Generated state stays in `.data/dev/`; do not copy it between checkouts or delete
-its secrets while retaining its database. The existing `apps/web/.env` is untouched.
+its secrets while retaining its database. The harness never reads `apps/web/.env`.
 Root `db:migrate`, `db:push` and `db:studio` target this isolated development database.
 For intentional deployment migrations, invoke the web package’s `db:migrate`
 with an explicitly supplied `DATABASE_URL` instead.
 
-SearXNG is optional and shared: `docker compose up -d searxng`, then configure
+`pnpm dev:setup` starts shared Postgres and SearXNG. Configure
 `http://localhost:8081` under Admin → Tools in each development instance.
 OAuth providers may reject `.localhost` callbacks; use local email/password login,
 or configure Portless with a domain accepted by your provider.
@@ -116,10 +115,10 @@ the ways to hurt yourself, what to check before finishing, and how to verify.
 ## Commands
 
 ```sh
-pnpm dev:setup        # provision this checkout and apply its migrations
+pnpm dev:setup        # start shared Postgres/SearXNG and provision this checkout
 pnpm dev:setup:seeded # provision, then import normal development data without a prompt
 pnpm dev:info         # show isolated paths and the last launched URL
-pnpm dev:import       # explicitly import the personal instance into isolated dev state
+pnpm dev:import       # copy the primary checkout’s selected state into this worktree
 pnpm dev:destroy      # drop this checkout’s databases, role and isolated state
 pnpm dev:destroy --orphans # report and optionally clean up removed tagged worktrees
 pnpm dev            # Portless web app and desktop shell, rebuilt and relaunched on change

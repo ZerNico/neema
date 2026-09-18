@@ -1,30 +1,43 @@
+# Local development only. One shared server holds every checkout's isolated
+# database; `pnpm dev:setup` provisions this checkout's role and database in it.
+# A deployment topology, if one is ever needed, belongs under infra/production.
+#
+# The project name is pinned so a bare `docker compose` from a linked worktree
+# reaches this same stack instead of creating a second one from its directory
+# name. Never `docker compose down --volumes`: pgdata holds every checkout.
+name: chat-development
+
 services:
   postgres:
-    extends:
-      file: ./infra/postgres-base.compose.yml
-      service: postgres-base
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
     environment:
-      POSTGRES_USER: chat
-      POSTGRES_PASSWORD: chat
-      POSTGRES_DB: chat
+      POSTGRES_USER: chat_dev_admin
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U chat"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U chat_dev_admin -d postgres"]
+      interval: 1s
       timeout: 3s
-      retries: 10
+      retries: 30
 
-  # Local search backend for the web_search tool (admin → Tools points at
-  # http://localhost:8081). JSON output + disabled limiter via mounted config.
+  # Search backend for the web_search tool, shared by every checkout (admin →
+  # Tools points at http://localhost:8081). JSON output and a disabled limiter
+  # come from the mounted config.
   searxng:
     image: docker.io/searxng/searxng
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
       - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
 volumes:
   pgdata:

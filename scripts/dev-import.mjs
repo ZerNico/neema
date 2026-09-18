@@ -1,17 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { parseEnv } from "node:util";
 import { spawn, execFileSync } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import { mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { activateSnapshot, instanceEnv, instancePaths, loadInstance, safeError } from "./dev-state.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(join(root, "apps/web/package.json"));
 const { Client } = require("pg");
-export const compose = ["compose", "--project-name", "chat-development", "--file", join(root, "infra/dev-postgres.compose.yml")];
+export const compose = ["compose", "--project-name", "chat-development", "--file", join(root, "docker-compose.yml")];
 const interrupted = "Interrupted by development snapshot import.";
 
 export async function connect(url, readonly = false) {
@@ -23,29 +22,18 @@ export async function connect(url, readonly = false) {
 }
 
 export async function sourceConfig(checkoutRoot) {
-  // Parse data, never source a shell script or merge the source environment into the runner.
-  let web = join(checkoutRoot, "apps/web");
-  let env;
-  try { env = parseEnv(await readFile(join(web, ".env"), "utf8")); }
-  catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    // Linked worktrees normally lack ignored env files. Resolve relative blob paths at the source.
-    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: checkoutRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    web = join(dirname(common), "apps/web");
-    try { env = parseEnv(await readFile(join(web, ".env"), "utf8")); }
-    catch (cause) { throw safeError("No source apps/web/.env found in this checkout or the primary checkout.", { cause }); }
-  }
-  if (!env.DATABASE_URL) throw safeError("apps/web/.env must specify DATABASE_URL for snapshot import.");
-  const url = new URL(env.DATABASE_URL);
-  if (!["postgres:", "postgresql:"].includes(url.protocol)) throw safeError("Snapshot source must be PostgreSQL.");
-  if (!/^[A-Za-z0-9+/]{43}=$/.test(env.PROVIDER_KEY_SECRET ?? "")) throw safeError("Source PROVIDER_KEY_SECRET must be a 32-byte base64 key.");
+  // The primary checkout is the only seed source; worktrees never read an env file.
+  const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: checkoutRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const primaryRoot = dirname(common);
+  const currentRoot = await realpath(checkoutRoot);
+  if (primaryRoot === currentRoot) throw safeError("The primary checkout is the seed source. Configure it directly instead of importing it into itself.");
+  let primary;
+  try { primary = await loadInstance(primaryRoot); }
+  catch (cause) { throw safeError("The primary checkout is not set up. Run pnpm dev:setup there before seeding a worktree.", { cause }); }
   return {
-    url: url.toString(),
-    providerSecret: env.PROVIDER_KEY_SECRET,
-    blobs: await realpath(resolve(web, env.BLOB_STORE_ROOT || ".data/storage")).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-      throw safeError("Source blob directory does not exist; nothing to import.");
-    }),
+    url: instanceEnv(primary).DATABASE_URL,
+    providerSecret: primary.providerSecret,
+    blobs: primary.blobs,
   };
 }
 
@@ -154,11 +142,12 @@ export async function sanitize(client) {
 }
 
 export async function copyBlobs(client, sourceRoot, targetRoot) {
+  const { rows } = await client.query("SELECT storage_key, sha256, size FROM attachment_blobs");
+  if (rows.length === 0) return 0;
   const source = await realpath(sourceRoot);
   await mkdir(targetRoot, { recursive: true, mode: 0o700 });
   const target = await realpath(targetRoot);
   if (source === target || target.startsWith(source + sep) || source.startsWith(target + sep)) throw new Error("Source and target blob roots overlap.");
-  const { rows } = await client.query("SELECT storage_key, sha256, size FROM attachment_blobs");
   for (const row of rows) {
     const key = row.storage_key;
     if (typeof key !== "string" || !key.startsWith("blobs/") || key.split("/").some((part) => !part || part === "." || part === "..") || key.includes("\\") || key.includes("\0")) throw new Error("Invalid source blob key.");
@@ -187,10 +176,9 @@ export async function copyBlobs(client, sourceRoot, targetRoot) {
 // Connection fields travel over stdin, not argv or Docker's persisted environment.
 async function archiveCommand(kind, url, archive, run, transport) {
   const connection = new URL(url);
-  if (kind === "dump") {
-    if (transport.sourceLocal) { connection.hostname = "127.0.0.1"; connection.port = "5432"; }
-    else if (["localhost", "127.0.0.1", "[::1]"].includes(connection.hostname)) connection.hostname = "host.docker.internal";
-  } else { connection.hostname = "127.0.0.1"; connection.port = "5432"; }
+  // Source and target are checkout databases in this container's one dev server.
+  connection.hostname = "127.0.0.1";
+  connection.port = "5432";
   const fields = [connection.hostname, connection.port || "5432", decodeURIComponent(connection.username), decodeURIComponent(connection.password), decodeURIComponent(connection.pathname.slice(1)), connection.searchParams.get("sslmode") || "prefer"];
   if (fields.some((field) => /[\r\n\0]/.test(field))) throw new Error("Unsupported PostgreSQL connection field.");
   const file = await open(archive, kind === "dump" ? "wx" : "r", 0o600);

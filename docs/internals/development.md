@@ -19,20 +19,24 @@ the bootstrap administrator installs pgvector before application migrations run.
 The server and migrations receive the same generated connection string. Database
 identity and passwords are validated before they can become provisioning SQL.
 
-Existing env files are never copied or modified. Generated credentials under
-`.data/dev/instance.json` are mode 0600 and persist across setup runs. The runner
-sets database, auth secrets, blob root and desktop profile in the child environment,
-overriding inherited values before Vite loads any env files. Direct package scripts
-are deliberately lower-level: they do not provide this safety boundary. Integration
+The harness reads no env file. Generated credentials under `.data/dev/instance.json`
+are mode 0600 and persist across setup runs. The runner sets database, auth secrets,
+blob root and desktop profile in the child environment, overriding inherited values
+before Vite loads any env files. Direct package scripts are deliberately
+lower-level: they require an explicitly supplied `DATABASE_URL` and provide no such
+boundary, which is why `drizzle.config.ts` throws rather than defaulting. Integration
 tests still own their separate Testcontainers databases. This is local namespacing,
 not a security boundary: every local checkout knows the dedicated container’s
 administrator password.
 
 Database rows and blob bytes belong together. Instances start empty, but the explicit
-`dev:import` command can copy a personal snapshot from `apps/web/.env`, falling back
-to the primary checkout’s file for a linked worktree. Relative blob paths resolve at
-that source checkout. The source is read-only; its encryption key is reused so
-provider ciphertext needs no rewrite. These remain real provider credentials.
+`dev:import` command copies the primary checkout’s selected instance into a worktree.
+The primary is found through Git’s common directory, so it is the source no matter
+which worktree asks, and it refuses to seed itself. Both databases live in the one
+dev server, so dump and restore run container-local. The source is read-only; its
+encryption key is reused so provider ciphertext needs no rewrite. These remain real
+provider credentials, and a worktree whose branch lags the primary is refused rather
+than given a schema its code cannot run.
 
 Import restores into a fresh database and copies blobs into a fresh directory.
 Migration history must match the checkout, and every referenced blob must match its

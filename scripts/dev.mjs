@@ -119,7 +119,7 @@ async function setup(instance, seed) {
   if (source) {
     const sourceClient = await connect(source.url, true).catch(() => {
       throw new Error(
-        "The personal source database is unavailable. Start it before seeding a worktree.",
+        "The primary development source is unavailable. Run pnpm dev:setup in the primary checkout first.",
       );
     });
     await sourceClient.end();
@@ -168,7 +168,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
     );
   }
   console.log(
-    `Ready: ${instance.database}\nState: ${instance.directory}\nRun pnpm dev or pnpm dev:web.\nCopy personal data with pnpm dev:setup --seed or pnpm dev:import, or register normally on a fresh database.`,
+    `Ready: ${instance.database}\nState: ${instance.directory}\nRun pnpm dev or pnpm dev:web.\nIn a worktree, copy the primary checkout with pnpm dev:setup --seed or pnpm dev:import.`,
   );
 }
 
