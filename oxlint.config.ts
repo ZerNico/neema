@@ -1,10 +1,9 @@
 import { defineConfig } from "oxlint";
 import type { SlopRuleName } from "eslint-plugin-slop";
 
-/** Changed lines only, including the last five commits, rather than untouched code. */
 const slop = (level: "error" | "warn", ...rules: SlopRuleName[]) =>
   Object.fromEntries(
-    rules.map((rule) => [`slop/${rule}`, [level, { inspection: "recent-changes" }]] as const),
+    rules.map((rule) => [`slop/${rule}`, [level, { inspection: "full" }]] as const),
   );
 
 /** What a call site may do to a component. See docs/internals/ui.md. */
@@ -57,10 +56,17 @@ export default defineConfig({
   },
   overrides: [
     {
-      // The design system restating its own primitives, and tests reaching for a
-      // sentinel class no Tailwind build emits.
+      // The design system owns styling; tests exercise class forwarding.
       files: ["apps/web/src/ui/**", "**/*.test.tsx"],
-      rules: { "shadcn/no-restyle": "off", "shadcn/no-unknown-classes": "off" },
+      rules: { "shadcn/no-restyle": "off" },
+    },
+    {
+      files: ["apps/web/src/ui/detail-panel.test.tsx"],
+      rules: { "shadcn/no-unknown-classes": ["error", { allow: ["test-panel-class"] }] },
+    },
+    {
+      files: ["apps/web/src/ui/primitives/sonner.tsx"],
+      rules: { "shadcn/no-unknown-classes": ["error", { allow: ["toaster"] }] },
     },
   ],
   ignorePatterns: [

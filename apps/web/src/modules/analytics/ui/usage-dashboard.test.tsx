@@ -38,7 +38,7 @@ const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
 
 /**
  * Two months are on screen, so "10" alone is ambiguous. react-day-picker
- * stamps each cell with its full date — the only handle that names one day.
+ * stamps each cell with its full date, the only handle that names one day.
  */
 const day = (iso: string): HTMLElement => {
   const cell = document.querySelector<HTMLElement>(`[data-day="${iso}"] button`);
@@ -54,7 +54,7 @@ describe("UsageRangePicker", () => {
 
   it("labels the trigger with the inclusive end day of a custom range", () => {
     // The window's `to` is exclusive, so Aug 16 midnight means "through the
-    // 15th" — showing the 16th would claim a day that isn't in the data.
+    // 15th"; showing the 16th would claim a day that isn't in the data.
     setup({
       kind: "custom",
       from: "2026-08-10T00:00:00.000Z",

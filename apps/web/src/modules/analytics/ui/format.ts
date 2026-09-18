@@ -47,7 +47,7 @@ export const formatPointDelta = (delta: number): string =>
 
 /**
  * Relative change for counts and totals. Null means there is no honest
- * comparison to draw — the caller renders nothing rather than a fake 0%.
+ * comparison to draw, so the caller renders nothing rather than a fake 0%.
  */
 export const formatRelativeDelta = (current: number, previous: number): string | null => {
   if (previous === 0) return current === 0 ? null : "New";
@@ -56,7 +56,7 @@ export const formatRelativeDelta = (current: number, previous: number): string |
   return `${change >= 0 ? "+" : "\u2212"}${Math.abs(change * 100).toFixed(0)}%`;
 };
 
-/** Cost per million tokens — the blended rate across every model in range. */
+/** Cost per million tokens, the blended rate across every model in range. */
 export const formatCostPerMillion = (cost: number, tokens: number): string =>
   `${formatCost((cost / tokens) * 1_000_000)}/M`;
 

@@ -2,7 +2,7 @@
  * Postgres image used by every integration container.
  *
  * Semantic knowledge search stores `vector` columns, so the migrations need
- * pgvector present — the stock `postgres:17-alpine` image cannot run them.
+ * pgvector present; the stock `postgres:17-alpine` image cannot run them.
  * Same major version as docker-compose.yml; keep the two in step.
  */
 export const POSTGRES_IMAGE =

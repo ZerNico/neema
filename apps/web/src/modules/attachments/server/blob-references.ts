@@ -9,9 +9,11 @@ import {
 } from "~/db/schema/index.ts";
 import type { DbTx } from "./repo.ts";
 
-// Every reference writer/remover takes these locks before changing references.
-// Sorting gives multi-blob operations one lock order. Check for orphans in a
-// subsequent statement so a waiter sees references committed by the lock holder.
+/**
+ * Every reference writer/remover takes these locks before changing references.
+ * Sorting gives multi-blob operations one lock order. Check for orphans in a
+ * subsequent statement so a waiter sees references committed by the lock holder.
+ */
 export const lockBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
   ids.length === 0
     ? Effect.succeed([])

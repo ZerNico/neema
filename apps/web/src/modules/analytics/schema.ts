@@ -6,7 +6,7 @@ import { Schema } from "effect";
  * Presets stay a closed set of literals rather than an open day count so their
  * query keys remain the small stable values the route loaders prefetch.
  *
- * Custom boundaries are half-open — `from` inclusive, `to` exclusive — and are
+ * Custom boundaries are half-open, `from` inclusive and `to` exclusive, and are
  * always UTC midnights. The picker's end date reads as inclusive to the user,
  * so it encodes as the *following* midnight; that keeps the boundary out of
  * end-of-day arithmetic and makes adjacent windows exact.
@@ -29,10 +29,10 @@ export const UsageRangeInput = Schema.Union([
   ),
 ]);
 
-/** Decoded (server) form — custom boundaries are Dates. */
+/** Decoded (server) form: custom boundaries are Dates. */
 export type UsageRange = typeof UsageRangeInput.Type;
 
-/** Encoded (client/wire) form — custom boundaries are ISO strings. */
+/** Encoded (client/wire) form: custom boundaries are ISO strings. */
 export type UsageRangeEncoded = typeof UsageRangeInput.Encoded;
 
 export type UsageRangeDays = 7 | 30 | 90;

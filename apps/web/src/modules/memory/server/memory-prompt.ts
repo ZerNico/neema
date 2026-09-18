@@ -15,8 +15,10 @@ export interface RenderedMemoryContext {
 const OPEN = "<saved_memory_context>";
 const CLOSE = "</saved_memory_context>";
 
-// The application controls the framing; JSON encoding prevents a stored value
-// from breaking out of its line or forging our delimiters.
+/**
+ * The application controls the framing; JSON encoding prevents a stored value
+ * from breaking out of its line or forging our delimiters.
+ */
 export function renderMemoryContext(
   items: ReadonlyArray<MemoryPromptItem>,
   budget = MEMORY_PROMPT_CHAR_BUDGET,

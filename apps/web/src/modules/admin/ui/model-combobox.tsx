@@ -30,10 +30,12 @@ export interface CatalogPick {
   custom?: boolean;
 }
 
-// Autocomplete over the provider's live /models catalog. While typing, a
-// creatable row (`Add "x" as custom model`) is appended so ids the catalog
-// doesn't know — or a fully unavailable catalog — still go through the normal
-// selection flow.
+/**
+ * Autocomplete over the provider's live /models catalog. While typing, a
+ * creatable row (`Add "x" as custom model`) is appended so ids the catalog
+ * doesn't know, or a fully unavailable catalog, still go through the normal
+ * selection flow.
+ */
 export function ModelCombobox({
   providerId,
   inputId,
@@ -89,7 +91,7 @@ export function ModelCombobox({
           catalog.isLoading
             ? "Loading models…"
             : catalog.data?.ok === false
-              ? "Catalog unavailable — type a model ID"
+              ? "Catalog unavailable, type a model ID"
               : "Search models or type an ID…"
         }
       />

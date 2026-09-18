@@ -16,7 +16,7 @@ import { cn } from "~/ui/utils";
 export interface MentionItem {
   id: string;
   label: string;
-  /** Muted suffix on the label line — an owner, a count. */
+  /** Muted suffix on the label line: an owner, a count. */
   meta?: string | undefined;
   /** Second line. */
   description?: string | undefined;
@@ -41,7 +41,7 @@ const MAX_RESULTS = 8;
  * most one list can be open: the sources are tried in order and the first whose
  * token matches at the caret wins.
  *
- * The whole thing is presentation over a caret position — it never owns the
+ * The whole thing is presentation over a caret position; it never owns the
  * textarea's value. Accepting a row deletes the token and hands the id back, so
  * what a selection *means* stays with the caller.
  */
@@ -92,13 +92,11 @@ export function useTextareaMentions(
           )
           .slice(0, MAX_RESULTS)
       : [];
-  // A dismissal outlives caret movement but not editing. Keying it on the token
-  // signature alone was not enough: accepting a row deletes the token and puts
-  // the caret back where it started, so typing the trigger again rebuilt a
-  // byte-identical signature and the list stayed suppressed — which is exactly
-  // the re-add-what-you-just-removed sequence. Adjusting the state during
-  // render (React's documented pattern) settles it before paint, where an
-  // effect would cost an extra commit.
+  // A dismissal outlives caret movement but not editing. Token signature alone
+  // isn't enough: accepting a row deletes the token, and retyping the trigger
+  // rebuilds a byte-identical signature, re-adding what was just removed. Clearing
+  // it during render settles this before paint, where an effect would cost an
+  // extra commit.
   if (dismissed && dismissed.value !== value) setDismissed(null);
   const open = !!token && dismissed?.signature !== signature && results.length > 0;
   const selectedIndex =
@@ -175,13 +173,11 @@ export function useTextareaMentions(
       typeof document.execCommand === "function" && document.execCommand("delete", false);
     if (!removed) {
       textarea.setRangeText("", token.start, token.end, "end");
-      // setRangeText edits the DOM behind React's back, so React's value
-      // tracker still holds the pre-accept string. The next keystroke that
-      // recreates exactly that string would compare equal and be swallowed —
-      // typing "#" again right after accepting "#" is that case, and the
-      // character lands in the DOM while onChange never fires. A native input
-      // event resyncs the tracker. (execCommand dispatches one itself; a
-      // duplicate would dedupe, so this only runs on the fallback path.)
+      // setRangeText edits the DOM behind React's back, so its value tracker
+      // holds the pre-accept string. Retyping "#" after accepting "#" recreates
+      // that string, compares equal, and is swallowed: the character lands in
+      // the DOM but onChange never fires. A native input event resyncs the
+      // tracker; execCommand dispatches its own.
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }
     onChange(textarea.value);

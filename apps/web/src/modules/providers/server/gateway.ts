@@ -71,10 +71,10 @@ export class ProviderContextOverflow extends Schema.TaggedError<ProviderContextO
 ) {}
 
 // There is no machine-readable code for this across OpenAI-compatible
-// providers — OpenRouter forwards the upstream body verbatim, so the phrasing
+// providers: OpenRouter forwards the upstream body verbatim, so the phrasing
 // is whatever the upstream chose. Matching prose is unlovely but it is the
-// only signal that exists; a miss degrades to ProviderUnreachable, which is
-// how this failed before the retry existed.
+// only signal that exists; a miss degrades to ProviderUnreachable, how this
+// failed before the retry existed.
 const CONTEXT_OVERFLOW_PATTERNS = [
   /context[_ ]length[_ ]exceeded/i,
   /maximum context length/i,
@@ -109,8 +109,10 @@ export interface CatalogModel {
   readonly pricing: ModelPricing | null;
 }
 
-// Streamed response parts from effect/unstable/ai: text/reasoning deltas,
-// tool-call + tool-result parts (handlers run by the library), finish, etc.
+/**
+ * Streamed response parts from effect/unstable/ai: text/reasoning deltas,
+ * tool-call + tool-result parts (handlers run by the library), finish, etc.
+ */
 export type ChatStreamPart = Response.AnyPart;
 
 // Sensitivity follows the outgoing input, not only the requested output mode.
@@ -160,13 +162,15 @@ const ModelsResponse = Schema.Struct({
 const parseCatalogPrice = (value: string | null | undefined) =>
   typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
 
-// Catalog prices arrive as USD-per-token decimal strings ("0.0000025");
-// the app stores USD per 1M tokens. Free models ("0") map to a zero price,
-// which is a statement, not an unknown.
+/**
+ * Catalog prices arrive as USD-per-token decimal strings ("0.0000025");
+ * the app stores USD per 1M tokens. Free models ("0") map to a zero price,
+ * which is a statement, not an unknown.
+ */
 export const catalogPricing = (
   pricing: { prompt?: string | null; completion?: string | null } | null | undefined,
 ): CatalogModel["pricing"] => {
-  // Number(null) is 0 — only a non-empty string is a stated price.
+  // Number(null) is 0, so only a non-empty string is a stated price.
   const input = parseCatalogPrice(pricing?.prompt);
   const output = parseCatalogPrice(pricing?.completion);
   if (!Number.isFinite(input)) return null;
@@ -242,23 +246,27 @@ export interface EmbeddingAttribution {
 export interface EmbeddingResult {
   readonly embeddings: ReadonlyArray<ReadonlyArray<number>>;
   readonly dimensions: number;
-  /** Absent when the provider reported none — unknown cost, never zero. */
+  /** Absent when the provider reported none: unknown cost, never zero. */
   readonly inputTokens: number | null;
 }
 
-// Talks to configured AI providers: model catalog for admin autocomplete, and
-// streaming chat completions for generation.
+/**
+ * Talks to configured AI providers: model catalog for admin autocomplete, and
+ * streaming chat completions for generation.
+ */
 export class AiGateway extends Context.Service<
   AiGateway,
   {
-    // Live model list from the provider API (autocomplete source)
+    /** Live model list from the provider API (autocomplete source) */
     fetchCatalog(
       providerId: string,
     ): Effect.Effect<ReadonlyArray<CatalogModel>, ProviderUnreachable | ModelNotFound>;
-    // Stream one model turn for a stored model id. When a toolkit is passed,
-    // the library resolves tool calls (runs handlers) within the turn and
-    // emits tool-call/tool-result parts; the caller drives the multi-turn
-    // loop by feeding the parts back in as prompt history.
+    /**
+     * Stream one model turn for a stored model id. When a toolkit is passed,
+     * the library resolves tool calls (runs handlers) within the turn and
+     * emits tool-call/tool-result parts; the caller drives the multi-turn
+     * loop by feeding the parts back in as prompt history.
+     */
     streamChat(input: {
       imageOutput?: boolean;
       modelId: string;
@@ -270,10 +278,12 @@ export class AiGateway extends Context.Service<
       ChatStreamPart,
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
     >;
-    // One bounded, tool-free model turn returning just the text. Used for
-    // side generations (conversation titles, compaction summaries), never for
-    // the answer itself. Still goes out as a streaming request — see the
-    // implementation for why.
+    /**
+     * One bounded, tool-free model turn returning just the text. Used for
+     * side generations (conversation titles, compaction summaries), never for
+     * the answer itself. Still goes out as a streaming request, see the
+     * implementation for why.
+     */
     generateText(input: {
       modelId: string;
       prompt: Prompt.Prompt;
@@ -333,12 +343,10 @@ export class AiGateway extends Context.Service<
 
         // Both supported kinds expose an OpenAI-style GET /models.
         //
-        // OpenRouter's default listing is text-generation only: embedding
-        // models are absent from it and only appear when the query asks for
-        // that output modality. Fetch both views and merge, so an admin can
-        // pick an embedding model from the same autocomplete. A plain
-        // OpenAI-compatible endpoint lists everything in one call and would
-        // ignore (or reject) the filter, so it gets the single request.
+        // OpenRouter's listing is text-generation only; embedding models
+        // appear only when the query asks for that modality, so fetch both
+        // and merge for one admin autocomplete. A plain endpoint lists
+        // everything in one call, so it gets a single request.
         const base = provider.baseUrl.replace(/\/$/, "");
         const listing = (url: string) =>
           httpClient
@@ -526,15 +534,12 @@ export class AiGateway extends Context.Service<
 
       type SideGeneration = { text: string; usage: Response.Usage; finishMetadata: unknown };
 
-      // Folded from the streaming endpoint rather than taken from
-      // `LanguageModel.generateText`, which posts a non-streaming completion:
-      // its response schema requires `system_fingerprint`, a field plain
-      // OpenAI-compatible servers omit, so a one-shot call fails to decode
-      // against providers whose streaming path works perfectly (the streaming
-      // chunk schema marks the same field optional). Titles and compaction
-      // summaries must not be the only things in the app that need a provider
-      // to be OpenRouter, so they ride the wire format every generation
-      // already proves.
+      // Folded from the streaming endpoint, not `LanguageModel.generateText`:
+      // its response schema requires `system_fingerprint`, which plain
+      // OpenAI-compatible servers omit, so one-shot decode fails where
+      // streaming works. Titles and compaction summaries must not require
+      // OpenRouter specifically, so they ride the wire format every
+      // generation already proves.
       const generateText = Effect.fn("AiGateway.generateText")(function* (input: {
         modelId: string;
         prompt: Prompt.Prompt;
@@ -545,7 +550,7 @@ export class AiGateway extends Context.Service<
           input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
         );
         // No toolkit, so the request carries no tools and the model has
-        // nothing to call — `toolChoice` would be moot. Think extraction is
+        // nothing to call, so `toolChoice` would be moot. Think extraction is
         // shared with `streamChat` for the same reason: a <think> block is
         // never part of a title or a summary.
         const stream = extractThinkTags(LanguageModel.streamText({ prompt: input.prompt })).pipe(
@@ -691,13 +696,11 @@ export class AiGateway extends Context.Service<
           return { embeddings: [], dimensions: input.expectedDimensions ?? 0, inputTokens: 0 };
         }
 
-        // `expectedDimensions` is what the index was approved at, and it is
-        // used below to *verify* the response — never sent as a request
-        // parameter. Sending `dimensions` would ask the provider to truncate,
-        // which only Matryoshka-trained models honour; on any other model the
-        // OpenAI-compatible surface may reject it, and OpenRouter's reference
-        // leaves the behaviour unspecified. The model's native width is what
-        // Detect recorded, so the check below is the whole contract.
+        // `expectedDimensions` is what the index was approved at, used below to
+        // *verify* the response, never sent as a request parameter: `dimensions`
+        // asks the provider to truncate, which only Matryoshka-trained models honour;
+        // others may reject or ignore it. Detect recorded the model's width, so the
+        // check below is the contract.
         const request = HttpClientRequest.post(
           `${provider.baseUrl.replace(/\/$/, "")}/embeddings`,
         ).pipe(

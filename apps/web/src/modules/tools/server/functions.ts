@@ -96,10 +96,12 @@ export const testSearchConnection = createServerFn({ method: "POST" })
     ),
   );
 
-// Non-admin: lets the composer decide whether to show the Search toggle, which
-// controls web_search only. The URL reader has no toggle and is gated separately
-// by URLs in user-authored messages, so it is deliberately not ORed in here.
-// Exposes nothing beyond booleans.
+/**
+ * Non-admin: lets the composer decide whether to show the Search toggle, which
+ * controls web_search only. The URL reader has no toggle and is gated separately
+ * by URLs in user-authored messages, so it is deliberately not ORed in here.
+ * Exposes nothing beyond booleans.
+ */
 export const getWebSearchAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(() =>

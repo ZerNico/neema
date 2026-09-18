@@ -1,5 +1,5 @@
-// Landing-page greeting. Better Auth's `name` is free-form text — a full name,
-// a single handle, sometimes an email — so the greeting only uses it when the
+// Landing-page greeting. Better Auth's `name` is free-form text (a full name,
+// a single handle, sometimes an email), so the greeting only uses it when the
 // leading word actually reads like something to call a person.
 
 const NEUTRAL = "What can I help with?";

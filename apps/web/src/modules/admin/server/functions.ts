@@ -48,7 +48,9 @@ export const deleteProvider = createServerFn({ method: "POST" })
     runtime.runPromise(ProviderRepo.use((repo) => repo.deleteProvider(data.providerId))),
   );
 
-// Live model catalog from the provider's /models endpoint (autocomplete source).
+/**
+ * Live model catalog from the provider's /models endpoint (autocomplete source).
+ */
 export const fetchProviderCatalog = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .validator(standard(ProviderIdInput))
@@ -219,7 +221,9 @@ export const removeGroupMember = createServerFn({ method: "POST" })
     ),
   );
 
-// --- Model access ---
+/**
+ * --- Model access ---
+ */
 
 export const listModelAccess = createServerFn({ method: "GET" })
   .middleware([requireAdmin])

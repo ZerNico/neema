@@ -47,7 +47,7 @@ export const agentIcon = (icon: string): IconSvgElement =>
  * What the composer knows about its agent and collections. Ids come from the
  * conversation; names resolve against the permission-aware lists, so a
  * selection the user can no longer read shows as unavailable rather than
- * silently disappearing — the server refuses the turn either way.
+ * silently disappearing, since the server refuses the turn either way.
  */
 export interface ContextSelection {
   /**

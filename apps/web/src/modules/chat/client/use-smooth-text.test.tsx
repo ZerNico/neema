@@ -50,7 +50,7 @@ describe("useSmoothText", () => {
     vi.useRealTimers();
   });
 
-  it("shows the initial text at once — history never animates", () => {
+  it("shows the initial text at once, since history never animates", () => {
     const { result } = renderHook(() => useSmoothText("already streamed text"));
     expect(result.current).toBe("already streamed text");
   });
@@ -77,7 +77,7 @@ describe("useSmoothText", () => {
     expect(result.current).toBe("The whole sentence arrives in a single delta");
   });
 
-  it("keeps pacing the tail after the stream ends — no closing pop", () => {
+  it("keeps pacing the tail after the stream ends, with no closing pop", () => {
     const { result, rerender } = renderHook(
       ({ target }: { target: string }) => useSmoothText(target),
       {

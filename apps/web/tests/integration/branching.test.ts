@@ -59,7 +59,7 @@ let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 let modelId: string;
 let providerId: string;
 
-// Only titles are generated here — nothing in this file streams an answer.
+// Only titles are generated here. Nothing in this file streams an answer.
 const GENERATED_TITLE = "Forked thread";
 const fakeGeneratedText = (text: string) =>
   Effect.succeed({
@@ -226,7 +226,7 @@ const seedThread = Effect.fn("test.seedThread")(function* (
   };
 });
 
-/** Everything but identity — what a clone has to reproduce exactly. */
+/** Everything but identity: what a clone has to reproduce exactly. */
 const shape = (message: MessageRow) => ({
   role: message.role,
   status: message.status,
@@ -594,7 +594,7 @@ describe("branching a conversation", () => {
             messageId: source.messages[1]!.id,
           }),
         );
-        // A real, finished assistant message — just not in this conversation.
+        // A real, finished assistant message, just not in this conversation.
         const foreignMessage = yield* Effect.flip(
           chat.branchConversation({
             userId: owner,

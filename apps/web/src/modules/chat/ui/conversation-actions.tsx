@@ -33,7 +33,7 @@ export interface ActionableConversation {
 export interface ConversationActions {
   startRename: (conversation: ActionableConversation) => void;
   confirmDelete: (conversation: ActionableConversation) => Promise<void>;
-  /** Mount once per surface — the shared rename dialog. */
+  /** Mount once per surface: the shared rename dialog. */
   renameDialog: ReactNode;
 }
 

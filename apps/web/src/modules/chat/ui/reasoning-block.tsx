@@ -14,14 +14,16 @@ import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
-// ChatGPT-style thinking section above an assistant answer.
-//
-// Three shapes depending on what the provider gives us:
-// - Visible reasoning, streaming: auto-expanded pane (max-height, auto-scroll
-//   pinned to the newest thought) with a shimmering "Thinking…" header.
-// - Visible reasoning, finished: collapsed one-line summary, expandable.
-// - Hidden reasoning (encrypted/redacted): indicator only while thinking;
-//   nothing expandable afterwards.
+/**
+ * ChatGPT-style thinking section above an assistant answer.
+ *
+ * Three shapes, depending on the provider:
+ * - Visible, streaming: auto-expanded pane (max-height, auto-scroll pinned to
+ *   the newest thought) with a shimmering "Thinking…" header.
+ * - Visible, finished: collapsed one-line summary, expandable.
+ * - Hidden (encrypted/redacted): indicator only while thinking; nothing
+ *   expandable afterwards.
+ */
 export const ReasoningBlock = memo(function ReasoningBlock({
   reasoning,
   active,
@@ -32,7 +34,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
 }) {
   const hasContent = reasoning.trim().length > 0;
   // Automatic behavior: open while the model is visibly thinking, closed once
-  // it answers. A click overrides that — but only within the phase it was
+  // it answers. A click overrides that, but only within the phase it was
   // made in (`during`), so finishing still collapses a manually opened pane
   // and a new generation re-opens a manually closed one.
   const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);

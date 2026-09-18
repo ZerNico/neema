@@ -29,7 +29,7 @@ export function AnalyticsPage() {
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
       {data.daily.length === 0 ? (
-        // The range picker above stays live — a quiet week can still switch
+        // The range picker above stays live, so a quiet week can still switch
         // to 90 days and find history.
         <EmptyState
           icon={Analytics01Icon}

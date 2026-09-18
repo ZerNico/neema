@@ -18,9 +18,11 @@ const heartbeat: Stream.Stream<Uint8Array> = Stream.fromEffectSchedule(
   Schedule.spaced(Duration.seconds(15)),
 );
 
-// Adapts an app-runtime event stream to an SSE Response. `merge` with
-// haltStrategy "left" ends the response when the data stream completes;
-// client disconnects cancel the ReadableStream which interrupts the fiber.
+/**
+ * Adapts an app-runtime event stream to an SSE Response. `merge` with
+ * haltStrategy "left" ends the response when the data stream completes;
+ * client disconnects cancel the ReadableStream which interrupts the fiber.
+ */
 export function sseResponse<A>(
   stream: Stream.Stream<A>,
   toFrame: (value: A) => Uint8Array,

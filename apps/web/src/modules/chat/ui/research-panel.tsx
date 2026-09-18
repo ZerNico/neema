@@ -20,9 +20,9 @@ import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
 
 // The transcript row stays one line; this is where the rest lives: what the
-// run did, in order, grouped by the task it was doing it for. The sources
-// panel is a separate view with its own entry points (citation chips, the
-// message menu); the plan is the model's working note and stays internal.
+// run did, in order, grouped by task. The sources panel is a separate view
+// (citation chips, the message menu); the plan is the model's working note
+// and stays internal.
 
 const taskLabels: Record<ResearchTaskProgress["status"], string> = {
   queued: "Queued",
@@ -32,12 +32,10 @@ const taskLabels: Record<ResearchTaskProgress["status"], string> = {
   aborted: "Stopped",
 };
 
-// Limitations are written for the model that synthesises the answer (and for
-// the run's diagnostics), not for the reader: "InvalidOutputError", output
-// limits and usage accounting mean nothing to them. Provider hiccups are also
-// expected — a run of 30 calls will lose one — and the answer already says
-// where coverage is thin. So the panel shows one plain sentence when coverage
-// actually fell short, and nothing for the routine cases.
+// Limitations are written for the model that synthesises the answer, not the
+// reader: "InvalidOutputError", output limits and usage mean nothing to them.
+// Provider hiccups are routine, and the answer covers thin spots, so the
+// panel shows a plain sentence only when coverage actually fell short.
 const coverageNote = (progress: ResearchProgress | undefined): string | null => {
   const limitations = progress?.limitations ?? [];
   if (progress?.phase === "aborted") return null;

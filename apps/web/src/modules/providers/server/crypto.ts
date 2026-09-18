@@ -1,8 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Config, Context, Effect, Layer, Redacted } from "effect";
 
-// AES-256-GCM encryption for provider API keys at rest.
-// Format: base64(iv).base64(tag).base64(ciphertext)
+/**
+ * AES-256-GCM encryption for provider API keys at rest.
+ * Format: base64(iv).base64(tag).base64(ciphertext)
+ */
 export class KeyCipher extends Context.Service<
   KeyCipher,
   {

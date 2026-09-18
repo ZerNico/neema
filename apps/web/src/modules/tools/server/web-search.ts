@@ -80,8 +80,10 @@ const mergeRoundRobin = (outcomes: ReadonlyArray<SearchOutcome>): SearchHit[] =>
   return merged;
 };
 
-// Builds the ready-to-use handler for a generation run. Loads config once so a
-// run keeps a stable snapshot even if an admin edits the tool mid-stream.
+/**
+ * Builds the ready-to-use handler for a generation run. Loads config once so a
+ * run keeps a stable snapshot even if an admin edits the tool mid-stream.
+ */
 export class WebSearchExecutor extends Context.Service<
   WebSearchExecutor,
   {
@@ -93,7 +95,7 @@ export class WebSearchExecutor extends Context.Service<
     ): Effect.Effect<WebSearchHandler, ToolUnavailable, Scope.Scope>;
     /** Read once at research start; an active run keeps its captured allowance. */
     researchSearchLimit(): Effect.Effect<number>;
-    // Cheap check used by ChatService validation + composer availability.
+    /** Cheap check used by ChatService validation + composer availability. */
     availability(): Effect.Effect<{ configured: boolean; enabled: boolean }>;
   }
 >()("chat/tools/WebSearchExecutor") {

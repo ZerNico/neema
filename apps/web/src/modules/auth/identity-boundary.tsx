@@ -36,10 +36,10 @@ export const useIdentityBoundary = () => useContext(IdentityContext);
  * The tree is rendered for `initialIdentity` and nothing else: cached queries,
  * open streams and drafts all belong to that account, so a different one must
  * never render into them. When the identity changes, the whole tree is torn
- * down, caches are cleared and the document is replaced — never patched.
+ * down, caches are cleared and the document is replaced, never patched.
  *
  * Detection is layered, cheapest and most authoritative first:
- * 1. A `401` from any server function ends the session on the spot — the
+ * 1. A `401` from any server function ends the session on the spot: the
  *    server said so, no confirmation round trip needed.
  * 2. In-app changes (sign-out, impersonation) go through `changeIdentity`,
  *    which broadcasts to sibling tabs over `localStorage`; Better Auth's own
@@ -48,7 +48,7 @@ export const useIdentityBoundary = () => useContext(IdentityContext);
  *    sees: a cookie expired or cleared outside the app while the tab slept.
  *
  * Only (3) is speculative, so it never hides anything. Concealing the app
- * before the check answers would blank it on every tab return — and via
+ * before the check answers would blank it on every tab return, and via
  * `<Activity>` it also detaches host refs, which Motion treats as a remount
  * and replays every entrance animation on screen. The one exception is the
  * BFCache snapshot: `pagehide` hides synchronously because the frozen page

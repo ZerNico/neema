@@ -31,8 +31,10 @@ export const modelAccessQuery = queryOptions({
   queryFn: () => listModelAccess(),
 });
 
-// The model settings form is tall; both model dialogs share one width and
-// scroll inside the viewport instead of growing past it.
+/**
+ * The model settings form is tall; both model dialogs share one width and
+ * scroll inside the viewport instead of growing past it.
+ */
 export const TALL_DIALOG_CLASS = "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl";
 
 export interface EditableModel {
@@ -49,9 +51,11 @@ export interface EditableModel {
   access: ModelAccess;
 }
 
-// Stays mounted; the caller drives `open` and keeps `model` set until the
-// close animation has finished. Base UI unmounts the popup contents once
-// closed, so the form (and its draft) starts fresh on every open.
+/**
+ * Stays mounted; the caller drives `open` and keeps `model` set until the
+ * close animation has finished. Base UI unmounts the popup contents once
+ * closed, so the form (and its draft) starts fresh on every open.
+ */
 export function ModelEditDialog({
   model,
   open,

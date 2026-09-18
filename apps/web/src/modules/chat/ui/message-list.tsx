@@ -56,9 +56,9 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 // Renders GFM footnote references as citation chips linking to their source,
 // and hides the footnote list streamdown would otherwise append (the detail
 // panel is our sources UI).
-// Both hooks into streamdown's output — the `#user-content-fn-N` href shape and
-// the `data-footnotes` section — are verified against 2.5.0 by the render test;
-// re-check them on upgrade.
+// Both hooks into streamdown's output, the `#user-content-fn-N` href shape and
+// `data-footnotes` section, are verified against 2.5.0 by render tests;
+// re-check on upgrade.
 function citationComponents(sources: ToolSource[]): MarkdownComponents {
   const byIndex = new Map(sources.map((s) => [s.index, s]));
   return {
@@ -76,7 +76,7 @@ function citationComponents(sources: ToolSource[]): MarkdownComponents {
     },
     section: ({ node, children, ...props }) => {
       // hast gives a valueless attribute the empty string, so compare against
-      // undefined — a truthiness check here silently renders the list.
+      // undefined, since a truthiness check here silently renders the list.
       const properties = node?.properties as Record<string, unknown> | undefined;
       if (properties?.dataFootnotes !== undefined) return null;
       return <section {...props}>{children}</section>;
@@ -719,7 +719,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const openSources = useCallback(() => sourcePanel.current?.(), []);
   const streaming = message.status === "streaming";
   const toolRunning = message.toolActivities.some((a) => a.status === "running");
-  // "Thinking" is the phase before any visible answer text arrives — but not
+  // "Thinking" is the phase before any visible answer text arrives, but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive =
     streaming && message.content.length === 0 && !message.images?.length && !toolRunning;

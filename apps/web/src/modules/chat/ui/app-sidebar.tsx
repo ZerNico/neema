@@ -137,7 +137,7 @@ function ConversationList() {
 
   const pages = conversationsPages.data.pages;
   // Between two page fetches a chat that just received a message can appear on
-  // both — dedupe so React never sees a repeated key before the next
+  // both. Dedupe so React never sees a repeated key before the next
   // invalidation re-pages the list.
   const conversations = useMemo(() => {
     const seen = new Set<string>();

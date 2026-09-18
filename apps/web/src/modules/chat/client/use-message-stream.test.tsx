@@ -175,7 +175,7 @@ describe("useMessageStream smoothing", () => {
     act(() => source.emit("chunk", { seq: 1, delta: "A final chunk of several words" }));
     act(() => source.emit("done", { status: "complete" }));
 
-    // Raw state is complete, but the display hasn't caught up — consumers
+    // Raw state is complete, but the display hasn't caught up, so consumers
     // still see a streaming message and the canonical refetch waits.
     expect(result.current.status).toBe("streaming");
     expect(result.current.text).not.toBe("A final chunk of several words");

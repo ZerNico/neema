@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 
-// Tests drive events (including reconnects) explicitly; each suite resets instances.
+/**
+ * Tests drive events (including reconnects) explicitly; each suite resets instances.
+ */
 export class FakeEventSource {
   static instances: FakeEventSource[] = [];
   private listeners = new Map<string, Set<(event: MessageEvent) => void>>();

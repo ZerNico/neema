@@ -13,7 +13,7 @@ const message = (error: unknown): string =>
 
 /**
  * Filesystem BlobStore. The bytes never pass through Postgres; only the
- * metadata does. Buffering a whole file in memory is fine at the 20 MiB cap —
+ * metadata does. Buffering a whole file in memory is fine at the 20 MiB cap;
  * the streaming question belongs to the S3 backend, if it ever needs it.
  */
 export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(

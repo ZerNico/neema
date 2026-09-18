@@ -11,8 +11,10 @@ export class InvalidDefaultModelOrder extends Schema.TaggedError<InvalidDefaultM
   { reason: Schema.String },
 ) {}
 
-// Input is already authorized and in display order. Rank affects selection,
-// never presentation; strip it before returning rows to the chat client.
+/**
+ * Input is already authorized and in display order. Rank affects selection,
+ * never presentation; strip it before returning rows to the chat client.
+ */
 export function markDefaultModel<T extends { id: string; defaultPriority: number | null }>(
   models: ReadonlyArray<T>,
 ): Array<Omit<T, "defaultPriority"> & { isDefault: boolean }> {

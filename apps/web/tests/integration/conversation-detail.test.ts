@@ -29,7 +29,7 @@ beforeAll(async () => {
   });
 
   // Only what the detail read touches: no gateway, no stream engine, no
-  // services — this exercises the payload assembly against real SQL.
+  // services, so this exercises the payload assembly against real SQL.
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
@@ -100,7 +100,7 @@ const seedThread = Effect.fn("test.seedThread")(function* (userId: string, title
 /**
  * Points a conversation at a source directly. Branching only ever links two
  * conversations of the same owner, so the cross-owner case has to be written
- * in — the foreign key does not constrain it, and the read must not leak.
+ * in: the foreign key does not constrain it, and the read must not leak.
  */
 const linkBranch = Effect.fn("test.linkBranch")(function* (
   conversationId: string,
@@ -139,7 +139,7 @@ describe("loadConversationDetail", () => {
 
     const detail = await run(loadConversationDetail(owner, branch.conversationId));
 
-    // The whole payload still loads — an unreadable source drops the marker,
+    // The whole payload still loads: an unreadable source drops the marker,
     // it does not fail the read.
     expect(detail.branchedFrom).toBeNull();
     expect(detail.conversation.title).toBe("Forked thread");

@@ -243,7 +243,7 @@ export function AskUserBlock({
                       {question.options.map((option) => (
                         <li key={option.label}>
                           {option.label}
-                          {option.description ? ` — ${option.description}` : ""}
+                          {option.description ? `: ${option.description}` : ""}
                         </li>
                       ))}
                     </ul>

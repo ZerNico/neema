@@ -98,11 +98,13 @@ export const messages = pgTable(
     usage: jsonb().$type<{
       inputTokens?: number;
       outputTokens?: number;
-      // Input tokens the provider counted for the FIRST model call of this
-      // generation — the only number that maps onto one prompt. `inputTokens`
-      // sums every tool round, so it cannot calibrate the estimator.
+      /**
+       * Input tokens the provider counted for the FIRST model call of this
+       * generation, the only number that maps onto one prompt. `inputTokens`
+       * sums every tool round, so it cannot calibrate the estimator.
+       */
       firstInputTokens?: number;
-      // What the estimator predicted for that same prompt.
+      /** What the estimator predicted for that same prompt. */
       estimatedFirstInputTokens?: number;
     }>(),
     error: jsonb().$type<{ tag: string; message: string }>(),
@@ -124,8 +126,10 @@ export const messages = pgTable(
   ],
 );
 
-// Ordered stream chunks for resumable replay. Retained until the message is
-// complete + a grace period (cleanup job), so late resumers can still replay.
+/**
+ * Ordered stream chunks for resumable replay. Retained until the message is
+ * complete + a grace period (cleanup job), so late resumers can still replay.
+ */
 export const messageChunks = pgTable(
   "message_chunks",
   {
@@ -145,9 +149,11 @@ export const messageChunks = pgTable(
   (t) => [primaryKey({ columns: [t.messageId, t.seq] })],
 );
 
-// Durable record of tool calls made during an assistant message's generation.
-// Stores query/summary metadata only — extracted page bodies are passed to the
-// model in-memory and never persisted.
+/**
+ * Durable record of tool calls made during an assistant message's generation.
+ * Stores query/summary metadata only, since extracted page bodies are passed to the
+ * model in-memory and never persisted.
+ */
 export const messageToolCalls = pgTable(
   "message_tool_calls",
   {
@@ -166,7 +172,7 @@ export const messageToolCalls = pgTable(
     providerCallId: text("provider_call_id").notNull(),
     toolName: text("tool_name").notNull(),
     arguments: jsonb().$type<JsonValue>().notNull(),
-    // durable summary (query, counts, source urls/titles) — not page content
+    // durable summary (query, counts, source urls/titles), not page content
     result: jsonb().$type<JsonValue>(),
     status: text({ enum: ["running", "complete", "error"] }).notNull(),
     error: jsonb().$type<{ code: string; message: string }>(),
@@ -182,8 +188,8 @@ export const messageToolCalls = pgTable(
 /**
  * Progressive compaction checkpoints (Onyx-style): the summary that stands in
  * for everything up to and including `through_message_id` when a conversation
- * outgrows the model's context window. The stored transcript is never touched
- * — only the model payload is compacted.
+ * outgrows the model's context window. The stored transcript is never touched,
+ * only the model payload is compacted.
  *
  * Rows are immutable and superseded rather than replaced: a branch cut before
  * the newest boundary still needs the newest checkpoint that is valid for its
@@ -212,7 +218,7 @@ export const conversationCompactionCheckpoints = pgTable(
       t.conversationId,
       t.throughMessageId,
     ),
-    // Referencing side of the FK — scanned on every message delete.
+    // Referencing side of the FK, scanned on every message delete.
     index("compaction_checkpoints_through_message_idx").on(t.throughMessageId),
   ],
 );

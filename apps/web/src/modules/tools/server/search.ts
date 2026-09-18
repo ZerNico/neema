@@ -65,9 +65,11 @@ const SearxngConfig = Schema.Struct({
 });
 const decodeConfig = Schema.decodeUnknownEffect(SearxngConfig);
 
-// Provider-agnostic search seam; SearXNG is the first backend. The baseUrl is
-// admin-controlled and MAY be local (that's the point of self-hosting), so no
-// SSRF guard applies here — only to result-page fetching.
+/**
+ * Provider-agnostic search seam; SearXNG is the first backend. The baseUrl is
+ * admin-controlled and MAY be local (that's the point of self-hosting), so no
+ * SSRF guard applies here, only to result-page fetching.
+ */
 export class SearchBackend extends Context.Service<
   SearchBackend,
   {
@@ -220,7 +222,7 @@ export class SearchBackend extends Context.Service<
               backend: "searxng",
               message:
                 res.status === 403
-                  ? "403 Forbidden — is the json format enabled in settings.yml?"
+                  ? "403 Forbidden. Is the json format enabled in settings.yml?"
                   : `HTTP ${res.status}`,
             });
           }

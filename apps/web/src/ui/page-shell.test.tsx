@@ -18,7 +18,7 @@ const scrollerOf = (element: Element | null) => {
   return null;
 };
 
-// The app layout's <main> is a fixed-height flex child that never scrolls —
+// The app layout's <main> is a fixed-height flex child that never scrolls.
 // the chat view relies on that. Every other route therefore has to bring its
 // own scroll container, and Agents and Knowledge shipped without one once.
 // Page owns it now, so a page built from Page scrolls by construction.

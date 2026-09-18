@@ -11,9 +11,11 @@ export const hostOf = (url: string): string => {
   }
 };
 
-// Favicon via our own /api/favicon proxy: the browser never contacts a third
-// party, and the route falls back to 404 (→ the globe icon below) when the
-// upstream has nothing.
+/**
+ * Favicon via our own /api/favicon proxy: the browser never contacts a third
+ * party, and the route falls back to 404 (→ the globe icon below) when the
+ * upstream has nothing.
+ */
 export function Favicon({ url, className }: { url: string; className?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {

@@ -266,7 +266,7 @@ export class KnowledgeRepo extends Context.Service<
     /**
      * Every collection id on the instance, for an admin-triggered rebuild.
      * The rebuild itself is still the owner-scoped path, run per collection,
-     * so no per-user rule is bypassed — the admin only starts it.
+     * so no per-user rule is bypassed, since the admin only starts it.
      */
     listAllCollectionIds(): Effect.Effect<ReadonlyArray<{ id: string; userId: string }>>;
     /** Role check for admin-only knowledge operations; same source as the sharing rules. */
@@ -839,7 +839,7 @@ export class KnowledgeRepo extends Context.Service<
         // Re-read through the typed select rather than mapping the raw result:
         // the update returns snake_case columns, and one shape for version rows
         // is worth the extra round trip on a background job.
-        const claimedId = (rows as unknown as { rows: ReadonlyArray<{ id: string }> }).rows[0]?.id;
+        const claimedId = (rows as { rows: ReadonlyArray<{ id: string }> }).rows[0]?.id;
         if (!claimedId) return null;
         const versions = yield* db
           .select()
@@ -874,7 +874,7 @@ export class KnowledgeRepo extends Context.Service<
           .transaction((tx) =>
             Effect.gen(function* () {
               // `truncated` now also covers skipped scanned pages, which is
-              // partial *coverage* of an otherwise complete extraction — the
+              // partial *coverage* of an otherwise complete extraction. The
               // text present is exact and citable, so it publishes. Only text
               // cut short by a size limit stays unpublishable (the worker
               // fails those before reaching here).
@@ -1080,8 +1080,8 @@ export class KnowledgeRepo extends Context.Service<
             `,
           )
           .pipe(Effect.orDie);
-        const versionId = (rows as unknown as { rows: ReadonlyArray<{ version_id: string }> })
-          .rows[0]?.version_id;
+        const versionId = (rows as { rows: ReadonlyArray<{ version_id: string }> }).rows[0]
+          ?.version_id;
         if (!versionId) return null;
         const [owner] = yield* db
           .select({ ownerUserId: knowledgeCollections.userId })

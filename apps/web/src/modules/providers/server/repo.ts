@@ -12,7 +12,7 @@ export type ProviderKind = "openrouter" | "openai-compatible";
 
 export type ModelRow = typeof models.$inferSelect;
 export type ModelAccess = ModelRow["access"];
-/** A model as the chat picker consumes it — only what the picker renders. */
+/** A model as the chat picker consumes it: only what the picker renders. */
 export type ChatModelRow = Pick<
   ModelRow,
   "id" | "displayName" | "contextLength" | "capabilities"
@@ -21,7 +21,7 @@ export type ChatModelRow = Pick<
   isDefault: boolean;
 };
 type ProviderRow = typeof providers.$inferSelect;
-// Provider rows with the ciphertext stripped — safe to send to admin clients.
+/** Provider rows with the ciphertext stripped, safe to send to admin clients. */
 export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext">;
 export type ProviderWithKey = PublicProvider & { apiKey: Redacted.Redacted<string> };
 
@@ -42,7 +42,7 @@ export class ProviderRepo extends Context.Service<
       patch: Partial<{ name: string; baseUrl: string; apiKey: string; enabled: boolean }>,
     ): Effect.Effect<void>;
     deleteProvider(providerId: string): Effect.Effect<void>;
-    // Internal: full row incl. decrypted key, for the AI gateway only.
+    /** Internal: full row incl. decrypted key, for the AI gateway only. */
     getProviderWithKey(providerId: string): Effect.Effect<ProviderWithKey | null>;
     listModels(filter?: { providerId?: string; enabledOnly?: boolean }): Effect.Effect<ModelRow[]>;
     /**
@@ -57,7 +57,7 @@ export class ProviderRepo extends Context.Service<
     /**
      * May this user use this model right now: the listChatModelsFor access
      * predicate plus an enabled provider. The model's own enabled/type flags
-     * are deliberately not checked — callers already hold the row via
+     * are deliberately not checked; callers already hold the row via
      * getModel and fold those into the same ModelNotFound.
      */
     isModelAccessible(userId: string, modelId: string): Effect.Effect<boolean>;

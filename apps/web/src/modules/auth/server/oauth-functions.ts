@@ -124,8 +124,10 @@ export const deleteOAuthProvider = createServerFn({ method: "POST" })
     invalidateAuth();
   });
 
-// Unauthenticated on purpose: the sign-in page needs the buttons before anyone
-// is signed in. Ids and labels only; nothing about a client or its secret.
+/**
+ * Unauthenticated on purpose: the sign-in page needs the buttons before anyone
+ * is signed in. Ids and labels only; nothing about a client or its secret.
+ */
 export const getSignInProviders = createServerFn({ method: "GET" }).handler(() =>
   runtime.runPromise(OAuthRepo.use((repo) => repo.listForSignIn())),
 );

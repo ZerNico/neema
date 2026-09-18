@@ -10,7 +10,9 @@ const baseSettings = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 } as const;
 
-// Inert by default; enable auto-save to test tool availability without persisting memories.
+/**
+ * Inert by default; enable auto-save to test tool availability without persisting memories.
+ */
 export const makeFakeMemoryService = (options: { autoSave?: boolean } = {}) => {
   const settings = options.autoSave
     ? { ...baseSettings, globalEnabled: true, effectiveAutoSaveEnabled: true }

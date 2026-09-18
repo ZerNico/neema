@@ -16,7 +16,7 @@ export interface ConfirmOptions {
   description?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** Style the confirm button as destructive (default true — deletes are the common case). */
+  /** Style the confirm button as destructive (default true, since deletes are the common case). */
   destructive?: boolean;
 }
 
@@ -24,15 +24,16 @@ type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
 
 const ConfirmContext = createContext<ConfirmFn | null>(null);
 
-// Promise-based confirmation dialog:
-//
-//   const confirm = useConfirm()
-//   if (await confirm({ title: "Delete model?" })) { ... }
-//
-// Resolves true on confirm, false on cancel/dismiss. One dialog instance per
-// provider; opening another confirmation dismisses the previous one as false.
-// Built on AlertDialog so the browser gets role="alertdialog" and outside
-// clicks don't dismiss — the user has to pick an answer (Escape still cancels).
+/**
+ * Promise-based confirmation dialog:
+ *
+ *   const confirm = useConfirm()
+ *   if (await confirm({ title: "Delete model?" })) { ... }
+ *
+ * Resolves true on confirm, false on cancel or dismiss. A new confirmation
+ * dismisses the previous one as false. Built on AlertDialog: outside clicks
+ * don't dismiss, only Escape or an answer.
+ */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
   const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);

@@ -11,14 +11,16 @@ import {
 
 export const CONVERSATIONS_PAGE_SIZE = 30;
 
-/** Opaque to the client — handed straight back to the server next page. */
+/** Opaque to the client, handed straight back to the server next page. */
 export interface ConversationCursorValue {
   activity: string;
   id: string;
 }
 
-// Keyed under the existing `["conversations"]` prefix so the sync bus's
-// prefix invalidation still covers every search variant.
+/**
+ * Keyed under the existing `["conversations"]` prefix so the sync bus's
+ * prefix invalidation still covers every search variant.
+ */
 export const conversationsInfiniteQuery = (query = "") =>
   infiniteQueryOptions({
     queryKey: ["conversations", { query }],

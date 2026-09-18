@@ -429,7 +429,7 @@ function EditProviderDialog({
   const queryClient = useQueryClient();
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
-  // Empty means "keep the current key" — the stored key can't be shown.
+  // Empty means "keep the current key", since the stored key can't be shown.
   const [apiKey, setApiKey] = useState("");
   const complete = Boolean(name.trim() && baseUrl.trim());
 

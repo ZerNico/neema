@@ -145,7 +145,7 @@ type Services =
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const exec = async (statement: string) =>
-  (await run(Effect.flatMap(Db, (db) => db.execute(statement as never)))) as unknown as {
+  (await run(Effect.flatMap(Db, (db) => db.execute(statement as never)))) as {
     rows: ReadonlyArray<Record<string, unknown>>;
   };
 const createUser = async () => {
@@ -1743,7 +1743,7 @@ describe("knowledge-backed generations", () => {
         { step: "Review", status: "in_progress" },
       ],
     });
-    // The reminder carries the current list only — never a history of revisions.
+    // The reminder carries the current list only, never a history of revisions.
     const last = promptText(requests.at(-1)!.prompt);
     expect(last).toContain("[x] Draft");
     expect(last).toContain("[~] Review");

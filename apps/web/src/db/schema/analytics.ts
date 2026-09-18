@@ -10,11 +10,13 @@ import {
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
-// Append-only usage ledger: one row per generation attempt (chat answer,
-// title, context compaction, or embedding request), written at finalize time and never updated.
-// Retry adds a new row, branching copies nothing, deleting a conversation
-// leaves it intact — which is exactly why analytics reads this and not
-// `messages.usage`.
+/**
+ * Append-only usage ledger: one row per generation attempt (chat answer,
+ * title, context compaction, or embedding request), written at finalize time and never updated.
+ * Retry adds a new row, branching copies nothing, deleting a conversation
+ * leaves it intact. That is exactly why analytics reads this and not
+ * `messages.usage`.
+ */
 
 export const usageEvents = pgTable(
   "usage_events",

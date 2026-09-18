@@ -18,8 +18,10 @@ export const MemoryPreferences = Schema.Struct({
 });
 export type MemoryPreferences = typeof MemoryPreferences.Type;
 
-// Raw user preferences stay visible even when the instance-wide memory tool is
-// disabled. The effective fields are what generation code must act on.
+/**
+ * Raw user preferences stay visible even when the instance-wide memory tool is
+ * disabled. The effective fields are what generation code must act on.
+ */
 export const MemorySettings = Schema.Struct({
   ...MemoryPreferences.fields,
   globalEnabled: Schema.Boolean,
@@ -42,8 +44,10 @@ export const Memory = Schema.Struct({
 });
 export type Memory = typeof Memory.Type;
 
-// Mutation inputs leave content-length checks to the service so callers receive
-// a typed rejection instead of a transport-level schema error.
+/**
+ * Mutation inputs leave content-length checks to the service so callers receive
+ * a typed rejection instead of a transport-level schema error.
+ */
 export const CreateMemoryInput = Schema.Struct({
   content: Schema.String,
 });
@@ -66,9 +70,11 @@ export const UpdateMemorySettingsInput = Schema.Struct({
 });
 export type UpdateMemorySettingsInput = typeof UpdateMemorySettingsInput.Type;
 
-// Internal trusted input captured with the generation's message snapshot. It is
-// deliberately not exposed by a server function: the current source is hashed
-// again under the write lock and must still match this value.
+/**
+ * Internal trusted input captured with the generation's message snapshot. It is
+ * deliberately not exposed by a server function: the current source is hashed
+ * again under the write lock and must still match this value.
+ */
 export const SaveModelMemoryInput = Schema.Struct({
   memoryId: Schema.optionalKey(Schema.String),
   content: Schema.String,

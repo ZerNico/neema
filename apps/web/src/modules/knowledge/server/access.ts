@@ -15,7 +15,7 @@ import {
  * published it to the instance.
  *
  * Read access is additive and deliberately separate from edit rights, which
- * are the owner's alone. Being an admin is not on this list — publishing a
+ * are the owner's alone. Being an admin is not on this list: publishing a
  * collection is an administrative act, reading someone's private documents is
  * not.
  */

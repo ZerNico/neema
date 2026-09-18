@@ -59,12 +59,11 @@ function ActionButton({
 }
 
 // The retry button is a menu, not a split control: it always opens with
-// "Retry same" pinned on top and the model list underneath, so both paths
-// share one target (the t3.chat pattern).
+// "Retry same" pinned above the model list, so both paths share one target
+// (the t3.chat pattern).
 //
-// Deliberately not useSuspenseQuery: the composer already suspends on this
-// list, so the cache is warm by the time the menu opens — and a message row
-// that suspends would blank the conversation around it.
+// Deliberately not useSuspenseQuery: the composer already warms this list, so
+// a suspending row would blank the conversation around it.
 function RetryMenu({
   onRetry,
   onRetryWith,
@@ -146,7 +145,7 @@ function RetryControl({
   retryModelId?: string | null | undefined;
   disabled: boolean;
 }) {
-  // No model switch wired (e.g. the caller has no models to offer) — the
+  // No model switch wired (e.g. the caller has no models to offer), so the
   // button degrades to a plain immediate retry.
   if (!onRetryWith) {
     return (
@@ -210,9 +209,11 @@ function SourcesMenu({
   );
 }
 
-// The action row under a finished assistant message: copy + retry (with its
-// model chevron) always, plus a 3-dot menu (currently just "View sources")
-// when there are sources.
+/**
+ * The action row under a finished assistant message: copy + retry (with its
+ * model chevron) always, plus a 3-dot menu (currently just "View sources")
+ * when there are sources.
+ */
 export function MessageActions({
   onOpenSources,
   content,

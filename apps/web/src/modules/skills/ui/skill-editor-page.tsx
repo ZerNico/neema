@@ -201,7 +201,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                   onClick={() => setUpdating(true)}
                 >
                   <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                  Check for updates{dirty ? " — save first" : ""}
+                  Check for updates{dirty ? " (save first)" : ""}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem
@@ -270,7 +270,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
         findings={validation.value?.findings ?? validation.error?.findings ?? []}
       />
       <p className="text-muted-foreground text-xs">
-        A skill is instructions, not access — files here are stored and read, never run. Anyone you
+        A skill is instructions, not access: files here are stored and read, never run. Anyone you
         share it with can see its instructions.
       </p>
       {initial ? (

@@ -24,7 +24,7 @@ export interface AttachmentUpload {
   readonly status: "uploading" | "complete" | "error";
   /** Object URL (fresh upload) or `/api/files/:id` (seeded), images only. */
   readonly previewUrl: string | null;
-  /** Server DTO — set once the upload completes. */
+  /** Server DTO, set once the upload completes. */
   readonly attachment: Attachment | null;
   /** Already claimed by the message being edited; removal is local only. */
   readonly existing: boolean;
@@ -55,7 +55,7 @@ export interface AttachmentUploads {
   seed(attachments: ReadonlyArray<Attachment>): void;
   /**
    * Runs `send` now, or once every upload settles. A failed upload cancels the
-   * queue instead — the draft and the chips stay put so the user can retry.
+   * queue instead, so the draft and the chips stay put and the user can retry.
    */
   submit(send: (attachmentIds: ReadonlyArray<string>) => void): void;
   cancelQueue(): void;
@@ -184,14 +184,14 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
           fileName: file.name,
           size: file.size,
           kind,
-          // Oversized files never reach the network — the server would only
+          // Oversized files never reach the network, since the server would only
           // reject them after buffering the whole body.
           status: oversized ? "error" : "uploading",
           previewUrl,
           attachment: null,
           existing: false,
           error: oversized
-            ? `Too large — the limit is ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`
+            ? `Too large. The limit is ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`
             : null,
         };
       });
@@ -291,7 +291,7 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
   }, []);
 
   // Unmount: object URLs would otherwise be retained for the page's lifetime.
-  // Uploads in flight are left alone — the orphan sweep collects them.
+  // Uploads in flight are left alone; the orphan sweep collects them.
   useEffect(
     () => () => {
       for (const url of objectUrls.current) URL.revokeObjectURL(url);

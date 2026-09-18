@@ -101,11 +101,17 @@ const prepared = (
 
 const runTool = (toolkit: Toolkit.WithHandler<any>, name: string, params: object) =>
   Effect.gen(function* () {
-    const stream = yield* toolkit.handle(
-      name as never,
-      params as never,
-    ) as unknown as Effect.Effect<Stream.Stream<{ result: unknown; preliminary?: boolean }>>;
-    const parts = yield* Stream.runCollect(stream);
+    const stream = yield* (toolkit.handle(name as never, params as never) as Effect.Effect<
+      Stream.Stream<{ result: unknown; preliminary?: boolean }, unknown, unknown>,
+      unknown,
+      never
+    >);
+    const narrowedStream = stream as Stream.Stream<
+      { result: unknown; preliminary?: boolean },
+      unknown,
+      never
+    >;
+    const parts = yield* Stream.runCollect(narrowedStream);
     return [...parts].map((part) => part.result as WebToolResult);
   });
 

@@ -19,7 +19,7 @@ describe("CodeViewer", () => {
   });
 
   // Shiki splits on the terminator too, so the highlighted path needs its own
-  // trim — the unhighlighted one passing proves nothing about it.
+  // trim. The unhighlighted one passing proves nothing about it.
   it("does not invent a line for a trailing newline when highlighting", async () => {
     const { container } = render(<CodeViewer text={"const x = 1;\n"} language="typescript" />);
     await waitFor(() => expect(tokensOf(container).length).toBeGreaterThan(1));

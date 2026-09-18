@@ -1,7 +1,9 @@
 import type { Response } from "effect/unstable/ai";
 
-// Accumulated across the model turns of one generation attempt — the ledger
-// row's numeric half.
+/**
+ * Accumulated across the model turns of one generation attempt, the ledger
+ * row's numeric half.
+ */
 export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
@@ -22,9 +24,11 @@ export const emptyUsageTotals = (): UsageTotals => ({
   sawUsage: false,
 });
 
-// Finish metadata is provider-augmented and untyped here; OpenRouter attaches
-// its raw usage object — including the actual billed `cost` in USD — under
-// metadata.openrouter.usage (see @effect/ai-openrouter OpenRouterLanguageModel).
+/**
+ * Finish metadata is provider-augmented and untyped here; OpenRouter attaches
+ * its raw usage object, including the actual billed `cost` in USD, under
+ * metadata.openrouter.usage (see @effect/ai-openrouter OpenRouterLanguageModel).
+ */
 export const providerCostOf = (metadata: unknown): number | null => {
   const usage = (metadata as { openrouter?: { usage?: { cost?: unknown } } } | undefined)
     ?.openrouter?.usage;
@@ -46,7 +50,7 @@ export const addFinishUsage = (
 };
 
 /**
- * Provider-reported cost wins — it reflects what was actually billed, cache
+ * Provider-reported cost wins, since it reflects what was actually billed, cache
  * discounts included. Model pricing (USD per 1M tokens) is the fallback;
  * without either the cost is honestly unknown.
  */

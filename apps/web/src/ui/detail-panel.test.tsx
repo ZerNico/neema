@@ -567,7 +567,7 @@ it("drops the old desktop host across breakpoints and cannot resurrect its pendi
 it("survives an identity revalidation on tab return without replaying its open animation", async () => {
   // A live tab is never blanked while the session is rechecked: hiding the tree
   // detaches host refs, which Motion reads as a remount and answers by running
-  // `initial` again — the rail collapsed to 0 and slid open on every refocus.
+  // `initial` again, so the rail collapsed to 0 and slid open on every refocus.
   environment.reducedMotion = false;
   const { IdentityBoundary } = await import("~/modules/auth/identity-boundary.tsx");
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");

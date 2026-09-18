@@ -31,7 +31,7 @@ export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | nul
  * The Start client turns a non-OK server-function response into
  * `new Error(await response.text())`, so the status is lost and the body is
  * all that survives. `requireSession` therefore writes a fixed body and this
- * matches on it — the two are one contract. Raw `Response` objects are
+ * matches on it: the two are one contract. Raw `Response` objects are
  * matched too for callers that fetch API routes directly.
  */
 export const UNAUTHENTICATED_BODY = "Unauthorized";

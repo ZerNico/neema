@@ -96,8 +96,6 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, AttachmentRepo | AttachmentService | BlobStore | ChatRepo | Db>,
 ) => runtime.runPromise(effect as never) as Promise<A>;
 
-const bytes = (value: string) => new TextEncoder().encode(value);
-
 const makeUser = Effect.fn("test.makeUser")(function* () {
   const db = yield* Db;
   const userId = uuidv7();
@@ -114,7 +112,7 @@ const upload = (userId: string, fileName: string, content: string) =>
       userId,
       fileName,
       declaredMediaType: "text/plain",
-      bytes: bytes(content),
+      bytes: new TextEncoder().encode(content),
     });
   });
 
@@ -303,7 +301,7 @@ describe("durable blob cleanup", () => {
         // never landed. Nothing that follows rows could ever find this object.
         const stranded = blobStorageKey(userId, "a".repeat(64));
         yield* repo.recordBlobCandidate(stranded);
-        yield* store.put(stranded, bytes("orphaned by a lost commit"));
+        yield* store.put(stranded, new TextEncoder().encode("orphaned by a lost commit"));
 
         // A registration that committed even though its caller saw a failure:
         // the intent is still pending, but a row owns the key.
@@ -332,7 +330,7 @@ describe("durable blob cleanup", () => {
           strandedGone: !(yield* store.exists(stranded)),
           ownedKept: yield* store.exists(ownedKey),
           registered: registered.id,
-          intents: (intents as unknown as { rows: ReadonlyArray<unknown> }).rows,
+          intents: (intents as { rows: ReadonlyArray<unknown> }).rows,
         };
       }),
     );
@@ -376,10 +374,10 @@ describe("durable blob cleanup", () => {
           `select storage_key from blob_cleanup_intents` as never,
         );
         return {
-          pending: (pending as unknown as { rows: ReadonlyArray<{ kind: string }> }).rows,
+          pending: (pending as { rows: ReadonlyArray<{ kind: string }> }).rows,
           claimed,
           gone: !(yield* store.exists(key)),
-          remaining: (remaining as unknown as { rows: ReadonlyArray<unknown> }).rows,
+          remaining: (remaining as { rows: ReadonlyArray<unknown> }).rows,
         };
       }),
     );
@@ -418,7 +416,7 @@ describe("durable blob cleanup", () => {
         return {
           first,
           second,
-          attempts: (row as unknown as { rows: ReadonlyArray<{ attempts: number }> }).rows[0],
+          attempts: (row as { rows: ReadonlyArray<{ attempts: number }> }).rows[0],
         };
       }),
     );
@@ -449,7 +447,7 @@ describe("attachment claiming", () => {
 
         const linked = yield* attachmentRepo.listForMessages([turn.userMessage.id]);
         // Finish the first generation so the next turn passes the busy guard
-        // and fails on the claim itself — the thing this test is about.
+        // and fails on the claim itself, which is the thing this test is about.
         yield* finish(turn.assistant.id);
         const reclaim = yield* repo
           .createTurn({
@@ -669,7 +667,7 @@ describe("attachment replacement on edit", () => {
         const key = (yield* blobsOf(alice))[0]!.storageKey;
 
         // The ownership check must gate the attachment release, not just the
-        // conversation delete — otherwise this destroys Alice's files.
+        // conversation delete, otherwise this destroys Alice's files.
         const keys = yield* repo.deleteConversation(mallory, turn.conversation.id);
 
         const db = yield* Db;

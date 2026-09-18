@@ -24,7 +24,7 @@ import { groups } from "./groups.ts";
 
 /**
  * pgvector column without a declared dimension. Exact (sequential) cosine
- * search is what this release does — an ANN index would need a fixed dimension
+ * search is what this release does. An ANN index would need a fixed dimension
  * and would pin every embedding space to the same width forever. Rows are
  * always filtered to one embedding space before a distance is evaluated, so
  * every vector a query compares is the same width.
@@ -58,8 +58,10 @@ export const knowledgeCollections = pgTable(
   (t) => [index("knowledge_collections_user_id_idx").on(t.userId)],
 );
 
-// Read/use grants are additive: owner OR direct grant OR a granted group the
-// user is currently in OR instance audience. They never imply edit rights.
+/**
+ * Read/use grants are additive: owner OR direct grant OR a granted group the
+ * user is currently in OR instance audience. They never imply edit rights.
+ */
 export const knowledgeCollectionUserGrants = pgTable(
   "knowledge_collection_user_grants",
   {
@@ -121,7 +123,7 @@ export const knowledgeDocuments = pgTable(
 
 /**
  * One immutable content revision. Text, chunk boundaries and locations never
- * change once published — that is what makes a citation stable and what lets
+ * change once published, which is what makes a citation stable and what lets
  * embeddings be rebuilt against the same content. A new upload, an edited note
  * or a parser change all create a new version instead.
  */
@@ -187,7 +189,7 @@ export const knowledgeChunks = pgTable(
       .notNull()
       .references(() => knowledgeDocumentVersions.id, { onDelete: "cascade" }),
     ordinal: integer().notNull(),
-    /** Verbatim source text — what a citation points at and a read returns. */
+    /** Verbatim source text: what a citation points at and a read returns. */
     content: text().notNull(),
     /** Heading breadcrumb ("Vendor Agreement › Termination"), for context. */
     headingPath: text("heading_path").notNull().default(""),
@@ -273,7 +275,7 @@ export const knowledgeEmbeddingJobs = pgTable(
  * once at send time inside the turn's transaction. Retry and branch reuse this
  * manifest instead of re-resolving, so a reply never silently answers from
  * content that arrived after the question. `status` records what the manifest
- * captured — a pending or failed document is part of the record, because
+ * captured. A pending or failed document is part of the record, because
  * absence must not read as complete coverage.
  */
 export const messageKnowledgeVersions = pgTable(

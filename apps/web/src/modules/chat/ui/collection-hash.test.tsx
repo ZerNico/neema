@@ -97,7 +97,7 @@ describe("collection # mentions", () => {
     // does long before a real keystroke.
     await act(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
 
-    // The chip is removed elsewhere, so the row is offered again — and typing
+    // The chip is removed elsewhere, so the row is offered again, and typing
     // the trigger at the same caret must reopen the list, not stay suppressed
     // because an identical token was accepted there a moment ago.
     type("#");

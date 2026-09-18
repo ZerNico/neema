@@ -27,7 +27,7 @@ export type AttachmentBlobRow = typeof attachmentBlobs.$inferSelect;
 /** The transaction handle `Db.transaction` hands its callback. */
 export type DbTx = Parameters<Parameters<Db["Service"]["transaction"]>[0]>[0];
 
-/** Attachment joined with its blob — everything the prompt builder needs. */
+/** Attachment joined with its blob, everything the prompt builder needs. */
 export interface AttachmentWithBlob {
   id: string;
   userId: string;
@@ -141,7 +141,7 @@ export class AttachmentRepo extends Context.Service<
     /**
      * Copies the attachments of each source message onto its target message,
      * inside the caller's transaction (branching). Blobs are shared, not
-     * duplicated — only the attachment rows and links are new.
+     * duplicated; only the attachment rows and links are new.
      */
     cloneForMessages(
       tx: DbTx,
@@ -402,7 +402,7 @@ export class AttachmentRepo extends Context.Service<
               // The unique index on attachment_id is the real race guard: a
               // concurrent claim of the same upload loses here and rolls the
               // whole transaction back. Only that specific violation is a
-              // user-level conflict — any other query error stays a defect.
+              // user-level conflict; any other query error stays a defect.
               Effect.catchTag("EffectDrizzleQueryError", (error) =>
                 isUniqueViolation(error)
                   ? Effect.fail(new AttachmentNotAvailable({ attachmentId: requested[0]! }))
@@ -580,7 +580,7 @@ export class AttachmentRepo extends Context.Service<
           .insert(blobCleanupIntents)
           .values({ storageKey, kind: "candidate" })
           // A key already marked for deletion stays marked: it is the same
-          // question either way — does any row own these bytes?
+          // question either way, does any row own these bytes?
           .onConflictDoNothing()
           .pipe(Effect.orDie);
       });
@@ -603,11 +603,9 @@ export class AttachmentRepo extends Context.Service<
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              // Due-ness is judged by the database's clock, the same clock that
-              // stamped `not_before` and `created_at`. Comparing against a JS
-              // Date lets a few milliseconds of skew between app and database
-              // hide rows that are already due — and a reconciler that quietly
-              // sees nothing is exactly the failure this ledger exists to prevent.
+              // Due-ness uses the database's clock (matches not_before/created_at),
+              // never a JS Date: skew would hide rows that are already due, and a
+              // silent reconciler is the failure this ledger exists to prevent.
               const due = yield* tx
                 .select()
                 .from(blobCleanupIntents)

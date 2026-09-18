@@ -46,7 +46,7 @@ export function ChatsPage() {
       .filter((conversation) => !seen.has(conversation.id) && seen.add(conversation.id));
   }, [pages.data]);
 
-  // Search results are ranked by recency but browsed as one list — day
+  // Search results are ranked by recency but browsed as one list, so day
   // headings would only chop up an already short set of matches.
   const groups = useMemo(
     () => (query ? [{ label: "", conversations }] : groupConversationsByDate(conversations)),

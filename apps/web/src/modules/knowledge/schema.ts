@@ -84,7 +84,7 @@ export type KnowledgeDocument = typeof KnowledgeDocument.Type;
 
 /**
  * One retrieved passage. `documentId`/`versionId`/`chunkId` are the citation
- * handle — an internal source is never addressed by a URL the model wrote.
+ * handle. An internal source is never addressed by a URL the model wrote.
  */
 export const KnowledgePassage = Schema.Struct({
   collectionId: Schema.String,

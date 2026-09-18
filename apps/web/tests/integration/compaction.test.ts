@@ -70,7 +70,7 @@ let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | AnalyticsRepo | StreamEngi
 
 /**
  * The one fake in the end-to-end block: every prompt the engine would have
- * sent, plus switches for the two provider behaviours worth exercising —
+ * sent, plus switches for the two provider behaviours worth exercising:
  * a refused oversized prompt, and a model that cannot write a summary.
  */
 const gateway = {
@@ -124,11 +124,9 @@ const FakeGateway = Layer.succeed(AiGateway, {
       const overflow = () =>
         new ProviderContextOverflow({ providerId: "p", message: "maximum context length" });
       if (gateway.partialOverflowOnCalls.includes(callNumber)) {
-        return Stream.make({
-          type: "text-delta",
-          id: "partial",
-          delta: "partial",
-        } as never as ChatStreamPart).pipe(Stream.concat(Stream.fail(overflow())));
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "partial", delta: "partial" }),
+        ).pipe(Stream.concat(Stream.fail(overflow())));
       }
       if (gateway.overflowsLeft > 0 || gateway.overflowOnCalls.includes(callNumber)) {
         if (gateway.overflowsLeft > 0) gateway.overflowsLeft -= 1;
@@ -177,26 +175,24 @@ const FakeGateway = Layer.succeed(AiGateway, {
             providerExecuted: false,
             preliminary: false,
           }) as ChatStreamPart,
-          {
-            type: "finish",
+          AiResponse.makePart("finish", {
             reason: "tool-calls",
-            usage: {
+            usage: new AiResponse.Usage({
               inputTokens: { total: gateway.reportedInputTokens },
               outputTokens: { total: 12 },
-            },
-          } as never as ChatStreamPart,
+            }),
+          }),
         );
       }
       return Stream.make(
-        { type: "text-delta", id: "t", delta: "answered" } as never as ChatStreamPart,
-        {
-          type: "finish",
+        AiResponse.makePart("text-delta", { id: "t", delta: "answered" }),
+        AiResponse.makePart("finish", {
           reason: "stop",
-          usage: {
+          usage: new AiResponse.Usage({
             inputTokens: { total: gateway.reportedInputTokens },
             outputTokens: { total: 12 },
-          },
-        } as never as ChatStreamPart,
+          }),
+        }),
       );
     }),
 });
@@ -610,7 +606,7 @@ describe("context compaction", () => {
       }),
     );
 
-    // The answer still gets generated — just against fewer turns.
+    // The answer still gets generated, just against fewer turns.
     expect(result.decision.mode).toBe("truncated");
     expect(result.decision.startIndex).toBeGreaterThan(0);
     expect(result.decision.estimatedInputTokens).toBeLessThanOrEqual(result.decision.budget.input);
@@ -714,7 +710,7 @@ describe("context compaction", () => {
         const history = yield* historyOf(conversationId);
         const boundaryIndex = history.messages.findIndex((m) => m.id === source.throughMessageId);
 
-        // A checkpoint the branch cuts *before* — it describes messages the
+        // A checkpoint the branch cuts *before*: it describes messages the
         // copy does not have, so it must not come along.
         const laterBoundary = history.messages.at(-2)!;
         yield* repo.insertCompactionCheckpoint({
@@ -1317,8 +1313,8 @@ describe("compaction inside a generation", () => {
     // Two rows added by the new turn; nothing removed to make room.
     expect(result.storedAfter).toBe(result.storedBefore + 2);
 
-    // The pass is dead air on the client, so it is announced as chunks —
-    // persisted, so a reload mid-pass replays it like any other marker.
+    // The pass is dead air on the client, so it is announced as chunks. The
+    // chunks are persisted, so a reload mid-pass replays it like any other marker.
     const markers = result.chunks
       .filter((chunk) => chunk.kind === "compaction")
       .map((chunk) => JSON.parse(chunk.delta) as Record<string, unknown>);
@@ -1550,7 +1546,7 @@ describe("compaction inside a generation", () => {
       }),
     );
     // What the provider counted for the first call, beside what we predicted
-    // for that same prompt — either alone calibrates nothing.
+    // for that same prompt, since either alone calibrates nothing.
     expect(usage?.firstInputTokens).toBe(9_999);
     expect(usage?.estimatedFirstInputTokens).toBeGreaterThan(0);
   }, 60_000);
@@ -1569,7 +1565,7 @@ describe("compaction inside a generation", () => {
     );
 
     expect(gateway.streamPrompts).toHaveLength(2);
-    // The retry is strictly smaller — resending the rejected prompt would
+    // The retry is strictly smaller, since resending the rejected prompt would
     // just be refused again.
     expect(gateway.streamPrompts[1]!.length).toBeLessThan(gateway.streamPrompts[0]!.length);
     // The newest question survives the shrink; it is the one being answered.

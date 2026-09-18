@@ -1,8 +1,10 @@
 import { boolean, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { JsonValue } from "./providers.ts";
 
-// Instance-wide tool registry, managed by admins. One row per tool; the
-// web_search row is seeded (disabled) by migration.
+/**
+ * Instance-wide tool registry, managed by admins. One row per tool; the
+ * web_search row is seeded (disabled) by migration.
+ */
 
 export const tools = pgTable(
   "tools",

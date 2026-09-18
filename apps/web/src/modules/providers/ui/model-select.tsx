@@ -19,8 +19,8 @@ export interface ModelSelectOption {
  * The admin-side model dropdown: a plain single-value select, the same rows
  * and the same "Name · Provider" wording wherever an admin picks one model
  * from a list (default model order, semantic search). The chat composer and
- * the agent editor use `ModelPicker` instead — a searchable, capability-
- * annotated combobox — because a user picks from many models often; an admin
+ * the agent editor use `ModelPicker` instead, a searchable, capability-
+ * annotated combobox, because a user picks from many models often; an admin
  * picks one, rarely.
  *
  * Base UI resolves the trigger's text from `items`, never from the rendered

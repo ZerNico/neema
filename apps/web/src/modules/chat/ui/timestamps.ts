@@ -52,7 +52,7 @@ const daysBefore = (day: number, today: number): number => Math.round((today - d
 
 /**
  * Heading for a calendar day: "Today", "Yesterday", the weekday within the
- * past week, then the date itself — with the year only once it stops being
+ * past week, then the date itself, with the year only once it stops being
  * implied by the current one.
  */
 export function dayLabel(date: Date, now: Date = new Date(), locale?: string): string {
@@ -97,7 +97,7 @@ export interface StampedMessage {
 
 /**
  * Stamps for an ordered run of messages. Day headings are computed against the
- * message before them, so this must be given the list as rendered — filtering
+ * message before them, so this must be given the list as rendered. Filtering
  * afterwards would leave a day opening with no heading.
  */
 export function buildMessageStamps(
@@ -109,7 +109,7 @@ export function buildMessageStamps(
   let previousDay: number | null = null;
   for (const message of messages) {
     const date = new Date(message.createdAt);
-    // A row with an unreadable timestamp still has to render — it just goes
+    // A row with an unreadable timestamp still has to render. It just goes
     // without a stamp rather than heading its day "Invalid Date".
     if (Number.isNaN(date.getTime())) continue;
     const day = startOfDay(date);

@@ -4,9 +4,11 @@ import type { SkillToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
-// One summary row, like memory: the disclosure only ever repeated the skill
-// name back at the reader. Which supporting files were read is not something
-// they need, and a skill row never implies the task was done or verified.
+/**
+ * One summary row, like memory: the disclosure only ever repeated the skill
+ * name back at the reader. Which supporting files were read is not something
+ * they need, and a skill row never implies the task was done or verified.
+ */
 export function SkillActivityBlock({ activities }: { activities: SkillToolActivity[] }) {
   if (!activities.length) return null;
   const names = [

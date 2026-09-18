@@ -68,7 +68,7 @@ interface ToolActivityBase {
   error?: string;
 }
 
-// Live/durable view of one web tool call, upserted by callId from tool chunks.
+/** Live/durable view of one web tool call, upserted by callId from tool chunks. */
 export interface WebToolActivity extends ToolActivityBase {
   family: "web";
   targets: string[];
@@ -78,8 +78,10 @@ export interface WebToolActivity extends ToolActivityBase {
   sources?: ToolSource[];
 }
 
-// Memory activity is deliberately summary-only. User memory content and every
-// web-only field stay out of both stream state and the rendered activity row.
+/**
+ * Memory activity is deliberately summary-only. User memory content and every
+ * web-only field stay out of both stream state and the rendered activity row.
+ */
 export interface MemoryToolActivity extends ToolActivityBase {
   family: "memory";
   outcome?: MemoryActivityOutcome;
@@ -139,9 +141,11 @@ export const isWebToolActivity = (activity: ToolActivity): activity is WebToolAc
 export const isMemoryToolActivity = (activity: ToolActivity): activity is MemoryToolActivity =>
   activity.family === "memory";
 
-// One durable/live compaction occurrence. Position is relative to model/tool
-// turns inside this assistant response, not to the historical checkpoint it
-// may have produced.
+/**
+ * One durable/live compaction occurrence. Position is relative to model/tool
+ * turns inside this assistant response, not to the historical checkpoint it
+ * may have produced.
+ */
 export interface CompactionActivity {
   eventId: string;
   runId?: string;
@@ -218,8 +222,10 @@ export const toMemoryActivityOutcome = (value: unknown): MemoryActivityOutcome |
 export const readTextOffset = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
-// Parses a tool chunk envelope defensively: malformed rows must not crash the
-// stream; the chunk still advances lastSeq so resume cursors stay correct.
+/**
+ * Parses a tool chunk envelope defensively: malformed rows must not crash the
+ * stream; the chunk still advances lastSeq so resume cursors stay correct.
+ */
 export function applyToolChunk(
   tools: ToolActivity[],
   delta: string,
@@ -604,8 +610,10 @@ export function applyToolChunk(
   return tools;
 }
 
-// Same defensive contract as `applyToolChunk`: a malformed envelope leaves the
-// state alone, and replaying the same marker twice is a no-op.
+/**
+ * Same defensive contract as `applyToolChunk`: a malformed envelope leaves the
+ * state alone, and replaying the same marker twice is a no-op.
+ */
 export function applyCompactionChunk(
   current: CompactionActivity[],
   delta: string,
@@ -765,15 +773,17 @@ export interface InitialStream {
   lastSeq: number;
 }
 
-// Subscribes to a streaming assistant message with resume support.
-// `initial` carries chunks already loaded via the conversation query, so the
-// SSE connection only replays what happened after them (?after=<seq>).
+/**
+ * Subscribes to a streaming assistant message with resume support.
+ * `initial` carries chunks already loaded via the conversation query, so the
+ * SSE connection only replays what happened after them (?after=<seq>).
+ */
 export function useMessageStream(
   messageId: string | null,
   initial: InitialStream | null,
   conversationId: string | null,
   /**
-   * Bump to force a fresh subscription for the SAME message id — retry reuses
+   * Bump to force a fresh subscription for the SAME message id, since retry reuses
    * the row, so the id alone can't signal "this is a new generation".
    */
   epoch = 0,
@@ -859,7 +869,7 @@ export function useMessageStream(
       closed = true;
       dispatch({ kind: "done", status: data.status });
       source.close();
-      // Errors and stops refresh the canonical row immediately — feedback
+      // Errors and stops refresh the canonical row immediately, since feedback
       // outranks pacing. A normal completion holds the refetch until the
       // smoothed view drains (the effect below): swapping in the row's full
       // content early would be exactly the end-of-stream pop smoothing
@@ -881,8 +891,8 @@ export function useMessageStream(
     // initial is intentionally captured only when the generation changes
   }, [messageId, epoch, runId, conversationId, queryClient, generationKey]);
 
-  // The reducer accumulates raw deltas (lastSeq must track receipt exactly —
-  // resume depends on it); only the strings the UI renders are word-paced.
+  // The reducer accumulates raw deltas (lastSeq must track receipt exactly,
+  // since resume depends on it); only the strings the UI renders are word-paced.
   const text = useSmoothText(state.text);
   const reasoning = useSmoothText(state.reasoning);
   const drained = text === state.text && reasoning === state.reasoning;

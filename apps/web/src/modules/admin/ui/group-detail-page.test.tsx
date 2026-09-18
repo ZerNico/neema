@@ -68,7 +68,7 @@ describe("GroupDetailPage sharing permissions", () => {
     expect(shareSwitch("Alice")).not.toBeChecked();
     expect(shareSwitch("Bob")).toBeChecked();
     expect(screen.getAllByRole("switch")).toHaveLength(2);
-    expect(screen.getByText("Always allowed — admin")).toBeInTheDocument();
+    expect(screen.getByText("Always allowed, admin")).toBeInTheDocument();
     expect(screen.getByText(/Disabling it leaves existing shares intact/)).toBeInTheDocument();
   });
 

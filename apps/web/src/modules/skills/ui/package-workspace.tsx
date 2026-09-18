@@ -31,7 +31,7 @@ const previewPlugins = { ...markdownPlugins };
 delete previewPlugins.mermaid;
 const previewComponents = {
   img: ({ alt }: { alt?: string | undefined }) => (
-    <span className="text-muted-foreground">[Image{alt ? `: ${alt}` : ""} — not loaded]</span>
+    <span className="text-muted-foreground">[Image{alt ? `: ${alt}` : ""}, not loaded]</span>
   ),
 };
 export function SkillPreview({ content }: { content: string }) {
@@ -57,7 +57,7 @@ interface Draft {
   readonly target?: string;
 }
 
-/** Folders before files, then alphabetical — the ordering file explorers use. */
+/** Folders before files, then alphabetical: the ordering file explorers use. */
 function buildTree(paths: string[], folders: Set<string>): TreeNode[] {
   const roots: TreeNode[] = [];
   const nodes = new Map<string, TreeNode>();
@@ -261,7 +261,7 @@ export function PackageWorkspace({
 }) {
   const confirm = useConfirm();
   // One rail, never two: a second copy would mount a second inline name field,
-  // and its autofocus would blur — and so cancel — the one being typed into.
+  // and its autofocus would blur, and so cancel, the one being typed into.
   const isMobile = useIsMobile();
   const [filesOpen, setFilesOpen] = useState(false);
   const [selected, setSelected] = useState("SKILL.md");

@@ -29,7 +29,7 @@ export const getUsageAnalytics = createServerFn({ method: "GET" })
         Effect.all(
           {
             summary: repo.summary(window),
-            // Same query, shifted back one window — the delta baseline.
+            // Same query, shifted back one window, giving the delta baseline.
             previousSummary: repo.summary(previous),
             daily: repo.daily(window),
             byModel: repo.byModel(window),
@@ -41,7 +41,7 @@ export const getUsageAnalytics = createServerFn({ method: "GET" })
     );
   });
 
-/** The signed-in user's own usage — the user id never comes from the client. */
+/** The signed-in user's own usage; the user id never comes from the client. */
 export const getMyUsage = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(UsageRangeInput))

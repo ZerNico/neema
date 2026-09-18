@@ -3,9 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-// Number inputs are kept as strings in form state (what the <input> holds);
-// the schema parses and range-checks them, so a typo shows as a field error
-// instead of silently disabling Save.
+/**
+ * Number inputs are kept as strings in form state (what the <input> holds);
+ * the schema parses and range-checks them, so a typo shows as a field error
+ * instead of silently disabling Save.
+ */
 export const integerBetween = (minimum: number, maximum: number) =>
   Schema.NumberFromString.check(
     Schema.isInt({ message: "Enter a whole number." }),
@@ -18,7 +20,7 @@ const fieldErrors = (field: AnyFieldApi) =>
       typeof e === "string" ? e : ((e as { message?: string } | undefined)?.message ?? "Invalid"),
   }));
 
-/** Number input with min/max — TextField only covers text-like controls. */
+/** Number input with min/max, since TextField only covers text-like controls. */
 export function NumberField({
   field,
   label,

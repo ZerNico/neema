@@ -42,10 +42,12 @@ export const embeddingConfigurationQuery = queryOptions({
   queryFn: () => getEmbeddingConfiguration(),
 });
 
-// Everything an admin decides about how documents become searchable: how text
-// is extracted from files, and whether (and through which model) it is
-// embedded. Both feed knowledge collections; neither is a chat tool, which is
-// why they live here rather than under Tools.
+/**
+ * Everything an admin decides about how documents become searchable: how text
+ * is extracted from files, and whether (and through which model) it is
+ * embedded. Both feed knowledge collections; neither is a chat tool, which is
+ * why they live here rather than under Tools.
+ */
 export function KnowledgeAdminPage() {
   return (
     <Page title="Documents">

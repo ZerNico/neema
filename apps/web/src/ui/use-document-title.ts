@@ -12,7 +12,7 @@ export function useDocumentTitle(title: string | null | undefined) {
   useEffect(() => {
     const trimmed = title?.trim();
     if (!trimmed) return;
-    document.title = `${trimmed} — ${BASE_TITLE}`;
+    document.title = `${trimmed} · ${BASE_TITLE}`;
     return () => {
       document.title = BASE_TITLE;
     };

@@ -49,14 +49,14 @@ describe("webToolsSystemHint", () => {
 describe("buildSearchReminder", () => {
   it("lists prior sources by index with their url and snippet", () => {
     const text = buildSearchReminder({ sources: [source(1), source(4)], lastCycle: false });
-    expect(text).toContain("[1] Result 1 — https://example.com/1");
+    expect(text).toContain("[1] Result 1: https://example.com/1");
     expect(text).toContain("Snippet 1");
-    expect(text).toContain("[4] Result 4 — https://example.com/4");
+    expect(text).toContain("[4] Result 4: https://example.com/4");
   });
 
   it("omits the snippet line for a source that has none", () => {
     const text = buildSearchReminder({ sources: [source(2, { snippet: "" })], lastCycle: false });
-    expect(text).toContain("[2] Result 2 — https://example.com/2");
+    expect(text).toContain("[2] Result 2: https://example.com/2");
     expect(text).not.toContain("    ");
   });
 
@@ -80,7 +80,7 @@ describe("buildSearchReminder", () => {
 });
 
 describe("systemReminderMessage", () => {
-  it("wraps the text in tags on a user message — chat APIs have no reminder role", () => {
+  it("wraps the text in tags on a user message, since chat APIs have no reminder role", () => {
     const message = systemReminderMessage("stay on topic");
     expect(message.role).toBe("user");
     expect(message.content).toBe("<system-reminder>\nstay on topic\n</system-reminder>");

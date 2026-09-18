@@ -1,9 +1,11 @@
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
-// Who may get an account, and who already has one. Approval lives here rather
-// than on `user` because Better Auth owns that table's columns and a future
-// release adding its own status field would collide.
+/**
+ * Who may get an account, and who already has one. Approval lives here rather
+ * than on `user` because Better Auth owns that table's columns and a future
+ * release adding its own status field would collide.
+ */
 
 export const authSettings = pgTable("auth_settings", {
   // One row, seeded by migration. The constant primary key is what keeps it

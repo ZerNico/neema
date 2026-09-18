@@ -1,8 +1,10 @@
 import { canonicalUserUrl } from "./user-urls.ts";
 
-// Mutable authority shared by web_search and read_url for one generation.
-// It starts with URLs backed by user text / prior tool results, then grows as
-// searches return new hits. Model-authored prose never enters this set.
+/**
+ * Mutable authority shared by web_search and read_url for one generation.
+ * It starts with URLs backed by user text / prior tool results, then grows as
+ * searches return new hits. Model-authored prose never enters this set.
+ */
 export interface UrlAuthority {
   readonly seeded: boolean;
   allow(url: string): void;

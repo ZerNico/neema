@@ -5,21 +5,25 @@
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 
-// Pasting more than this becomes a text attachment instead of draft text.
+/** Pasting more than this becomes a text attachment instead of draft text. */
 export const PASTE_TEXT_CHAR_THRESHOLD = 2_000;
 export const PASTE_TEXT_LINE_THRESHOLD = 50;
 export const PASTED_TEXT_FILE_NAME = "pasted-text.txt";
 
-// No SVG: it is active content (scripts, external refs) and we serve blobs
-// from our own origin.
+/**
+ * No SVG: it is active content (scripts, external refs) and we serve blobs
+ * from our own origin.
+ */
 export const IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 export const PDF_MEDIA_TYPE = "application/pdf";
 export const TEXT_MEDIA_TYPE = "text/plain";
 
 export type AttachmentKind = "image" | "pdf" | "text";
 
-// Extensions accepted as text attachments; anything else must sniff as an
-// image or PDF. Keyed to a markdown language hint for the prompt fence.
+/**
+ * Extensions accepted as text attachments; anything else must sniff as an
+ * image or PDF. Keyed to a markdown language hint for the prompt fence.
+ */
 export const TEXT_EXTENSIONS: Record<string, string> = {
   bash: "bash",
   c: "c",
@@ -70,8 +74,10 @@ export const TEXT_EXTENSIONS: Record<string, string> = {
   zsh: "bash",
 };
 
-// `accept` for the hidden file input. Extensions carry the text types because
-// browsers report inconsistent MIME types for source files.
+/**
+ * `accept` for the hidden file input. Extensions carry the text types because
+ * browsers report inconsistent MIME types for source files.
+ */
 export const ATTACHMENT_ACCEPT = [
   ...IMAGE_MEDIA_TYPES,
   PDF_MEDIA_TYPE,
@@ -85,8 +91,8 @@ export const fileExtension = (fileName: string): string => {
   return fileName.slice(dot + 1).toLowerCase();
 };
 
-/** True when the extension is on the text allowlist. Own-property check —
- * a file named `x.constructor` must not match via the prototype chain. */
+/** True when the extension is on the text allowlist. Own-property check,
+ * since a file named `x.constructor` must not match via the prototype chain. */
 export const isTextExtension = (ext: string): boolean => Object.hasOwn(TEXT_EXTENSIONS, ext);
 
 /** Markdown language hint for a text attachment; "" when we have none. */

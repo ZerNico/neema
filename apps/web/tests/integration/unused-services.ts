@@ -4,7 +4,9 @@ import { DocumentParser } from "~/modules/attachments/server/document-parser.ts"
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 
-// Satisfy the stream engine's dependencies without allowing blob/document reads.
+/**
+ * Satisfy the stream engine's dependencies without allowing blob/document reads.
+ */
 export const FakeBlobStore = Layer.succeed(BlobStore, {
   put: () => Effect.die("no blobs in these tests"),
   get: () => Effect.die("no blobs in these tests"),

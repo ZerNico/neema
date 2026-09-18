@@ -7,8 +7,10 @@ import type { AiGateway } from "~/modules/providers/server/gateway.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ChatRepo } from "./repo.ts";
 
-// Only what the generator touches, so unit tests can pass plain objects
-// instead of standing up the layer graph (same shape as PromptDeps).
+/**
+ * Only what the generator touches, so unit tests can pass plain objects
+ * instead of standing up the layer graph (same shape as PromptDeps).
+ */
 export interface TitleDeps {
   readonly gateway: Pick<AiGateway["Service"], "generateText">;
   readonly repo: Pick<ChatRepo["Service"], "setTitleIfPending">;
@@ -87,8 +89,8 @@ export const sanitizeTitle = (raw: string): string | null => {
 };
 
 /**
- * What the title becomes when the model fails, times out, or answers junk —
- * a pending placeholder must never be permanent.
+ * What the title becomes when the model fails, times out, or answers junk.
+ * A pending placeholder must never be permanent.
  */
 export const fallbackTitle = (input: {
   content: string;
@@ -111,7 +113,7 @@ export const generateConversationTitle = Effect.fn("chat.generateConversationTit
   input: TitleInput,
 ) {
   yield* resolveTitle(deps, input).pipe(
-    // The fiber is detached — a dying write would be an unobserved fiber
+    // The fiber is detached, so a dying write would be an unobserved fiber
     // death, not a log line. Interruption (shutdown) stays silent.
     Effect.catchCause((cause) =>
       Cause.hasInterruptsOnly(cause)
@@ -158,7 +160,7 @@ const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, 
       Effect.tap((result) => recordTitleUsage(deps, input, result)),
       Effect.map((result) => sanitizeTitle(result.text)),
       // A failed or slow side generation is a log line, not a broken
-      // conversation — the fallback below still resolves the placeholder.
+      // conversation, since the fallback below still resolves the placeholder.
       Effect.catch((cause) =>
         Effect.as(Effect.logInfo("Title generation failed", { cause: String(cause) }), null),
       ),
@@ -166,7 +168,7 @@ const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, 
 
   const title = generated ?? fallbackTitle(input);
 
-  // False when the user renamed the chat first, or deleted it — either way
+  // False when the user renamed the chat first, or deleted it. Either way
   // there is nothing to announce.
   const applied = yield* deps.repo.setTitleIfPending(input.conversationId, title);
   if (!applied) return;

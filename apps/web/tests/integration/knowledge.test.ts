@@ -158,7 +158,7 @@ let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 
 const exec = async (statement: string) =>
-  (await run(Effect.flatMap(Db, (db) => db.execute(statement as never)))) as unknown as {
+  (await run(Effect.flatMap(Db, (db) => db.execute(statement as never)))) as {
     rows: ReadonlyArray<Record<string, unknown>>;
   };
 
@@ -1123,7 +1123,7 @@ describe("knowledge application boundary", () => {
   it("publishes text containing NUL by stripping it, instead of failing every attempt", async () => {
     // Postgres rejects U+0000 in text columns. Before the fix this note's
     // insert died on each lease and the owner saw a document stuck "indexing"
-    // until the attempts ran out — indistinguishable from a timeout.
+    // until the attempts ran out, indistinguishable from a timeout.
     await configureEmbeddings({ spaceId: null, enabled: false });
     await drainIndexer();
     const owner = await createUser();
@@ -2028,7 +2028,7 @@ describe("knowledge ingestion", () => {
       ),
     );
     expect(
-      (remaining as unknown as { rows: ReadonlyArray<{ total: number }> }).rows[0]!.total,
+      (remaining as { rows: ReadonlyArray<{ total: number }> }).rows[0]!.total,
     ).toBe(1);
 
     // Deleting the document is the last reference, so now the bytes go.

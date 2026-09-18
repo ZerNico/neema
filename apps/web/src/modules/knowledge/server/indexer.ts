@@ -35,7 +35,7 @@ const isTextual = (mediaType: string) =>
  * The two stages are independent on purpose: text and chunks are the immutable
  * content of a version, while vectors are a replaceable derivative. Embeddings
  * can fail, be disabled, or be rebuilt into a different space without ever
- * making a document unreadable — lexical search and reads keep working.
+ * making a document unreadable, since lexical search and reads keep working.
  */
 export class KnowledgeIndexer extends Context.Service<
   KnowledgeIndexer,

@@ -76,7 +76,7 @@ export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
 });
 
-// Opaque to the client: it hands back whatever the previous page returned.
+/** Opaque to the client: it hands back whatever the previous page returned. */
 export const ConversationCursor = Schema.Struct({
   /** ISO timestamp of coalesce(lastMessageAt, createdAt) for the last row served. */
   activity: Schema.String,
@@ -96,8 +96,10 @@ export const MessageIdInput = Schema.Struct({
   messageId: Schema.String,
 });
 
-// Omitting `modelId` regenerates with whatever model produced the answer;
-// sending one switches models for the new attempt ("retry with").
+/**
+ * Omitting `modelId` regenerates with whatever model produced the answer;
+ * sending one switches models for the new attempt ("retry with").
+ */
 export const RetryMessageInput = Schema.Struct({
   ...desktopSubmissionFields,
   conversationId: Schema.String,
@@ -107,7 +109,7 @@ export const RetryMessageInput = Schema.Struct({
   openDocumentId: OpenDocumentId,
 });
 
-// Forks the conversation at this assistant message into a new one.
+/** Forks the conversation at this assistant message into a new one. */
 export const BranchConversationInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,
@@ -149,10 +151,10 @@ export const RenameConversationInput = Schema.Struct({
 });
 
 // Envelope persisted in message_chunks.delta for kind:"compaction" markers.
-// Compaction runs to completion before the first token of the answer, so
-// without these the UI has nothing to show for however long it takes.
-// `result` carries the summary so the finished block reads the same live as
-// it does after the conversation refetches the checkpoint.
+// Compaction runs to completion before the first answer token, so without
+// these the UI shows nothing for however long it takes. `result` carries the
+// summary so the finished block reads the same live as after a checkpoint
+// refetch.
 const compactionPositionFields = {
   runId: Schema.optionalKey(Schema.String),
   taskId: Schema.optionalKey(Schema.String),

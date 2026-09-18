@@ -52,7 +52,7 @@ export interface DetailPanelApi {
 }
 
 // Actions are split from state so that opening or closing the panel doesn't
-// re-render every consumer that only ever calls open() — i.e. every message.
+// re-render every consumer that only ever calls open(), i.e. every message.
 const DetailPanelContext = createContext<DetailPanelApi | null>(null);
 const DetailPanelStateContext = createContext<DetailPanelRequest | null>(null);
 // Live owners subscribe to identity, not the request they refresh: updating a
@@ -66,17 +66,16 @@ const DetailPanelBeforeActionContext = createContext<
   (handler: (action: PanelAction) => void) => () => void
 >(() => () => {});
 
-// A general-purpose detail region beside the main content — the sources list is
-// the first tenant, not the only intended one.
-//
-//   const panel = useDetailPanel()
-//   panel.open({ id: `sources:${messageId}`, title: "Sources",
-//                body: <SourcesPanelBody … /> })
-//
-// The provider only supplies context; render <DetailPanelRail /> wherever the
-// region belongs in the layout. On desktop the rail is a flex *sibling* of the
-// content, so opening it shrinks the content rather than covering it; on mobile
-// it becomes a bottom sheet.
+/**
+ * A general detail region beside the main content (not just for sources).
+ *
+ *   const panel = useDetailPanel()
+ *   panel.open({ id, title, body })
+ *
+ * The provider supplies context; render <DetailPanelRail /> anywhere in the
+ * layout. Desktop's rail is a flex sibling, shrinking content instead of
+ * covering it; mobile becomes a bottom sheet.
+ */
 export function DetailPanelProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DetailPanelRequest | null>(null);
 
@@ -104,7 +103,7 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Otherwise navigating away leaves the panel showing the previous page's
-  // detail. Derived during render — no effect needed.
+  // detail. Derived during render, so no effect is needed.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [lastPathname, setLastPathname] = useState(pathname);
   if (lastPathname !== pathname) {
@@ -438,7 +437,7 @@ function DesktopPanel({ className }: { className: string | undefined }) {
   );
 }
 
-/** Stable actions — safe to depend on from memo hooks. */
+/** Stable actions, safe to depend on from memo hooks. */
 export function useDetailPanel(): DetailPanelApi {
   const api = useContext(DetailPanelContext);
   if (!api) throw new Error("useDetailPanel must be used within a DetailPanelProvider");

@@ -35,7 +35,7 @@ export class DocumentParser extends Context.Service<
       /**
        * Overrides the configured page/character bounds. The tool row's limits
        * are tuned for inlining a PDF into one prompt; a knowledge collection
-       * indexes the document instead and can afford — and needs — more of it.
+       * indexes the document instead and can afford, and needs, more of it.
        */
       limits?: { maxChars: number; maxPages: number };
       /** Knowledge must never publish a prompt-truncated PDF as complete. */
@@ -120,7 +120,7 @@ const parseLocalPdf = Effect.fn("DocumentParser.parseLocalPdf")(function* (
         // Optional pdfjs-dist assets are absent with the serverless bundle.
       }
       // pdf.js transfers (and detaches) the buffer it is given; copy so the
-      // caller's bytes stay usable — the same blob may be sent natively too.
+      // caller's bytes stay usable, since the same blob may be sent natively too.
       const loadingTask = getDocument({
         data: new Uint8Array(input.bytes),
         useSystemFonts: true,
@@ -152,12 +152,11 @@ const parseLocalPdf = Effect.fn("DocumentParser.parseLocalPdf")(function* (
           const page = await document.getPage(index + 1);
           const content = await page.getTextContent();
           signal.throwIfAborted();
-          // Fonts with private-use glyphs (emoji in event tickets, dingbats)
-          // surface as U+0000 and stray C0 controls in pdf.js text runs.
-          // Postgres refuses NUL in text columns, so leaving them in makes
-          // publication die on every attempt until the lease gives up — which
-          // looks exactly like a timeout to the owner. Drop them here, where
-          // both attachment prompts and knowledge indexing get their text.
+          // Private-use glyphs (event-ticket emoji, dingbats) surface as U+0000
+          // and stray C0 controls in pdf.js text runs. Postgres rejects NUL in
+          // text columns, so leaving them in silently kills publication on every
+          // attempt, indistinguishable from a timeout. Strip here, upstream of
+          // both attachment prompts and knowledge indexing.
           const text = stripControlCharacters(
             content.items
               .map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : "") : ""))

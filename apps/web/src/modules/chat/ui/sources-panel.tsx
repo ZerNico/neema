@@ -82,9 +82,11 @@ export function useSourcesPanel(messageId: string, sources: ToolSource[]) {
   }, [panel, messageId, sources]);
 }
 
-// The detail-panel body for a message's sources. Takes only the source list,
-// which for a completed message is stable. Rows are keyed by the citation
-// index but never show it: the number is the model's handle, not the reader's.
+/**
+ * The detail-panel body for a message's sources. Takes only the source list,
+ * which for a completed message is stable. Rows are keyed by the citation
+ * index but never show it: the number is the model's handle, not the reader's.
+ */
 export function SourcesPanelBody({ sources }: { sources: ToolSource[] }) {
   return (
     <ul className="flex flex-col gap-1">

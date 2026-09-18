@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 // Type-only, so it is erased and cannot evaluate the module before the env var
-// below is set — the layer reads BLOB_STORE_ROOT at import time.
+// below is set: the layer reads BLOB_STORE_ROOT at import time.
 import type { BlobStore as BlobStoreService } from "./blob-store.ts";
 
 const root = mkdtempSync(join(tmpdir(), "blob-store-"));

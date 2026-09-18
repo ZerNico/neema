@@ -30,7 +30,7 @@ interface ProviderGroup {
 }
 
 // A model is worth showing for the provider it comes from as much as for its
-// own name — "sonnet" and "anthropic" should both find the same row.
+// own name, so "sonnet" and "anthropic" should both find the same row.
 const matches = (model: PickableModel, query: string): boolean => {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
@@ -41,7 +41,7 @@ const matches = (model: PickableModel, query: string): boolean => {
 /**
  * Searchable, provider-grouped model list. Shared by the composer's model
  * button and the retry menu so both offer the same rows, the same grouping and
- * the same typeahead — only the trigger (and an optional header) differs.
+ * the same typeahead. Only the trigger (and an optional header) differs.
  */
 export function ModelPicker({
   models,
@@ -64,7 +64,7 @@ export function ModelPicker({
   /** Visible trigger content; the primitive appends its own chevron. */
   children?: ReactNode;
   /**
-   * Rendered inside the popup above the search input — extra actions that
+   * Rendered inside the popup above the search input: extra actions that
    * belong to the trigger, not to any model (e.g. the retry menu's
    * "Retry same" row). Gets a `close` so a chosen action can dismiss the
    * popup, which model selection otherwise does on its own.

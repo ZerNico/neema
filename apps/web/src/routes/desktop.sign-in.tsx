@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
 
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-// Outside `_app` on purpose: this page has no sidebar and must not load the
-// conversation list for a tab that closes in a minute.
+/**
+ * Outside `_app` on purpose: this page has no sidebar and must not load the
+ * conversation list for a tab that closes in a minute.
+ */
 export const Route = createFileRoute("/desktop/sign-in")({
   validateSearch: (search: Record<string, unknown>): { challenge?: string } =>
     typeof search["challenge"] === "string" && CHALLENGE_PATTERN.test(search["challenge"])

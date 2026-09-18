@@ -5,7 +5,7 @@ import { markdownPlugins } from "./markdown-plugins.ts";
 
 // Records the moment @streamdown/mermaid is first imported. Vitest evaluates a
 // mock factory on the first import of the module, so a call here means
-// something pulled mermaid in — the whole point of the lazy wrapper is that
+// something pulled mermaid in, and the whole point of the lazy wrapper is that
 // nothing does until a diagram actually renders.
 const { mermaidImported } = vi.hoisted(() => ({ mermaidImported: vi.fn() }));
 vi.mock("@streamdown/mermaid", async (importOriginal) => {
@@ -13,12 +13,11 @@ vi.mock("@streamdown/mermaid", async (importOriginal) => {
   return await importOriginal<typeof import("@streamdown/mermaid")>();
 });
 
-// jsdom has no IntersectionObserver, and streamdown holds a diagram at its
-// loading skeleton until the block scrolls into view — without one the
-// component throws from its mount effect and React tears the tree down. Kept
-// local rather than in tests/setup.ui.ts: InfiniteSentinel deliberately falls
-// back to its button when no observer exists, and the chats-page tests rely on
-// that.
+// jsdom has no IntersectionObserver; streamdown holds a diagram at its
+// loading skeleton until it scrolls into view, and without one the mount
+// effect throws, tearing the tree down. Kept local, not in tests/setup.ui.ts:
+// InfiniteSentinel's button fallback (no observer) is what chats-page tests
+// rely on.
 globalThis.IntersectionObserver = class IntersectionObserver {
   constructor(private readonly callback: IntersectionObserverCallback) {}
   observe(target: Element) {

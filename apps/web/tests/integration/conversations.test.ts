@@ -118,7 +118,7 @@ describe("listConversations pagination", () => {
         yield* seed(userId, [
           // Created first but active most recently.
           { id: "old-but-active", title: "a", created: 0, last: 9000 },
-          // Created last, never used — still ranks by its creation time.
+          // Created last, never used, but still ranks by its creation time.
           { id: "new-and-empty", title: "b", created: 5000 },
           { id: "stale", title: "c", created: 1000, last: 2000 },
         ]);
@@ -285,7 +285,7 @@ describe("listConversations title search", () => {
         };
       }),
     );
-    // Blank search still lists it — there is simply nothing to match against.
+    // Blank search still lists it, since there is simply nothing to match against.
     expect(result).toEqual({ searched: ["p2"], unsearched: ["p2", "p1"] });
   });
 

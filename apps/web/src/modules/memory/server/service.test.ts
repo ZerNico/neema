@@ -41,7 +41,7 @@ describe("memory sensitive-value rejection", () => {
     "Order reference 4111111111111112",
     "Invoice 5555555555554443",
     "Ticket 378282246310006",
-    // Luhn-valid, but no issuer ever mints these — a 15-digit IMEI and a
+    // Luhn-valid, but no issuer ever mints these: a 15-digit IMEI and a
     // 13-digit run that starts outside every issuer range.
     "Handset IMEI 356938035643809",
     "Tracking code 1234567890128",
@@ -62,7 +62,7 @@ describe("memory sensitive-value rejection", () => {
   it.each([
     // Right shape, wrong mod-97 remainder.
     "DE89 3704 0044 0532 0130 01",
-    // Unknown country code — never treated as an IBAN.
+    // Unknown country code, never treated as an IBAN.
     "Ticket AB12 3456 7890 1234",
     // Known country code, wrong length for it.
     "DE89 3704 0044 0532 01",

@@ -25,8 +25,12 @@ className={buttonVariants({...})}>`.
   a semantic foreground, reveal it and say how its text fills the box, but changing a component's own
   spacing, shape or type scale means the wrong component was chosen or a variant is missing. That list
   is `callSiteMayDo` in `oxlint.config.ts`; `Card` and its parts also take padding, because `card.tsx`
-  is shared by padded cards and unpadded ListCards. `src/ui/**` is exempt, being the design system
-  restating its own primitives, and so are tests, which need a sentinel class no build emits.
+  is shared by padded cards and unpadded ListCards. `no-restyle` exempts `src/ui/**`, where the
+  design system restates its own primitives, and component tests. Unknown-class checking still runs
+  there; only `test-panel-class` in the detail-panel test and the generated Sonner `toaster` class
+  are allowed in their respective files. Raw-color checking remains enabled everywhere.
+- Stacked form sections use `FieldSet` from `~/ui/field-set.tsx` with `compact` for tighter spacing;
+  the generated primitive and the wrapper's default keep their original spacing.
 - It runs at `error` with a count of zero, so anything new is genuinely new. The standing exceptions
   each carry an `oxlint-disable-next-line` naming the reason, next to the line it applies to. Add one
   there rather than widening `callSiteMayDo`, which would hide the decision from everyone who reads

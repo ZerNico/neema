@@ -45,7 +45,7 @@ const clamp = (value: number, min: number, max: number) =>
 /**
  * Per-phase output caps for one model. A configured `contextLength` is the only
  * input; without one the shared default keeps today's behaviour. Synthesis is
- * the answer the reader actually gets, so it scales — the exploring phases stay
+ * the answer the reader actually gets, so it scales, while the exploring phases stay
  * small because their output is tool calls and a bounded report.
  */
 export const researchOutputCaps = (
@@ -162,7 +162,7 @@ export class ResearchBudget {
         RESEARCH_LIMITS.explorationMs,
     );
   }
-  /** Whether another task could still run — false means the run is at its bound. */
+  /** Whether another task could still run. False means the run is at its bound. */
   get canDispatch() {
     // A task dispatched without web budget can only produce an uncited report.
     return this.webAvailable && this.tasks < RESEARCH_LIMITS.tasks;

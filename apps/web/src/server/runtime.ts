@@ -36,7 +36,7 @@ import { Db, PgLive } from "./db.ts";
 
 // Application layer graph. Server functions and routes run effects against
 // this shared runtime; its resources (pg pool, pubsub relays, in-flight
-// generation fibers) live until the next dev reload replaces it — for the
+// generation fibers) live until the next dev reload replaces it, or for the
 // process lifetime in production.
 const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, fsBlobStoreLayer).pipe(
   Layer.provideMerge(PgLive),
@@ -84,13 +84,11 @@ const AppLayer = ChatService.layer.pipe(
 
 const memoMap = Layer.makeMemoMapUnsafe();
 
-// Vite's dev server re-executes this module whenever anything in the layer
-// graph changes, but never runs import.meta.hot.dispose hooks for server
-// modules — so each evaluation replaces the previous generation itself:
-// dispose the old runtime (pg pool, LISTEN connection, generation fibers)
-// and take over. Serving the old graph instead would mean repo/service edits
-// silently don't apply until a manual restart. In production the module runs
-// once and there is nothing to dispose.
+// Vite re-executes this module on any layer-graph change but never fires
+// import.meta.hot.dispose for server modules, so each evaluation must dispose
+// the previous runtime (pg pool, LISTEN connection, generation fibers) before
+// taking over. Otherwise repo/service edits would silently not apply until a
+// manual restart. Production runs once; nothing to dispose.
 const globalKey = Symbol.for("chat/server/runtime");
 type GlobalWithRuntime = typeof globalThis & {
   [globalKey]?: ManagedRuntime.ManagedRuntime<

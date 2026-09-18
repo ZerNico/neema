@@ -22,7 +22,7 @@ export const CAPABILITY_META = [
   { key: "files" as const, label: "File input", icon: Attachment01Icon },
 ];
 
-// Compact icon row for a model's capabilities (picker, admin lists).
+/** Compact icon row for a model's capabilities (picker, admin lists). */
 export function CapabilityIcons({
   capabilities,
   className,
@@ -73,7 +73,7 @@ export function CapabilityIcons({
   );
 }
 
-// Compact context-length badge, e.g. "128k" or "1M".
+/** Compact context-length badge, e.g. "128k" or "1M". */
 export function ContextBadge({ contextLength }: { contextLength: number | null | undefined }) {
   if (!contextLength) return null;
   const label =

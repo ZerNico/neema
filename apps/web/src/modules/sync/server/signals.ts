@@ -3,7 +3,9 @@ import { Effect, Schema } from "effect";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncEnvelope } from "../events.ts";
 
-// Internal wakeups share the transport, never the browser event contract.
+/**
+ * Internal wakeups share the transport, never the browser event contract.
+ */
 export const WorkSignal = Schema.Struct({
   type: Schema.Literal("knowledge.work"),
   stage: Schema.Literals(["extraction", "embedding"]),
@@ -16,8 +18,10 @@ export const Notification = Schema.Union([
 export type Notification = typeof Notification.Type;
 export const NOTIFICATION_CHANNEL = "chat_sync";
 
-// PgClient.notify acquires another connection, even inside a transaction.
-// Executing on the writer's handle makes Postgres deliver only after commit.
+/**
+ * PgClient.notify acquires another connection, even inside a transaction.
+ * Executing on the writer's handle makes Postgres deliver only after commit.
+ */
 export const notifyOnCommit = (tx: Pick<DbTx, "execute">, notification: Notification) =>
   tx
     .execute(sql`select pg_notify(${NOTIFICATION_CHANNEL}, ${JSON.stringify(notification)})`)

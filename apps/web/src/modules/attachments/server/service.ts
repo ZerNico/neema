@@ -64,13 +64,11 @@ export class AttachmentService extends Context.Service<
       const repo = yield* AttachmentRepo;
       const store = yield* BlobStore;
 
-      // Physical deletion always trails the commit, so a rolled-back
-      // transaction can never leave rows pointing at deleted bytes. The
-      // reverse drift — bytes with no row — is covered by the cleanup ledger:
-      // `collectOrphanedBlobs` records the intent in the same transaction that
-      // removed the last reference, and uploads record one before storing, so
-      // an interrupted delete or a crashed upload is finished by the
-      // reconciler rather than leaked.
+      // Physical deletion trails the commit so a rolled-back transaction never
+      // orphans deleted bytes. The reverse case, bytes with no row, is covered
+      // by the cleanup ledger: `collectOrphanedBlobs` and uploads both record
+      // intent first, so an interrupted delete or crashed upload gets finished
+      // by the reconciler, not leaked.
       const deleteBlobs = (keys: ReadonlyArray<string>) =>
         Effect.forEach(
           keys,
@@ -104,7 +102,7 @@ export class AttachmentService extends Context.Service<
             reason: "upload a PDF or text document",
           });
 
-        // Hashed here, over the bytes we actually received — a client-supplied
+        // Hashed here, over the bytes we actually received: a client-supplied
         // hash would be both untrustworthy and a free existence oracle.
         const sha256 = createHash("sha256").update(input.bytes).digest("hex");
         const storageKey = blobStorageKey(input.userId, sha256);

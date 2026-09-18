@@ -39,7 +39,7 @@ export const listConversations = createServerFn({ method: "GET" })
               ? {}
               : { cursor: { activity: new Date(data.cursor.activity), id: data.cursor.id } }),
           })
-          // The cursor goes back out exactly as it came in — a string the
+          // The cursor goes back out exactly as it came in: a string the
           // client round-trips without having to know what is in it.
           .pipe(
             Effect.map((page) => ({
@@ -114,7 +114,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           AttachmentUnsupported: (e) =>
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          // Claimed by another message, or gone — the chip is stale either way.
+          // Claimed by another message, or gone. The chip is stale either way.
           AttachmentNotAvailable: () =>
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
         }),
@@ -371,7 +371,7 @@ export const listChatModels = createServerFn({ method: "GET" })
     runtime.runPromise(
       // Filtered to what THIS user may see: public models plus private ones
       // shared with a group they belong to (admins see everything). The rows
-      // carry the provider's display name — the picker groups by it.
+      // carry the provider's display name, which the picker groups by.
       ProviderRepo.use((repo) => repo.listChatModelsFor(context.session.user.id)),
     ),
   );

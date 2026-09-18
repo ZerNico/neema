@@ -5,7 +5,6 @@ import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
-import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -77,12 +76,11 @@ const FakeGateway = Layer.succeed(AiGateway, {
   generateText: () => fakeGeneratedText("A title"),
   streamChat: () =>
     Stream.make(
-      { type: "text-delta", id: "t", delta: "ok" } as never as ChatStreamPart,
-      {
-        type: "finish",
+      AiResponse.makePart("text-delta", { id: "t", delta: "ok" }),
+      AiResponse.makePart("finish", {
         reason: "stop",
-        usage: { inputTokens: {}, outputTokens: {} },
-      } as never as ChatStreamPart,
+        usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+      }),
     ),
 });
 
@@ -630,7 +628,7 @@ describe("generation-time enforcement", () => {
         const privateModel = yield* makeModel({ access: "groups" });
         yield* providerRepo.updateModelAccess(privateModel, "groups", [group.id]);
 
-        // A finished turn written directly — no generation needed to retry.
+        // A finished turn written directly. No generation needed to retry.
         const conversation = yield* chatRepo.createConversation({
           userId: member,
           modelId: privateModel,

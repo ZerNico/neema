@@ -3,10 +3,11 @@ import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 
 /**
- * Bottom-of-list loader for an infinite query. The button is the real control
- * — scrolling is a convenience, and a keyboard user never triggers it — while
- * an IntersectionObserver fires the same callback once the row comes into
- * view. jsdom and SSR have no observer, so there they just get the button.
+ * Bottom-of-list loader for an infinite query. The button is the real
+ * control, since scrolling is a convenience a keyboard user never triggers,
+ * while an IntersectionObserver fires the same callback once the row comes
+ * into view. jsdom and SSR have no observer, so there they just get the
+ * button.
  */
 export function InfiniteSentinel({
   hasNext,
@@ -21,8 +22,8 @@ export function InfiniteSentinel({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Kept in a ref so re-arming the observer isn't tied to the callback's
-  // identity — react-query hands back a fresh `fetchNextPage` each render,
-  // and re-observing a still-visible sentinel would fire it again.
+  // identity, because react-query hands back a fresh `fetchNextPage` each
+  // render, and re-observing a still-visible sentinel would fire it again.
   const load = useRef(onLoadMore);
   useEffect(() => {
     load.current = onLoadMore;

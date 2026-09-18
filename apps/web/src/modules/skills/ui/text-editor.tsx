@@ -35,12 +35,11 @@ const theme = EditorView.theme({
   },
   "&.cm-focused": { outline: "none" },
 });
-// A package is not only Markdown — `scripts/*.py` and other code files travel
-// with it — so the grammar follows the file name. `language-data` loads each
+// A package is not only Markdown: `scripts/*.py` and other code files travel
+// with it, so the grammar follows the file name. `language-data` loads each
 // one on demand, which also highlights fenced code inside SKILL.md.
 const markdownExtensions = [markdown({ codeLanguages: languages })];
 const plainText: never[] = [];
-const isMarkdown = (path: string) => /\.md$/iu.test(path);
 export default function SkillTextEditor({
   value,
   onChange,
@@ -64,7 +63,7 @@ export default function SkillTextEditor({
   // rather than applied to whatever is open now.
   const [loaded, setLoaded] = useState<{ path: string; support: LanguageSupport } | null>(null);
   useEffect(() => {
-    if (isMarkdown(path)) return;
+    if (/\.md$/iu.test(path)) return;
     let current = true;
     const description = LanguageDescription.matchFilename(languages, path);
     // An unknown extension stays plain text rather than guessing a grammar.
@@ -77,7 +76,11 @@ export default function SkillTextEditor({
   }, [path]);
   const extensions = useMemo(
     () =>
-      isMarkdown(path) ? markdownExtensions : loaded?.path === path ? [loaded.support] : plainText,
+      /\.md$/iu.test(path)
+        ? markdownExtensions
+        : loaded?.path === path
+          ? [loaded.support]
+          : plainText,
     [path, loaded],
   );
   useEffect(() => {

@@ -129,18 +129,20 @@ const repoWith = (
   vision = false,
 ) =>
   Layer.succeed(ProviderRepo)(
-    ProviderRepo.of({
-      getModel: () =>
-        Effect.succeed({
-          id: "m1",
-          providerId: "p1",
-          modelKey: "vendor/model",
-          capabilities: { reasoning: false, tools, vision, files: false, imageOutput },
-        }),
-      getProviderWithKey: () =>
-        Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1", kind }),
+    ProviderRepo.of(
       // The gateway reaches for nothing else.
-    } as unknown as ProviderRepo["Service"]),
+      Object.assign({} as ProviderRepo["Service"], {
+        getModel: () =>
+          Effect.succeed({
+            id: "m1",
+            providerId: "p1",
+            modelKey: "vendor/model",
+            capabilities: { reasoning: false, tools, vision, files: false, imageOutput },
+          }),
+        getProviderWithKey: () =>
+          Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1", kind }),
+      }),
+    ),
   );
 const repoStub = repoWith(true);
 // A model that cannot take a `tools` parameter: the gateway polyfills it.
@@ -231,7 +233,7 @@ describe("side generations", () => {
       const result = yield* generate;
 
       expect(result.text).toBe("Release notes");
-      // What `addFinishUsage` reads as "no usage seen" — no ledger row, rather
+      // What `addFinishUsage` reads as "no usage seen": no ledger row, rather
       // than a failed title or a lost compaction summary.
       expect(result.usage.inputTokens.total).toBeUndefined();
       expect(result.usage.outputTokens.total).toBeUndefined();
@@ -348,9 +350,9 @@ describe("sensitive input diagnostics for text output", () => {
             failure === "http" ? 400 : 200,
           );
           const history = yield* buildHistoryMessages(
-            {
+            Object.assign({} as PromptDeps, {
               attachments: { listWithBlobsForMessages: () => Effect.succeed([]) },
-            } as unknown as PromptDeps,
+            }),
             {
               messages: [
                 {
@@ -712,28 +714,30 @@ describe("prompt-based tool calling for models without native support", () => {
 
 const embeddingRepo = Layer.succeed(
   ProviderRepo,
-  ProviderRepo.of({
-    getModel: () =>
-      Effect.succeed({
-        id: "embedding",
-        providerId: "p1",
-        modelKey: "vendor/embed",
-        type: "embedding",
-        enabled: true,
-        access: "public",
-        embeddingDimensions: 3,
-        displayName: "Embedding model",
-        contextLength: embeddingContextLength,
-        pricing: { input: embeddingInputPrice, output: null },
-      }),
-    getProviderWithKey: () =>
-      Effect.succeed({
-        id: "p1",
-        enabled: true,
-        apiKey: Redacted.make("fake-key"),
-        baseUrl: "https://provider.test/v1",
-      }),
-  } as unknown as ProviderRepo["Service"]),
+  ProviderRepo.of(
+    Object.assign({} as ProviderRepo["Service"], {
+      getModel: () =>
+        Effect.succeed({
+          id: "embedding",
+          providerId: "p1",
+          modelKey: "vendor/embed",
+          type: "embedding",
+          enabled: true,
+          access: "public",
+          embeddingDimensions: 3,
+          displayName: "Embedding model",
+          contextLength: embeddingContextLength,
+          pricing: { input: embeddingInputPrice, output: null },
+        }),
+      getProviderWithKey: () =>
+        Effect.succeed({
+          id: "p1",
+          enabled: true,
+          apiKey: Redacted.make("fake-key"),
+          baseUrl: "https://provider.test/v1",
+        }),
+    }),
+  ),
 );
 const embed = Effect.flatMap(AiGateway, (gateway) =>
   gateway.embed({
@@ -1081,15 +1085,17 @@ describe("provider catalog", () => {
               ],
             });
       const repo = Layer.succeed(ProviderRepo)(
-        ProviderRepo.of({
-          getProviderWithKey: () =>
-            Effect.succeed({
-              id: "p1",
-              kind: "openrouter",
-              apiKey: Redacted.make("sk-test"),
-              baseUrl: "https://provider.test/v1/",
-            }),
-        } as unknown as ProviderRepo["Service"]),
+        ProviderRepo.of(
+          Object.assign({} as ProviderRepo["Service"], {
+            getProviderWithKey: () =>
+              Effect.succeed({
+                id: "p1",
+                kind: "openrouter",
+                apiKey: Redacted.make("sk-test"),
+                baseUrl: "https://provider.test/v1/",
+              }),
+          }),
+        ),
       );
       const catalog = yield* Effect.flatMap(AiGateway, (gateway) =>
         gateway.fetchCatalog("p1"),
@@ -1118,15 +1124,17 @@ describe("provider catalog", () => {
           ],
         });
       const repo = Layer.succeed(ProviderRepo)(
-        ProviderRepo.of({
-          getProviderWithKey: () =>
-            Effect.succeed({
-              id: "p2",
-              kind: "openai-compatible",
-              apiKey: Redacted.make("sk-test"),
-              baseUrl: "https://compat.test/v1",
-            }),
-        } as unknown as ProviderRepo["Service"]),
+        ProviderRepo.of(
+          Object.assign({} as ProviderRepo["Service"], {
+            getProviderWithKey: () =>
+              Effect.succeed({
+                id: "p2",
+                kind: "openai-compatible",
+                apiKey: Redacted.make("sk-test"),
+                baseUrl: "https://compat.test/v1",
+              }),
+          }),
+        ),
       );
       const catalog = yield* Effect.flatMap(AiGateway, (gateway) =>
         gateway.fetchCatalog("p2"),

@@ -25,7 +25,14 @@ import {
   FIXED_SERVER_ARGUMENT,
   RECOVERY_RETRY,
 } from "./chrome.ts";
-import { configFile, isConfiguredOriginUrl, isSafeExternalUrl, readConfig, toOrigin, writeConfig } from "./config.ts";
+import {
+  configFile,
+  isConfiguredOriginUrl,
+  isSafeExternalUrl,
+  readConfig,
+  toOrigin,
+  writeConfig,
+} from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Layer, ManagedRuntime } from "effect";

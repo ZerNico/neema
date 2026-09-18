@@ -25,9 +25,11 @@ export interface SectionNavItem {
   matchPrefix: string;
 }
 
-// Secondary sidebar layout for sectioned areas (admin, settings). On >=md it
-// renders nav + content side by side. On mobile the nav is its own full
-// screen; detail pages take over the viewport and get a back button via Page.
+/**
+ * Secondary sidebar layout for sectioned areas (admin, settings). On >=md it
+ * renders nav + content side by side. On mobile the nav is its own full
+ * screen; detail pages take over the viewport and get a back button via Page.
+ */
 export function SectionShell({
   title,
   rootPath,
@@ -92,16 +94,14 @@ export function SectionShell({
   );
 }
 
-// Consistent page chrome: title row with optional back target (shown on
-// mobile always, on desktop only for detail pages) and actions slot, then
-// the page body. `width="wide"` is for dashboards that want the room.
-//
-// Page is also the scroll container. The app layout's <main> is a fixed-height
-// flex child that never scrolls: the chat view needs it that way (a virtual
-// list and a pinned composer share the height), and every other route got its
-// own scroller ad hoc until Agents and Knowledge shipped without one. Owning it
-// here means a route built from Page scrolls by construction, whether it sits
-// under SectionShell or directly in <main>.
+/**
+ * Consistent page chrome: title row with optional back target (shown on
+ * mobile always, on desktop only for detail pages) and actions slot, then
+ * the page body. `width="wide"` is for dashboards that want the room.
+ *
+ * Page is the scroll container; see docs/internals/ui.md#page-chrome-and-layout
+ * for why <main> itself never scrolls.
+ */
 export function Page({
   title,
   description,
@@ -168,8 +168,10 @@ export function Page({
   );
 }
 
-// Titled block within a Page. The eyebrow heading is the one style used for
-// every in-page section across admin, settings and tools.
+/**
+ * Titled block within a Page. The eyebrow heading is the one style used for
+ * every in-page section across admin, settings and tools.
+ */
 export function Section({
   title,
   description,
@@ -201,18 +203,20 @@ export function Section({
   );
 }
 
-// The row a section acts from: Save/Apply/Reset, or a control paired with the
-// button that consumes it. Left-aligned and below the fields, because a Save
-// button sitting above the field it saves reads backwards — which is the whole
-// difference from `Section`'s `actions` slot, whose job is "add one of these"
-// beside the heading. It also stops a submit button stretching to full width,
-// which is what a bare button as a direct child of a `flex-col` form does.
+/**
+ * The row a section acts from: Save/Apply/Reset, or a control paired with the
+ * button that consumes it. Left-aligned below the fields, not `Section`'s
+ * `actions` slot ("add one of these" by the heading). See
+ * docs/internals/ui.md#page-chrome-and-layout for why this exists.
+ */
 export function FormActions({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
 }
 
-// Shared list-row primitives so providers, models, users and settings read the
-// same. Radius sits on the app's 2xl/3xl/4xl scale like every other surface.
+/**
+ * Shared list-row primitives so providers, models, users and settings read the
+ * same. Radius sits on the app's 2xl/3xl/4xl scale like every other surface.
+ */
 export function ListCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={cn(cardSurfaceClassName, "divide-border divide-y overflow-hidden", className)}>
@@ -244,10 +248,11 @@ export function ListRow({
   );
 }
 
-// The one loading shape for a list-shaped page. Routes preload through their
-// loader wherever they can, so this is for the windows a loader cannot cover
-// (no-preload routes, a query that only starts once the page is interactive) —
-// but it has to be the same shape everywhere, or each module invents its own.
+/**
+ * The one loading shape for a list-shaped page: for windows a loader can't
+ * cover (no-preload routes, a query that only starts once interactive). Same
+ * shape everywhere, or each module invents its own.
+ */
 export function ListSkeleton({
   rows = 3,
   media = "tile",
@@ -305,8 +310,10 @@ export function EmptyState({
   );
 }
 
-// Failed-to-load state for a query. Distinct from EmptyState ("nothing here
-// yet") so the two can't be confused, with a retry when one is available.
+/**
+ * Failed-to-load state for a query. Distinct from EmptyState ("nothing here
+ * yet") so the two can't be confused, with a retry when one is available.
+ */
 export function ErrorState({
   title = "Something went wrong",
   description,

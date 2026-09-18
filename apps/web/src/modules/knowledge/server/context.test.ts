@@ -14,6 +14,11 @@ import type { ManifestEntry } from "./repo.ts";
 import type { KnowledgeSearchSession } from "./search.ts";
 import { KnowledgeService } from "./service.ts";
 
+// Every KnowledgeService method context preparation must not reach for dies
+// loudly, so an accidental call fails the test instead of silently no-oping.
+const unimplemented = (..._args: ReadonlyArray<unknown>): Effect.Effect<never> =>
+  Effect.die("context preparation must not call this KnowledgeService method");
+
 const entry = (n: number, chars = 100): ManifestEntry => ({
   collectionId: `collection-${n}`,
   documentId: `document-${n}`,
@@ -56,6 +61,24 @@ const setup = (
     },
   }).pipe(
     Effect.provideService(KnowledgeService, {
+      // Only read/readBodies are exercised here; every other method of the
+      // service dies loudly if context preparation ever reaches for it.
+      list: unimplemented,
+      detail: unimplemented,
+      create: unimplemented,
+      update: unimplemented,
+      remove: unimplemented,
+      addNote: unimplemented,
+      upload: unimplemented,
+      replaceNote: unimplemented,
+      retryDocument: unimplemented,
+      removeDocument: unimplemented,
+      reindex: unimplemented,
+      rebuildContent: unimplemented,
+      rebuildIndex: unimplemented,
+      rebuildAllIndexes: unimplemented,
+      manifest: unimplemented,
+      download: unimplemented,
       read: () => Effect.die("full context must not loop through range reads"),
       readBodies:
         options.readBodies ??
@@ -67,7 +90,7 @@ const setup = (
               text: "x".repeat(reference.charCount),
             })),
           )),
-    } as unknown as KnowledgeService["Service"]),
+    }),
   );
 };
 

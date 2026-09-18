@@ -39,7 +39,7 @@ const summary = {
   abortedAttempts: 2,
   inputTokens: 1_200_000,
   outputTokens: 300_000,
-  cachedInputTokens: 600_000, // half of input — a clean 50% hit rate
+  cachedInputTokens: 600_000, // half of input, a clean 50% hit rate
   reasoningTokens: 100_000,
   cost: 1.25,
   costComplete: true,
@@ -206,18 +206,18 @@ describe("AnalyticsPage", () => {
     expect(rangeTrigger()).toBeInTheDocument();
   });
 
-  it("shows an em dash and a floor hint when cost is incomplete", async () => {
+  it("shows a placeholder dash and a floor hint when cost is incomplete", async () => {
     renderPage({
       summary: { ...summary, cost: 0, costComplete: false },
     });
     // Cost and blended rate both suppress; cache/error rates still resolve.
-    expect((await screen.findAllByText("—")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("–")).length).toBeGreaterThan(0);
 
     renderPage({
       summary: { ...summary, cost: 0.5, costComplete: false },
     });
     expect(await screen.findByText("$0.5")).toBeInTheDocument();
-    expect(screen.getByText("at least — some costs unknown")).toBeInTheDocument();
+    expect(screen.getByText("at least, some costs unknown")).toBeInTheDocument();
   });
 
   it("states counts in percent and rates in points", async () => {
@@ -234,8 +234,8 @@ describe("AnalyticsPage", () => {
   it("derives the cache, blended-cost and error KPIs", async () => {
     renderPage();
     expect(await screen.findByText("Reused text")).toBeInTheDocument();
-    // 600K cached of 1.2M input. Cached is *inside* input, not added to it —
-    // the wrong formula would give 33%.
+    // 600K cached of 1.2M input. Cached is *inside* input, not added to it,
+    // so the wrong formula would give 33%.
     expect(screen.getByText("50%")).toBeInTheDocument();
     // $1.25 over 1.5M tokens.
     expect(screen.getByText("$0.833/M")).toBeInTheDocument();
@@ -247,7 +247,7 @@ describe("AnalyticsPage", () => {
   it("suppresses the blended rate when any cost in range is unknown", async () => {
     renderPage({ summary: { ...summary, costComplete: false } });
     const tile = (await screen.findAllByText("Cost per 1M tokens"))[0]!.parentElement!;
-    expect(tile).toHaveTextContent("—");
+    expect(tile).toHaveTextContent("–");
     expect(tile).not.toHaveTextContent("/M");
   });
 

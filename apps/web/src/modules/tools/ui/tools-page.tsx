@@ -289,7 +289,7 @@ function WebSearchSection() {
                 className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
               >
                 {testResult.ok
-                  ? `Connection ok — ${testResult.resultCount} results in ${testResult.latencyMs}ms.`
+                  ? `Connection ok, ${testResult.resultCount} results in ${testResult.latencyMs}ms.`
                   : `Could not connect: ${testResult.error}`}
               </p>
             ) : null}
@@ -415,11 +415,11 @@ function UrlReaderSection() {
 }
 
 // Local PDF text extraction, used when a model cannot take a PDF natively.
-// Kept local on purpose — the alternative would ship the user's document to a
-// third-party parser.
+// Kept local on purpose, since the alternative would ship the user's document
+// to a third-party parser.
 
 // Semantic search for knowledge collections. Keyword search always works;
 // this adds an embedding model. Two things are deliberately explicit here:
 // enabling means document text is sent to that provider, and switching
-// models asks whether existing vectors stay comparable — a name or a matching
-// dimension count never decides that on its own.
+// models asks whether existing vectors stay comparable. A name or matching
+// dimension count alone never decides that.

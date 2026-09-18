@@ -156,7 +156,7 @@ describe("ConversationTitle", () => {
     const { rerender } = renderTitle(null);
     rerender(TITLE);
 
-    // Nothing of the title has been painted yet — no flash of the full text.
+    // Nothing of the title has been painted yet, so there is no flash of the full text.
     expect(node()).toHaveAttribute("data-title-state", "revealing");
     expect(node()).toHaveTextContent("");
     expect(node()).toHaveAttribute("aria-label", TITLE);

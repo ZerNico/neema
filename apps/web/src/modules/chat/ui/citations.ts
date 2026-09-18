@@ -12,7 +12,7 @@ export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
  *
  * The model only writes `[^n]` markers; it never writes the definitions. We
  * append them from our own source list, which is what makes the markers resolve
- * to footnote links *during* streaming — otherwise GFM leaves an unresolved
+ * to footnote links *during* streaming. Otherwise GFM leaves an unresolved
  * `[^1]` as literal text until the definitions arrive, which for a model would
  * be at the very end of the message (or never).
  *
@@ -27,7 +27,7 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
   const body = content
     // A marker still being streamed, e.g. "…as of 2026[^1" at the very end.
     .replace(/\[\^\d*$/, "")
-    // Indexes with no matching source — the model invented them.
+    // Indexes with no matching source, since the model invented them.
     .replace(/\[\^(\d+)\]/g, (match, n: string) => (known.has(Number(n)) ? match : ""));
 
   const definitions = sources.map((s) => `[^${s.index}]: ${sourceTarget(s)}`).join("\n");

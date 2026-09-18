@@ -2,8 +2,10 @@ import { boolean, index, pgTable, primaryKey, text, timestamp } from "drizzle-or
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
-// Admin-managed user groups. Membership is a separate app-owned table rather
-// than a column on `user` — Better Auth owns that table's shape.
+/**
+ * Admin-managed user groups. Membership is a separate app-owned table rather
+ * than a column on `user`, since Better Auth owns that table's shape.
+ */
 
 export const groups = pgTable("groups", {
   id: text().primaryKey(),
@@ -27,14 +29,16 @@ export const groupMembers = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.groupId, t.userId] }),
-    // Access checks resolve "which groups is this user in" — the PK only
+    // Access checks resolve "which groups is this user in", so the PK only
     // serves the group-side lookup.
     index("group_members_user_id_idx").on(t.userId),
   ],
 );
 
-// Which groups may use a `access = 'groups'` model. A private model with no
-// rows here is deliberately visible to admins only (staging state).
+/**
+ * Which groups may use a `access = 'groups'` model. A private model with no
+ * rows here is deliberately visible to admins only (staging state).
+ */
 export const modelGroupAccess = pgTable(
   "model_group_access",
   {

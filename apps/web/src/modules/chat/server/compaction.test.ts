@@ -25,6 +25,7 @@ import {
   type ActiveRound,
 } from "./compaction.ts";
 import type { HistoryMessage } from "./prompt.ts";
+import type { CompactionCheckpointRow } from "./repo.ts";
 
 const textOf = (message: Prompt.MessageEncoded): string => {
   const content: unknown = message.content;
@@ -605,8 +606,14 @@ const harness = (
   const listCompactionCheckpoints = vi.fn(() =>
     Effect.die("checkpoint must be selected before rendering"),
   );
-  const insertCompactionCheckpoint = vi.fn((row: Record<string, unknown>) =>
-    Effect.succeed({ id: "cp-new", createdAt: new Date(), ...row }),
+  const insertCompactionCheckpoint = vi.fn(
+    (row: {
+      conversationId: string;
+      throughMessageId: string;
+      modelId: string | null;
+      summary: string;
+    }): Effect.Effect<CompactionCheckpointRow | null> =>
+      Effect.succeed({ id: "cp-new", createdAt: new Date(), ...row }),
   );
   const createCompactionEvent = vi.fn(() => Effect.void);
   const completeCompactionEvent = vi.fn(() => Effect.void);
@@ -621,7 +628,7 @@ const harness = (
     },
     providers: { getModel: () => Effect.succeed(null) },
     analytics: { record },
-  } as unknown as CompactionDeps;
+  } as CompactionDeps;
   return {
     deps,
     generateText,
@@ -1010,9 +1017,7 @@ describe("prepareCompactedHistory", () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const h = harness();
-        (
-          h.insertCompactionCheckpoint as unknown as { mockImplementation: Function }
-        ).mockImplementation(() => Effect.succeed(null));
+        h.insertCompactionCheckpoint.mockImplementation(() => Effect.succeed(null));
         const decision = yield* prepareCompactedHistory(h.deps, request(history(30)));
         expect(decision.mode).toBe("checkpoint");
         expect(decision.checkpoint).toBeNull();
@@ -1061,7 +1066,7 @@ describe("prepareCompactedActiveRounds", () => {
           passIndex: 0,
           textOffset: 27,
           calibrationFactor: 1,
-          sourceManifest: "[7] Evidence — https://example.com/evidence",
+          sourceManifest: "[7] Evidence: https://example.com/evidence",
           onCompaction: (event) => Effect.sync(() => void events.push(event)),
         });
 

@@ -2,15 +2,11 @@ import { code } from "@streamdown/code";
 import { useMemo, useReducer, type CSSProperties } from "react";
 import { cn } from "~/ui/utils";
 
-// A file viewer, not a chat code fence. Streamdown's fence is message
-// furniture — its own bordered card, sidebar fill and header bar — which
-// inside the preview dialog reads as a box in a box, with two headers naming
-// the same file. This renders shiki's tokens directly into a gutter+code grid
-// so the dialog frame is the only frame.
-//
-// It borrows the `code` plugin the markdown pipeline already loads, so the
-// highlighter, its grammar cache and its bundle cost are shared rather than
-// duplicated.
+// A file viewer, not a chat code fence: Streamdown's fence adds its own
+// bordered card, sidebar and header, which inside this dialog would double up
+// with the dialog's own frame. Renders shiki's tokens directly into a
+// gutter+code grid instead, reusing the `code` plugin's shared highlighter and
+// grammar cache.
 
 type Tokens = NonNullable<ReturnType<typeof code.highlight>>["tokens"];
 
@@ -40,14 +36,11 @@ const useHighlighted = (text: string, language: string): Tokens | null => {
   const eligible = supported !== null && text.length <= HIGHLIGHT_CHAR_CAP;
   const [version, retry] = useReducer((n: number) => n + 1, 0);
 
-  // Both the cache read and the subscription are this one call: it returns the
-  // tokens outright when the plugin has already highlighted this exact input,
-  // and otherwise returns null after registering the callback. Registering has
-  // to happen here rather than in an effect — the plugin adds the callback in
-  // the same synchronous block that starts the load, so an already-loaded
-  // grammar resolves before any effect could subscribe, and the file would
-  // stay grey forever. The callback only re-renders; the retried call is the
-  // one that reads the now-populated cache.
+  // This one call both reads the cache and subscribes: returns tokens if
+  // already highlighted, else null after registering a callback. Must run
+  // synchronously, not in an effect, since an already-loaded grammar can
+  // resolve before an effect subscribes. The callback only re-renders; the
+  // retry reads the populated cache.
   return useMemo(() => {
     if (!eligible) return null;
     void version;
@@ -88,9 +81,9 @@ export function CodeViewer({
             <span
               aria-hidden
               // Sticky so the numbers survive horizontal scrolling. Its fill
-              // must be the container's exact colour — a translucent one would
-              // stack over that and show as a strip — and opaque, so long lines
-              // pass behind the numbers rather than through them.
+              // must be the container's exact colour, since a translucent one
+              // would stack over that and show as a strip, and opaque, so long
+              // lines pass behind the numbers rather than through them.
               className="bg-muted text-muted-foreground/50 group-hover:text-muted-foreground/80 sticky left-0 shrink-0 pr-3 pl-4 text-right tabular-nums select-none"
               style={{ width: `calc(${gutter} + 1.75rem)` }}
             >

@@ -159,7 +159,7 @@ function TextPreview({
   }
 
   // A markdown file is the one kind with two genuinely different readings, so
-  // it keeps the toggle. Everything else — source, config, logs, plain text —
+  // it keeps the toggle. Everything else (source, config, logs, plain text)
   // is a file, and goes to the file viewer.
   const markdown = language === "markdown" && state.text.length <= RENDER_CHAR_CAP;
 

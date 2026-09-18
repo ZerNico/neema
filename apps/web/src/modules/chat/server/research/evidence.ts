@@ -21,7 +21,7 @@ export function evidenceManifest(text: string, sources: ReadonlyArray<Source>): 
     )
     .map(
       (source) =>
-        `[${source.index}] ${source.title} — ${sourceTarget(source)}${source.read ? (source.kind === "document" ? " (document excerpt read)" : " (page extracted)") : " (snippet only)"}`,
+        `[${source.index}] ${source.title}: ${sourceTarget(source)}${source.read ? (source.kind === "document" ? " (document excerpt read)" : " (page extracted)") : " (snippet only)"}`,
     )
     .join("\n");
 }

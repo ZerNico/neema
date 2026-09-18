@@ -76,7 +76,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
         // compaction bodies stay private; ordinary chat summaries are displayable.
         toolCalls: repo.listToolCalls(assistantIds),
         compactionEvents: repo.listCompactionEvents(assistantIds),
-        // Flat, like tool calls — the view groups by messageId.
+        // Flat, like tool calls. The view groups by messageId.
         attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
         // Only the installed agent persists between turns. Standalone knowledge
         // is message input, not a conversation default.

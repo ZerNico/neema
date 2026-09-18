@@ -5,8 +5,10 @@ import { NOTIFICATION_CHANNEL } from "./signals.ts";
 
 export type NotificationFrame = { type: "ready" } | { type: "payload"; payload: string };
 
-// The adapter's listen stream ignores socket errors. Own this connection so
-// reconnects can announce readiness and every consumer can reconcile its gap.
+/**
+ * The adapter's listen stream ignores socket errors. Own this connection so
+ * reconnects can announce readiness and every consumer can reconcile its gap.
+ */
 export const listenNotifications = (config: PgClient.PgClientConfig) =>
   Stream.callback<NotificationFrame, Error>((queue) =>
     Effect.gen(function* () {

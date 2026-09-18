@@ -122,7 +122,7 @@ const input = (overrides: Partial<TitleInput> = {}): TitleInput => ({
   ...overrides,
 });
 
-// No token fields at all — recordTitleUsage sees sawUsage=false and returns
+// No token fields at all, so recordTitleUsage sees sawUsage=false and returns
 // before touching providers or analytics.
 const emptyUsage = { inputTokens: {}, outputTokens: {} } as Response.Usage;
 
@@ -141,7 +141,7 @@ const harness = (options: { generate?: Effect.Effect<string, never>; applied?: b
     sync: { publish },
     providers: { getModel: () => Effect.succeed(null) },
     analytics: { record },
-  } as unknown as TitleDeps;
+  } as TitleDeps;
   return { deps, generateText, setTitleIfPending, publish, record };
 };
 

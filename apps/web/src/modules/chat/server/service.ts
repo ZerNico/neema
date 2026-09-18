@@ -65,7 +65,7 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     agentId?: string | null | undefined;
   };
 
-// Orchestrates the chat use-cases on top of repo + stream engine + sync bus.
+/** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
 export class ChatService extends Context.Service<
   ChatService,
   {
@@ -88,8 +88,10 @@ export class ChatService extends Context.Service<
       | KnowledgeNotAvailable
       | KnowledgeRejected
     >;
-    // Regenerates an assistant message in place (same id, fresh stream),
-    // deleting every message after it — retry rewinds the conversation.
+    /**
+     * Regenerates an assistant message in place (same id, fresh stream),
+     * deleting every message after it. Retry rewinds the conversation.
+     */
     retryMessage(
       input: DesktopSubmission & {
         userId: string;
@@ -117,8 +119,10 @@ export class ChatService extends Context.Service<
       | SkillRejected
       | KnowledgeNotAvailable
     >;
-    // Forks the conversation at an assistant message into a new one holding a
-    // copy of everything up to it. The source is left untouched.
+    /**
+     * Forks the conversation at an assistant message into a new one holding a
+     * copy of everything up to it. The source is left untouched.
+     */
     branchConversation(input: {
       userId: string;
       conversationId: string;
@@ -164,8 +168,10 @@ export class ChatService extends Context.Service<
       | KnowledgeNotAvailable
       | KnowledgeRejected
     >;
-    // Winds a streaming assistant message down early, keeping the partial
-    // answer. `stopped: false` means there was nothing to stop here.
+    /**
+     * Winds a streaming assistant message down early, keeping the partial
+     * answer. `stopped: false` means there was nothing to stop here.
+     */
     stopGeneration(input: {
       generationId?: string | undefined;
       userId: string;
@@ -264,7 +270,7 @@ function makeChatService() {
 
     // Rejects attachments the model cannot read before anything is written, so
     // the user gets a 400 instead of a generation that fails halfway through.
-    // Returns their file names in the caller's order — the title generator
+    // Returns their file names in the caller's order, since the title generator
     // needs them and the rows are already loaded here.
     const validateAttachments = Effect.fn("ChatService.validateAttachments")(function* (
       userId: string,
@@ -299,7 +305,7 @@ function makeChatService() {
             return yield* new AttachmentUnsupported({
               fileName: row.fileName,
               reason:
-                "this model cannot read PDFs and document parsing is disabled — enable it in admin settings or pick a model that accepts files",
+                "this model cannot read PDFs and document parsing is disabled. Enable it in admin settings or pick a model that accepts files",
             });
           }
         }
@@ -308,12 +314,11 @@ function makeChatService() {
       return fileNames;
     });
 
-    // Sends a user message; creates the conversation on first message.
+    // Sends a user message (creates the conversation on first message).
     // Returns ids the client needs to subscribe to the assistant stream.
-    // The effective configuration is resolved inside the turn's transaction
-    // against the (possibly just installed) conversation defaults, so what is
-    // stored is exactly what was read. Preferences degrade; access failures
-    // fail the whole turn before any row is written.
+    // Effective configuration resolves inside the turn's transaction against
+    // conversation defaults, so what is stored is what was read; access
+    // failures fail the turn before any row is written.
     const resolver =
       (
         input: {
@@ -648,7 +653,7 @@ function makeChatService() {
       // Retrying rewinds the conversation to this response: everything after
       // it is deleted (a later turn answering a response that no longer
       // exists would be nonsense). Refuse while any later message still
-      // streams — its generation fiber would keep writing to deleted rows.
+      // streams, since its generation fiber would keep writing to deleted rows.
       const all = yield* repo.listMessages(input.conversationId);
       const index = all.findIndex((m) => m.id === input.messageId);
       const after = all.slice(index + 1);
@@ -660,7 +665,7 @@ function makeChatService() {
       }
 
       // An explicit choice also rescues a message whose model row has since
-      // been deleted — picking another one is the only way to retry it at all.
+      // been deleted; picking another one is the only way to retry it at all.
       const switching = input.modelId !== undefined && input.modelId !== message.modelId;
       const modelId = input.modelId ?? message.modelId;
       if (!modelId) {
@@ -769,7 +774,7 @@ function makeChatService() {
       });
 
       // Branching a chat whose title has not resolved yet would otherwise
-      // leave the copy stuck on the placeholder forever — the source's own
+      // leave the copy stuck on the placeholder forever. The source's own
       // title fiber only ever writes to the source.
       if (branch.title === null) {
         const seed = prefix.find((m) => m.role === "user");
@@ -778,7 +783,7 @@ function makeChatService() {
           ? (yield* attachmentRepo.listForMessages([seed.id])).map((a) => a.fileName)
           : [];
         const titleInput = { content: seed?.content ?? "", attachmentFileNames };
-        // The model of the first turn, like sendMessage — not the
+        // The model of the first turn, like sendMessage, not the
         // conversation's current one.
         if (firstAssistant?.modelId) {
           yield* Effect.forkDetach(
@@ -791,7 +796,7 @@ function makeChatService() {
           );
         } else if (yield* repo.setTitleIfPending(branch.id, fallbackTitle(titleInput))) {
           // That model row is gone (deleted provider), so there is nothing to
-          // ask — settle on the fallback rather than stay pending.
+          // ask. Settle on the fallback rather than stay pending.
           yield* sync.publish(input.userId, {
             type: "conversation.updated",
             conversationId: branch.id,
@@ -878,7 +883,7 @@ function makeChatService() {
           timeZone: input.timeZone,
           openDocumentId: input.openDocumentId,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
-          // From the edited user message onward — its text changes while the
+          // From the edited user message onward, its text changes while the
           // row survives, so any summary covering it is stale.
           invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
           edit: {
@@ -977,7 +982,7 @@ function makeChatService() {
       if (!message || message.conversationId !== input.conversationId) {
         return yield* new MessageNotFound({ messageId: input.messageId });
       }
-      // Already finished (or generating on another instance) — the client
+      // Already finished (or generating on another instance). The client
       // learns the real state from the `done` event either way.
       if (message.status !== "streaming") return { stopped: false };
       if (message.generationId && input.generationId !== message.generationId)

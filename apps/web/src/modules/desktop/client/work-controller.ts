@@ -42,8 +42,10 @@ interface Entry {
   deadline: ReturnType<typeof setTimeout>;
 }
 
-// One instance per authenticated document, not per chat route. IPC owns replay
-// across document reloads; this controller owns consent and result delivery.
+/**
+ * One instance per authenticated document, not per chat route. IPC owns replay
+ * across document reloads; this controller owns consent and result delivery.
+ */
 export class WorkController {
   private entries = new Map<string, Entry>();
   private grants = new Map<string, Set<PendingKind>>();

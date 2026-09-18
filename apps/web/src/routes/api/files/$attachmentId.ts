@@ -12,8 +12,10 @@ const contentDisposition = (kind: string, fileName: string) => {
   return `${mode}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 };
 
-// Serves attachment bytes to anyone the access policy allows. Raw route rather
-// than a server function because the body is bytes with cache headers.
+/**
+ * Serves attachment bytes to anyone the access policy allows. Raw route rather
+ * than a server function because the body is bytes with cache headers.
+ */
 export const Route = createFileRoute("/api/files/$attachmentId")({
   server: {
     handlers: {
@@ -40,7 +42,7 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
         return new Response(file.bytes as BodyInit, {
           headers: {
             "Content-Type": kind === "text" ? `${file.mediaType}; charset=utf-8` : file.mediaType,
-            // From the bytes actually being sent, not the size column — if
+            // From the bytes actually being sent, not the size column. If
             // store and DB ever drift the response must not be malformed.
             "Content-Length": String(file.bytes.byteLength),
             "Content-Disposition": contentDisposition(kind, file.fileName),

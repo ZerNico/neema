@@ -71,8 +71,10 @@ export function readQuestionResponse(value: unknown): QuestionResponse | null {
   );
 }
 
-// Only explicit selections and user-written text enter the user role. Questions,
-// descriptions and unselected options remain assistant-authored context.
+/**
+ * Only explicit selections and user-written text enter the user role. Questions,
+ * descriptions and unselected options remain assistant-authored context.
+ */
 export function formatQuestionResponse(
   questions: AskUserParams["questions"],
   response: QuestionResponse,
@@ -112,7 +114,7 @@ export function formatQuestionContext(questions: AskUserParams["questions"]): st
           question.options
             .map(
               (option, choice) =>
-                `${choice + 1}. ${option.label}${option.description ? ` — ${option.description}` : ""}`,
+                `${choice + 1}. ${option.label}${option.description ? `: ${option.description}` : ""}`,
             )
             .join("\n") +
           `\n${question.multiSelect ? "Select one or more, and/or write a custom answer." : "Choose one or write a custom answer."}`,
@@ -121,8 +123,10 @@ export function formatQuestionContext(questions: AskUserParams["questions"]): st
   );
 }
 
-// Durable answer association must agree with the arguments the tool accepted,
-// not only a decodable result left on an inconsistent historical row.
+/**
+ * Durable answer association must agree with the arguments the tool accepted,
+ * not only a decodable result left on an inconsistent historical row.
+ */
 export function readStoredQuestionPresentation(
   args: unknown,
   result: unknown,

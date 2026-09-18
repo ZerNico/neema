@@ -9,8 +9,10 @@ import type { AuthOAuthProvider } from "./config.ts";
 
 type OAuthProviderRow = typeof oauthProviders.$inferSelect;
 
-// Provider rows safe for admin clients: the ciphertext becomes a boolean, the
-// same trade the tools and providers pages make.
+/**
+ * Provider rows safe for admin clients: the ciphertext becomes a boolean, the
+ * same trade the tools and providers pages make.
+ */
 export type PublicOAuthProvider = Omit<OAuthProviderRow, "clientSecretCiphertext"> & {
   secretConfigured: boolean;
 };

@@ -74,7 +74,7 @@ const rangeLabel = (range: UsageRangeEncoded): string =>
     ? (USAGE_RANGES.find((r) => r.value === range.days)?.label ?? `Last ${range.days} days`)
     : formatRangeLabel(range.from, range.to);
 
-/** The one filter row — sits above everything it scopes. */
+/** The one filter row, sitting above everything it scopes. */
 export function UsageRangePicker({
   range,
   onChange,
@@ -139,7 +139,7 @@ export function UsageRangePicker({
                   Cancel
                 </Button>
                 {/* react-day-picker fills `from` and `to` on the first click,
-                    so this is "nothing picked yet" — one click is a legitimate
+                    so this is "nothing picked yet"; one click is a legitimate
                     one-day range and commits as such. */}
                 <Button size="sm" onClick={apply} disabled={!draft?.from || !draft.to}>
                   Apply
@@ -255,7 +255,7 @@ function ChartLegend({ items }: { items: ReadonlyArray<{ label: string; colorVar
   );
 }
 
-/** A ratio, or null when the denominator is zero — never a fake 0%. */
+/** A ratio, or null when the denominator is zero, never a fake 0%. */
 const ratio = (numerator: number, denominator: number): number | null =>
   denominator === 0 ? null : numerator / denominator;
 
@@ -266,7 +266,7 @@ const ratio = (numerator: number, denominator: number): number | null =>
 const pointDelta = (current: number | null, previous: number | null): string | null =>
   current === null || previous === null ? null : formatPointDelta(current - previous);
 
-/** Two-segment part-to-whole meter — a static split, so CSS, not a chart. */
+/** Two-segment part-to-whole meter, a static split, so CSS, not a chart. */
 // Fixed segment order, so a kind keeps its colour whatever the counts do.
 const GENERATION_KINDS = [
   { key: "chat", label: "chat", color: "var(--chart-1)" },
@@ -312,7 +312,7 @@ function SplitMeter({
   );
 }
 
-/** KPI row + the time charts + by-model — shared by admin and settings. */
+/** KPI row + the time charts + by-model, shared by admin and settings. */
 export function UsageOverview({
   summary,
   previousSummary,
@@ -337,17 +337,17 @@ export function UsageOverview({
   const tokens = summary.inputTokens + summary.outputTokens;
   const previousTokens = previousSummary.inputTokens + previousSummary.outputTokens;
 
-  // A partial cost sum is a floor, not a total — say so instead of lying.
+  // A partial cost sum is a floor, not a total, so say so instead of lying.
   const costKnown = summary.cost > 0 || summary.costComplete;
-  const costValue = costKnown ? formatCost(summary.cost) : "—";
+  const costValue = costKnown ? formatCost(summary.cost) : "–";
   const costSub =
-    !summary.costComplete && summary.cost > 0 ? "at least — some costs unknown" : undefined;
+    !summary.costComplete && summary.cost > 0 ? "at least, some costs unknown" : undefined;
   // A delta between two floors is not a delta. Both sides must be complete.
   const bothCostsComplete = summary.costComplete && previousSummary.costComplete;
 
   const cacheRate = ratio(summary.cachedInputTokens, summary.inputTokens);
   const previousCacheRate = ratio(previousSummary.cachedInputTokens, previousSummary.inputTokens);
-  // Errors span chat *and* title runs, so the divisor is attempts — not
+  // Errors span chat *and* title runs, so the divisor is attempts, not
   // `messages`, which counts only chat.
   const errorRate = ratio(summary.errorAttempts, summary.attempts);
   const previousErrorRate = ratio(previousSummary.errorAttempts, previousSummary.attempts);
@@ -380,20 +380,20 @@ export function UsageOverview({
         />
         <StatTile
           label="Reused text"
-          value={cacheRate === null ? "—" : formatPercent(cacheRate)}
+          value={cacheRate === null ? "–" : formatPercent(cacheRate)}
           sub="of what was sent"
           delta={pointDelta(cacheRate, previousCacheRate)}
         />
         <StatTile
           label="Cost per 1M tokens"
           value={
-            summary.costComplete && tokens > 0 ? formatCostPerMillion(summary.cost, tokens) : "—"
+            summary.costComplete && tokens > 0 ? formatCostPerMillion(summary.cost, tokens) : "–"
           }
           delta={null}
         />
         <StatTile
           label="Failed responses"
-          value={errorRate === null ? "—" : formatPercent(errorRate)}
+          value={errorRate === null ? "–" : formatPercent(errorRate)}
           sub={`${formatCount(summary.errorAttempts)} failed · ${formatCount(summary.abortedAttempts)} stopped · ${formatCount(summary.attempts)} tries`}
           delta={pointDelta(errorRate, previousErrorRate)}
         />
@@ -456,7 +456,7 @@ export function UsageOverview({
             row.modelName,
             formatCount(row.messages),
             formatTokens(row.inputTokens + row.outputTokens),
-            row.cost > 0 ? formatCost(row.cost) : "—",
+            row.cost > 0 ? formatCost(row.cost) : "–",
           ])}
         />
       </ChartCard>
@@ -520,7 +520,7 @@ export function UsersTable({ byUser }: { byUser: readonly UsageByUser[] }) {
         `${row.name} (${row.email})`,
         formatCount(row.messages),
         formatTokens(row.inputTokens + row.outputTokens),
-        row.cost > 0 ? formatCost(row.cost) : "—",
+        row.cost > 0 ? formatCost(row.cost) : "–",
       ])}
     />
   );

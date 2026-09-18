@@ -1,8 +1,10 @@
 import { Schema } from "effect";
 
-// Domain events fanned out to a user's connected browser sessions.
-// Payloads carry ids only — clients refetch details via queries. This keeps
-// events small enough for Postgres NOTIFY (8kB limit) and avoids stale data.
+/**
+ * Domain events fanned out to a user's connected browser sessions.
+ * Payloads carry ids only, so clients refetch details via queries. This keeps
+ * events small enough for Postgres NOTIFY (8kB limit) and avoids stale data.
+ */
 
 export const SyncEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("sync.ready") }),
@@ -64,9 +66,11 @@ export const SyncEvent = Schema.Union([
 
 export type SyncEvent = typeof SyncEvent.Type;
 
-// Most events target one user's browser sessions. Instance-wide policy changes
-// use the global variant so every authenticated SSE subscriber can refetch its
-// own authorized view without enumerating users or putting data on the wire.
+/**
+ * Most events target one user's browser sessions. Instance-wide policy changes
+ * use the global variant so every authenticated SSE subscriber can refetch its
+ * own authorized view without enumerating users or putting data on the wire.
+ */
 export const SyncEnvelope = Schema.Union([
   Schema.Struct({
     scope: Schema.Literal("user"),

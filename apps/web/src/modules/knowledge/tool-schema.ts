@@ -70,7 +70,7 @@ export const KnowledgeToolResult = Schema.Struct({
 });
 export type KnowledgeToolResult = typeof KnowledgeToolResult.Type;
 
-// Bodies are model-only. This is the only projection persisted in activity rows.
+/** Bodies are model-only. This is the only projection persisted in activity rows. */
 export const KnowledgeActivitySummary = Schema.Struct({
   targets: Schema.Array(Schema.String),
   documentsListed: Schema.Int,
@@ -140,7 +140,7 @@ export const knowledgeActivityResult = (result: KnowledgeToolResult): KnowledgeA
     ...(result.error ? { error: result.error } : {}),
   });
 
-// Ordinary chat and research share the same untrusted-result boundary.
+/** Ordinary chat and research share the same untrusted-result boundary. */
 export const projectKnowledgeToolResult = (
   result: unknown,
   isFailure: boolean,

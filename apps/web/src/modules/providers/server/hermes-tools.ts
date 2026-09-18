@@ -84,7 +84,7 @@ const responseText = (part: Prompt.ToolResultPart) =>
  * Rewrites the prompt so the wire never carries `tool_calls` or a `tool`
  * role: assistant tool calls become `<tool_call>` text on that message, and
  * each run of tool messages becomes one user message of `<tool_response>`
- * blocks. The Hermes block is appended to the leading system messages —
+ * blocks. The Hermes block is appended to the leading system messages,
  * after the app's own prompt, so cached prefixes stay stable.
  */
 export const rewriteHermesPrompt = (input: {
@@ -362,17 +362,17 @@ const foldStreamParts = (parts: ReadonlyArray<Part>): Array<Part> => {
 };
 
 // The inner service hands out *decoded* parts (`response-metadata.timestamp`
-// is a `DateTime`), while a provider hook must return the encoded shape the
-// outer `LanguageModel.make` decodes again. Tool calls are synthesized above
-// in encoded form already — their params are the model's raw JSON — so only
-// the rest goes back through the codec.
+// is a `DateTime`), while a provider hook must return the encoded shape
+// `LanguageModel.make` decodes again. Tool calls are synthesized above already
+// encoded (their params are the model's raw JSON), so only the rest goes back
+// through the codec.
 const encodeStreamPart = Schema.encodeEffect(Response.StreamPart(Toolkit.empty));
 const encodePart = Schema.encodeEffect(Response.Part(Toolkit.empty));
 const encodeStream = (
   part: Part,
 ): Effect.Effect<Response.StreamPartEncoded | Response.PartEncoded> =>
   part.type === "tool-call"
-    ? Effect.succeed(part as unknown as Response.ToolCallPartEncoded)
+    ? Effect.succeed(part as Response.ToolCallPartEncoded)
     : part.type === "text" || part.type === "reasoning"
       ? Effect.orDie(encodePart(part))
       : Effect.orDie(encodeStreamPart(part as Response.StreamPart<{}>));

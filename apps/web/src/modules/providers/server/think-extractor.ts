@@ -9,8 +9,10 @@ type Metadata = Response.TextDeltaPartMetadata;
 const OPEN_TAG = "<think>";
 const CLOSE_TAG = "</think>";
 
-// Longest suffix of `text` that is a proper prefix of `tag` (a possibly
-// split tag straddling a chunk boundary). Returns 0 if none.
+/**
+ * Longest suffix of `text` that is a proper prefix of `tag` (a possibly
+ * split tag straddling a chunk boundary). Returns 0 if none.
+ */
 export const partialTagSuffix = (text: string, tag: string): number => {
   const max = Math.min(text.length, tag.length - 1);
   for (let len = max; len > 0; len--) {
@@ -19,11 +21,13 @@ export const partialTagSuffix = (text: string, tag: string): number => {
   return 0;
 };
 
-// Always-on middleware for models that emit raw <think>…</think> blocks in
-// their visible text (R1 distills, QwQ, local models): routes think content to
-// the reasoning track as reasoning-delta parts. Provider-native reasoning
-// parts and all non-text parts pass through untouched; a buffered partial tag
-// is flushed before any non-text part so ordering is preserved.
+/**
+ * Always-on middleware for models that emit raw <think>…</think> blocks in
+ * visible text (R1 distills, QwQ, local models): routes think content to the
+ * reasoning track as reasoning-delta parts. Provider-native reasoning and all
+ * non-text parts pass through untouched; a buffered partial tag flushes before
+ * any non-text part to preserve ordering.
+ */
 export const extractThinkTags = <E, R>(
   source: Stream.Stream<ChatStreamPart, E, R>,
 ): Stream.Stream<ChatStreamPart, E, R> => {

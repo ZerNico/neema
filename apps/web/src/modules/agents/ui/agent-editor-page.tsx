@@ -32,7 +32,9 @@ const agentFormValidator = Schema.toStandardSchemaV1(
 const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 
-// Owner-only editor. Recipients start chats from the agent list instead.
+/**
+ * Owner-only editor. Recipients start chats from the agent list instead.
+ */
 export function AgentEditorPage({ agentId }: { agentId: string | null }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();

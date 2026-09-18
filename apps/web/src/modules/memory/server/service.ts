@@ -16,11 +16,11 @@ import {
 import { hashMemoryContent } from "./content-hash.ts";
 import { MemoryRepo } from "./repo.ts";
 
-// Memory rows are replayed into every later prompt, so anything that looks like a
-// live credential or a high-risk personal identifier must never be stored. The
-// bar is "obvious": each rule is either a vendor-specific token shape or a
-// checksum-validated identifier, because a false positive silently drops a
-// legitimate memory and users get no way to override it.
+// Memory rows are replayed into every later prompt, so anything that looks like
+// a live credential or high-risk personal identifier must never be stored. The
+// bar is "obvious": each rule is a vendor-specific token shape or
+// checksum-validated identifier, since a false positive drops a legitimate
+// memory with no override.
 const obviousSensitivePatterns = [
   /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/iu,
   /\b(?:sk|pk|rk)_(?:live|test)_[a-z0-9]{16,}\b/iu,
@@ -38,7 +38,7 @@ const obviousSensitivePatterns = [
   /\bnpm_[a-z0-9]{36}\b/iu,
   // Twilio account/API SIDs are a fixed 2-letter prefix plus 32 hex characters.
   /\b(?:AC|SK)[0-9a-f]{32}\b/u,
-  // Extended private keys (BIP-32) — distinctive prefix plus a long base58 body.
+  // Extended private keys (BIP-32): distinctive prefix plus a long base58 body.
   /\b[xyz]prv[1-9A-HJ-NP-Za-km-z]{60,}/u,
   /\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/iu,
   /\bbearer\s+[a-z0-9._~+/-]{12,}=*\b/iu,

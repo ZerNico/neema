@@ -19,7 +19,11 @@ import {
 import { RESEARCH_LIMITS, researchOutputCaps } from "~/modules/chat/server/research/budget.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { computeBudget, estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
-import { projectResearchProgress } from "~/modules/chat/research-schema.ts";
+import {
+  projectResearchProgress,
+  type ResearchPhase,
+  type ResearchTaskProgress,
+} from "~/modules/chat/research-schema.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -78,6 +82,26 @@ let runtime: ManagedRuntime.ManagedRuntime<
 let remote: typeof runtime;
 let modelId: string;
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
+/**
+ * Shape of the `progress` field inside a decoded `message_tool_calls.result`
+ * blob for a `deep_research` call. `result` is a `JsonValue`, an index-signature
+ * type that never overlaps with a named-property interface, so the cast goes
+ * through the blob's `Record<string, unknown>` shape first and this shape is
+ * applied to the `.progress` property access instead.
+ */
+interface StoredResearchProgress {
+  readonly runId: string;
+  readonly phase: ResearchPhase;
+  readonly tasks: Array<{
+    readonly id: string;
+    readonly ordinal: number;
+    readonly title: string;
+    readonly status: ResearchTaskProgress["status"];
+    readonly error?: string;
+  }>;
+  readonly limitations: Array<string>;
+  readonly usageComplete: boolean;
+}
 const requests: GatewayInput[] = [];
 let coordinatorFailure: "provider" | "context" | "defect" | null = null;
 let coordinatorFirstResponse: "finish" | "text" | "empty" | null = null;
@@ -938,7 +962,7 @@ describe("durable deep research", () => {
         )!;
         for (const progress of [
           run.progress,
-          (root.result as unknown as { progress: typeof run.progress }).progress,
+          (root.result as Record<string, unknown>).progress as StoredResearchProgress,
           ...snapshots,
         ]) {
           expect(progress).toEqual(projectResearchProgress(progress));
@@ -1667,8 +1691,8 @@ describe("what the investigation may see", () => {
     const noticeOf = (request: GatewayInput) => JSON.stringify(request.prompt.content.at(-1) ?? "");
     const workers = requests.filter((entry) => phaseOf(entry) === "worker");
     const coordinators = requests.filter((entry) => phaseOf(entry) === "coordinator");
-    // Every exploring turn ends on a user-role budget line — never an assistant
-    // prefill — and states what remains.
+    // Every exploring turn ends on a user-role budget line, never an assistant
+    // prefill, and states what remains.
     for (const request of [...workers, ...coordinators]) {
       expect(request.prompt.content.at(-1)?.role).toBe("user");
       expect(noticeOf(request)).toContain("Remaining budget (ceiling, not a target):");

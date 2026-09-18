@@ -4,13 +4,11 @@ import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig, type Plugin } from "vite";
 
-// Dev only. Nitro's Vite middleware guesses whether a request is a static
-// asset from `sec-fetch-dest`: anything that is neither `empty` nor a document
-// dest is handed to Vite's static layer and never reaches the app, so an
+// Dev only. Nitro's Vite middleware guesses static-vs-app from `sec-fetch-dest`:
+// neither `empty` nor document dest reaches Vite's static layer, so
 // `<img src="/api/files/:id">` 404s while `fetch()` on the same URL works
-// (nitro/dist/_build/vite.dev.mjs). Our /api routes are always app routes, so
-// drop the hint before the heuristic sees it. The built server routes them
-// directly and needs none of this.
+// (nitro/dist/_build/vite.dev.mjs). /api routes are always app routes, so
+// strip the hint first; the built server needs none of this.
 const apiRoutesAreNeverAssets = (): Plugin => ({
   name: "api-routes-are-never-assets",
   apply: "serve",

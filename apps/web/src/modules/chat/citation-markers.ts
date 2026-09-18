@@ -1,6 +1,6 @@
 // Citation markers (`[^N]`) are rendering syntax, not content. Shared between
-// the UI (display/copy) and the stream engine (history hygiene) — hence module
-// root, not ui/.
+// the UI (display/copy) and the stream engine (history hygiene), so it lives at
+// module root, not ui/.
 
 /** Removes every citation marker. For clipboard text and model history. */
 export function stripCitationMarkers(content: string): string {

@@ -17,7 +17,6 @@ const GIF = text("GIF89a....");
 const WEBP = new Uint8Array([...text("RIFF"), 0, 0, 0, 0, ...text("WEBPVP8 ")]);
 const PDF = text("%PDF-1.7\n1 0 obj\n");
 
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 /** Expected-failure helper: swaps the channels so the error is the result. */
 const runError = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(Effect.flip(effect));
 
@@ -78,7 +77,7 @@ describe("validateAttachment", () => {
   });
 
   it("normalizes text files to text/plain", async () => {
-    const result = await run(
+    const result = await Effect.runPromise(
       validateAttachment({
         fileName: "src/main.ts",
         declaredMediaType: "video/mp4",
@@ -117,7 +116,7 @@ describe("validateAttachment", () => {
 
   it("accepts a file exactly at the cap", async () => {
     const atCap = new Uint8Array(MAX_ATTACHMENT_BYTES).fill(0x61);
-    const result = await run(
+    const result = await Effect.runPromise(
       validateAttachment({ fileName: "big.txt", declaredMediaType: "text/plain", bytes: atCap }),
     );
     expect(result.kind).toBe("text");

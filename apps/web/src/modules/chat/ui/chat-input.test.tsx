@@ -158,7 +158,7 @@ const setup = (
     <QueryClientProvider client={client}>
       <Suspense fallback={null}>
         <Harness
-          upload={upload as unknown as (file: File) => Promise<Attachment>}
+          upload={upload as (file: File) => Promise<Attachment>}
           destroy={destroy}
           onSubmit={onSubmit}
           initialValue={options.initialValue ?? ""}
@@ -668,7 +668,7 @@ describe("ChatInput upload state", () => {
     pick(harness, huge);
 
     expect(harness.upload).not.toHaveBeenCalled();
-    expect(screen.getByText("Too large — the limit is 20.0 MB.")).toBeInTheDocument();
+    expect(screen.getByText("Too large. The limit is 20.0 MB.")).toBeInTheDocument();
   });
 });
 
@@ -808,7 +808,7 @@ describe("ChatInput preview", () => {
       expect(document.querySelectorAll("[data-shiki-token]").length).toBeGreaterThan(1);
     });
     expect(screen.getByText("const")).toBeInTheDocument();
-    // One numbered line — the dialog's own chrome also carries aria-hidden, so
+    // One numbered line. The dialog's own chrome also carries aria-hidden, so
     // count the gutter cells next to the tokens rather than the whole document.
     const viewer = document.querySelector("[data-shiki-token]")!.closest(".font-mono")!;
     expect(viewer.querySelectorAll("[aria-hidden]")).toHaveLength(1);
@@ -851,7 +851,7 @@ describe("ChatInput model compatibility", () => {
 
     expect(
       await screen.findByText(
-        "Text Only cannot read images — pick another model or remove this file.",
+        "Text Only cannot read images, so pick another model or remove this file.",
       ),
     ).toBeInTheDocument();
     expect(sendButton()).toBeDisabled();

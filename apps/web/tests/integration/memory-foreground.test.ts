@@ -134,11 +134,11 @@ const finish = (reason: "stop" | "tool-calls"): ChatStreamPart =>
     type: "finish",
     reason,
     usage: { inputTokens: { total: 10 }, outputTokens: { total: 1 } },
-  }) as never as ChatStreamPart;
+  }) as ChatStreamPart;
 
 const finalAnswer = (): Stream.Stream<ChatStreamPart> =>
   Stream.make(
-    { type: "text-delta", id: "answer", delta: "Done." } as never as ChatStreamPart,
+    { type: "text-delta", id: "answer", delta: "Done." } as ChatStreamPart,
     finish("stop"),
   );
 
@@ -165,7 +165,7 @@ const memoryToolRound = (input: GatewayInput): Stream.Stream<ChatStreamPart> => 
           ...result,
         }) as ChatStreamPart,
     ),
-  ) as unknown as Stream.Stream<ChatStreamPart>;
+  ) as Stream.Stream<ChatStreamPart>;
 
   return Stream.make(call).pipe(
     Stream.concat(results),
@@ -196,7 +196,7 @@ const webSearchRound = (input: GatewayInput): Stream.Stream<ChatStreamPart> => {
           ...result,
         }) as ChatStreamPart,
     ),
-  ) as unknown as Stream.Stream<ChatStreamPart>;
+  ) as Stream.Stream<ChatStreamPart>;
 
   return Stream.make(call).pipe(
     Stream.concat(results),
@@ -257,7 +257,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
                   type: "text-delta",
                   id: "intro",
                   delta: "Before 🌍\n\n",
-                } as never as ChatStreamPart)
+                } as ChatStreamPart)
               : Stream.empty
           ).pipe(
             Stream.concat(questionRound(input, "ask-1")),
@@ -267,7 +267,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
                     type: "text-delta",
                     id: "between",
                     delta: "Between tools.\n\n",
-                  } as never as ChatStreamPart)
+                  } as ChatStreamPart)
                 : Stream.empty,
             ),
             Stream.concat(
@@ -284,7 +284,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
                     type: "text-delta",
                     id: "trailing",
                     delta: "After both.",
-                  } as never as ChatStreamPart)
+                  } as ChatStreamPart)
                 : Stream.empty,
             ),
             Stream.concat(
@@ -761,7 +761,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
       JSON.stringify(message.content).includes("Q1: Detailed"),
     );
     expect(question?.role).toBe("assistant");
-    expect(JSON.stringify(question)).toContain("Detailed — Include examples");
+    expect(JSON.stringify(question)).toContain("Detailed: Include examples");
     expect(answer?.role).toBe("user");
     expect(JSON.stringify(answer)).not.toContain("Which level of detail?");
     expect(gatewayState.calls[1]?.tools).not.toContain("read_url");

@@ -246,7 +246,7 @@ describe("ToolsPage", () => {
 
     pending.resolve({ ok: true, resultCount: 3, latencyMs: 42 });
     const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent("Connection ok — 3 results in 42ms.");
+    expect(status).toHaveTextContent("Connection ok, 3 results in 42ms.");
     expect(status).toHaveClass("text-success");
   });
 

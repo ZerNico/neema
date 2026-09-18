@@ -75,8 +75,10 @@ export const claimDesktopTool = createServerFn({ method: "POST" })
     ),
   );
 
-// The in-process claim is rechecked after the database read. A late answer is
-// refused even if the generation was live when the request first arrived.
+/**
+ * The in-process claim is rechecked after the database read. A late answer is
+ * refused even if the generation was live when the request first arrived.
+ */
 export const submitDesktopToolResult = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SubmitDesktopToolResultInput))

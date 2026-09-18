@@ -18,7 +18,9 @@ const researchMaxSearchQueries = Schema.optionalKey(
   ),
 );
 
-// Non-secret configuration for the web_search tool row (tools.config jsonb).
+/**
+ * Non-secret configuration for the web_search tool row (tools.config jsonb).
+ */
 export const WebSearchConfig = Schema.Struct({
   backend: Schema.Literals(["searxng"]),
   baseUrl: Schema.String.check(Schema.isMinLength(1)),
@@ -28,8 +30,10 @@ export const WebSearchConfig = Schema.Struct({
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
 
-// Non-secret configuration for the document_parser tool row. `kind` on the
-// row selects the backend; "local" is the in-process unpdf extractor.
+/**
+ * Non-secret configuration for the document_parser tool row. `kind` on the
+ * row selects the backend; "local" is the in-process unpdf extractor.
+ */
 export const DocumentParserConfig = Schema.Struct({
   maxChars: Schema.Int.check(
     Schema.isGreaterThanOrEqualTo(1000),
@@ -39,7 +43,9 @@ export const DocumentParserConfig = Schema.Struct({
 });
 export type DocumentParserConfig = typeof DocumentParserConfig.Type;
 
-// Non-secret configuration for the url_reader tool row.
+/**
+ * Non-secret configuration for the url_reader tool row.
+ */
 export const UrlReaderConfig = Schema.Struct({
   perPageCharCap: Schema.Int.check(
     Schema.isGreaterThanOrEqualTo(1000),
@@ -51,8 +57,10 @@ export type UrlReaderConfig = typeof UrlReaderConfig.Type;
 const SearchQuery = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500));
 const ReadableUrl = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000));
 
-// Parameters the model supplies when calling web_search. Multiple queries let
-// one model turn cover different phrasings or facets of the same question.
+/**
+ * Parameters the model supplies when calling web_search. Multiple queries let
+ * one model turn cover different phrasings or facets of the same question.
+ */
 export const WebSearchParams = Schema.Struct({
   queries: Schema.Array(SearchQuery).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
   timeRange: Schema.optionalKey(Schema.Literals(["day", "month", "year"])),
@@ -60,13 +68,17 @@ export const WebSearchParams = Schema.Struct({
 });
 export type WebSearchParams = typeof WebSearchParams.Type;
 
-// Parameters the model supplies when calling read_url.
+/**
+ * Parameters the model supplies when calling read_url.
+ */
 export const UrlReadParams = Schema.Struct({
   urls: Schema.Array(ReadableUrl).check(Schema.isMinLength(1), Schema.isMaxLength(5)),
 });
 export type UrlReadParams = typeof UrlReadParams.Type;
 
-// Per-source status shown live in the chat UI (favicon row).
+/**
+ * Per-source status shown live in the chat UI (favicon row).
+ */
 export const PageStatus = Schema.Struct({
   url: Schema.String,
   title: Schema.optionalKey(Schema.String),
@@ -90,9 +102,11 @@ const WebToolItem = Schema.Struct({
   truncated: Schema.optionalKey(Schema.Boolean),
 });
 
-// One result shape for every web tool. `targets` contains search queries for
-// web_search and URLs for read_url. Page bodies are returned to the model here
-// but are intentionally omitted from persisted tool-call summaries below.
+/**
+ * One result shape for every web tool. `targets` contains search queries for
+ * web_search and URLs for read_url. Page bodies are returned to the model here
+ * but are intentionally omitted from persisted tool-call summaries below.
+ */
 export const WebToolResult = Schema.Struct({
   ok: Schema.Boolean,
   targets: Schema.Array(Schema.String),
@@ -119,8 +133,10 @@ export const MemoryActivityOutcome = Schema.Literals([
   "rejected",
 ]);
 export type MemoryActivityOutcome = typeof MemoryActivityOutcome.Type;
-// Mirrors the handler's closed rejection set. It is the only thing a rejected
-// save leaves behind: the arguments are never persisted or streamed.
+/**
+ * Mirrors the handler's closed rejection set. It is the only thing a rejected
+ * save leaves behind: the arguments are never persisted or streamed.
+ */
 export const MemoryActivityReason = Schema.Literals([
   "invalid_content",
   "invalid_replaces",
@@ -285,7 +301,9 @@ export const ToolChunkEnvelope = Schema.Union([
 ]);
 export type ToolChunkEnvelope = typeof ToolChunkEnvelope.Type;
 
-// Admin server-fn inputs
+/**
+ * Admin server-fn inputs
+ */
 export const UpdateMemoryToolInput = Schema.Struct({
   enabled: Schema.Boolean,
 });

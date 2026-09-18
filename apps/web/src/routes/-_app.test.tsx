@@ -38,11 +38,7 @@ const user: SessionData["user"] = {
 
 const runBeforeLoad = (queryClient: QueryClient) =>
   // Only the field beforeLoad reads; the router supplies the rest.
-  (
-    Route.options.beforeLoad as unknown as (args: {
-      context: { queryClient: QueryClient };
-    }) => Promise<{ user: typeof user }>
-  )({ context: { queryClient } });
+  Route.options.beforeLoad!({ context: { queryClient } } as never);
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -97,7 +93,7 @@ describe("app shell guard", () => {
     const queryClient = newClient();
     await runBeforeLoad(queryClient);
 
-    // What signing out does — the next guard has to go back to the server
+    // What signing out does: the next guard has to go back to the server
     // rather than wave through the account that just left.
     queryClient.clear();
     sessionMock.mockResolvedValue(null as never);

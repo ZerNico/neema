@@ -337,8 +337,10 @@ export const waitForDraftBinding = async (conversationId?: string) => {
   }
 };
 
-// The server can publish a local call before the create-turn response arrives.
-// Hold dispatch until its draft grant has the durable conversation id.
+/**
+ * The server can publish a local call before the create-turn response arrives.
+ * Hold dispatch until its draft grant has the durable conversation id.
+ */
 export const withDraftFolderBinding = async <A extends { conversationId: string }>(
   send: () => Promise<A>,
   queryClient: QueryClient,

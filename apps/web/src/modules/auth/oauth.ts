@@ -16,9 +16,11 @@ export interface OAuthBuiltin {
   };
 }
 
-// Adding one here also needs a case in `socialProvidersFrom`
-// (server/config.ts), which is where Better Auth's per-provider option types
-// are satisfied. An entry with no case there is never registered.
+/**
+ * Adding one here also needs a case in `socialProvidersFrom`
+ * (server/config.ts), which is where Better Auth's per-provider option types
+ * are satisfied. An entry with no case there is never registered.
+ */
 export const OAUTH_BUILTINS: readonly OAuthBuiltin[] = [
   { id: "google", label: "Google" },
   { id: "github", label: "GitHub" },
@@ -46,8 +48,10 @@ export const OAUTH_BUILTINS: readonly OAuthBuiltin[] = [
 
 export const findBuiltin = (id: string) => OAUTH_BUILTINS.find((b) => b.id === id) ?? null;
 
-// Non-secret extras for a built-in row (oauth_providers.config jsonb). Both
-// keys are provider-specific; a row carries at most the one its provider reads.
+/**
+ * Non-secret extras for a built-in row (oauth_providers.config jsonb). Both
+ * keys are provider-specific; a row carries at most the one its provider reads.
+ */
 export const BuiltinOAuthConfig = Schema.Struct({
   tenantId: Schema.optionalKey(Schema.String),
   issuer: Schema.optionalKey(Schema.String),

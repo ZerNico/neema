@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 /**
  * The optional working checklist. One short list per generation, replaced
- * wholesale by each call — never a log of past lists.
+ * wholesale by each call, never a log of past lists.
  *
  * It is a statement of intent, not evidence: a completed step says the model
  * believes it did the work, and prompts and the UI must not present it as

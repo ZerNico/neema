@@ -5,7 +5,7 @@ import { relations } from "./relations.ts";
 // Plain (Promise-based) drizzle client with its own small pg pool. This exists
 // ONLY for Better Auth's Drizzle adapter, which needs a non-Effect client.
 // Application code must use the `Db` service (Effect client on @effect/sql-pg)
-// provided by ~/server/db.ts — do not import this from modules.
+// provided by ~/server/db.ts. Do not import this from modules.
 let pool: Pool | undefined;
 
 export function getPool() {

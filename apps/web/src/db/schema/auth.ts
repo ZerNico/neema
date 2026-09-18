@@ -1,7 +1,9 @@
 import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-// Better Auth core tables (+ admin plugin fields on user).
-// Column shapes must stay in sync with better-auth's Drizzle adapter expectations.
+/**
+ * Better Auth core tables (+ admin plugin fields on user).
+ * Column shapes must stay in sync with better-auth's Drizzle adapter expectations.
+ */
 
 export const user = pgTable("user", {
   id: text().primaryKey(),

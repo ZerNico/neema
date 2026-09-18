@@ -11,9 +11,11 @@ const OPTIONS: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
   { value: "dark", label: "Dark", icon: Moon02Icon },
 ];
 
-// Three-way segmented theme control (light / system / dark). Base UI's toggle
-// group supplies arrow-key navigation and the focus ring; single-select so one
-// option is always pressed.
+/**
+ * Three-way segmented theme control (light / system / dark). Base UI's toggle
+ * group supplies arrow-key navigation and the focus ring; single-select so one
+ * option is always pressed.
+ */
 export function ThemeSwitch({ className }: { className?: string }) {
   const theme = useTheme();
 
@@ -23,7 +25,7 @@ export function ThemeSwitch({ className }: { className?: string }) {
       value={[theme]}
       multiple={false}
       onValueChange={(value) => {
-        // Pressing the active item again yields [] — keep the current theme.
+        // Pressing the active item again yields [], so keep the current theme.
         const next = OPTIONS.find((option) => option.value === value[0]);
         if (next) setTheme(next.value);
       }}

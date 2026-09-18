@@ -10,9 +10,11 @@ import {
 import { user } from "./auth.ts";
 import { messages } from "./chat.ts";
 
-// Stored bytes, content-addressed. Dedup is scoped to one user: a global
-// (sha256) unique would let anyone probe whether some other user already
-// uploaded a given file.
+/**
+ * Stored bytes, content-addressed. Dedup is scoped to one user: a global
+ * (sha256) unique would let anyone probe whether some other user already
+ * uploaded a given file.
+ */
 export const attachmentBlobs = pgTable(
   "attachment_blobs",
   {
@@ -48,7 +50,7 @@ export const attachmentBlobs = pgTable(
  * directions of the gap are recorded here before the risky half runs:
  *
  * - `candidate` is written before an upload's bytes are stored, and covers the
- *   window where the object exists but its row does not yet — a cancelled
+ *   window where the object exists but its row does not yet, since a cancelled
  *   request or a lost commit acknowledgement would otherwise strand bytes no
  *   row-following sweep can ever find.
  * - `orphan` is written inside the transaction that removes a blob's last
@@ -56,7 +58,7 @@ export const attachmentBlobs = pgTable(
  *
  * The reconciler resolves a `candidate` by asking whether any blob row now owns
  * the key: registration may have committed even when the caller saw a failure,
- * so ownership — never the caller's error — decides.
+ * so ownership decides, never the caller's error.
  */
 export const blobCleanupIntents = pgTable(
   "blob_cleanup_intents",
@@ -72,8 +74,10 @@ export const blobCleanupIntents = pgTable(
   (t) => [index("blob_cleanup_intents_due_idx").on(t.notBefore)],
 );
 
-// One row per chip the user added — the same bytes attached twice give two
-// attachments sharing one blob, each with its own name.
+/**
+ * One row per chip the user added: the same bytes attached twice give two
+ * attachments sharing one blob, each with its own name.
+ */
 export const attachments = pgTable(
   "attachments",
   {

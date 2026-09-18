@@ -76,8 +76,10 @@ export class ResearchExecutionError extends Schema.TaggedError<ResearchExecution
   { reason: Schema.Literals(["context", "budget", "provider_timeout"]) },
 ) {}
 
-// Only fixed application-owned diagnostics leave this boundary. Provider errors
-// can contain request bodies, credentials or fetched content; never display them.
+/**
+ * Only fixed application-owned diagnostics leave this boundary. Provider errors
+ * can contain request bodies, credentials or fetched content; never display them.
+ */
 export const researchFailureMessage = (cause: Cause.Cause<unknown>): string => {
   for (const reason of cause.reasons) {
     const error =
@@ -796,11 +798,11 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
               return;
             }
             const ok = !part.isFailure && result?.ok === true;
-            // A failed search or page read is the worker's job to route around
-            // (the prompt says so), and the activity panel lists it for the
-            // curious. It is not a limitation of the answer. A run of failed
-            // searches with no success between them is different: that is the
-            // backend down, and the budget latches exploration off.
+            // A failed search or page read is the worker's job to route around;
+            // the activity panel lists it for the curious, but it does not limit
+            // the answer. A run of failures with none succeeding is different:
+            // that signals the backend is down, and the budget latches
+            // exploration off.
             yield* store.locked(fence, (tx) =>
               tx
                 .update(messageToolCalls)

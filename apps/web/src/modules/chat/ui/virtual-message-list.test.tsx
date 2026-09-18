@@ -17,7 +17,7 @@ vi.mock("./message-list.tsx", () => ({
   MessageBubble: () => <div />,
 }));
 
-const messages = [{ id: "message-1" }] as unknown as DisplayMessage[];
+const messages = [{ id: "message-1" }] as DisplayMessage[];
 const virtualizer = {
   getVirtualItems: () => [],
   getTotalSize: () => 96,

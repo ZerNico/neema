@@ -6,8 +6,10 @@ import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
 
-// Resumable message stream: replays persisted chunks after ?after=<seq>,
-// then tails live generation, then emits a terminal `done` event.
+/**
+ * Resumable message stream: replays persisted chunks after ?after=<seq>,
+ * then tails live generation, then emits a terminal `done` event.
+ */
 export const Route = createFileRoute("/api/messages/$messageId/stream")({
   server: {
     handlers: {

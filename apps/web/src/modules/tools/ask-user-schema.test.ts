@@ -171,7 +171,7 @@ describe("ask_user contract", () => {
       "skipping is not approval",
     );
     expect(formatQuestionContext(questions)).toContain("Q1: How much detail?");
-    expect(formatQuestionContext(questions)).toContain("2. Detailed — Include examples");
+    expect(formatQuestionContext(questions)).toContain("2. Detailed: Include examples");
   });
 
   it("requires accepted arguments and durable question results to agree", () => {

@@ -105,9 +105,11 @@ const TRANSCRIPT_VIOLATIONS = 20;
 /** One-line summaries and command output share this ceiling with a desktop read. */
 export const DESKTOP_RESULT_DETAIL_CHARS = LIMITS.readChars;
 
-// Postgres refuses a NUL inside jsonb, and a binary file read as text is full
-// of them. The page is untrusted input, so the row is made safe here rather
-// than trusting every reader on the machine to have been careful.
+/**
+ * Postgres refuses a NUL inside jsonb, and a binary file read as text is full
+ * of them. The page is untrusted input, so the row is made safe here rather
+ * than trusting every reader on the machine to have been careful.
+ */
 export const storable = (text: string) => text.replaceAll("\u0000", "");
 
 export const forTranscript = (result: DesktopToolResult): DesktopToolResult => ({

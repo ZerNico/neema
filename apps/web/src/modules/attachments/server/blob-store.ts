@@ -26,8 +26,10 @@ export class BlobStore extends Context.Service<
   }
 >()("chat/attachments/BlobStore") {}
 
-// Two levels of hex sharding keep any single directory small even with a lot
-// of blobs per user.
+/**
+ * Two levels of hex sharding keep any single directory small even with a lot
+ * of blobs per user.
+ */
 export const blobStorageKey = (
   userId: string,
   sha256: string,
@@ -42,7 +44,7 @@ const PREFIX_PATTERN = /^blobs\/[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Keys and prefixes only ever come from the helpers above, but they end up as
- * filesystem paths — validating the shape here means a backend never has to
+ * filesystem paths, so validating the shape here means a backend never has to
  * reason about `..` or absolute paths.
  */
 export const isValidBlobKey = (key: string): boolean => KEY_PATTERN.test(key);

@@ -8,11 +8,11 @@ type PluginConfig = NonNullable<ComponentProps<typeof Streamdown>["plugins"]>;
 type MermaidInstance = ReturnType<DiagramPlugin["getMermaid"]>;
 type MermaidConfig = Parameters<MermaidInstance["initialize"]>[0];
 
-// mermaid is ~950 KB gzipped and @streamdown/mermaid imports it at module
-// scope, so re-exporting it here would drag all of it into the chat bundle.
-// Streamdown only calls getMermaid() and then awaits instance.render(), so we
-// hand it a stand-in that fetches the real plugin on the first diagram —
-// conversations without one never pay for it.
+// mermaid is ~950 KB gzipped and imported at module scope by
+// @streamdown/mermaid, so re-exporting it here would drag all of it into the
+// chat bundle. Streamdown only calls getMermaid() then awaits render(), so
+// this stand-in fetches the real plugin on first diagram; conversations
+// without one never pay.
 let pending: Promise<DiagramPlugin> | null = null;
 const loadMermaid = (): Promise<DiagramPlugin> =>
   (pending ??= import("@streamdown/mermaid").then((m) => m.mermaid));
@@ -35,16 +35,13 @@ const lazyMermaid: MermaidInstance = {
   },
 };
 
-// Streamdown 2.x ships everything below as opt-in plugins — without them a
-// fence renders as plain text, `$$…$$` stays literal, and CJK autolinks
-// swallow the punctuation that follows them. One shared config so shiki's
-// highlighter (and its lazily loaded grammars) initializes once, not per
-// message.
-//
-// `math` keeps the plugin's own `singleDollarTextMath: false`: enabling it
-// makes prose like "$5 and $10" parse as math and render as "5and". `$$…$$`
-// works inline and as a display block either way, which is what models
-// actually emit for anything non-trivial.
+/**
+ * Streamdown's plugins are opt-in; without them fences render as text,
+ * `$$…$$` stays literal, and CJK autolinks eat trailing punctuation. One
+ * shared config so shiki initializes once, not per message. `math` keeps
+ * `singleDollarTextMath: false`, since "$5 and $10" would otherwise misparse
+ * as math; `$$…$$` works inline and as block.
+ */
 export const markdownPlugins: PluginConfig = {
   cjk,
   code,

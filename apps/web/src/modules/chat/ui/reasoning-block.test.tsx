@@ -37,7 +37,7 @@ describe("ReasoningBlock", () => {
     act(() => toggle().click());
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
 
-    // More reasoning streams in — the user's choice holds.
+    // More reasoning streams in, and the user's choice holds.
     rerender(<ReasoningBlock reasoning="Chain of thought… and more" active />);
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
   });
@@ -64,7 +64,7 @@ describe("ReasoningBlock", () => {
     act(() => toggle().click());
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
 
-    // A retry starts thinking again — the stale manual collapse must not
+    // A retry starts thinking again, so the stale manual collapse must not
     // keep the fresh reasoning hidden.
     rerender(<ReasoningBlock reasoning="First thoughts" active />);
     expect(toggle()).toHaveAttribute("aria-expanded", "true");

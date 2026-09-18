@@ -17,7 +17,7 @@ import { activityRowClassName } from "./activity-row.ts";
  * The model's working checklist: one collapsed row carrying the latest list.
  *
  * Deliberately understated. A completed step is the model saying it believes
- * it did that work — not a receipt — so the row summarizes progress without
+ * it did that work, not a receipt, so the row summarizes progress without
  * presenting it as verified coverage.
  */
 export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) {

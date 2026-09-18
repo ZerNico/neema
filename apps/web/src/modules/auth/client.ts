@@ -12,7 +12,7 @@ export type SessionData = typeof authClient.$Infer.Session;
 
 /**
  * The signed-in user behind the query cache, because `_app.beforeLoad` runs on
- * every navigation AND every hover preload — uncached, that is a round trip in
+ * every navigation AND every hover preload. Uncached, that is a round trip in
  * front of the route's own data on each one, including a switch between two
  * chats already held in the cache.
  *

@@ -7,11 +7,12 @@ import type { ToolSource } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
 
-// An inline citation rendered in place of a GFM footnote reference: the
-// source's favicon and title, linking straight to the page. Citation numbers
-// are an internal handle between the model and the source list; a reader
-// wants to know what the source is, not which one it was. The full list is
-// still a click away in the message menu; hovering previews host and snippet.
+/**
+ * An inline citation replacing a GFM footnote reference: the source's favicon
+ * and title, linking straight to the page. Citation numbers are an internal
+ * handle between model and source list; a reader wants to know what the
+ * source is, not which number it was. Hovering previews host and snippet.
+ */
 export function CitationChip({ source }: { source: ToolSource }) {
   if (source.kind === "document") return <DocumentCitationChip source={source} />;
   return <CitationPreview source={source} />;

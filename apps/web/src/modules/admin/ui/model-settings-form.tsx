@@ -29,9 +29,9 @@ import {
   FieldDescription,
   FieldLabel,
   FieldLegend,
-  FieldSet,
   FieldTitle,
 } from "~/ui/primitives/field";
+import { FieldSet } from "~/ui/field-set.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import {
@@ -44,8 +44,10 @@ import {
 import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 
-// Sentence-case labels for the type enum wherever it is shown to a person
-// (badges, selects). The enum values themselves stay lowercase on the wire.
+/**
+ * Sentence-case labels for the type enum wherever it is shown to a person
+ * (badges, selects). The enum values themselves stay lowercase on the wire.
+ */
 export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
   chat: "Chat",
   embedding: "Embedding",
@@ -197,8 +199,7 @@ export function ModelSettingsFields({
 
   return (
     <>
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
-      <FieldSet className="gap-4" disabled={disabled}>
+      <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">General</FieldLegend>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
@@ -321,8 +322,7 @@ export function ModelSettingsFields({
         </FieldLabel>
       </FieldSet>
 
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
-      <FieldSet className="gap-4" disabled={disabled}>
+      <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">Capabilities</FieldLegend>
         {draft.type === "embedding" ? (
           <FieldDescription>
@@ -366,8 +366,7 @@ export function ModelSettingsFields({
         </div>
       </FieldSet>
 
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
-      <FieldSet className="gap-4" disabled={disabled}>
+      <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">Pricing</FieldLegend>
         <FieldDescription>
           USD per 1M tokens, used when the provider doesn’t report a cost.
@@ -400,8 +399,7 @@ export function ModelSettingsFields({
         </div>
       </FieldSet>
 
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the dialog stacks four of these, so it runs tighter than the default */}
-      <FieldSet className="gap-4" disabled={disabled}>
+      <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">Access</FieldLegend>
         <Field>
           <FieldLabel htmlFor={`${id}-access`}>Visibility</FieldLabel>

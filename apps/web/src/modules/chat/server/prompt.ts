@@ -22,8 +22,10 @@ export interface HistoryMessage {
   readonly providerReplay?: ProviderReplay | null;
 }
 
-// Only the three methods the builder needs, so unit tests can hand it plain
-// objects instead of standing up the whole layer graph.
+/**
+ * Only the three methods the builder needs, so unit tests can hand it plain
+ * objects instead of standing up the whole layer graph.
+ */
 export interface PromptDeps {
   readonly chat?: Pick<ChatRepo["Service"], "listToolCalls">;
   readonly attachments: Pick<
@@ -55,15 +57,15 @@ const messageTimestamp = (message: HistoryMessage): string => {
  * Rebuilds the prompt history from stored messages, resolving each attachment
  * link to real bytes.
  *
- * Nothing about an attachment lives in the message text — the link is the only
- * record — so every generation re-decides how to deliver it: natively when the
+ * Nothing about an attachment lives in the message text. The link is the only
+ * record, so every generation re-decides how to deliver it: natively when the
  * model reads files, as locally extracted text when it does not.
  */
 export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(function* (
   deps: PromptDeps,
   input: {
     messages: ReadonlyArray<HistoryMessage>;
-    /** Any web tool armed for this generation — search, the reader, or both. */
+    /** Any web tool armed for this generation: search, the reader, or both. */
     webToolsEnabled: boolean;
     /** Model accepts non-image file parts (catalog `files` capability). */
     modelSupportsFiles: boolean;
@@ -81,7 +83,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     content:
       messageTimestamp(message) +
       // Without web tools there is no recap block, so history markers would
-      // teach the model to emit unresolvable citations — strip them.
+      // teach the model to emit unresolvable citations, so strip them.
       (message.role === "assistant" ? normalizeAssistantText(message.content) : message.content),
   });
 
@@ -122,7 +124,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   const pdfText = Effect.fn("chat.pdfText")(function* (row: AttachmentWithBlob) {
     if (parserKind === undefined) parserKind = (yield* deps.parser.availability()).kind;
     // Cached extractions are only reusable while the configured backend is the
-    // one that produced them — a better parser must not be shadowed by old text.
+    // one that produced them, so a better parser must not be shadowed by old text.
     if (row.parsedText !== null && row.parsedWith === parserKind) return row.parsedText;
 
     const bytes = yield* loadBytes(row);

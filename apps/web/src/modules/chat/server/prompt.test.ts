@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Effect } from "effect";
+import type { Prompt } from "effect/unstable/ai";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { buildHistoryMessages, type HistoryMessage, type PromptDeps } from "./prompt.ts";
+import type { ToolCallRow } from "./repo.ts";
 
 type Row = AttachmentWithBlob & { messageId: string; position: number };
 
@@ -22,8 +24,6 @@ const row = (overrides: Partial<Row> & { mediaType: string; messageId: string })
   };
 };
 
-const bytes = (value: string) => new TextEncoder().encode(value);
-
 interface Harness {
   deps: PromptDeps;
   get: ReturnType<typeof vi.fn>;
@@ -38,7 +38,7 @@ const harness = (options: {
   parsed?: string;
 }): Harness => {
   const get = vi.fn((key: string) =>
-    Effect.succeed(bytes(options.blobs?.[key] ?? `bytes of ${key}`)),
+    Effect.succeed(new TextEncoder().encode(options.blobs?.[key] ?? `bytes of ${key}`)),
   );
   const parsePdf = vi.fn(() =>
     Effect.succeed({
@@ -198,7 +198,7 @@ describe("buildHistoryMessages with attachments", () => {
           type: "file",
           mediaType: "image/png",
           fileName: "shot.png",
-          data: bytes("PNGDATA"),
+          data: new TextEncoder().encode("PNGDATA"),
         },
         {
           type: "text",
@@ -209,7 +209,8 @@ describe("buildHistoryMessages with attachments", () => {
     });
     // The bytes reach the provider as a Uint8Array, not a base64 string.
     expect(
-      (message as unknown as { content: Array<{ data?: unknown }> }).content[0]?.data,
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.FilePartEncoded>)[0]
+        ?.data,
     ).toBeInstanceOf(Uint8Array);
   });
 
@@ -218,7 +219,7 @@ describe("buildHistoryMessages with attachments", () => {
       rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "a.png" })],
     });
     const [message] = await build(deps, [user("m1", "   ")]);
-    expect((message as unknown as { content: unknown[] }).content).toHaveLength(1);
+    expect((message as Prompt.UserMessageEncoded).content).toHaveLength(1);
   });
 
   it("leaves messages without attachments as plain strings", async () => {
@@ -227,7 +228,7 @@ describe("buildHistoryMessages with attachments", () => {
     });
     const messages = await build(deps, [user("m1", "first"), user("m2", "second")]);
     expect(messages[0]).toEqual({ role: "user", content: "first" });
-    expect(Array.isArray((messages[1] as unknown as { content: unknown }).content)).toBe(true);
+    expect(Array.isArray(messages[1]!.content)).toBe(true);
   });
 
   it("reads a blob shared by two turns only once", async () => {
@@ -259,11 +260,11 @@ describe("buildHistoryMessages PDF delivery", () => {
       blobs: { "blobs/user-1/aa/bb/pdf": "%PDF-1.4" },
     });
     const [message] = await build(deps, [user("m1", "summarize")], { modelSupportsFiles: true });
-    expect((message as unknown as { content: Array<{ type: string }> }).content[0]).toEqual({
+    expect((message as Prompt.UserMessageEncoded).content[0]).toEqual({
       type: "file",
       mediaType: "application/pdf",
       fileName: "paper.pdf",
-      data: bytes("%PDF-1.4"),
+      data: new TextEncoder().encode("%PDF-1.4"),
     });
     expect(parsePdf).not.toHaveBeenCalled();
   });
@@ -274,9 +275,7 @@ describe("buildHistoryMessages PDF delivery", () => {
       parsed: "page one",
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
-    expect(
-      (message as unknown as { content: Array<{ type: string; text?: string }> }).content[0],
-    ).toEqual({
+    expect((message as Prompt.UserMessageEncoded).content[0]).toEqual({
       type: "text",
       text: "Text extracted from attached PDF: paper.pdf\n```\npage one\n```",
     });
@@ -294,7 +293,8 @@ describe("buildHistoryMessages PDF delivery", () => {
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
     expect(
-      (message as unknown as { content: Array<{ text?: string }> }).content[0]?.text,
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[0]
+        ?.text,
     ).toContain("cached body");
     expect(parsePdf).not.toHaveBeenCalled();
     // Not even the bytes are read when the cache hits.
@@ -309,7 +309,8 @@ describe("buildHistoryMessages PDF delivery", () => {
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
     expect(
-      (message as unknown as { content: Array<{ text?: string }> }).content[0]?.text,
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[0]
+        ?.text,
     ).toContain("fresh body");
     expect(parsePdf).toHaveBeenCalledTimes(1);
   });
@@ -472,19 +473,26 @@ describe("assistant image replay", () => {
     () =>
       Effect.gen(function* () {
         const { deps } = harness({ rows: [imageRow] });
+        const toolCall: ToolCallRow = {
+          id: "call-1",
+          messageId: "answer",
+          researchRunId: null,
+          researchTaskId: null,
+          turnIndex: 0,
+          callIndex: 0,
+          textOffset: null,
+          providerCallId: "call",
+          toolName: "inspect",
+          arguments: { target: "image" },
+          result: { ok: true },
+          status: "complete",
+          error: null,
+          startedAt: new Date(),
+          completedAt: null,
+        };
         const chat = {
-          listToolCalls: () =>
-            Effect.succeed([
-              {
-                turnIndex: 0,
-                toolName: "inspect",
-                providerCallId: "call",
-                arguments: { target: "image" },
-                status: "complete",
-                result: { ok: true },
-              },
-            ]),
-        } as unknown as NonNullable<PromptDeps["chat"]>;
+          listToolCalls: () => Effect.succeed([toolCall]),
+        };
         const prefix = "😀before[^1]";
         const signedText = prefix + "after[^2]";
         const content = signedText + "tail[^3]";

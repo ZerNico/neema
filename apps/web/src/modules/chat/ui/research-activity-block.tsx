@@ -30,7 +30,7 @@ const endedEarly: Partial<Record<ResearchPhase, { alone: string; note: string }>
   error: { alone: "Research failed", note: "ended early" },
 };
 
-/** The newest running target, else the newest target seen — what it is on now. */
+/** The newest running target, else the newest target seen: what it is on now. */
 const currentDetail = (webActivities: ReadonlyArray<ResearchStepActivity>): string | null => {
   let latest: ResearchStepActivity | undefined;
   for (const activity of webActivities) {

@@ -60,11 +60,14 @@ let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 let providerId: string;
 
 // Per-test knobs for the fake provider's terminal finish part.
-let finishUsage: { inputTokens: object; outputTokens: object } = {
+let finishUsage: {
+  inputTokens: { total?: number; cacheRead?: number };
+  outputTokens: { total?: number; reasoning?: number };
+} = {
   inputTokens: {},
   outputTokens: {},
 };
-let finishMetadata: unknown;
+let finishMetadata: AiResponse.ProviderMetadata | undefined;
 let failStream = false;
 
 const makeUsage = (input: {
@@ -106,13 +109,12 @@ const FakeGateway = Layer.succeed(AiGateway, {
         ) as Stream.Stream<ChatStreamPart, never>;
       }
       return Stream.make(
-        { type: "text-delta", id: "t", delta: "answer" } as never as ChatStreamPart,
-        {
-          type: "finish",
+        AiResponse.makePart("text-delta", { id: "t", delta: "answer" }),
+        AiResponse.makePart("finish", {
           reason: "stop",
-          usage: finishUsage,
+          usage: new AiResponse.Usage(finishUsage),
           metadata: finishMetadata,
-        } as never as ChatStreamPart,
+        }),
       );
     }),
 });
@@ -242,7 +244,7 @@ describe("usage ledger capture", () => {
     const result = await run(
       Effect.gen(function* () {
         const userId = yield* makeUser();
-        // Pricing present too — the provider-reported number must still win.
+        // Pricing is present too, so the provider-reported number must still win.
         const model = yield* makeModel({ pricing: { input: 2, output: 10 } });
         const turn = yield* generateOnce(userId, model.id);
         return {
@@ -338,7 +340,7 @@ describe("usage ledger capture", () => {
           return yield* eventsForMessage(turn.assistantMessageId);
         }),
       );
-      // The stream died before its finish part, so tokens are zero — but the
+      // The stream died before its finish part, so tokens are zero, but the
       // attempt itself is on the ledger.
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ status: "error", inputTokens: 0, outputTokens: 0 });
@@ -383,7 +385,7 @@ describe("usage ledger capture", () => {
         const deps: TitleDeps = {
           gateway: (yield* AiGateway) as TitleDeps["gateway"],
           repo,
-          sync: { publish: () => Effect.void } as unknown as TitleDeps["sync"],
+          sync: { publish: () => Effect.void } as TitleDeps["sync"],
           providers,
           analytics,
         };
@@ -537,7 +539,7 @@ describe("usage aggregates", () => {
     );
     expect(result).toEqual({
       messages: 2, // titles counted in tokens, not messages
-      // Every row, chat and title alike — this is the error-rate divisor.
+      // Every row, chat and title alike, since this is the error-rate divisor.
       attempts: 3,
       titleGenerations: 1,
       compactionGenerations: 0,
@@ -610,16 +612,16 @@ describe("usage aggregates", () => {
         };
         yield* db.insert(usageEvents).values([
           { ...base, id: uuidv7(), inputTokens: 1, createdAt: WINDOW_FROM },
-          // One millisecond inside the upper bound — must be counted.
+          // One millisecond inside the upper bound, so it must be counted.
           {
             ...base,
             id: uuidv7(),
             inputTokens: 10,
             createdAt: new Date(WINDOW_TO.getTime() - 1),
           },
-          // Exactly on the exclusive bound — must not be.
+          // Exactly on the exclusive bound, so it must not be.
           { ...base, id: uuidv7(), inputTokens: 100, createdAt: WINDOW_TO },
-          // Just before the inclusive bound — must not be.
+          // Just before the inclusive bound, so it must not be.
           {
             ...base,
             id: uuidv7(),
@@ -656,7 +658,7 @@ describe("usage aggregates", () => {
         };
         yield* db.insert(usageEvents).values([
           { ...base, id: uuidv7(), kind: "chat", status: "error" },
-          // A failed *title* run is still a failed attempt — the rate would
+          // A failed *title* run is still a failed attempt, so the rate would
           // be wrong if the divisor were chat-only.
           { ...base, id: uuidv7(), kind: "title", status: "error" },
           { ...base, id: uuidv7(), kind: "chat", status: "aborted" },
@@ -674,7 +676,7 @@ describe("usage aggregates", () => {
     });
   });
 
-  it("returns zeros — and a complete cost — for a range with no events", async () => {
+  it("returns zeros, and a complete cost, for a range with no events", async () => {
     const result = await run(
       Effect.gen(function* () {
         const analytics = yield* AnalyticsRepo;
@@ -699,7 +701,7 @@ describe("usage aggregates", () => {
       cachedInputTokens: 0,
       reasoningTokens: 0,
       cost: 0,
-      // Nothing is unknown when nothing is there — the tile must not claim
+      // Nothing is unknown when nothing is there, so the tile must not claim
       // "at least".
       costComplete: true,
       activeUsers: 0,

@@ -8,16 +8,11 @@ import {
 } from "../schema.ts";
 import type { MemoryService } from "./service.ts";
 
-// The transport shape accepts anything the model emits. A tool call that omits
-// `content`, sends the wrong type, overruns the length cap or invents a
-// `replaces` value has to come back as a tool result the model can react to —
-// a parameter decode error is raised before the handler runs and fails the
-// whole generation instead. Every constraint is re-checked in the handler.
-//
-// The provider still sees the strict contract: `toJsonSchema` on an
-// always-passing filter declares the field's JSON Schema without constraining
-// what decodes. A fresh fragment is returned per call because the generated
-// document belongs to (and may be rewritten by) the provider integration.
+// The transport accepts anything the model emits: malformed input becomes a
+// tool result the model can react to, not a decode error that fails the
+// whole generation (every constraint is re-checked in the handler).
+// `toJsonSchema` on an always-passing filter still declares the strict
+// contract without constraining what decodes.
 const declaredAs = (fragment: () => Record<string, unknown>) =>
   Schema.Any.check(Schema.makeFilter(() => true, { toJsonSchema: fragment }));
 
@@ -42,16 +37,20 @@ export const SaveMemoryParams = Schema.Struct({
   ),
 });
 
-// Declared over `unknown` rather than the schema's `any` so handler code cannot
-// read a field without validating it first.
+/**
+ * Declared over `unknown` rather than the schema's `any` so handler code cannot
+ * read a field without validating it first.
+ */
 export interface SaveMemoryParams {
   readonly content?: unknown;
   readonly replaces?: unknown;
 }
 
-// Why a save was refused, as a closed set the activity row can persist. The
-// model's arguments never make it onto the row, so without this a rejection is
-// indistinguishable from a transport failure after the fact.
+/**
+ * Why a save was refused, as a closed set the activity row can persist. The
+ * model's arguments never make it onto the row, so without this a rejection is
+ * indistinguishable from a transport failure after the fact.
+ */
 export const SaveMemoryRejection = Schema.Literals([
   "invalid_content",
   "invalid_replaces",

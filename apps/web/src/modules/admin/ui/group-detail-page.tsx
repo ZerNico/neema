@@ -225,7 +225,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                   <span className="text-muted-foreground truncate text-xs">{member.email}</span>
                 </div>
                 {member.role === "admin" ? (
-                  <span className="text-muted-foreground text-xs">Always allowed — admin</span>
+                  <span className="text-muted-foreground text-xs">Always allowed, admin</span>
                 ) : (
                   <label className="flex items-center gap-2 text-xs">
                     Can share into this group<span className="sr-only">for {member.name}</span>

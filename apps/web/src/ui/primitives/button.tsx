@@ -43,11 +43,11 @@ const buttonVariantClasses = cva(
   },
 );
 
-// The base sets `border-transparent` so filled variants show no line, and
-// `outline` overrides it with `border-border`. Both are border-color utilities,
-// so the one Tailwind emits last wins unless tailwind-merge drops the loser —
-// which is why merging belongs here, not at each call site: `buttonVariants`
-// is used directly on links, where forgetting `cn` silently removes the border.
+// The base sets `border-transparent` so filled variants show no line; `outline`
+// overrides it with `border-border`. Both are border-color utilities, so
+// merging (not Tailwind's own last-wins) must resolve which one applies.
+// `buttonVariants` is used directly on links, where forgetting `cn` silently
+// drops the border.
 const buttonVariants = (props?: Parameters<typeof buttonVariantClasses>[0]) =>
   cn(buttonVariantClasses(props));
 

@@ -9,10 +9,12 @@ import { cn } from "~/ui/utils";
 const BOTTOM_THRESHOLD = 48;
 const ESTIMATED_MESSAGE_HEIGHT = 96;
 
-// Virtualized, bottom-anchored message list. Only visible messages render
-// (long chats stay cheap), heights are measured dynamically (markdown blocks
-// vary wildly), and the list follows streaming output while the user is at
-// the bottom. Scrolling up detaches; a jump-to-bottom button reattaches.
+/**
+ * Virtualized, bottom-anchored message list. Only visible messages render
+ * (long chats stay cheap), heights are measured dynamically (markdown blocks
+ * vary wildly), and the list follows streaming output while the user is at
+ * the bottom. Scrolling up detaches; a jump-to-bottom button reattaches.
+ */
 export function VirtualMessageList({
   messages,
   /** Monotonically growing signal (e.g. streamed text length) to follow. */
@@ -115,7 +117,7 @@ export function VirtualMessageList({
               data-index={item.index}
               // Offset with `top`, not translateY: a transform makes the row a
               // containing block, and a `position: sticky` descendant then
-              // resolves against the row instead of the scrollport — which
+              // resolves against the row instead of the scrollport, which
               // parked streamdown's code-block toolbar partway down the page.
               className="absolute left-0 w-full px-4 py-2"
               style={{ top: item.start }}

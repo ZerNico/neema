@@ -5,8 +5,10 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
 
-// Per-tab sync feed: pushes this user's domain events (from any browser or
-// instance) so sidebars and open chats stay consistent.
+/**
+ * Per-tab sync feed: pushes this user's domain events (from any browser or
+ * instance) so sidebars and open chats stay consistent.
+ */
 export const Route = createFileRoute("/api/sync")({
   server: {
     handlers: {

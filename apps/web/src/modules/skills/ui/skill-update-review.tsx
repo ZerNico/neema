@@ -90,7 +90,7 @@ function ReviewFiles({
     onSuccess: (result) => onApplied(result.files, result.revision),
     onError: () =>
       toast.error(
-        "Could not update the skill. Your choices are kept — if it changed somewhere else in the meantime, go back and check again.",
+        "Could not update the skill. Your choices are kept, but if it changed somewhere else in the meantime, go back and check again.",
       ),
   });
   const changed = changes.filter(
@@ -118,11 +118,11 @@ function ReviewFiles({
       </p>
       <Section
         title="What changed"
-        description="Your version is kept unless you pick the new one. Whole files are swapped — the two are never mixed together."
+        description="Your version is kept unless you pick the new one. Whole files are swapped; the two are never mixed together."
       >
         {changed.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            Nothing to update — your files match the latest version.
+            Nothing to update, your files match the latest version.
           </p>
         ) : (
           changed.map((change) => (

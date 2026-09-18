@@ -43,8 +43,8 @@ export class SharingService extends Context.Service<
       const bus = yield* SyncBus;
       // Per-runtime throttle on grant-by-email, bounded even for many accounts.
       // `recipients` deliberately exposes an account directory to any signed-in
-      // user — this is a single-tenant, self-hosted app where colleagues pick
-      // each other by name — so the throttle is a cap on automated granting,
+      // user, since this is a single-tenant, self-hosted app where colleagues pick
+      // each other by name, so the throttle is a cap on automated granting,
       // not the enumeration defence it originally was.
       const lookups = new Map<string, { until: number; count: number }>();
       const admitLookup = (userId: string) =>

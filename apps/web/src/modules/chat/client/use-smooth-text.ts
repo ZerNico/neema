@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 
-// Providers differ wildly in chunk size: the reference mock streams ~7-char
-// deltas, while an aggregator like 9router sends ~90-char ones — whole
-// sentences popping in at once. Smoothing is purely presentational and lives
-// entirely on this side of the wire: the reducer's text (and therefore
-// lastSeq/resume bookkeeping and the persisted chunks) is untouched; only
-// what the user sees trails it, released a word at a time.
+// Providers vary wildly in chunk size: the mock streams ~7-char deltas, an
+// aggregator like 9router sends ~90-char ones. Smoothing is purely
+// presentational: the reducer's text, lastSeq/resume bookkeeping and
+// persisted chunks stay untouched; only what the user sees trails behind,
+// released a word at a time.
 
 const TICK_MS = 30;
 /** One extra word per tick for every this-many words of backlog. */
 const CATCH_UP_DIVISOR = 10;
-/** Leading whitespace plus the next word — released as one unit. */
+/** Leading whitespace plus the next word, released as one unit. */
 const WORD = /^\s*\S+/;
 
 /**
@@ -19,7 +18,7 @@ const WORD = /^\s*\S+/;
  */
 export function nextSmoothStep(shown: string, target: string): string {
   // A target that doesn't extend what's shown is a different generation
-  // (retry, navigation) — snap, never animate a rewrite.
+  // (retry, navigation), so snap instead of animating a rewrite.
   if (!target.startsWith(shown)) return target;
   let pending = target.slice(shown.length);
   if (!pending) return shown;
@@ -46,7 +45,7 @@ export function nextSmoothStep(shown: string, target: string): string {
 
 /**
  * The visible, word-paced view of a growing stream. The returned string
- * trails `target` and catches up one tick at a time — and keeps pacing after
+ * trails `target` and catches up one tick at a time, and keeps pacing after
  * the stream ends, so the provider's last chunk lands as words like every
  * other one, never as a final pop. History never animates (the first value
  * is shown as-is), and a target that rewrites what is shown (retry,

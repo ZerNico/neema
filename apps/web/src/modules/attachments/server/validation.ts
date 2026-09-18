@@ -78,7 +78,7 @@ export interface ValidatedAttachment {
 
 /**
  * Decides what an uploaded file actually is, from its bytes. Text files keep no
- * trace of their declared type — everything textual is normalized to
+ * trace of their declared type; everything textual is normalized to
  * text/plain so serving headers are uniform.
  */
 export const validateAttachment = Effect.fn("attachments.validateAttachment")(function* (input: {

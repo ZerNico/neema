@@ -23,8 +23,10 @@ export const sameConnection = (a: EmbeddingConnection, b: EmbeddingConnection) =
 
 export const decodeEmbeddingConfig = Schema.decodeUnknownOption(KnowledgeSearchConfig);
 
-// Only public connection fields are selected. Locking callers retain the config,
-// model and provider rows through publication, never through a network request.
+/**
+ * Only public connection fields are selected. Locking callers retain the config,
+ * model and provider rows through publication, never through a network request.
+ */
 export const readConnection = (db: Db["Service"] | DbTx, modelId: string, lock = false) =>
   Effect.gen(function* () {
     const query = db

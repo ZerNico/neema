@@ -79,7 +79,7 @@ describe("extractThinkTags", () => {
 
   // Regression: parts were built as bare object literals, so `metadata` was
   // undefined. Nothing noticed until a turn ended in tool calls and
-  // `Prompt.fromResponseParts` folded it back in — `Object.entries(undefined)`
+  // `Prompt.fromResponseParts` folded it back in, and `Object.entries(undefined)`
   // killed the whole generation.
   it.effect("stamps metadata on every part it synthesizes", () =>
     Effect.gen(function* () {
@@ -121,7 +121,7 @@ describe("extractThinkTags", () => {
 
   it.effect("passes non-text parts through and flushes buffered text first", () =>
     Effect.gen(function* () {
-      const finish = { type: "finish", reason: "stop" } as unknown as ChatStreamPart;
+      const finish = { type: "finish", reason: "stop" } as ChatStreamPart;
       const out = yield* run([text("Done <t"), finish]);
       const finishIdx = out.findIndex((p) => p.type === "finish");
       expect(finishIdx).toBeGreaterThan(0);

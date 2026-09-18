@@ -13,7 +13,9 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-// AI provider registry, managed by admins.
+/**
+ * AI provider registry, managed by admins.
+ */
 
 export const providers = pgTable("providers", {
   id: text().primaryKey(),
@@ -52,7 +54,7 @@ export const models = pgTable(
       .default({ reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     // USD per 1M tokens; prefilled from the provider catalog where it carries
-    // prices (OpenRouter), admin-editable. Null = unknown — usage costs then
+    // prices (OpenRouter), admin-editable. Null = unknown, so usage costs then
     // rely on provider-reported numbers or stay unknown.
     pricing: jsonb().$type<ModelPricing>(),
     // "public": every user sees and can use it. "groups": only members of the

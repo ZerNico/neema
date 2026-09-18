@@ -34,7 +34,7 @@ describe("resolveUsageWindow", () => {
 });
 
 describe("previousUsageWindow", () => {
-  it("is adjacent and equal in length — no shared instant, no gap", () => {
+  it("is adjacent and equal in length, with no shared instant and no gap", () => {
     const current = resolveUsageWindow({ kind: "preset", days: 30 }, NOW);
     const previous = previousUsageWindow(current);
 

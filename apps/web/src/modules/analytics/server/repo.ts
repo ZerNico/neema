@@ -44,9 +44,9 @@ export interface UsageScope {
 }
 
 export interface UsageSummary {
-  /** Chat generations only — title runs are counted in tokens, not here. */
+  /** Chat generations only, title runs are counted in tokens, not here. */
   messages: number;
-  /** Every provider attempt of any kind — the error-rate divisor. */
+  /** Every provider attempt of any kind, the error-rate divisor. */
   attempts: number;
   titleGenerations: number;
   compactionGenerations: number;
@@ -54,11 +54,11 @@ export interface UsageSummary {
   abortedAttempts: number;
   inputTokens: number;
   outputTokens: number;
-  /** Cache reads, already included in `inputTokens` — not an addend. */
+  /** Cache reads, already included in `inputTokens`, not an addend. */
   cachedInputTokens: number;
   reasoningTokens: number;
   cost: number;
-  /** False when any event in range has unknown cost — the total is a floor. */
+  /** False when any event in range has unknown cost, so the total is a floor. */
   costComplete: boolean;
   activeUsers: number;
 }

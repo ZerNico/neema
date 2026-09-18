@@ -119,7 +119,7 @@ type Operation = Omit<ImpersonationEvent, "timestamp">;
 const startPath = "/admin/impersonate-user";
 const stopPath = "/admin/stop-impersonating";
 
-// Also used by isolated handler tests: no production runtime or environment DB is imported.
+/** Also used by isolated handler tests: no production runtime or environment DB is imported. */
 export function createAppAuth({
   db,
   baseURL,

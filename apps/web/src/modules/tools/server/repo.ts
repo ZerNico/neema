@@ -7,7 +7,9 @@ import { KnowledgeSearchConfig } from "~/modules/knowledge/schema.ts";
 import { DocumentParserConfig, UrlReaderConfig, WebSearchConfig } from "../schema.ts";
 
 type ToolRow = typeof tools.$inferSelect;
-// Tool rows safe for admin clients: ciphertext replaced by a boolean.
+/**
+ * Tool rows safe for admin clients: ciphertext replaced by a boolean.
+ */
 export type PublicTool = Omit<ToolRow, "secretCiphertext"> & { secretConfigured: boolean };
 
 const toPublic = ({ secretCiphertext, ...rest }: ToolRow): PublicTool => ({
@@ -24,19 +26,25 @@ export class ToolsRepo extends Context.Service<
   ToolsRepo,
   {
     getTool(name: string): Effect.Effect<PublicTool | null>;
-    // Internal: decoded web_search config + decrypted secret, for execution.
+    /**
+     * Internal: decoded web_search config + decrypted secret, for execution.
+     */
     getWebSearch(): Effect.Effect<{
       enabled: boolean;
       config: WebSearchConfig;
       secret: Redacted.Redacted<string> | null;
     } | null>;
-    // Internal: decoded document_parser row (no secret) for the parser service.
+    /**
+     * Internal: decoded document_parser row (no secret) for the parser service.
+     */
     getDocumentParser(): Effect.Effect<{
       enabled: boolean;
       kind: string;
       config: DocumentParserConfig;
     } | null>;
-    // Internal: decoded read_url row for the URL reader executor.
+    /**
+     * Internal: decoded read_url row for the URL reader executor.
+     */
     getUrlReader(): Effect.Effect<{ enabled: boolean; config: UrlReaderConfig } | null>;
     /**
      * Internal: decoded knowledge_search row. `enabled` turns semantic search

@@ -21,8 +21,10 @@ export interface Membership {
   groupName: string;
 }
 
-// A unique-name conflict arrives as EffectDrizzleQueryError whose `cause` is
-// a whole Effect Cause wrapping SqlError → effect/sql's tagged
+/**
+ * A unique-name conflict arrives as EffectDrizzleQueryError whose `cause` is
+ * a whole Effect Cause wrapping SqlError → effect/sql's tagged
+ */
 
 export class GroupRepo extends Context.Service<
   GroupRepo,
@@ -39,7 +41,7 @@ export class GroupRepo extends Context.Service<
     deleteGroup(groupId: string): Effect.Effect<void>;
     getGroup(groupId: string): Effect.Effect<GroupRow, GroupNotFound>;
     listMembers(groupId: string): Effect.Effect<GroupMember[]>;
-    /** Every membership with its group name — the users page's badges. */
+    /** Every membership with its group name, for the users page's badges. */
     listMemberships(): Effect.Effect<Membership[]>;
     /** Idempotent: adding an existing member is a no-op. */
     addMember(groupId: string, userId: string): Effect.Effect<void>;

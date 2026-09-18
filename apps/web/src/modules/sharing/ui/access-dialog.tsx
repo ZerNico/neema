@@ -79,7 +79,7 @@ const initials = (name: string) =>
 
 /**
  * Owner-only access management for an agent or a collection. Every grant is the
- * same permission — use, never edit — so rows carry a plain "Can use" label
+ * same permission (use, never edit), so rows carry a plain "Can use" label
  * rather than a role picker. Grants are additive: a person keeps access that
  * comes from a group or from everyone signed in, which is why removing one row
  * never claims more than it does.

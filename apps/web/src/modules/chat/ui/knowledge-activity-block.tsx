@@ -25,7 +25,7 @@ const quotedQueries = (queries: ReadonlyArray<string>): string => {
  * One collapsed row for a run of knowledge calls, like the web row: the
  * header says what happened in a few words, the disclosure lists what was
  * searched and read. Open while running, closes shortly after, and a manual
- * choice sticks. Reads and listings are counted rather than itemised — their
+ * choice sticks. Reads and listings are counted rather than itemised, since their
  * targets are opaque version ids.
  */
 export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeToolActivity[] }) {

@@ -1,5 +1,5 @@
 // Sidebar bucketing by recency. The server already orders conversations
-// newest-first, so grouping only has to slice that order — never reorder it.
+// newest-first, so grouping only has to slice that order and never reorder it.
 
 export interface DatedConversation {
   readonly lastMessageAt: Date | string | number | null;

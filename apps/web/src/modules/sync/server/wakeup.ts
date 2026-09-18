@@ -1,7 +1,9 @@
 import { Effect, Queue, Stream } from "effect";
 
-// Subscribe before reading state; keep one dirty bit while that read runs.
-// The scope owns the relay, so cancelled runs cannot leave listeners behind.
+/**
+ * Subscribe before reading state; keep one dirty bit while that read runs.
+ * The scope owns the relay, so cancelled runs cannot leave listeners behind.
+ */
 export const wakeOn = <A>(signals: Stream.Stream<A>) =>
   Effect.gen(function* () {
     const pull = yield* Stream.toPull(signals);

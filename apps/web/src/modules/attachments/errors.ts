@@ -1,7 +1,9 @@
 import { Schema } from "effect";
 
-// Upload was refused before anything was stored. `reason` is safe to show the
-// user — it only ever describes their own file.
+/**
+ * Upload was refused before anything was stored. `reason` is safe to show the
+ * user, since it only ever describes their own file.
+ */
 export class AttachmentRejected extends Schema.TaggedError<AttachmentRejected>()(
   "AttachmentRejected",
   {
@@ -10,8 +12,10 @@ export class AttachmentRejected extends Schema.TaggedError<AttachmentRejected>()
   },
 ) {}
 
-// Nonexistent id, someone else's attachment, and an already-claimed attachment
-// all raise this one error: the caller must not be able to tell them apart.
+/**
+ * Nonexistent id, someone else's attachment, and an already-claimed attachment
+ * all raise this one error: the caller must not be able to tell them apart.
+ */
 export class AttachmentNotAvailable extends Schema.TaggedError<AttachmentNotAvailable>()(
   "AttachmentNotAvailable",
   { attachmentId: Schema.String },

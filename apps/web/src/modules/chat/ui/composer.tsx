@@ -14,12 +14,12 @@ export interface ComposerHandle {
   seedDraft: (text: string) => void;
   /** Consumes a navigation prefill once, without replacing typing or moving focus. */
   prefillDraft: (text: string) => void;
-  /** Puts the caret in the textarea — opening a chat should be ready to type. */
+  /** Puts the caret in the textarea, since opening a chat should be ready to type. */
   focus: () => void;
 }
 
 interface ComposerProps {
-  /** Rejects on failure — the draft and chips survive so the user can retry. */
+  /** Rejects on failure. The draft and chips survive so the user can retry. */
   onSend: (
     content: string,
     attachmentIds: ReadonlyArray<string>,

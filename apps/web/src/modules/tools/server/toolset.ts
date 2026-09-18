@@ -6,8 +6,10 @@ import type { UrlAuthority } from "./url-authority.ts";
 import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";
 import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
 
-// Tool families build their definitions and handlers independently, then the
-// stream engine combines whichever groups apply to one generation.
+/**
+ * Tool families build their definitions and handlers independently, then the
+ * stream engine combines whichever groups apply to one generation.
+ */
 export interface ToolGroup {
   readonly toolkit: Toolkit.Any;
   readonly handlers: Record<string, unknown>;
@@ -22,9 +24,11 @@ type DynamicToolkit = Toolkit.Toolkit<Record<string, Tool.Any>>;
 
 const unavailable = () => Effect.succeed(null);
 
-// The Effect toolkit API is statically typed around a fixed tuple of tools,
-// while this boundary deliberately combines runtime-optional groups. Keep the
-// cast here rather than spreading `any` through every executor and caller.
+/**
+ * The Effect toolkit API is statically typed around a fixed tuple of tools,
+ * while this boundary deliberately combines runtime-optional groups. Keep the
+ * cast here rather than spreading `any` through every executor and caller.
+ */
 export const mergeToolGroups = Effect.fn("tools.mergeToolGroups")(function* (
   groups: ReadonlyArray<ToolGroup>,
 ) {
@@ -35,12 +39,14 @@ export const mergeToolGroups = Effect.fn("tools.mergeToolGroups")(function* (
   return yield* toolkit.pipe(Effect.provide(toolkit.toLayer(handlers as never)));
 });
 
-// The web tools for one generation: whichever tools apply, wired to one shared
-// citation indexer. `undefined` when neither applies.
-//
-// Search follows the user's per-message preference. The reader rides with an
-// armed search so the model can open its hits, and is also offered independently
-// when user text or prior tool results seeded URL authority.
+/**
+ * The web tools for one generation: whichever tools apply, wired to one
+ * shared citation indexer. `undefined` when neither applies.
+ *
+ * Search follows the user's per-message preference; the reader rides armed so
+ * the model can open its hits, and is offered too when user text or prior
+ * results seed URL authority.
+ */
 export const prepareWebTools: (input: {
   webSearch: WebSearchExecutor["Service"];
   urlReader: UrlReaderExecutor["Service"];

@@ -19,8 +19,10 @@ export const disclosureBodyRailClassName =
 const contentClassName =
   "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden";
 
-// Presentation only: Base UI and the caller retain ownership of state, refs,
-// render props, and mounting behavior, including state-dependent class names.
+/**
+ * Presentation only: Base UI and the caller retain ownership of state, refs,
+ * render props, and mounting behavior, including state-dependent class names.
+ */
 export function DisclosureContent({
   className,
   ...props

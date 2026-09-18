@@ -28,8 +28,8 @@ const EMPTY_DAY = {
 
 /**
  * Sparse day rows from SQL, densified over the window the server actually
- * scanned — a custom window that ended months ago renders its own days rather
- * than the last N ending today.
+ * scanned, so a custom window that ended months ago renders its own days
+ * rather than the last N ending today.
  */
 const densify = (daily: readonly UsageDay[], window: UsageWindow): UsageDay[] => {
   const byDay = new Map(daily.map((row) => [row.day, row]));
@@ -37,7 +37,7 @@ const densify = (daily: readonly UsageDay[], window: UsageWindow): UsageDay[] =>
 };
 
 /**
- * Stacked token composition per day — four mutually exclusive series.
+ * Stacked token composition per day, four mutually exclusive series.
  *
  * Cached input is a *subset* of input and reasoning a subset of output, so the
  * stack subtracts rather than adds them; charting the raw four would double
@@ -94,7 +94,7 @@ export function TokensPerDayChart({
           axis: { line: false, ticks: { format: (v) => formatTokens(Number(v)) } },
         },
       },
-      // The legend is HTML in the card header — the built-in one spreads its
+      // The legend is HTML in the card header, since the built-in one spreads its
       // items across the full chart width (itemWidth = width / columns).
       color: {
         domain: ["Input", "Cached", "Output", "Reasoning"],
@@ -115,7 +115,7 @@ export function TokensPerDayChart({
   );
 }
 
-/** Single-series line — messages per day. No legend; the card title names it. */
+/** Single-series line, messages per day. No legend; the card title names it. */
 export function MessagesPerDayChart({
   daily,
   window,
@@ -157,7 +157,7 @@ export function MessagesPerDayChart({
 const MAX_MODEL_BARS = 8;
 
 /**
- * Horizontal bars, total tokens by model. Magnitude comparison, so one hue —
+ * Horizontal bars, total tokens by model. Magnitude comparison, so one hue;
  * identity lives in the row label, not in color. The tail beyond the top
  * eight folds into "Other"; the table next to it stays complete.
  */
@@ -204,7 +204,7 @@ export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel
 /**
  * A bare trend line for a KPI tile: no axes, grid, tooltip or focus ring.
  *
- * Decorative by design — the tile's value and delta carry the meaning, so the
+ * Decorative by design, since the tile's value and delta carry the meaning, so the
  * mark is hidden from assistive tech rather than given a label that would
  * repeat them. Below two points there is no trend to draw, so it renders
  * nothing rather than a single misleading dot.

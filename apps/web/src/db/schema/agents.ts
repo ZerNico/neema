@@ -12,9 +12,11 @@ import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
 
-// A saved chat configuration — instructions, a preferred model, tool defaults
-// and attached collections. Agents run on the ordinary generation path: what
-// is stored here is a set of *preferences*, never permissions.
+/**
+ * A saved chat configuration: instructions, a preferred model, tool defaults
+ * and attached collections. Agents run on the ordinary generation path: what
+ * is stored here is a set of *preferences*, never permissions.
+ */
 
 export const agents = pgTable(
   "agents",
@@ -47,8 +49,10 @@ export const agents = pgTable(
   (t) => [index("agents_user_id_idx").on(t.userId)],
 );
 
-// Attached collections. Sharing the agent does NOT share these: a recipient
-// needs their own read access to each collection, checked separately.
+/**
+ * Attached collections. Sharing the agent does NOT share these: a recipient
+ * needs their own read access to each collection, checked separately.
+ */
 export const agentCollections = pgTable(
   "agent_collections",
   {
@@ -112,8 +116,10 @@ export type ResolvedAgentConfig = {
   planEnabled: boolean;
 };
 
-// Fixed live association. No row means plain chat; a null FK is a deletion
-// tombstone that blocks new attempts without hiding historical messages.
+/**
+ * Fixed live association. No row means plain chat; a null FK is a deletion
+ * tombstone that blocks new attempts without hiding historical messages.
+ */
 export const conversationAgents = pgTable("conversation_agents", {
   conversationId: text("conversation_id")
     .primaryKey()
@@ -191,7 +197,7 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    * The effective union of agent dependencies and standalone inputs, in order. Kept beside the resolved
    * document manifest because an empty or fully-pending collection resolves to
    * no version rows at all, and "nothing selected" must not be confused with
-   * "a selection that happens to be empty" — authorization checks the
+   * "a selection that happens to be empty", since authorization checks the
    * collections themselves.
    */
   collectionIds: jsonb("collection_ids").$type<string[]>().notNull().default([]),

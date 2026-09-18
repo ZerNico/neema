@@ -1,9 +1,11 @@
 import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { JsonValue } from "./providers.ts";
 
-// Instance-wide OAuth sign-in providers, managed by admins. The primary key is
-// the id Better Auth registers the provider under, so it is also the last
-// segment of the callback URL the admin pastes into the provider's console.
+/**
+ * Instance-wide OAuth sign-in providers, managed by admins. The primary key is
+ * the id Better Auth registers the provider under, so it is also the last
+ * segment of the callback URL the admin pastes into the provider's console.
+ */
 
 export const oauthProviders = pgTable("oauth_providers", {
   id: text().primaryKey(),

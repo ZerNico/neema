@@ -706,7 +706,7 @@ describe("MessageBubble actions", () => {
     expect(onBranch).toHaveBeenCalledOnce();
   });
 
-  it("keeps branching off user messages — only an answer can be forked", () => {
+  it("keeps branching off user messages, since only an answer can be forked", () => {
     renderPlain({ role: "user", content: "hi there", onBranch: vi.fn() });
     expect(screen.queryByRole("button", { name: "Branch off" })).toBeNull();
   });
@@ -965,7 +965,7 @@ describe("MessageBubble actions", () => {
 
     expect(screen.getByText("Shortening earlier messages…")).toBeInTheDocument();
     expect(screen.queryByText("Thinking…")).toBeNull();
-    // Nothing to expand yet — a dead button would just be noise.
+    // Nothing to expand yet. A dead button would just be noise.
     expect(screen.queryByRole("button", { name: /Summarizing/ })).toBeNull();
   });
 
@@ -1245,7 +1245,7 @@ describe("MessageBubble actions", () => {
         <DetailPanelRail />
       </DetailPanelProvider>,
     );
-    // Cited own, read own and cited inherited — not the two uncited hits. The
+    // Cited own, read own and cited inherited, not the two uncited hits. The
     // tool row counts the same way: two of its five hits made the list.
     fireEvent.click(screen.getByRole("button", { name: "Searched the web · 2 sources" }));
     fireEvent.click(screen.getByRole("button", { name: "View all sources" }));

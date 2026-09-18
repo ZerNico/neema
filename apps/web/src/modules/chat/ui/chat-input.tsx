@@ -150,15 +150,15 @@ export const ChatInput = forwardRef<
       ? "Sending after uploads finish"
       : submitLabel;
   // Everything the "+" menu can offer besides attaching files. Three things key
-  // off this — the trigger's label, whether it is enabled at all, and the menu
-  // width — and they drifted apart when Skills was added to the menu without
-  // being added to any of them, so they read it from one place now.
+  // off this: the trigger's label, whether it's enabled, and the menu width.
+  // They drifted apart when Skills was added to the menu without being added
+  // to any of them, so they read it from one place now.
   const hasTools = !!context || !!skills || !!onResearchEnabledChange || researchEnabled;
   const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
   // "#" offers the same collections the Knowledge popup does, minus the ones
-  // already on this message and the agent's own — those are not the user's to
-  // add or remove. Selecting one commits immediately, so it passes the full
-  // list plus the single addition, exactly as the popup's Add button does.
+  // already on this message and the agent's own (not the user's to add or
+  // remove). Selecting one commits immediately, passing the full list plus
+  // the single addition, exactly as the popup's Add button does.
   const knowledge = useQuery({ ...knowledgeCollectionsQuery, enabled: !!context });
   const mentionableCollections = useMemo(() => {
     if (!context || controlsDisabled) return undefined;
@@ -220,7 +220,7 @@ export const ChatInput = forwardRef<
   const warningFor = (item: AttachmentUpload): string | null => {
     if (item.status === "error") return null;
     if (item.kind === "image" && selectedModel && !selectedModel.capabilities.vision) {
-      return `${selectedModel.displayName} cannot read images — pick another model or remove this file.`;
+      return `${selectedModel.displayName} cannot read images, so pick another model or remove this file.`;
     }
     if (
       item.kind === "pdf" &&
@@ -228,7 +228,7 @@ export const ChatInput = forwardRef<
       !selectedModel.capabilities.files &&
       !parsingUsable
     ) {
-      return `${selectedModel.displayName} cannot read PDFs and document parsing is disabled — ask an admin to enable it or pick another model.`;
+      return `${selectedModel.displayName} cannot read PDFs and document parsing is disabled. Ask an admin to enable it or pick another model.`;
     }
     return null;
   };
@@ -402,7 +402,7 @@ export const ChatInput = forwardRef<
         onValueChange={onValueChange}
         onSubmit={submit}
         onCancel={onCancel}
-        placeholder={noModels ? "No models configured — ask an admin" : placeholder}
+        placeholder={noModels ? "No models configured, ask an admin" : placeholder}
         {...(textareaLabel ? { ariaLabel: textareaLabel } : {})}
         autoFocus={autoFocus}
         disabled={noModels || textareaDisabled}

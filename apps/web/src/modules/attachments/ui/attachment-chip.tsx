@@ -21,8 +21,10 @@ export interface AttachmentChipItem {
 
 const KIND_ICON = { pdf: Pdf01Icon, text: File01Icon, image: File01Icon } as const;
 
-// Shared by the composer (removable, live upload state) and sent messages
-// (read-only, linking to the authenticated bytes route).
+/**
+ * Shared by the composer (removable, live upload state) and sent messages
+ * (read-only, linking to the authenticated bytes route).
+ */
 export function AttachmentChip({
   item,
   warning,
@@ -134,7 +136,7 @@ export function AttachmentChip({
   return (
     <>
       <div className={shell} title={problem ?? item.fileName} aria-busy={uploading || undefined}>
-        {/* Always the same wrapper — swapping it in only once a preview URL
+        {/* Always the same wrapper, since swapping it in only once a preview URL
             exists would recreate the chip's DOM mid-upload. */}
         <button
           type="button"
@@ -166,7 +168,7 @@ export function AttachmentChip({
   );
 }
 
-// Wrapper the composer and the sent-message bubble share.
+/** Wrapper the composer and the sent-message bubble share. */
 export function AttachmentChipRow({
   children,
   className,

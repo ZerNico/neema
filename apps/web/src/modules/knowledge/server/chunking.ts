@@ -12,7 +12,7 @@ export const CHUNKER_REVISION = 2;
 /**
  * Identity of the extraction pipeline that produced a version's text and chunk
  * boundaries. Recorded on publication so an owner can tell which documents
- * predate a parser or chunker change — the content is immutable, so improving
+ * predate a parser or chunker change. The content is immutable, so improving
  * the pipeline means building a *new* version, never rewriting an old one.
  *
  * Notes carry their own text, so only the chunker is part of their identity.

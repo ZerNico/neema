@@ -239,13 +239,11 @@ describe("research composer", () => {
             onSearchEnabledChange={vi.fn()}
             researchEnabled
             onResearchEnabledChange={onChange}
-            attachments={
-              {
-                items: [],
-                isFull: false,
-                queued: reason === "queued" && blocked,
-              } as unknown as AttachmentUploads
-            }
+            attachments={Object.assign({} as AttachmentUploads, {
+              items: [],
+              isFull: false,
+              queued: reason === "queued" && blocked,
+            })}
           />
         </QueryClientProvider>
       );
@@ -263,7 +261,11 @@ describe("research composer", () => {
 
   it("keeps the submitted research offer fixed while attachments finish uploading", async () => {
     const onChange = vi.fn();
-    const attachments = { items: [], isFull: false, queued: true } as unknown as AttachmentUploads;
+    const attachments = Object.assign({} as AttachmentUploads, {
+      items: [],
+      isFull: false,
+      queued: true,
+    });
     render(
       <QueryClientProvider client={client()}>
         <ChatInput
@@ -293,11 +295,11 @@ describe("research composer", () => {
     "keeps research available with no uploads or a full attachment list (full=%s)",
     async (full) => {
       const onChange = vi.fn();
-      const attachments = {
+      const attachments = Object.assign({} as AttachmentUploads, {
         items: [],
         isFull: true,
         queued: false,
-      } as unknown as AttachmentUploads;
+      });
       render(
         <QueryClientProvider client={client()}>
           <ChatInput
