@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { link, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // Errors marked safe are user-actionable and carry no connection secrets.
@@ -33,22 +33,18 @@ export async function loadInstance(root, create = false) {
       authSecret: randomBytes(32).toString("hex"),
       providerSecret: randomBytes(32).toString("base64"),
     };
-    const temporary = join(paths.directory, `instance-${randomBytes(12).toString("hex")}.tmp`);
-    await writeFile(temporary, JSON.stringify(config, null, 2), { flag: "wx", mode: 0o600 });
     try {
-      // Publish a complete file without replacing a concurrent setup’s secrets.
-      await link(temporary, paths.config);
+      await writeFile(paths.config, JSON.stringify(config, null, 2), { flag: "wx", mode: 0o600 });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-    } finally {
-      await unlink(temporary);
     }
   }
   let config;
   try {
     config = JSON.parse(await readFile(paths.config, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT") throw new Error("Run pnpm dev:setup in this checkout first.", { cause: error });
+    if (error.code === "ENOENT")
+      throw new Error("Run pnpm dev:setup in this checkout first.", { cause: error });
     throw error;
   }
   if (
@@ -65,11 +61,13 @@ export async function loadInstance(root, create = false) {
   const snapshot = config.snapshot;
   return {
     ...paths,
-    ...(snapshot ? {
-      database: `${paths.database}_${snapshot}`,
-      blobs: join(paths.directory, "snapshots", snapshot, "storage"),
-      profile: join(paths.directory, "snapshots", snapshot, "desktop"),
-    } : {}),
+    ...(snapshot
+      ? {
+          database: `${paths.database}_${snapshot}`,
+          blobs: join(paths.directory, "snapshots", snapshot, "storage"),
+          profile: join(paths.directory, "snapshots", snapshot, "desktop"),
+        }
+      : {}),
     snapshot,
     databasePassword: config.databasePassword,
     authSecret: config.authSecret,
@@ -77,16 +75,24 @@ export async function loadInstance(root, create = false) {
   };
 }
 
-// One rename selects the database, blobs, profile and keys together. Old generations remain intact.
+// One rename selects the database, blobs, profile and keys together.
 export async function activateSnapshot(instance, snapshot, providerSecret) {
   if (!/^[a-f0-9]{16}$/.test(snapshot) || !/^[A-Za-z0-9+/]{43}=$/.test(providerSecret)) {
     throw new Error("Invalid snapshot configuration.");
   }
   const config = JSON.parse(await readFile(instance.config, "utf8"));
   const temporary = join(instance.directory, `activate-${randomBytes(12).toString("hex")}.tmp`);
-  await writeFile(temporary, JSON.stringify({ ...config, snapshot, providerSecret }, null, 2), { flag: "wx", mode: 0o600 });
-  try { await rename(temporary, instance.config); }
-  finally { await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; }); }
+  await writeFile(temporary, JSON.stringify({ ...config, snapshot, providerSecret }, null, 2), {
+    flag: "wx",
+    mode: 0o600,
+  });
+  try {
+    await rename(temporary, instance.config);
+  } finally {
+    await unlink(temporary).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
 }
 
 export function instanceEnv(instance, inherited = process.env) {

@@ -6,6 +6,11 @@
       "command": "pnpm install --frozen-lockfile && pnpm dev:setup",
       "icon": "configure",
       "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Seed development data",
+      "command": "pnpm dev:setup --seed",
+      "icon": "configure"
     }
   ]
 }

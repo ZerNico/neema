@@ -1,7 +1,9 @@
 # Separate from the personal instance in docker-compose.yml.
 services:
   postgres:
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    extends:
+      file: ./postgres-base.compose.yml
+      service: postgres-base
     environment:
       POSTGRES_USER: chat_dev_admin
       POSTGRES_PASSWORD: local-development-only

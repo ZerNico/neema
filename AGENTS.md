@@ -83,7 +83,7 @@ skipped one on purpose.
   clarification, branch. Retry and edit re-resolve the agent, collections and
   skills inside the attempt transaction, before any reset.
 - **Tool offer**: the composer's search and research toggles only decide what the
-  attempt is *offered*; the model chooses. A `deep_research` call runs an
+  attempt is _offered_; the model chooses. A `deep_research` call runs an
   investigation that sees a brief, never the conversation.
 - **Display path**: the live SSE stream, the conversation-detail loader on reload,
   and a branch. All three project the same rows; a leak fixed in one is still open
@@ -102,12 +102,13 @@ skipped one on purpose.
 
 - `pnpm dev:setup` provisions checkout-isolated Postgres state, then `pnpm dev`
   starts the web app through Portless and its isolated desktop shell together
-  (`dev:web`, `dev:desktop` for one). `dev:info` prints paths and the last URL. Server
-  module edits hot-swap the Effect runtime; no restart. The shell has no HMR:
-  `dev:desktop` rebuilds and relaunches Electron on every change, and logs its
-  build stamp (short sha and time) on start, so "is it running my change" has
-  an answer in the terminal. The stamp is deliberately not in the UI. Sign in
-  at `/login`; the first registered user is admin.
+  (`dev:web`, `dev:desktop` for one). Ctrl-C stops the terminal-owned runner;
+  `dev:info` prints paths and the last URL, while `dev:destroy` retires only this
+  checkout’s resources. Server module edits hot-swap the Effect runtime; no restart.
+  The shell has no HMR: `dev:desktop` rebuilds and relaunches Electron on every
+  change, and logs its build stamp (short sha and time) on start, so "is it running
+  my change" has an answer in the terminal. The stamp is deliberately not in the UI.
+  Sign in at `/login`; the first registered user is admin.
 - Smallest proof first: the one test file you touched, with the right `--project`.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,

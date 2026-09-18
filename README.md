@@ -28,10 +28,14 @@ agent. For an unprivileged proxy, use
 Open the printed URL and register: the first account is the admin. Open the
 user menu (bottom-left) → **Admin** → add a provider and pick models.
 Development starts empty by default. To copy your personal instance, stop the dev
-app with `pnpm dev:stop`, then run `pnpm dev:import` and confirm. It reads
+app with Ctrl-C, then run `pnpm dev:import` and confirm. In a T3 Code worktree,
+choose **Seed development data** from its scripts menu to run the same safe staged
+copy without a prompt. It imports real provider keys, so generations can incur
+costs. The automatic worktree hook stays empty by default. It reads
 `apps/web/.env` (falling back to the primary checkout in a linked worktree), copies
 the database and blobs, and reuses the provider encryption key. The source stays
-unchanged; the previous dev state is retained. Imported provider keys are real, so
+unchanged; a failed import keeps the current dev state, and a successful one
+replaces it and removes the copy it superseded. Imported provider keys are real, so
 new generations can incur charges. Sign in with an existing email/password;
 OAuth is disabled in the copy, and OAuth-only snapshots are refused.
 
@@ -46,6 +50,11 @@ secrets and Electron profile. The shared development container is independent of
 
 `pnpm dev:setup` is safe to repeat and applies pending migrations. `pnpm dev:info`
 prints the database, storage paths and last launched URL, without credentials.
+Retire a checkout with `pnpm dev:destroy` **before removing its worktree**: it drops
+only this checkout’s databases and role, then removes its state. If that order was
+missed, `pnpm dev:destroy --orphans` reports tagged databases whose recorded checkout
+path is gone and asks before dropping them. Untagged legacy databases are reported,
+never deleted. The shared container and every other checkout are untouched.
 Generated state stays in `.data/dev/`; do not copy it between checkouts or delete
 its secrets while retaining its database. The existing `apps/web/.env` is untouched.
 Root `db:migrate`, `db:push` and `db:studio` target this isolated development database.
@@ -107,10 +116,12 @@ the ways to hurt yourself, what to check before finishing, and how to verify.
 ## Commands
 
 ```sh
-pnpm dev:setup      # provision this checkout and apply its migrations
-pnpm dev:info       # show isolated paths, runtime status and last launched URL
-pnpm dev:stop       # stop this checkout’s registered web and desktop runners
-pnpm dev:import     # explicitly import the personal instance into isolated dev state
+pnpm dev:setup        # provision this checkout and apply its migrations
+pnpm dev:setup:seeded # provision, then import normal development data without a prompt
+pnpm dev:info         # show isolated paths and the last launched URL
+pnpm dev:import       # explicitly import the personal instance into isolated dev state
+pnpm dev:destroy      # drop this checkout’s databases, role and isolated state
+pnpm dev:destroy --orphans # report and optionally clean up removed tagged worktrees
 pnpm dev            # Portless web app and desktop shell, rebuilt and relaunched on change
 pnpm dev:web        # the web app alone
 pnpm dev:desktop    # the shell alone, using this checkout’s last web origin

@@ -6,7 +6,7 @@ import { constants, createReadStream } from "node:fs";
 import { mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { activateSnapshot, instanceEnv, loadInstance, safeError } from "./dev-state.mjs";
+import { activateSnapshot, instanceEnv, instancePaths, loadInstance, safeError } from "./dev-state.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(join(root, "apps/web/package.json"));
@@ -62,6 +62,60 @@ export async function checkMigrations(client, migrations = join(root, "apps/web/
 export async function assertIdle(admin, instance) {
   const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [instance.database]);
   if (rows[0].n !== 0) throw new Error("The destination database has active connections. Stop its server and database tools first.");
+}
+
+const snapshotPattern = (instance) => new RegExp(`^chat_dev_${instance.id}_[a-f0-9]{16}$`);
+
+// A database outlives the checkout that made it, and the name only carries a one-way hash.
+// Recording the path lets a later sweep name what it is about to drop; Postgres does the quoting.
+export async function tagCheckout(admin, database, checkoutRoot) {
+  const { rows } = await admin.query("SELECT format('COMMENT ON DATABASE %I IS %L', $1::text, $2::text) AS sql", [database, checkoutRoot]);
+  await admin.query(rows[0].sql);
+}
+
+// Grouped by instance id so an orphan is retired as one unit: base, snapshots and role together.
+export async function instanceGroups(admin) {
+  const { rows } = await admin.query(`SELECT datname, shobj_description(oid, 'pg_database') AS checkout
+    FROM pg_database WHERE datname ~ '^chat_dev_[0-9a-f]{16}(_[0-9a-f]{16})?$' ORDER BY datname`);
+  const groups = new Map();
+  for (const row of rows) {
+    const id = row.datname.slice(9, 25);
+    const group = groups.get(id) ?? { id, databases: [], checkout: null };
+    group.databases.push(row.datname);
+    group.checkout ??= row.checkout;
+    groups.set(id, group);
+  }
+  return [...groups.values()];
+}
+
+export async function managedDatabases(admin, instance) {
+  const base = instancePaths(instance.root).database;
+  const { rows } = await admin.query("SELECT datname FROM pg_database WHERE datname = $1 OR datname LIKE $2", [base, `${base}_%`]);
+  return rows.map(({ datname }) => datname).filter((database) => database === base || snapshotPattern(instance).test(database));
+}
+
+export async function pruneInactiveSnapshots(admin, instance) {
+  const current = await loadInstance(instance.root);
+  const base = instancePaths(current.root);
+  const databases = (await managedDatabases(admin, current)).filter((database) => database !== current.database);
+  for (const database of databases) {
+    await assertIdle(admin, { ...current, database });
+    await admin.query(`DROP DATABASE ${database}`);
+  }
+  const snapshots = join(base.directory, "snapshots");
+  const directories = await readdir(snapshots, { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  for (const entry of directories) {
+    if (!entry.isDirectory() || !/^[a-f0-9]{16}$/.test(entry.name) || entry.name === current.snapshot) continue;
+    await rm(join(snapshots, entry.name), { recursive: true, force: true });
+  }
+  if (current.snapshot) {
+    await rm(base.blobs, { recursive: true, force: true });
+    await rm(base.profile, { recursive: true, force: true });
+  }
+  return databases;
 }
 
 export async function sanitize(client) {
@@ -175,6 +229,8 @@ export async function importSnapshot(instance, source, run, adminUrl = "postgres
     await admin.query(`CREATE DATABASE ${database} OWNER chat_dev_${instance.id}`);
     created = true;
     await admin.query(`REVOKE ALL ON DATABASE ${database} FROM PUBLIC`);
+    // Before restore: pg_restore runs --no-comments, so the source cannot overwrite this.
+    await tagCheckout(admin, database, instance.root);
     const extensionUrl = new URL(adminUrl);
     extensionUrl.pathname = `/${database}`;
     const extensionClient = await connect(extensionUrl.toString());
@@ -194,11 +250,17 @@ export async function importSnapshot(instance, source, run, adminUrl = "postgres
     await stagedClient.end(); stagedClient = null;
     await rm(archive);
     await assertIdle(admin, instance);
-    // All root entrypoints hold the same lifecycle gate while this manifest is replaced.
     await activateSnapshot(instance, snapshot, source.providerSecret);
     activated = true;
-    console.log(`Imported snapshot with ${count} blobs. Previous state retained.\nRun pnpm dev; sign in with your existing email/password. OAuth sign-in is disabled in the copy.`);
-    return await loadInstance(instance.root);
+    const current = await loadInstance(instance.root);
+    try {
+      const stale = await pruneInactiveSnapshots(admin, current);
+      if (stale.length > 0) console.log(`Removed ${stale.length} replaced development snapshot${stale.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      console.warn(`Imported state is active, but stale snapshots remain: ${error.message}`);
+    }
+    console.log(`Imported snapshot with ${count} blobs.\nRun pnpm dev; sign in with your existing email/password. OAuth sign-in is disabled in the copy.`);
+    return current;
   } finally {
     await sourceClient?.end();
     await stagedClient?.end();
