@@ -55,7 +55,7 @@ vi.mock("~/modules/attachments/server/functions.ts", () => ({
 const request = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
 const empty: FolderStatus = { folders: [], sandbox: { kind: "ready" } };
 const attached: FolderStatus = {
-  folders: [{ name: "site", alive: true }],
+  folders: [{ name: "site", path: "/home/user/site", alive: true }],
   sandbox: { kind: "ready" },
 };
 const reply = (value: unknown): BridgeReply => ({ ok: true, value });
@@ -160,9 +160,10 @@ it("blocks Work while IPC is unresolved, offers retry on failure, then permits r
 
 it("blocks submission during a picker and uses its result for the next Work attempt", async () => {
   const chosen = deferred<BridgeReply>();
+  const machine = { id: "executor", machineId: "machine-a", machineName: "Test Mac" };
   request.mockImplementation((tag) => {
     if (tag === "chooseFolder") return chosen.promise;
-    if (tag === "executionSession") return Promise.resolve(reply({ id: "executor" }));
+    if (tag === "executionSession") return Promise.resolve(reply(machine));
     return Promise.resolve(reply(empty));
   });
   const { wrapper } = setup();
@@ -198,9 +199,11 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await waitFor(() =>
     expect(sent).toHaveBeenCalledWith({
       fromDesktop: true,
-      desktopFolders: ["site"],
+      desktopFolders: [{ name: "site", path: "/home/user/site" }],
       desktopCommands: true,
       desktopExecutorId: "executor",
+      desktopMachineId: "machine-a",
+      desktopMachineName: "Test Mac",
     }),
   );
   await userEvent.click(screen.getByRole("button", { name: "site" }));
@@ -212,6 +215,8 @@ it("blocks submission during a picker and uses its result for the next Work atte
       fromDesktop: true,
       desktopCommands: false,
       desktopExecutorId: "executor",
+      desktopMachineId: "machine-a",
+      desktopMachineName: "Test Mac",
     }),
   );
 });
@@ -775,10 +780,14 @@ it("rejects unresolved Work attempts before session IPC, while ready-empty remai
   expect(requireWorkFolder(false, result.current)).toBeNull();
   await act(async () => pending.resolve(reply(empty)));
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
-  request.mockResolvedValue(reply({ id: "executor" }));
+  request.mockResolvedValue(
+    reply({ id: "executor", machineId: "machine-a", machineName: "Test Mac" }),
+  );
   expect(await desktopAttemptFields(requireWorkFolder(true, result.current))).toEqual({
     fromDesktop: true,
     desktopCommands: false,
     desktopExecutorId: "executor",
+    desktopMachineId: "machine-a",
+    desktopMachineName: "Test Mac",
   });
 });

@@ -3229,7 +3229,7 @@ for (const presented of [true, false]) {
 }
 
 describe("local tools on the user's machine", () => {
-  const folder = "acme-site";
+  const folder = { name: "acme-site", path: "/home/test/acme-site" };
   const workConversation = (userId: string) =>
     Effect.gen(function* () {
       const conversation = yield* (yield* ChatRepo).createConversation({
@@ -3347,7 +3347,7 @@ describe("local tools on the user's machine", () => {
               researchEnabled: false,
               fromDesktop: true,
               desktopExecutorId: "answer-session",
-              desktopFolders: ["answer-folder"],
+              desktopFolders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
               desktopCommands: false,
             });
             yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
@@ -3371,7 +3371,7 @@ describe("local tools on the user's machine", () => {
               },
               fromDesktop: true,
               desktopExecutorId: "edit-answer-session",
-              desktopFolders: ["edited-folder"],
+              desktopFolders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
               desktopCommands: true,
             });
             yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
@@ -3469,7 +3469,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "current-edit-session",
-            desktopFolders: ["current-folder"],
+            desktopFolders: [{ name: "current-folder", path: "/home/test/current-folder" }],
             desktopCommands: true,
           }),
         ),
@@ -3527,8 +3527,9 @@ describe("local tools on the user's machine", () => {
         // the model read the file without the server ever touching it.
         expect(prompts).toHaveLength(2);
         expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
-        // The folder's name reaches the prompt; its path never existed here.
-        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder);
+        // The folder's real path reaches the prompt as the model's address;
+        // only the name outlives the attempt, in the generation config.
+        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder.path);
 
         const call = result.detail.toolCalls.at(-1)!;
         expect(call.toolName).toBe("read_local_file");
@@ -3626,7 +3627,7 @@ describe("local tools on the user's machine", () => {
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = (input) =>
-      authoringTool(input, "run_command", { command: "pnpm test", folder });
+      authoringTool(input, "run_command", { command: "pnpm test" });
     try {
       const sent = await runtime.runPromise(send(seed, true));
       const result = await runtime.runPromise(
@@ -3664,7 +3665,7 @@ describe("local tools on the user's machine", () => {
 
       expect(result.waited).toEqual({
         name: "run_command",
-        args: { command: "pnpm test", folder },
+        args: { command: "pnpm test" },
       });
       expect(result.stopped).toBe(true);
       expect(result.late).toBe(false);
@@ -3697,7 +3698,7 @@ describe("local tools on the user's machine", () => {
           authoringFinish(),
         );
       asked.add(key);
-      return authoringTool(input, "write_local_file", { path: `${folder}/note.md`, text: "hi" });
+      return authoringTool(input, "write_local_file", { path: `${folder.path}/note.md`, text: "hi" });
     };
     try {
       const outcome = await runtime.runPromise(
@@ -3925,7 +3926,7 @@ describe("local tools on the user's machine", () => {
             mode: "work",
             fromDesktop: true,
             desktopExecutorId: "ignored-session",
-            desktopFolders: ["ignored-folder"],
+            desktopFolders: [{ name: "ignored-folder", path: "/home/test/ignored-folder" }],
             desktopCommands: true,
           }),
         ),

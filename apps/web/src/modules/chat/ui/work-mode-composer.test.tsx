@@ -156,7 +156,7 @@ describe("work mode", () => {
         refresh: () => {},
         setUpSandbox: () => {},
         choose: () =>
-          setStatus({ folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } }),
+          setStatus({ folders: [{ name: "site", path: "/home/user/site", alive: true }], sandbox: { kind: "ready" } }),
         detach: () => setStatus(NONE),
       };
       return (
@@ -182,7 +182,7 @@ describe("work mode", () => {
     await userEvent.click(sendButton());
     expect(sent).toHaveBeenLastCalledWith({
       fromDesktop: true,
-      desktopFolders: ["site"],
+      desktopFolders: [{ name: "site", path: "/home/user/site" }],
       desktopCommands: true,
     });
     await userEvent.click(screen.getByRole("button", { name: "site" }));
@@ -218,7 +218,7 @@ describe("work mode", () => {
 
   it("sends once a folder is attached", async () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
+    bridge.status = { folders: [{ name: "site", path: "/home/user/site", alive: true }], sandbox: { kind: "ready" } };
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<NewChat onSend={onSend} />);
     await userEvent.click(screen.getByRole("button", { name: "Work with a folder" }));
@@ -243,7 +243,7 @@ describe("work mode", () => {
 
   it("asks a work chat on a new machine to pick its folder again, without blocking", async () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: false }], sandbox: { kind: "ready" } };
+    bridge.status = { folders: [{ name: "site", path: "/home/user/site", alive: false }], sandbox: { kind: "ready" } };
     render(<ExistingChat mode="work" onSend={vi.fn().mockResolvedValue(undefined)} />);
     // The lost folder is still listed, marked, and can be chosen again.
     expect(screen.getByRole("button", { name: /site/ })).toHaveAttribute(
@@ -256,7 +256,7 @@ describe("work mode", () => {
 
   it("never shows a folder on a plain chat, even in the desktop app", () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
+    bridge.status = { folders: [{ name: "site", path: "/home/user/site", alive: true }], sandbox: { kind: "ready" } };
     render(<ExistingChat mode="chat" onSend={vi.fn()} />);
     expect(screen.queryByText("site")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

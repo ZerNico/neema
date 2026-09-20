@@ -8,6 +8,7 @@ import {
   DirectoryListing,
   EditReceipt,
   FileContents,
+  FileInfo,
   FolderStatus,
   FoundPaths,
   LIMITS,
@@ -26,9 +27,9 @@ const deletedPathsMax = LIMITS.deletedPaths;
  * Two rules hold for every procedure here and are enforced on the desktop side,
  * never assumed from the caller:
  *
- * - A path starts with the name of an attached folder (`site/src/index.ts`),
- *   or is `.` for the list of folders. An absolute path, a `..` escape or a
- *   symlink leading outside resolves to `outside-folder`. The site names a
+ * - A path is absolute and resolves, through realpath, inside the chat's
+ *   workspace or an attached folder. Anything else, a `..` escape or a
+ *   symlink leading outside, resolves to `outside-folder`. The site names a
  *   path; the desktop decides whether it is reachable.
  * - The conversation id selects which folders apply, because folders are
  *   attached per conversation and the mapping lives only on this machine.
@@ -71,7 +72,19 @@ export const DesktopRpcs = RpcGroup.make(
     success: FolderStatus,
   }),
 
-  Rpc.make("executionSession", { success: Schema.Struct({ id: Schema.String }) }),
+  /**
+   * The run-scoped executor id plus this machine's stable identity. The id
+   * changes every launch; `machineId` survives restarts but not a reinstall,
+   * which is exactly what the "this chat last worked elsewhere" banner keys
+   * on. Names are display text only, never an address.
+   */
+  Rpc.make("executionSession", {
+    success: Schema.Struct({
+      id: Schema.String,
+      machineId: Schema.String,
+      machineName: Schema.String,
+    }),
+  }),
   Rpc.make("cancelCall", {
     payload: { callId: Schema.String },
     success: Schema.Boolean,
@@ -102,6 +115,17 @@ export const DesktopRpcs = RpcGroup.make(
       callId: Schema.String,
     },
     success: FileContents,
+    error: DesktopError,
+  }),
+
+  /** Size alone, for a preview that needs the dialog's facts without the bytes. */
+  Rpc.make("fileInfo", {
+    payload: {
+      conversationId: Schema.String,
+      path: Schema.String,
+      callId: Schema.String,
+    },
+    success: FileInfo,
     error: DesktopError,
   }),
 
@@ -204,9 +228,12 @@ export const DesktopRpcs = RpcGroup.make(
       conversationId: Schema.String,
       /** Correlates the sandbox violation record with the tool call. */
       callId: Schema.String,
+      /**
+       * Run in the chat's workspace. Paths inside the command are absolute;
+       * the sandbox allows reads and writes inside the workspace and every
+       * attached folder, so `cd` and `cp` between them work.
+       */
       command: Schema.String,
-      /** Which attached folder is the working directory. */
-      folder: Schema.String,
       /**
        * How long the desktop lets the command run. The page derives it from
        * the server's deadline for the call, so a command never outlives the
@@ -244,6 +271,86 @@ export const DesktopRpcs = RpcGroup.make(
 
   /** Windows only: the one-time elevated install. Re-checks and returns the new state. */
   Rpc.make("setUpSandbox", { success: SandboxAvailability, error: DesktopError }),
+
+  /**
+   * The remaining procedures are user-driven, not model calls: no `callId`,
+   * no replay ledger, no approval. The composer's own confirmation (a chip
+   * the user can remove) is the consent, and the workspace is the app's own
+   * container, so nothing here crosses a trust boundary the picker would
+   * have added.
+   */
+
+  /**
+   * Writes a file the user pasted into the chat's workspace, by sanitized
+   * basename at its root. Binary (base64, capped at `LIMITS.importBytes`
+   * decoded), any type: only some are readable back by the model, and the
+   * rest still matter to commands. Drops with a local path use
+   * `importFileFromPath`, which moves no bytes over the bridge.
+   */
+  Rpc.make("importFile", {
+    payload: {
+      conversationId: Schema.String,
+      fileName: Schema.String,
+      base64: Schema.String,
+    },
+    success: WriteReceipt,
+    error: DesktopError,
+  }),
+
+  /**
+   * Copies a dropped file from where it already lives on this machine into
+   * the chat's workspace, capped at `LIMITS.importPathBytes`. The path comes
+   * from the drop event, which is the user's own consent; the copy is
+   * contained to the workspace root all the same.
+   */
+  Rpc.make("importFileFromPath", {
+    payload: {
+      conversationId: Schema.String,
+      fileName: Schema.String,
+      sourcePath: Schema.String,
+    },
+    success: WriteReceipt,
+    error: DesktopError,
+  }),
+
+  /** Removes a file `importFile` just placed, when its chip is removed. */
+  Rpc.make("discardImport", {
+    payload: { conversationId: Schema.String, name: Schema.String },
+    success: Schema.Void,
+    error: DesktopError,
+  }),
+
+  /**
+   * Copies the workspace of one conversation onto another: how a branch keeps
+   * its local files. Refuses a non-empty destination rather than merging into
+   * whatever the destination's lazy creation already holds.
+   */
+  Rpc.make("cloneWorkspace", {
+    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    success: Schema.Void,
+    error: DesktopError,
+  }),
+
+  /**
+   * Remembers the source conversation's folder grants under the destination
+   * too. Copy, not move: `rebindFolder` empties the source, which is the
+   * draft flow's contract and would be wrong for a branch.
+   */
+  Rpc.make("copyFolderGrants", {
+    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    success: FolderStatus,
+    error: DesktopError,
+  }),
+
+  /**
+   * Removes a conversation's workspace directory. Best-effort from the
+   * delete-conversation action; nothing on the server waits for it.
+   */
+  Rpc.make("discardWorkspace", {
+    payload: { conversationId: Schema.String },
+    success: Schema.Void,
+    error: DesktopError,
+  }),
 );
 
 export type DesktopRpcs = typeof DesktopRpcs;

@@ -2,8 +2,9 @@
 
 The Electron shell loads the deployed site and exposes an origin-checked,
 schema-derived bridge. The web application owns authentication; Electron owns
-folder grants, sandboxed local execution and native window controls. Absolute
-folder paths stay in the desktop profile, not in the server database.
+folder grants, sandboxed local execution and native window controls. Folder
+paths stay out of the server database; they live in the desktop profile and in
+attempt-scoped prompt and tool traffic only.
 
 The window uses `hiddenInset` on macOS and `hidden` with Window Controls Overlay
 on Windows/Linux, retaining standard controls rather than web replacements.
@@ -224,15 +225,29 @@ uploads settle. Draft text and skill chips stay live through that wait.
 
 `conversations.mode` is `chat | work`, fixed at creation and inherited by a
 branch, along with that chat's permission level. Work needs the desktop app,
-not a folder. Send, retry, edit and structured
+not a folder: every work conversation has an app-managed workspace that
+materializes on demand, so ready-empty means the workspace is there and empty,
+never that the chat is unusable. Send, retry, edit and structured
 answers all submit current desktop capabilities and executor identity. Work
 attempts without them are refused before rows are created or reset. Retry never
 revives an old attached-folder or command setting. Plain chat ignores local-tool
 capability fields. Browser Work history remains readable, with continuation
 actions disabled and server policy enforced independently.
 
-The server stores folder names per attempt (`desktop_folders`, an array),
-never paths. `folders.json` maps server origin plus conversation to local
+Each attempt is also stamped with the sending machine's id and display name
+(`desktop_machine_id` / `desktop_machine_name` on the generation config). The
+id is a per-install UUID the shell keeps in `machine.json`; a reinstall mints a
+new one, which is exactly the point: a chat whose latest attempt came from a
+machine this install does not know shows a dismissible banner naming it, with
+a take-over action that materializes this machine's workspace. Nothing is
+copied between machines, and the stamp is attempt metadata, never an address
+or a credential.
+
+The server persists folder names per attempt (`desktop_folders`, an array),
+never paths. The paths do cross it — the attempt's system hint and the tool
+traffic both carry them, the way file contents already do — but nothing is
+written with one, so a conversation opened on a second machine carries no
+stale addresses. `folders.json` maps server origin plus conversation to local
 grants: ids are minted by the server the shell is connected to, so two servers
 can issue the same one, and a grant on one must not open the folder to the
 other. Writes are serialized and replaced by an atomic rename, so overlapping
@@ -245,11 +260,63 @@ mount refetch or automatic retry. A failed first read opens the conversation wit
 an inline folder retry, not a route error or empty grants. A later refetch that
 fails keeps the last successful status, so a blip on focus does not look like a
 missing folder or block send. Ready-empty is valid: a new
-machine can continue Work without file tools until folders are attached there.
+machine materializes its own empty workspace and can continue Work at once,
+with user folders to re-attach if wanted.
 Folder loading and mutation state block new attempts without opening a second,
 animated warning inside the input. ChatView and NewChatView share that gate
 through `useWorkGate`; the composer is told `readOnly` rather than computing
 it again. Focus refresh does not remount the host.
+
+## The workspace
+
+Beside the granted folders, every work conversation has a workspace: a local
+directory the app owns, under `<userData>/workspaces/<origin-hash>/<id>/`,
+where the hash is of the server origin so two servers never share one. It is
+not a grant: the user never picked it, so it does not live in `folders.json`,
+the picker refuses the reserved name `workspace`, and the folder strip leaves
+it unlabeled: it is always present, so the strip shows only the folders the
+user chose. Its directory's existence is the whole
+record; there is no sidecar file. Creation is lazy (`ensure` inside the
+handlers that need it), which is what makes cross-device free: each machine
+gets its own empty workspace the first time it touches the chat, and nothing
+syncs. Files the user drops or pastes into the composer of a desktop work chat
+are copied there at add time, not at submit — the chip appears when the bytes
+land — and a send records their basenames on the attempt's generation config,
+which the transcript renders as chips above the question, like attachments,
+instead of as marker text in the message. The model learns about them from
+the tool surface it already has: find, list, read. In a browser, work chats
+keep the ordinary server-attachment path.
+
+The workspace is the always-present first root of the file-tool address
+space: `rootsFor` prepends it to the grant list, so the nine model tools and
+`run_command`'s write allowance reach it through the same containment rules as
+a granted folder, and a chat with no granted folder still has somewhere the
+model may read and write. It is also `run_command`'s working directory, which
+is why the sweep and the picker treat it as app-owned rather than shared.
+Imports themselves bypass that address space by
+design: they write into the app-owned directory directly and carry no call ID
+or approval because they are user actions, not model operations — like
+`chooseFolder`, they stay out of the replay ledger. The transport decides the
+cap. A paste has no path, so it ships as base64 over IPC and is capped at
+50 MB decoded; a drop inside the shell still knows where its File lives
+(`webUtils.getPathForFile`, exposed by the preload), so the shell copies it
+from there and the cap is 512 MB against an accidental drop, not against
+memory. The source is never contained: refusing to copy out of folders the
+chat cannot see is the whole point of an import, and the copy lands in the
+workspace root either way.
+
+Branching copies it. The branch flow awaits two RPCs before navigating —
+`copyFolderGrants` (the granted folders move over as copies, never moved off
+the source) and `cloneWorkspace` (a recursive copy that refuses to merge into
+a non-empty destination, and refuses outright above a 2 GB source). A failure
+opens the branch without its local files and says so, rather than not opening
+it. Drafts work the same way: a first send's files land in a `__draft__`
+workspace, and `rebindFolder` renames it onto the created conversation id in
+the same call that moves the grants, so the dispatch barrier needs no second
+wait. Deleting a conversation fires a best-effort `discardWorkspace`; a stale
+draft older than a week is swept at shell startup. There is deliberately no
+server-validity sweep: the shell cannot know which ids are dead without
+asking, and a wrong answer would delete someone's files.
 
 Loader preparation holds a query observer so unmounting the outgoing composer for
 route pending UI cannot cancel the read the destination still needs. It respects
@@ -258,35 +325,41 @@ cancel older reads and update only their original cache entry; draft rebinding
 invalidates both draft and destination state before releasing dispatch. Local
 queries are neither server-rendered nor persisted in the web backend.
 
-## Several folders, one file-tool address space
+## Several folders, one absolute address space
 
-A model file path begins with an attached folder's basename, such as
-`site/src/index.ts`; `list_folder "."` lists the folders. Duplicate basenames are
-refused at choose and at rebind. A lost folder can be replaced by name from
-Choose it again. `find_files` names a matching folder and the files inside it,
-not only files whose own names match. `find_files` and `search_files` share the
-same glob address space: a pattern that starts with an attached folder name is
-scoped to that folder. This is a virtual address space for file tools, not a
-shell mount layout.
-`run_command` separately names its working folder. The shell sees real filesystem
-paths relative to that cwd; `other-folder/file` does not automatically resolve to
-another attached folder. Attached roots are writable under the command's sandbox
-policy, but are not remapped into virtual shell paths.
+Every tool the model sees takes and returns real absolute POSIX paths, the
+way Cursor and Claude Code work. The system hint names each root with its
+path — the workspace first, then the attached folders — and
+`list_folder "."` lists the roots by those paths. Find and search return
+absolute paths, so a result can be fed straight back into any other tool,
+and `cp` between an attached folder and the workspace needs no second
+mechanism. Names survive for display alone: the strip's chips, the
+transcript's short `name/relative` receipts, and the reserved `workspace`
+label the picker refuses for a user folder. Duplicate basenames are refused
+at choose and at rebind so a receipt's owner is unambiguous; a lost folder
+can be replaced by name from Choose it again. `find_files` names a matching
+folder and the files inside it, not only files whose own names match.
 
-The two spaces contradict each other, so the system hint and the `run_command`
-description both spell out that a command leaves its folder's name out of its
-paths. Told only the file-tool rule, a model writes `cd site && python
-site/main.py`, which fails on both halves and costs two turns to learn.
+`run_command` takes no folder: the command starts in the chat's workspace,
+and the sandbox's write allowance covers the workspace plus every attached
+folder, so `cd` and `cp` across roots work inside one address space. Each
+command is one fresh sandboxed process; there is no persistent shell.
 
 ## Containment and command isolation
 
-File paths pass through `resolveAcross` and `resolveInFolder`. Absolute paths are
-refused, existing ancestors are inspected with `lstat`, and `realpath` establishes
-containment. A dangling symlink is not treated as an absent ordinary path: its
-resolution fails closed. Refusals name the path the caller supplied, never a
-host absolute. Only `ENOENT` allows walking to a parent. Moves check
-both ends. This does not claim protection against every concurrent filesystem
-replacement or hard-link alias.
+File paths pass through `resolveAmongRoots` and `resolveInFolder`. The
+requested string is normalized with `resolve()`, matched against each root
+textually, and proven contained with `realpath`; existing ancestors are
+inspected with `lstat`, and a dangling symlink is not treated as an absent
+ordinary path: its resolution fails closed. A root that the requested string
+never textually sat inside answers "not mine" and the next root is tried;
+when the string did sit inside a root and resolved outside anyway — a
+symlink escape or a `..` walk — that refusal is final, so an escape landing
+inside a neighbouring root still fails. Refusals name the path the caller
+supplied, never a host absolute the caller did not already know. Only
+`ENOENT` allows walking to a parent. Moves check both ends. This does not
+claim protection against every concurrent filesystem replacement or
+hard-link alias.
 
 Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
 Its manager is one per process with one proxy and one live policy, which is
@@ -301,7 +374,8 @@ and a list of toolchain locations (version managers, package stores, caches,
 git's identity) is re-allowed inside it, with the few credential files that
 sit in those regions denied again. The rest of the disk stays readable. Each
 call adds its attached folders to both the read and the write allow lists;
-they are the only writable places. A tool installed somewhere unusual fails
+they and the chat's workspace (picked up per call through `rootsFor`) are
+the only writable places. A tool installed somewhere unusual fails
 with a denial that names the path, which is preferred over a readable
 `~/.git-credentials`.
 

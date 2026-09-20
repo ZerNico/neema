@@ -6,6 +6,7 @@ import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
 import { useDesktop, useDesktopOutdated, type FolderState } from "~/modules/desktop/client/bridge.ts";
+import { useWorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -25,6 +26,7 @@ interface ComposerProps {
     attachmentIds: ReadonlyArray<string>,
     researchEnabled: boolean,
     skillIds?: ReadonlyArray<string>,
+    workspaceFiles?: ReadonlyArray<string>,
   ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
   onStop?: (() => void) | undefined;
@@ -59,6 +61,11 @@ interface ComposerProps {
    * cannot disagree.
    */
   readOnly?: boolean | undefined;
+  /**
+   * The conversation's id for workspace imports. Only a work chat inside the
+   * desktop app uses it; anything else uploads to the server.
+   */
+  conversationId?: string | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -78,6 +85,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     settings,
     folder = null,
     readOnly = false,
+    conversationId,
   },
   ref,
 ) {
@@ -103,6 +111,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const touched = useRef(false);
   const attachments = useAttachmentUploads();
+  // A work chat inside the desktop app keeps files local: drops and pastes
+  // land in the chat's workspace, and the send reports their names instead of
+  // uploading. Everywhere else the server-attachment path is unchanged.
+  const local = working && !!desktop && conversationId !== undefined;
+  const imports = useWorkspaceImports(conversationId ?? "");
+  const workspaceImports = local ? imports : null;
+  const serverAttachments = local ? null : attachments;
   // Seeding happens from the click that chose the starter, never from an
   // effect watching a prop: the state change belongs to that event.
   useImperativeHandle(
@@ -150,28 +165,41 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (sendDisabled || !modelId || blockedReason) return;
     touched.current = true;
     const submitted = requestRef.current;
-    attachments.submit((attachmentIds) => {
-      const current = requestRef.current;
-      if (submitted.blockedReason || submitted.disabled || !submitted.modelId) return;
-      const content = current.draft.trim();
-      if (!content && attachmentIds.length === 0) return;
-      const request = submitted.onSend(
-        content,
-        attachmentIds,
-        submitted.researchEnabled,
-        current.skillIds,
-      );
-      void request.then(
-        () => {
-          setDraft("");
-          setSkillIds([]);
-          setResearchEnabled(false);
-          // The message owns them now; dropping the chips must not delete them.
-          attachments.markClaimed();
-          textareaRef.current?.focus();
-        },
-        () => {},
-      );
+    // Both rows can be settling at once in a browser work chat that lost its
+    // desktop window mid-session; the imports queue only ever runs in-app.
+    (workspaceImports ?? attachments).submit((claimed: ReadonlyArray<string>) => {
+      const workspaceFiles = workspaceImports ? claimed : [];
+      const sendRest = (attachmentIds: ReadonlyArray<string>) => {
+        const current = requestRef.current;
+        if (submitted.blockedReason || submitted.disabled || !submitted.modelId) return;
+        const content = current.draft.trim();
+        if (!content && attachmentIds.length === 0 && workspaceFiles.length === 0) return;
+        // A plain send keeps the arity older callers were written against;
+        // only a work chat's local files add the fifth argument.
+        const request = workspaceImports
+          ? submitted.onSend(
+              content,
+              attachmentIds,
+              submitted.researchEnabled,
+              current.skillIds,
+              workspaceFiles,
+            )
+          : submitted.onSend(content, attachmentIds, submitted.researchEnabled, current.skillIds);
+        void request.then(
+          () => {
+            setDraft("");
+            setSkillIds([]);
+            setResearchEnabled(false);
+            // The message owns them now; dropping the chips must not delete them.
+            attachments.markClaimed();
+            workspaceImports?.markClaimed();
+            textareaRef.current?.focus();
+          },
+          () => {},
+        );
+      };
+      if (workspaceImports) attachments.submit(sendRest);
+      else sendRest(claimed);
     });
   };
 
@@ -201,7 +229,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ? { mode: { value: mode.value, onChange: mode.onChange } }
           : {})}
         blockedReason={blockedReason}
-        attachments={attachments}
+        {...(serverAttachments ? { attachments: serverAttachments } : {})}
+        {...(workspaceImports ? { workspaceImports } : {})}
         {...(context ? { context } : {})}
       />
       {/* Under the composer and inset, so it reads as part of it. Only a work

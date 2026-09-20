@@ -14,9 +14,14 @@ export interface AttachmentChipItem {
   readonly fileName: string;
   readonly size: number;
   readonly kind: AttachmentKind;
-  readonly status?: "uploading" | "complete" | "error";
+  readonly status?: "uploading" | "importing" | "complete" | "error";
   readonly previewUrl?: string | null;
   readonly error?: string | null;
+  /**
+   * Where the file landed. Omitted for server attachments; a workspace import
+   * shows the file's home instead of a server round-trip.
+   */
+  readonly location?: "workspace" | undefined;
 }
 
 const KIND_ICON = { pdf: Pdf01Icon, text: File01Icon, image: File01Icon } as const;
@@ -31,6 +36,7 @@ export function AttachmentChip({
   onRemove,
   href,
   preview,
+  onOpenPreview,
   className,
 }: {
   item: AttachmentChipItem;
@@ -40,12 +46,30 @@ export function AttachmentChip({
   href?: string | undefined;
   /** Full-content URL; when set, clicking the chip opens an in-app preview. */
   preview?: string | null | undefined;
+  /**
+   * Opens a preview the caller owns (a local file read at click time), instead
+   * of fetching `preview`. The dialog is the caller's to render.
+   */
+  onOpenPreview?: (() => void) | undefined;
   className?: string;
 }) {
   const status = item.status ?? "complete";
-  const uploading = status === "uploading";
+  const uploading = status === "uploading" || status === "importing";
   const problem = status === "error" ? (item.error ?? "Upload failed.") : (warning ?? null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const subtitle =
+    problem ??
+    (uploading
+      ? status === "importing"
+        ? "Adding…"
+        : "Uploading…"
+      : item.location === "workspace"
+        ? // A sent import earns its size beside the label once the bridge
+          // answers; before that (and for the composer) the home is the fact.
+          item.size > 0
+          ? `Workspace · ${formatFileSize(item.size)}`
+          : "Workspace"
+        : formatFileSize(item.size));
 
   const body = (
     <>
@@ -69,7 +93,7 @@ export function AttachmentChip({
             status === "error" ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {problem ?? (uploading ? "Uploading…" : formatFileSize(item.size))}
+          {subtitle}
         </span>
       </span>
       {problem ? (
@@ -141,12 +165,14 @@ export function AttachmentChip({
         <button
           type="button"
           aria-label={`Preview ${item.fileName}`}
-          onClick={preview ? () => setPreviewOpen(true) : undefined}
-          disabled={!preview}
+          onClick={
+            preview ? () => setPreviewOpen(true) : onOpenPreview ? () => onOpenPreview() : undefined
+          }
+          disabled={!preview && !onOpenPreview}
           className={cn(
             focusRingClassName,
             "flex min-w-0 items-center gap-2 rounded-xl",
-            preview ? "cursor-pointer" : "cursor-default",
+            preview || onOpenPreview ? "cursor-pointer" : "cursor-default",
           )}
         >
           {body}

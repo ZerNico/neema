@@ -10,6 +10,13 @@ import { Schema } from "effect";
 /** Folder grants hang on this key until the first message creates a conversation. */
 export const DRAFT_CONVERSATION = "__draft__";
 
+/**
+ * The name every work chat's own workspace answers to. It is the workspace
+ * chip's label and the name the picker refuses for a user folder, so no
+ * attached folder's basename collides with it.
+ */
+export const WORKSPACE_FOLDER_NAME = "workspace";
+
 /** Caps live here so a bounded result is the contract, not each caller's habit. */
 export const LIMITS = {
   /** One read. Beyond this the file comes back truncated with a marker. */
@@ -35,6 +42,25 @@ export const LIMITS = {
   deletedPaths: 100,
   /** Bytes of one binary file (image or document) sent to the model. */
   binaryBytes: 20 * 1024 * 1024,
+  /**
+   * Decoded bytes of one composer import that travels as base64 over IPC:
+   * pastes and picker files. At this cap a single import transiently costs
+   * ~67 MB of text plus structured-clone copies in both processes.
+   */
+  importBytes: 50 * 1024 * 1024,
+  /**
+   * An import the shell copies from a local path instead of receiving over
+   * IPC (drops inside the desktop, where the File still knows where it came
+   * from). No bytes cross the bridge, so the bound is only against dropping
+   * something huge by accident, and `cp` streams either way.
+   */
+  importPathBytes: 512 * 1024 * 1024,
+  /**
+   * Workspace size above which a branch refuses to copy it: the copy is
+   * awaited before navigation, so a multi-minute clone cannot pin the UI.
+   * The branch opens with an empty workspace instead, and says so.
+   */
+  cloneBytes: 2 * 1024 * 1024 * 1024,
 } as const;
 
 export const DirectoryEntry = Schema.Struct({
@@ -61,6 +87,13 @@ export const FileContents = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type FileContents = typeof FileContents.Type;
+
+/** Size and kind without the bytes: previews size the dialog before reading. */
+export const FileInfo = Schema.Struct({
+  path: Schema.String,
+  bytes: Schema.Int,
+});
+export type FileInfo = typeof FileInfo.Type;
 
 export const WriteReceipt = Schema.Struct({
   path: Schema.String,
@@ -278,16 +311,17 @@ export const SandboxAvailability = Schema.Union([
 export type SandboxAvailability = typeof SandboxAvailability.Type;
 
 /**
- * One attached folder as the site sees it. The absolute path never crosses:
- * the site shows a name and the server stores nothing, so the same
- * conversation on another machine simply resolves to different folders.
- *
- * The name is the folder's basename and doubles as the first segment of every
- * path the model uses (`site/src/index.ts`), which is why two folders with the
- * same name cannot both be attached.
+ * One attached folder as the site sees it, by its real absolute path. The path
+ * is the model's address for every file inside: the tools take absolute paths
+ * and the sandbox decides what is reachable, the way Cursor and Claude Code
+ * work. Paths live in attempt-scoped prompt text and tool traffic, same as
+ * file contents; the server persists only the names.
  */
 export const AttachedFolder = Schema.Struct({
+  /** The folder's basename, for the strip and grouping in the transcript. */
   name: Schema.String,
+  /** The real absolute path. */
+  path: Schema.String,
   /** False when the remembered folder has been moved, renamed or deleted since. */
   alive: Schema.Boolean,
 });
@@ -297,5 +331,17 @@ export type AttachedFolder = typeof AttachedFolder.Type;
 export const FolderStatus = Schema.Struct({
   folders: Schema.Array(AttachedFolder),
   sandbox: SandboxAvailability,
+  /**
+   * The chat's own workspace, always present on a work conversation. Kept
+   * apart from `folders`: those are user picks with picker/detach UI, this
+   * one is app-managed and pinned.
+   */
+  workspace: Schema.optionalKey(
+    Schema.Struct({
+      /** The workspace directory's real absolute path. */
+      path: Schema.String,
+      bytes: Schema.Int,
+    }),
+  ),
 });
 export type FolderStatus = typeof FolderStatus.Type;

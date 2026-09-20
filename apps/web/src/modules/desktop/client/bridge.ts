@@ -17,6 +17,7 @@ import {
   makeDesktopClient,
   readDesktopAuth,
   readDesktopChannel,
+  WORKSPACE_FOLDER_NAME,
   type DesktopAuth,
   type DesktopClient,
   type DesktopError,
@@ -242,8 +243,12 @@ export const useFolder = (conversationId: string): FolderState | null => {
 export interface DesktopSendFields {
   /** Submission policy information, not cryptographic proof of a desktop client. */
   readonly fromDesktop: true;
-  /** The attached folders' names; the server stores no path. */
-  readonly desktopFolders?: ReadonlyArray<string>;
+  /**
+   * The folders this chat can reach, by name and real path. The path is the
+   * model's address for everything inside and crosses as attempt-scoped prompt
+   * text; the server persists the names alone.
+   */
+  readonly desktopFolders?: ReadonlyArray<{ name: string; path: string }>;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
 }
@@ -267,11 +272,18 @@ export const folderUsable = (
  */
 export const desktopSendFields = (folder: FolderState | null): DesktopSendFields | null => {
   if (!folderUsable(folder)) return null;
-  const names = folder.status.folders.filter((item) => item.alive).map((item) => item.name);
+  const attached = folder.status.folders
+    .filter((item) => item.alive)
+    .map((item) => ({ name: item.name, path: item.path }));
+  // The workspace travels with its real path: it is the model's cwd and the
+  // root every absolute path in the workspace falls under.
+  const folders = folder.status.workspace
+    ? [{ name: WORKSPACE_FOLDER_NAME, path: folder.status.workspace.path }, ...attached]
+    : attached;
   return {
     fromDesktop: true,
-    ...(names.length > 0 ? { desktopFolders: names } : {}),
-    desktopCommands: names.length > 0 && folder.status.sandbox.kind === "ready",
+    ...(folders.length > 0 ? { desktopFolders: folders } : {}),
+    desktopCommands: folders.length > 0 && folder.status.sandbox.kind === "ready",
   };
 };
 
@@ -294,6 +306,37 @@ export const rebindDraftFolder = async (conversationId: string): Promise<void> =
 export const WORK_FOLDER_UNAVAILABLE =
   "Wait for the folder check before continuing this work chat.";
 
+/**
+ * How a branch keeps the source chat's local state on this machine: the
+ * user-attached folder grants are copied over, then the workspace directory is
+ * copied. Both are awaited before the view navigates, so the destination's
+ * first send cannot race its own lazy workspace creation against the copy.
+ * Either failure throws; the caller toasts and navigates anyway.
+ */
+export const copyWorkspaceToBranch = async (
+  fromConversationId: string,
+  toConversationId: string,
+): Promise<void> => {
+  const client = desktopClient();
+  if (!client) return;
+  await Effect.runPromise(
+    client.copyFolderGrants({ fromConversationId, toConversationId }),
+  );
+  await Effect.runPromise(
+    client.cloneWorkspace({ fromConversationId, toConversationId }),
+  );
+};
+
+/**
+ * Best-effort removal of a deleted conversation's workspace. A failure is a
+ * stray local directory, nothing the server waits for.
+ */
+export const discardWorkspace = (conversationId: string): void => {
+  const client = desktopClient();
+  if (!client) return;
+  void Effect.runPromise(client.discardWorkspace({ conversationId })).catch(() => {});
+};
+
 export const requireWorkFolder = (working: boolean, folder: FolderState | null) => {
   const fields = working ? desktopSendFields(folder) : null;
   if (working && !fields) throw new Error(WORK_FOLDER_UNAVAILABLE);
@@ -304,7 +347,31 @@ export const desktopAttemptFields = async (fields: DesktopSendFields | null) => 
   const client = desktopClient();
   if (!fields || !client) return {};
   const session = await Effect.runPromise(client.executionSession(undefined));
-  return { ...fields, desktopExecutorId: session.id };
+  return {
+    ...fields,
+    desktopExecutorId: session.id,
+    // Which machine sent this attempt. The site stamps it onto the generation
+    // so another machine opening the chat later can say where the files are.
+    desktopMachineId: session.machineId,
+    desktopMachineName: session.machineName,
+  };
+};
+
+/**
+ * This machine's stable id, or null in a browser. One query for the whole
+ * session: the id is fixed at shell first-run. The foreign-machine banner
+ * compares the conversation's latest stamp against it.
+ */
+export const useLocalMachineId = (): string | null => {
+  const client = useDesktop();
+  const query = useQuery({
+    queryKey: ["desktop-machine"],
+    enabled: client !== null,
+    queryFn: () => Effect.runPromise(client!.executionSession(undefined)),
+    staleTime: Infinity,
+    retry: false,
+  });
+  return query.data?.machineId ?? null;
 };
 
 type DraftBinding = {

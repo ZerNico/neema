@@ -29,10 +29,33 @@ describe("model operation identity", () => {
     const payload = {
       conversationId: "chat",
       command: "true",
-      folder: "work",
       timeoutMs: 100,
     };
     expect(() => decode(payload)).toThrow();
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
+  });
+});
+
+describe("user-driven workspace operations", () => {
+  const tags = [
+    { tag: "importFile", payload: { conversationId: "chat", fileName: "a.bin", base64: "AA==" } },
+    {
+      tag: "importFileFromPath",
+      payload: { conversationId: "chat", fileName: "a.bin", sourcePath: "/tmp/a.bin" },
+    },
+    { tag: "discardImport", payload: { conversationId: "chat", name: "a.bin" } },
+    { tag: "cloneWorkspace", payload: { fromConversationId: "chat", toConversationId: "branch" } },
+    {
+      tag: "copyFolderGrants",
+      payload: { fromConversationId: "chat", toConversationId: "branch" },
+    },
+    { tag: "discardWorkspace", payload: { conversationId: "chat" } },
+  ];
+
+  it.each(tags)("$tag carries no callId", ({ tag, payload }) => {
+    const rpc = DesktopRpcs.requests.get(tag)!;
+    const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
+    // A callId would mean the model could fire a user action on its own.
+    expect(Object.keys(decode(payload) as object)).not.toContain("callId");
   });
 });
