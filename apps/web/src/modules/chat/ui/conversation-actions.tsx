@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
+import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -54,6 +55,10 @@ export function useConversationActions(): ConversationActions {
   const removeMutation = useMutation({
     mutationFn: (conversationId: string) => deleteConversation({ data: { conversationId } }),
     onSuccess: async (_, conversationId) => {
+      // Best-effort: a work chat's local workspace dies with it. A failure
+      // leaves a stray directory, nothing the server waits for; a no-op in a
+      // browser.
+      discardWorkspace(conversationId);
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       // Only the surface that is actually showing the deleted chat navigates
       // away; on /chats there is no conversationId param at all.
