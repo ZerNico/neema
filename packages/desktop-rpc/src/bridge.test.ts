@@ -28,11 +28,18 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   detachFolder: unimplemented("detachFolder"),
   rebindFolder: unimplemented("rebindFolder"),
   listDirectory: unimplemented("listDirectory"),
+  fileInfo: unimplemented("fileInfo"),
   readFile: unimplemented("readFile"),
   writeFile: unimplemented("writeFile"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),
+  importFile: unimplemented("importFile"),
+  importFileFromPath: unimplemented("importFileFromPath"),
+  discardImport: unimplemented("discardImport"),
+  cloneWorkspace: unimplemented("cloneWorkspace"),
+  copyFolderGrants: unimplemented("copyFolderGrants"),
+  discardWorkspace: unimplemented("discardWorkspace"),
   ...overrides,
 });
 
@@ -121,7 +128,8 @@ describe("the desktop channel", () => {
     let work = { active: 0, needsApproval: 0 };
     const client = makeDesktopClient(
       connect({
-        executionSession: () => Effect.succeed({ id: "session" }),
+        executionSession: () =>
+          Effect.succeed({ id: "session", machineId: "machine", machineName: "Test Mac" }),
         cancelCall: ({ callId }) => Effect.succeed(callId === "call"),
         setWorkState: (state) =>
           Effect.sync(() => {
@@ -134,7 +142,11 @@ describe("the desktop channel", () => {
           }),
       }),
     );
-    expect(await Effect.runPromise(client.executionSession(undefined))).toEqual({ id: "session" });
+    expect(await Effect.runPromise(client.executionSession(undefined))).toEqual({
+      id: "session",
+      machineId: "machine",
+      machineName: "Test Mac",
+    });
     expect(await Effect.runPromise(client.cancelCall({ callId: "call" }))).toBe(true);
     await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1 }));
     expect(work).toEqual({ active: 2, needsApproval: 1 });

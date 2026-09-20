@@ -13,7 +13,7 @@ it("explains approval modes and preserves their stored values when selected", as
       <FolderStrip
         folder={{
           readiness: "ready",
-          status: { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } },
+          status: { folders: [{ name: "site", path: "/home/user/site", alive: true }], sandbox: { kind: "ready" } },
           busy: false,
           refusal: null,
           refresh: vi.fn(),
@@ -81,7 +81,7 @@ it("replaces a lost folder by name when choosing it again", async () => {
     <FolderStrip
       folder={{
         readiness: "ready",
-        status: { folders: [{ name: "site", alive: false }], sandbox: { kind: "ready" } },
+        status: { folders: [{ name: "site", path: "/home/user/site", alive: false }], sandbox: { kind: "ready" } },
         busy: false,
         refusal: null,
         refresh: vi.fn(),
@@ -94,4 +94,29 @@ it("replaces a lost folder by name when choosing it again", async () => {
   await userEvent.click(screen.getByRole("button", { name: /site/ }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "Choose it again" }));
   expect(choose).toHaveBeenCalledExactlyOnceWith("site");
+});
+
+it("keeps the workspace implicit: no chip, only the attach invite", () => {
+  render(
+    <FolderStrip
+      folder={{
+        readiness: "ready",
+        status: {
+          folders: [],
+          sandbox: { kind: "ready" },
+          workspace: { path: "/data/workspaces/abc", bytes: 512 },
+        },
+        busy: false,
+        refusal: null,
+        refresh: vi.fn(),
+        choose: vi.fn(),
+        detach: vi.fn(),
+        setUpSandbox: vi.fn(),
+      }}
+    />,
+  );
+  // The workspace is app-managed and always present, so it earns no chip;
+  // the strip shows only folders the user chose.
+  expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add a folder from this computer" })).toBeInTheDocument();
 });

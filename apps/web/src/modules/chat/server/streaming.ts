@@ -218,6 +218,11 @@ export class StreamEngine extends Context.Service<
       searchEnabled: boolean;
       generationId?: string | undefined;
       desktopExecutorId?: string | undefined;
+      /**
+       * The folders the sending machine named, paths included. Never stored:
+       * the paths exist for this attempt's prompt and tool traffic alone.
+       */
+      desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
       /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
@@ -346,6 +351,7 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
+        desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
@@ -860,12 +866,12 @@ export class StreamEngine extends Context.Service<
               : []),
             // After the web hint, so the ranking between them is the last word.
             ...(researchTool ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }] : []),
-            ...(desktopTools && config.desktopFolders
+            ...(desktopTools
               ? [
                   {
                     role: "system" as const,
                     content: desktopToolsSystemHint(
-                      config.desktopFolders,
+                      input.desktopFolders ?? [],
                       config.desktopCommands ?? false,
                     ),
                   },

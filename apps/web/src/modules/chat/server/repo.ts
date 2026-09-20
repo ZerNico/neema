@@ -92,10 +92,19 @@ export interface GenerationConfig {
   /** Whether `deep_research` was offered; the model still chooses. */
   readonly researchEnabled: boolean;
   readonly planEnabled: boolean;
-  /** Folder names when this attempt could reach a machine; null when it could not. */
+  /**
+   * Names when this attempt could reach a machine; null when it could not.
+   * Names alone persist: the paths stay on the machine that granted them and
+   * reach the model only through attempt-scoped prompt text and tool traffic.
+   */
   readonly desktopFolders?: ReadonlyArray<string> | null;
   /** Whether that machine could sandbox a command at the time. */
   readonly desktopCommands?: boolean;
+  /** The machine the attempt was sent from; null predates machine stamping. */
+  readonly desktopMachineId?: string | null;
+  readonly desktopMachineName?: string | null;
+  /** Workspace files this turn's send claimed; empty for every other attempt. */
+  readonly workspaceFiles?: ReadonlyArray<string>;
 }
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
@@ -329,6 +338,9 @@ const toConfig = (
   planEnabled: row.planEnabled,
   desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
+  desktopMachineId: row.desktopMachineId,
+  desktopMachineName: row.desktopMachineName,
+  workspaceFiles: row.workspaceFiles,
 });
 
 const readDefaults = Effect.fn("chat.readDefaults")(function* (
@@ -425,6 +437,9 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       researchEnabled: config.researchEnabled,
       desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
+      desktopMachineId: config.desktopMachineId ?? null,
+      desktopMachineName: config.desktopMachineName ?? null,
+      workspaceFiles: [...(config.workspaceFiles ?? [])],
       collectionIds: [...config.collectionIds],
     })
     .pipe(Effect.orDie);
@@ -523,6 +538,13 @@ export class ChatRepo extends Context.Service<
         agent: { name: string; icon: string } | null;
         collectionIds: ReadonlyArray<string>;
         skills?: ReadonlyArray<{ id: string; name: string }>;
+        /**
+         * The machine this attempt was sent from, when it was. The banner
+         * compares the latest answer's stamp with the local machine id.
+         */
+        desktopMachine?: { id: string; name: string | null } | null;
+        /** Workspace files the turn's send claimed; shown as chips on the question. */
+        workspaceFiles: ReadonlyArray<string>;
       }>
     >;
     updateConversation(
@@ -991,15 +1013,31 @@ export class ChatRepo extends Context.Service<
               skills: sql<
                 Array<{ id: string; name: string }>
               >`coalesce((select jsonb_agg(jsonb_build_object('id', entry->>'skillId', 'name', entry->>'name')) from jsonb_array_elements(${messageGenerationConfig.skills}) entry where (entry->>'explicit')::boolean), '[]'::jsonb)`,
+              desktopMachineId: messageGenerationConfig.desktopMachineId,
+              desktopMachineName: messageGenerationConfig.desktopMachineName,
+              workspaceFiles: messageGenerationConfig.workspaceFiles,
             })
             .from(messageGenerationConfig)
             .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
             .pipe(Effect.orDie);
           if (rows.length !== new Set(messageIds).size)
             return yield* Effect.die(new Error("Missing generation configuration in conversation"));
-          return rows.filter(
-            (row) => row.agent || row.collectionIds.length > 0 || row.skills.length > 0,
-          );
+          return rows
+            .filter(
+              (row) =>
+                row.agent ||
+                row.collectionIds.length > 0 ||
+                row.skills.length > 0 ||
+                row.desktopMachineId !== null ||
+                row.workspaceFiles.length > 0,
+            )
+            .map(({ desktopMachineId, desktopMachineName, ...row }) => ({
+              ...row,
+              desktopMachine:
+                desktopMachineId === null
+                  ? null
+                  : { id: desktopMachineId, name: desktopMachineName },
+            }));
         }),
 
         updateConversation: Effect.fn("ChatRepo.updateConversation")(

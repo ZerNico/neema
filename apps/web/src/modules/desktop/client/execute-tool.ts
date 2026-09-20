@@ -260,7 +260,6 @@ export const executeDesktopTool = (
             callId: activity.callId,
             conversationId,
             command,
-            folder: str(args.folder),
             timeoutMs,
           }),
           (output) => ({

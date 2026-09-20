@@ -23,6 +23,12 @@ export interface DesktopChannel {
   /** Short git sha and build time of the shell, for the reader and for bug reports. */
   readonly build?: string;
   readonly chrome?: DesktopChrome;
+  /**
+   * `webUtils.getPathForFile`, exposed by the preload: the local path behind
+   * a dropped File, or "" when the File has none (a paste). No File ever
+   * crosses the bridge; only the path string comes back.
+   */
+  readonly filePathForFile?: (file: File) => string;
   request(tag: string, payload: unknown): Promise<BridgeReply>;
 }
 
@@ -30,7 +36,7 @@ export type BridgeReply =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: unknown };
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 8;
 
 /** The key `contextBridge` exposes on `window` inside the desktop shell. */
 export const BRIDGE_KEY = "__chatDesktop" as const;
@@ -151,6 +157,20 @@ export const makeDesktopResponder =
       );
       return { ok: true, value: encoded } as const;
     });
+
+/**
+ * The local path behind a dropped File, when the shell knows one. Reads the
+ * channel fresh each call: a path lookup happens on drop, long after the
+ * client was resolved. Absent in tests, browsers and old shells: callers
+ * fall back to reading the bytes.
+ */
+export const filePathForFile = (file: File): string | null => {
+  const channel = readDesktopChannel();
+  const exposed = channel?.filePathForFile;
+  if (typeof exposed !== "function") return null;
+  const path = exposed(file);
+  return typeof path === "string" && path !== "" ? path : null;
+};
 
 /** True inside the desktop shell, on the origin the shell was pointed at. */
 export const readDesktopChannel = (): DesktopChannel | null => {

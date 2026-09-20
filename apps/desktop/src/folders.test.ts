@@ -1,9 +1,9 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { exists, resolveAcross, resolveInFolder } from "./folders.ts";
+import { exists, resolveAmongRoots, resolveInFolder } from "./folders.ts";
 
 /**
  * Real directories and real symlinks. A fake fs would let the containment check
@@ -17,7 +17,9 @@ const attempt = (requested: string) =>
   Effect.runPromise(Effect.result(resolveInFolder(root, requested)));
 
 beforeAll(async () => {
-  const base = await mkdtemp(join(tmpdir(), "chat-folders-"));
+  // realpath: macOS temp dirs are symlinked, and the resolver answers with the
+  // real path, so the requests must be built from it.
+  const base = await realpath(await mkdtemp(join(tmpdir(), "chat-folders-")));
   root = join(base, "workspace");
   outsideDir = join(base, "elsewhere");
   await mkdir(join(root, "src"), { recursive: true });
@@ -75,8 +77,16 @@ describe("resolving a path inside the chosen folder", () => {
     }
   });
 
-  it("refuses an absolute path even when it points inside", async () => {
+  it("accepts an absolute path that points inside", async () => {
     const outcome = await attempt(join(root, "src", "index.ts"));
+
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.relative).toBe(join("src", "index.ts"));
+  });
+
+  it("refuses an absolute path that points outside", async () => {
+    const outcome = await attempt(join(outsideDir, "secrets.txt"));
 
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag !== "Failure") return;
@@ -107,14 +117,13 @@ describe("resolving a path inside the chosen folder", () => {
     expect(outcome.failure.reason).toBe("outside-folder");
   });
 
-  it("does not name the host path when a dangling symlink cannot be resolved", async () => {
+  it("does not resolve a dangling symlink to the host path", async () => {
     await symlink(join(outsideDir, "missing"), join(root, "dangling"));
     const outcome = await attempt("dangling");
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag !== "Failure") return;
     expect(outcome.failure.reason).toBe("not-found");
     expect(outcome.failure.message).not.toContain(outsideDir);
-    expect(outcome.failure.message).not.toMatch(/^\//);
     expect(outcome.failure.message).toContain("dangling");
   });
 
@@ -129,12 +138,27 @@ describe("resolving a path inside the chosen folder", () => {
   });
 });
 
-describe("resolving a path across several attached folders", () => {
-  const across = (requested: string) =>
-    Effect.runPromise(Effect.result(resolveAcross([root, outsideDir], requested)));
+describe("resolving an absolute path among several roots", () => {
+  // One root exists and one does not, the way the workspace dir is missing
+  // until a write creates it: the live root answers, the missing one is
+  // skipped rather than masking the live one with its own failure. Read lazily:
+  // `root` is only set once the suite's beforeAll has run.
+  const among = (requested: string) =>
+    Effect.runPromise(
+      Effect.result(
+        resolveAmongRoots(
+          [
+            { name: "gone", root: join(root, "..", "not-yet-created") },
+            { name: "workspace", root },
+            { name: "elsewhere", root: outsideDir },
+          ],
+          requested,
+        ),
+      ),
+    );
 
-  it("routes by the first segment and names the result with the prefix", async () => {
-    const outcome = await across("workspace/src/index.ts");
+  it("picks the root that owns the path and names the receipt with it", async () => {
+    const outcome = await among(join(root, "src", "index.ts"));
     expect(outcome._tag).toBe("Success");
     if (outcome._tag !== "Success") return;
     expect(outcome.success.relative).toBe("workspace/src/index.ts");
@@ -142,26 +166,29 @@ describe("resolving a path across several attached folders", () => {
     expect(outcome.success.root.endsWith("workspace")).toBe(true);
   });
 
-  it("resolves a bare folder name to its root", async () => {
-    const outcome = await across("elsewhere");
+  it("resolves a root itself to its name", async () => {
+    const outcome = await among(outsideDir);
     expect(outcome._tag).toBe("Success");
     if (outcome._tag !== "Success") return;
     expect(outcome.success.relative).toBe("elsewhere");
     expect(outcome.success.absolute).toBe(outcome.success.root);
   });
 
-  it("refuses a path that names no attached folder", async () => {
-    const outcome = await across("src/index.ts");
-    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("not-found");
-  });
-
-  it("still refuses an escape through a symlink inside a named folder", async () => {
-    const outcome = await across("workspace/escape/secrets.txt");
+  it("refuses a relative path", async () => {
+    const outcome = await among("src/index.ts");
     expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
   });
 
-  it("refuses crossing from one folder into another with ..", async () => {
-    const outcome = await across("workspace/../elsewhere/secrets.txt");
+  it("refuses an absolute path under no root", async () => {
+    const outcome = await among("/etc/passwd");
     expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
+  });
+
+  it("still refuses an escape through a symlink inside a root", async () => {
+    const outcome = await among(join(root, "escape", "secrets.txt"));
+    expect(outcome._tag).toBe("Failure");
+    if (outcome._tag !== "Failure") return;
+    expect(outcome.failure.reason).toBe("outside-folder");
+    expect(outcome.failure.message).not.toContain(outsideDir);
   });
 });
