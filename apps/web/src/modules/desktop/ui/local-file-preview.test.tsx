@@ -48,6 +48,13 @@ const connect = (): DesktopClient => {
     detachFolder: notUsed("detachFolder"),
     rebindFolder: notUsed("rebindFolder"),
     listDirectory: notUsed("listDirectory"),
+    fileInfo: ({ path }) =>
+      Effect.suspend(() => {
+        asked.push({ tag: "fileInfo", path });
+        return files[path] === undefined
+          ? refuse("not-found", `${path} does not exist.`)
+          : Effect.succeed({ path, bytes: 4 });
+      }),
     writeFile: notUsed("writeFile"),
     editFile: notUsed("editFile"),
     movePath: notUsed("movePath"),
@@ -56,6 +63,12 @@ const connect = (): DesktopClient => {
     searchFiles: notUsed("searchFiles"),
     runCommand: notUsed("runCommand"),
     setUpSandbox: notUsed("setUpSandbox"),
+    importFile: notUsed("importFile"),
+    importFileFromPath: notUsed("importFileFromPath"),
+    discardImport: notUsed("discardImport"),
+    cloneWorkspace: notUsed("cloneWorkspace"),
+    copyFolderGrants: notUsed("copyFolderGrants"),
+    discardWorkspace: notUsed("discardWorkspace"),
     readFile: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "readFile", path });
@@ -244,15 +257,22 @@ describe("a work file row on the desktop", () => {
     await waitFor(() => expect(asked.at(-1)).toEqual({ tag: "revealPath:reveal", path: "site" }));
   });
 
-  it("says there is no preview for a file it cannot read, and opens nothing", async () => {
+  it("opens the dialog for a file with no preview, so its actions stay reachable", async () => {
     const row = wrote("site/report.bin");
     show(row);
     await click(row);
 
-    await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
-    expect(sonner.error.mock.calls[0]![0]).toBe("There’s no preview for this kind of file.");
+    expect(await screen.findByText("There’s no preview for this kind of file.")).toBeTruthy();
+    // No image extension, so the read goes straight to text and the refusal
+    // turns into a size-only dialog.
+    expect(asked.map((call) => call.tag)).toEqual(["readFile", "fileInfo"]);
+    // No bytes were handed over: nothing to render, nothing to revoke.
     expect(handed).toEqual([]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sonner.error).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Show in folder" }));
+    await waitFor(() =>
+      expect(asked.at(-1)).toEqual({ tag: "revealPath:reveal", path: "site/report.bin" }),
+    );
   });
 
   it("follows a move to where the file now is, and ignores a row with no file", async () => {

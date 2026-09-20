@@ -42,6 +42,7 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Disclosure,
@@ -144,6 +145,12 @@ export interface DisplayMessage {
   inheritedSources?: ToolSource[];
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
+  /**
+   * Files this send copied into the chat's workspace, by basename. The path
+   * joins against the machine's current workspace root at click time: the
+   * server stores names only, and a browser renders these inert.
+   */
+  workspaceFiles?: ReadonlyArray<string>;
   /** Edit this completed user message. */
   onEdit?: () => void;
   editDisabled?: boolean;
@@ -309,6 +316,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
       ) : (
         <div className="group/user flex w-full flex-col items-end">
           {(message.attachments && message.attachments.length > 0) ||
+          (message.workspaceFiles && message.workspaceFiles.length > 0) ||
           (message.collectionIds && message.collectionIds.length > 0) ||
           (message.skills && message.skills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
@@ -333,6 +341,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
                   href={attachmentUrl(attachment.id)}
                   preview={attachmentUrl(attachment.id)}
                 />
+              ))}
+              {message.workspaceFiles?.map((name) => (
+                <WorkspaceFileChip key={name} fileName={name} />
               ))}
             </AttachmentChipRow>
           ) : null}

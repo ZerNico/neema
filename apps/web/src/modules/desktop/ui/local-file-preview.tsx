@@ -48,6 +48,9 @@ export function LocalFileConversationProvider({
   );
 }
 
+/** The conversation the rendered file paths resolve against; null above the view. */
+export const useLocalFileConversation = () => useContext(LocalFileConversationContext);
+
 /** Read as bytes, because the picture is the thing rather than the source. */
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
   png: "image/png",
@@ -102,20 +105,40 @@ const readLocalFile = async (
       url: blobUrl([decode(file.base64)], file.mediaType),
     };
   }
-  const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
-  // An SVG is markup, so the desktop hands it over as text, never as bytes.
-  // `<img>` is what makes it safe: secure static mode runs no script and
-  // fetches nothing. A half-read one holds no picture, so it falls back to
-  // source.
-  const drawable = extension === "svg" && !file.truncated;
-  const blob = new Blob([file.text], { type: drawable ? "image/svg+xml" : "text/plain" });
-  return {
-    fileName,
-    size: blob.size,
-    kind: drawable ? "image" : "text",
-    url: URL.createObjectURL(blob),
-    truncated: file.truncated,
-  };
+  try {
+    const file = await run(
+      client.readFile({ conversationId, path, callId: crypto.randomUUID() }),
+    );
+    // An SVG is markup, so the desktop hands it over as text, never as bytes.
+    // `<img>` is what makes it safe: secure static mode runs no script and
+    // fetches nothing. A half-read one holds no picture, so it falls back to
+    // source.
+    const drawable = extension === "svg" && !file.truncated;
+    const blob = new Blob([file.text], { type: drawable ? "image/svg+xml" : "text/plain" });
+    return {
+      fileName,
+      size: blob.size,
+      kind: drawable ? "image" : "text",
+      url: URL.createObjectURL(blob),
+      truncated: file.truncated,
+    };
+  } catch (error) {
+    // A binary file is still worth opening: the dialog shows the "no preview"
+    // body with its actions, which beats a bare toast.
+    if (error instanceof DesktopError && error.reason === "not-text") {
+      const info = await run(
+        client.fileInfo({ conversationId, path, callId: crypto.randomUUID() }),
+      );
+      return {
+        fileName,
+        size: info.bytes,
+        kind: "text",
+        url: "",
+        unsupported: true,
+      };
+    }
+    throw error;
+  }
 };
 
 const refusalCopy = (reason: DesktopError["reason"]) => {
@@ -246,7 +269,8 @@ export function useLocalFilePreview(path: string | null): LocalFilePreview | nul
     mutationFn: () => readLocalFile(client!, conversationId!, path!),
     onSuccess: (opened) => {
       release();
-      live.current = opened.url;
+      // An unsupported file carries no object URL to hold on to.
+      live.current = opened.url === "" ? null : opened.url;
       setTarget(opened);
     },
     onError: (error) => {
