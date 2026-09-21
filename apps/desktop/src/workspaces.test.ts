@@ -1,10 +1,37 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  truncate,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { DRAFT_CONVERSATION, LIMITS } from "@chat/desktop-rpc";
+
+vi.mock("@chat/desktop-rpc", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@chat/desktop-rpc")>();
+  return {
+    ...original,
+    LIMITS: { ...original.LIMITS, cloneEntries: 300 },
+  };
+});
+
+import { LIMITS } from "@chat/desktop-rpc";
 import { WorkspaceRegistry, workspacesRoot } from "./workspaces.ts";
+
+const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
+const BRANCH = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
+const OTHER = "01990f4e-6650-7a33-a768-611e2e4bf4c9";
+const SUBMISSION = "550e8400-e29b-41d4-a716-446655440000";
+const SECOND_SUBMISSION = "550e8400-e29b-41d4-a716-446655440001";
+const RESERVATION = "550e8400-e29b-41d4-a716-446655440002";
+const SECOND_RESERVATION = "550e8400-e29b-41d4-a716-446655440003";
 
 const dirs: string[] = [];
 const base = async () => {
@@ -20,6 +47,21 @@ afterEach(async () => {
 const run = <A>(root: string, effect: Effect.Effect<A, unknown, WorkspaceRegistry>) =>
   Effect.runPromise(effect.pipe(Effect.provide(WorkspaceRegistry.layerEphemeral(root))));
 
+const addCommittedFile = (
+  conversationId: string,
+  submissionId: string,
+  reservationId: string,
+  name: string,
+  bytes: Uint8Array,
+) =>
+  Effect.gen(function* () {
+    const workspaces = yield* WorkspaceRegistry;
+    yield* workspaces.stageFile(conversationId, submissionId, name, bytes);
+    const promoted = yield* workspaces.promote(conversationId, submissionId, reservationId);
+    yield* workspaces.commit(conversationId, reservationId);
+    return promoted.files[0]!;
+  });
+
 describe("workspacesRoot", () => {
   it("keys the workspaces directory by an origin hash, not the origin", () => {
     const one = workspacesRoot("https://chat.one", "/data");
@@ -31,156 +73,368 @@ describe("workspacesRoot", () => {
 });
 
 describe("WorkspaceRegistry", () => {
-  it("imports a file, sanitizing and deduping the name", async () => {
+  it("rejects unsafe workspace and transaction ids at the filesystem boundary", async () => {
     const root = await base();
-    const imported = await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      const first = yield* workspaces.importFile("conv", "../Report.PDF", new Uint8Array([1]));
-      const second = yield* workspaces.importFile("conv", "Report.PDF", new Uint8Array([2, 3]));
-      const size = yield* workspaces.size("conv");
-      return { first, second, size };
-    }));
-    expect(imported.first.path).toBe("Report.PDF");
-    expect(imported.second.path).toBe("Report-1.PDF");
-    expect(imported.second.bytes).toBe(2);
-    expect(await readFile(join(root, "conv", "Report-1.PDF"))).toEqual(Buffer.from([2, 3]));
-    expect(imported.size).toBe(3);
+    const outcomes = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* Effect.all([
+          workspaces.ensure("../outside").pipe(Effect.result),
+          workspaces
+            .stageFile(CONVERSATION, "../submission", "x", new Uint8Array())
+            .pipe(Effect.result),
+          workspaces
+            .stageFile("550e8400-e29b-41d4-a716-446655440000", SUBMISSION, "x", new Uint8Array())
+            .pipe(Effect.result),
+        ]);
+      }),
+    );
+    expect(outcomes.every((outcome) => outcome._tag === "Failure")).toBe(true);
+    expect(await stat(join(root, "..", "outside")).catch(() => null)).toBeNull();
   });
 
-  it("refuses an import past the byte cap", async () => {
+  it("stages bytes outside the workspace, sanitizing and atomically deduping names", async () => {
+    const root = await base();
+    const staged = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* Effect.all(
+          [
+            workspaces.stageFile(CONVERSATION, SUBMISSION, "../Report.PDF", new Uint8Array([1])),
+            workspaces.stageFile(CONVERSATION, SUBMISSION, "Report.PDF", new Uint8Array([2, 3])),
+          ],
+          { concurrency: "unbounded" },
+        );
+      }),
+    );
+    expect(staged.map((file) => file.name).sort()).toEqual(["Report-1.PDF", "Report.PDF"]);
+    expect(await stat(join(root, CONVERSATION)).catch(() => null)).toBeNull();
+    expect(await readdir(join(root, ".staging", CONVERSATION, SUBMISSION))).toEqual([
+      "Report-1.PDF",
+      "Report.PDF",
+    ]);
+  });
+
+  it("refuses staged bytes past the base64 transport cap", async () => {
     const root = await base();
     const outcome = await run(
       root,
       Effect.gen(function* () {
         const workspaces = yield* WorkspaceRegistry;
         return yield* workspaces
-          .importFile("conv", "huge.bin", new Uint8Array(LIMITS.importBytes + 1))
+          .stageFile(CONVERSATION, SUBMISSION, "huge.bin", new Uint8Array(LIMITS.importBytes + 1))
           .pipe(Effect.result);
       }),
     );
     expect(outcome._tag).toBe("Failure");
   });
 
-  it("copies an import from a local path, deduped, without containing the source", async () => {
+  it("copies a host-path file into staging and leaves the source untouched", async () => {
     const root = await base();
-    const elsewhere = join(root, "..", "downloads");
-    await mkdir(elsewhere, { recursive: true });
-    const source = join(elsewhere, "dump.sql");
+    const downloads = join(root, "..", "downloads");
+    await mkdir(downloads, { recursive: true });
+    const source = join(downloads, "dump.sql");
     await writeFile(source, "select 1;");
-    const imported = await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      // The point of the path import: the source sits outside every folder
-      // the chat can see, and is copied in all the same.
-      const first = yield* workspaces.importFileFromPath("conv", "../dump.sql", source);
-      const second = yield* workspaces.importFileFromPath("conv", "dump.sql", source);
-      return { first, second };
-    }));
-    expect(imported.first.path).toBe("dump.sql");
-    expect(imported.second.path).toBe("dump-1.sql");
-    expect(imported.first.bytes).toBe(9);
-    expect(await readFile(join(root, "conv", "dump.sql"), "utf8")).toBe("select 1;");
-    // The source is untouched: a copy, never a move.
+    const receipt = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* workspaces.stageFileFromPath(CONVERSATION, SUBMISSION, "../dump.sql", source);
+      }),
+    );
+    expect(receipt).toEqual({ name: "dump.sql", bytes: 9 });
+    expect(
+      await readFile(join(root, ".staging", CONVERSATION, SUBMISSION, "dump.sql"), "utf8"),
+    ).toBe("select 1;");
     expect(await readFile(source, "utf8")).toBe("select 1;");
   });
 
-  it("refuses a path import that is a folder or past the path cap", async () => {
+  it("refuses a host-path folder or a file past the path cap", async () => {
     const root = await base();
-    const big = join(root, "..", `big-${process.pid}.bin`);
-    // Size only: the refusal must come from stat, so a sparse file proves it
-    // without half a gigabyte on disk.
-    await writeFile(big, new Uint8Array([1]));
-    const { truncate } = await import("node:fs/promises");
-    await truncate(big, LIMITS.importPathBytes + 1);
-    const outcome = await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      const folder = yield* workspaces
-        .importFileFromPath("conv", "dir", root)
-        .pipe(Effect.result);
-      const huge = yield* workspaces
-        .importFileFromPath("conv", "big.bin", big)
-        .pipe(Effect.result);
-      return { folder, huge };
-    }));
-    expect(outcome.folder._tag).toBe("Failure");
-    expect(outcome.huge._tag).toBe("Failure");
-    // Nothing landed: both refused before the workspace was even created.
-    expect(await stat(join(root, "conv")).catch(() => null)).toBeNull();
+    const sourceDir = join(root, "..", "downloads");
+    const huge = join(root, "..", "huge.bin");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(huge, new Uint8Array([1]));
+    await truncate(huge, LIMITS.importPathBytes + 1);
+    const outcomes = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* Effect.all([
+          workspaces
+            .stageFileFromPath(CONVERSATION, SUBMISSION, "dir", sourceDir)
+            .pipe(Effect.result),
+          workspaces
+            .stageFileFromPath(CONVERSATION, SUBMISSION, "huge.bin", huge)
+            .pipe(Effect.result),
+        ]);
+      }),
+    );
+    expect(outcomes.every((outcome) => outcome._tag === "Failure")).toBe(true);
+    expect(await stat(join(root, ".staging")).catch(() => null)).toBeNull();
   });
 
-  it("discards an import by basename, never a path", async () => {
+  it("discards one staged file by basename and then the whole submission", async () => {
     const root = await base();
-    await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.importFile("conv", "keep.txt", new Uint8Array([1]));
-      yield* workspaces.discardImport("conv", "../keep.txt");
-      // Removing a file that is not there is not an error.
-      yield* workspaces.discardImport("conv", "gone.txt");
-    }));
-    expect(await readdir(join(root, "conv"))).toEqual([]);
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "keep.txt", new Uint8Array([1]));
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "gone.txt", new Uint8Array([2]));
+        yield* workspaces.discardStagedFile(CONVERSATION, SUBMISSION, "../gone.txt");
+        yield* workspaces.discardStagedFile(CONVERSATION, SUBMISSION, "missing.txt");
+      }),
+    );
+    expect(await readdir(join(root, ".staging", CONVERSATION, SUBMISSION))).toEqual(["keep.txt"]);
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.discardSubmission(CONVERSATION, SUBMISSION);
+      }),
+    );
+    expect(
+      await stat(join(root, ".staging", CONVERSATION, SUBMISSION)).catch(() => null),
+    ).toBeNull();
   });
 
-  it("clones a workspace into a branch and refuses a non-empty destination", async () => {
+  it("promotes a complete batch, journals it, and commits without deleting workspace files", async () => {
     const root = await base();
-    const second = await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.importFile("source", "notes.md", new Uint8Array([1, 2]));
-      yield* workspaces.clone("source", "branch");
-      return yield* workspaces.clone("source", "branch").pipe(Effect.result);
-    }));
-    expect(await readFile(join(root, "branch", "notes.md"))).toEqual(Buffer.from([1, 2]));
-    // The source keeps its copy.
-    expect(await stat(join(root, "source", "notes.md"))).toBeTruthy();
+    const result = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "a.txt", new Uint8Array([1]));
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "b.txt", new Uint8Array([2]));
+        const promoted = yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+        const repeated = yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+        const pending = yield* workspaces.pendingPromotions();
+        yield* workspaces.commit(CONVERSATION, RESERVATION);
+        return { promoted, repeated, pending };
+      }),
+    );
+    expect(result.repeated).toEqual(result.promoted);
+    expect(result.pending).toEqual([
+      { conversationId: CONVERSATION, submissionId: SUBMISSION, reservationId: RESERVATION },
+    ]);
+    expect(await readdir(join(root, CONVERSATION))).toEqual(["a.txt", "b.txt"]);
+    expect(
+      await stat(join(root, ".staging", CONVERSATION, SUBMISSION)).catch(() => null),
+    ).toBeNull();
+    expect(await readdir(join(root, ".promotions"))).toEqual([]);
+  });
+
+  it("rolls a promotion back while preserving staging for retry", async () => {
+    const root = await base();
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "a.txt", new Uint8Array([1]));
+        yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+        yield* workspaces.rollback(CONVERSATION, RESERVATION);
+      }),
+    );
+    expect(await readdir(join(root, CONVERSATION))).toEqual([]);
+    expect(await readFile(join(root, ".staging", CONVERSATION, SUBMISSION, "a.txt"))).toEqual(
+      Buffer.from([1]),
+    );
+    expect(await readdir(join(root, ".promotions"))).toEqual([]);
+  });
+
+  it("protects staged inodes needed to roll a promotion back", async () => {
+    const root = await base();
+    const outcome = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "a.txt", new Uint8Array([1]));
+        yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+        const discard = yield* workspaces
+          .discardStagedFile(CONVERSATION, SUBMISSION, "a.txt")
+          .pipe(Effect.result);
+        yield* workspaces.rollback(CONVERSATION, RESERVATION);
+        return discard;
+      }),
+    );
+    expect(outcome._tag).toBe("Failure");
+    expect(await readdir(join(root, CONVERSATION))).toEqual([]);
+    expect(await readFile(join(root, ".staging", CONVERSATION, SUBMISSION, "a.txt"))).toEqual(
+      Buffer.from([1]),
+    );
+  });
+
+  it("does not remove a promoted path that was replaced before rollback", async () => {
+    const root = await base();
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "a.txt", new Uint8Array([1]));
+        yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+      }),
+    );
+    const final = join(root, CONVERSATION, "a.txt");
+    await rm(final);
+    await writeFile(final, "replacement");
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.rollback(CONVERSATION, RESERVATION);
+      }),
+    );
+    expect(await readFile(final, "utf8")).toBe("replacement");
+  });
+
+  it("keeps one unresolved promotion per workspace", async () => {
+    const root = await base();
+    const outcome = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.stageFile(CONVERSATION, SUBMISSION, "a.txt", new Uint8Array([1]));
+        yield* workspaces.stageFile(CONVERSATION, SECOND_SUBMISSION, "b.txt", new Uint8Array([2]));
+        yield* workspaces.promote(CONVERSATION, SUBMISSION, RESERVATION);
+        return yield* workspaces
+          .promote(CONVERSATION, SECOND_SUBMISSION, SECOND_RESERVATION)
+          .pipe(Effect.result);
+      }),
+    );
+    expect(outcome._tag).toBe("Failure");
+  });
+
+  it("clones committed files atomically and refuses a non-empty destination", async () => {
+    const root = await base();
+    const second = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* addCommittedFile(
+          CONVERSATION,
+          SUBMISSION,
+          RESERVATION,
+          "notes.md",
+          new Uint8Array([1, 2]),
+        );
+        yield* workspaces.clone(CONVERSATION, BRANCH);
+        return yield* workspaces.clone(CONVERSATION, BRANCH).pipe(Effect.result);
+      }),
+    );
+    expect(await readFile(join(root, BRANCH, "notes.md"))).toEqual(Buffer.from([1, 2]));
+    expect(await stat(join(root, CONVERSATION, "notes.md"))).toBeTruthy();
     expect(second._tag).toBe("Failure");
+    expect((await readdir(root)).some((name) => name.startsWith(".partial-"))).toBe(false);
   });
 
-  it("moves the draft workspace onto the new conversation on rebind", async () => {
+  it("refuses to publish a clone over an empty destination", async () => {
     const root = await base();
-    await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.importFile(DRAFT_CONVERSATION, "draft.txt", new Uint8Array([9]));
-      yield* workspaces.rebind(DRAFT_CONVERSATION, "conv");
-      // A second rebind after the move is a no-op, not an error.
-      yield* workspaces.rebind(DRAFT_CONVERSATION, "conv");
-    }));
-    expect(await readFile(join(root, "conv", "draft.txt"))).toEqual(Buffer.from([9]));
-    expect(await readdir(root)).toEqual(["conv"]);
+    const outcome = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* addCommittedFile(
+          CONVERSATION,
+          SUBMISSION,
+          RESERVATION,
+          "notes.md",
+          new Uint8Array([1, 2]),
+        );
+        yield* workspaces.ensure(BRANCH);
+        return yield* workspaces.clone(CONVERSATION, BRANCH).pipe(Effect.result);
+      }),
+    );
+    expect(outcome._tag).toBe("Failure");
+    expect(await readdir(join(root, BRANCH))).toEqual([]);
+    expect((await readdir(root)).some((name) => name.startsWith(".partial-"))).toBe(false);
   });
 
-  it("discards a whole workspace, and reports size 0 for one that never existed", async () => {
+  it("refuses a clone beyond the independent nesting cap", async () => {
     const root = await base();
-    const layout = await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.importFile("conv", "a.bin", new Uint8Array([1]));
-      yield* workspaces.discard("conv");
-      // `path` answers without creating anything.
-      return { ghost: workspaces.path("ghost"), size: yield* workspaces.size("ghost") };
-    }));
-    expect(layout.ghost).toBe(join(root, "ghost"));
-    expect(layout.size).toBe(0);
-    expect(await readdir(root)).toEqual([]);
+    let current = join(root, CONVERSATION);
+    await mkdir(current, { recursive: true });
+    for (let depth = 0; depth <= LIMITS.cloneDepth; depth += 1) {
+      current = join(current, "a");
+      await mkdir(current);
+    }
+    await writeFile(join(current, "deep.txt"), "x");
+    const outcome = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* workspaces.clone(CONVERSATION, BRANCH).pipe(Effect.result);
+      }),
+    );
+    expect(outcome._tag).toBe("Failure");
+    expect(await stat(join(root, BRANCH)).catch(() => null)).toBeNull();
   });
 
-  it("sweeps a draft workspace untouched for a week and keeps a fresh one", async () => {
+  it("refuses a clone beyond the independent visited-entry cap", async () => {
     const root = await base();
-    const stale = join(root, DRAFT_CONVERSATION);
-    await mkdir(stale, { recursive: true });
-    await writeFile(join(stale, "old.txt"), "x");
-    const weekAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
-    await utimes(join(stale, "old.txt"), weekAgo, weekAgo);
-    await utimes(stale, weekAgo, weekAgo);
+    const source = join(root, CONVERSATION);
+    await mkdir(source, { recursive: true });
+    await Promise.all(
+      Array.from({ length: LIMITS.cloneEntries + 1 }, (_, index) =>
+        writeFile(join(source, `${index}.txt`), "x"),
+      ),
+    );
+    const outcome = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        return yield* workspaces.clone(CONVERSATION, BRANCH).pipe(Effect.result);
+      }),
+    );
+    expect(outcome._tag).toBe("Failure");
+    expect(await stat(join(root, BRANCH)).catch(() => null)).toBeNull();
+  });
 
-    await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.sweepDrafts();
-    }));
-    expect((await readdir(root)).includes(DRAFT_CONVERSATION)).toBe(false);
+  it("discards a workspace and returns its path without creating it", async () => {
+    const root = await base();
+    const path = await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* addCommittedFile(
+          CONVERSATION,
+          SUBMISSION,
+          RESERVATION,
+          "a.bin",
+          new Uint8Array([1]),
+        );
+        yield* workspaces.discard(CONVERSATION);
+        return workspaces.path(OTHER);
+      }),
+    );
+    expect(path).toBe(join(root, OTHER));
+    expect(await stat(join(root, CONVERSATION)).catch(() => null)).toBeNull();
+    expect(await stat(join(root, OTHER)).catch(() => null)).toBeNull();
+  });
 
-    await run(root, Effect.gen(function* () {
-      const workspaces = yield* WorkspaceRegistry;
-      yield* workspaces.importFile(DRAFT_CONVERSATION, "fresh.txt", new Uint8Array([1]));
-      yield* workspaces.sweepDrafts();
-    }));
-    expect(await readdir(join(root, DRAFT_CONVERSATION))).toEqual(["fresh.txt"]);
+  it("sweeps stale unowned staging and clone partials but keeps fresh staging", async () => {
+    const root = await base();
+    const staleSubmission = join(root, ".staging", CONVERSATION, SUBMISSION);
+    const freshSubmission = join(root, ".staging", CONVERSATION, SECOND_SUBMISSION);
+    const partial = join(root, `.partial-${BRANCH}-old`);
+    await mkdir(staleSubmission, { recursive: true });
+    await mkdir(freshSubmission, { recursive: true });
+    await mkdir(partial, { recursive: true });
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await utimes(staleSubmission, old, old);
+    await utimes(partial, old, old);
+    await run(
+      root,
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.sweepTransient();
+      }),
+    );
+    expect(await stat(staleSubmission).catch(() => null)).toBeNull();
+    expect(await stat(partial).catch(() => null)).toBeNull();
+    expect(await stat(freshSubmission)).toBeTruthy();
   });
 
   it("keeps conversations apart across origins in the layered registry", async () => {
@@ -191,13 +445,14 @@ describe("WorkspaceRegistry", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const workspaces = yield* WorkspaceRegistry;
-        yield* workspaces.importFile("shared", "one.txt", new Uint8Array([1]));
+        yield* workspaces.ensure(CONVERSATION);
         origin = "https://chat.two";
-        // The other origin sees no workspace for the same conversation id.
-        expect(yield* workspaces.size("shared")).toBe(0);
-        yield* workspaces.importFile("shared", "two.txt", new Uint8Array([2]));
+        expect(
+          yield* Effect.promise(() => stat(workspaces.path(CONVERSATION)).catch(() => null)),
+        ).toBeNull();
+        yield* workspaces.ensure(CONVERSATION);
         origin = "https://chat.one";
-        expect(yield* workspaces.size("shared")).toBe(1);
+        expect(yield* Effect.promise(() => stat(workspaces.path(CONVERSATION)))).toBeTruthy();
       }).pipe(Effect.provide(layer)),
     );
   });

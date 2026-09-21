@@ -32,17 +32,24 @@ import { useDesktop } from "../client/bridge.ts";
  * far below the view that knows the conversation, and every row would otherwise
  * carry an id it has no other use for.
  */
-const LocalFileConversationContext = createContext<string | null>(null);
+const LocalFileConversationContext = createContext<{
+  conversationId: string;
+  workspaceRoot: string | null;
+} | null>(null);
 
 export function LocalFileConversationProvider({
   conversationId,
+  workspaceRoot,
   children,
 }: {
   conversationId: string;
+  workspaceRoot?: string | null;
   children: ReactNode;
 }) {
   return (
-    <LocalFileConversationContext.Provider value={conversationId}>
+    <LocalFileConversationContext.Provider
+      value={{ conversationId, workspaceRoot: workspaceRoot ?? null }}
+    >
       {children}
     </LocalFileConversationContext.Provider>
   );
@@ -69,8 +76,7 @@ const parentOf = (path: string) => {
   return cut === -1 ? null : path.slice(0, cut);
 };
 
-const blobUrl = (parts: BlobPart[], type: string) =>
-  URL.createObjectURL(new Blob(parts, { type }));
+const blobUrl = (parts: BlobPart[], type: string) => URL.createObjectURL(new Blob(parts, { type }));
 
 const decode = (base64: string) => {
   const binary = atob(base64);
@@ -106,9 +112,7 @@ const readLocalFile = async (
     };
   }
   try {
-    const file = await run(
-      client.readFile({ conversationId, path, callId: crypto.randomUUID() }),
-    );
+    const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
     // An SVG is markup, so the desktop hands it over as text, never as bytes.
     // `<img>` is what makes it safe: secure static mode runs no script and
     // fetches nothing. A half-read one holds no picture, so it falls back to
@@ -206,9 +210,7 @@ function LocalFileActions({
     // The header row has no room for a sentence, and the desktop's refusals
     // are already written as ones the reader can act on.
     onError: (error) =>
-      toast.error(
-        error instanceof DesktopError ? error.message : "That could not be opened.",
-      ),
+      toast.error(error instanceof DesktopError ? error.message : "That could not be opened."),
   });
   // A button that can only ever refuse is worse than no button. The desktop
   // still checks, and still refuses a file marked executable, which no
@@ -247,7 +249,8 @@ export interface LocalFilePreview {
  */
 export function useLocalFilePreview(path: string | null): LocalFilePreview | null {
   const client = useDesktop();
-  const conversationId = useContext(LocalFileConversationContext);
+  const local = useContext(LocalFileConversationContext);
+  const conversationId = local?.conversationId ?? null;
   const [target, setTarget] = useState<AttachmentPreviewTarget | null>(null);
   // An object URL outlives the render that made it, so the last one has to be
   // reachable from teardown as well as from the close that usually revokes it.
@@ -301,9 +304,7 @@ export function useLocalFilePreview(path: string | null): LocalFilePreview | nul
       target === null ? null : (
         <AttachmentPreviewDialog
           target={target}
-          actions={
-            <LocalFileActions client={client} conversationId={conversationId} path={path} />
-          }
+          actions={<LocalFileActions client={client} conversationId={conversationId} path={path} />}
           open
           onOpenChange={(next) => {
             if (next) return;

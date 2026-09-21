@@ -512,7 +512,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
       }
       const turn = yield* repo.createTurn({
         userId,
-        conversationId: null,
+        conversation: { kind: "new", id: uuidv7(), mode: "chat" },
         modelId,
         content: "Please remember that I prefer concise answers.",
         attachmentIds: [],
@@ -704,7 +704,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
         repo
           .createTurn({
             userId: result.userId,
-            conversationId: result.turn.conversation.id,
+            conversation: { kind: "existing", id: result.turn.conversation.id },
             modelId,
             attachmentIds: [],
             questionResponse: { callId: result.toolCalls[0]!.id, response: { kind: "skip" } },
@@ -724,7 +724,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
         const engine = yield* StreamEngine;
         const turn = yield* repo.createTurn({
           userId: result.userId,
-          conversationId: result.turn.conversation.id,
+          conversation: { kind: "existing", id: result.turn.conversation.id },
           modelId,
           attachmentIds: [],
           questionResponse: {

@@ -7,8 +7,21 @@ import { Schema } from "effect";
  * unprivileged peer to the site.
  */
 
-/** Folder grants hang on this key until the first message creates a conversation. */
-export const DRAFT_CONVERSATION = "__draft__";
+/** A workspace is one server conversation and therefore one canonical UUIDv7. */
+export const WorkspaceId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
+    message: "Expected a canonical UUIDv7.",
+  }),
+);
+export type WorkspaceId = typeof WorkspaceId.Type;
+
+/** Local transaction identities never become filesystem names without this check. */
+export const LocalTransactionId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
+    message: "Expected a canonical UUID.",
+  }),
+);
+export type LocalTransactionId = typeof LocalTransactionId.Type;
 
 /**
  * The name every work chat's own workspace answers to. It is the workspace
@@ -61,6 +74,10 @@ export const LIMITS = {
    * The branch opens with an empty workspace instead, and says so.
    */
   cloneBytes: 2 * 1024 * 1024 * 1024,
+  /** Directory entries inspected before a branch copy refuses the workspace. */
+  cloneEntries: 100_000,
+  /** Nesting inspected independently of the entry cap. */
+  cloneDepth: 256,
 } as const;
 
 export const DirectoryEntry = Schema.Struct({
@@ -101,6 +118,40 @@ export const WriteReceipt = Schema.Struct({
   bytes: Schema.Int,
 });
 export type WriteReceipt = typeof WriteReceipt.Type;
+
+/** A composer file safely held outside every model-visible workspace. */
+export const StagedFileReceipt = Schema.Struct({
+  name: Schema.String,
+  bytes: Schema.Int,
+});
+export type StagedFileReceipt = typeof StagedFileReceipt.Type;
+
+export const PromotionReceipt = Schema.Struct({
+  reservationId: LocalTransactionId,
+  files: Schema.Array(
+    Schema.Struct({
+      stagedName: Schema.String,
+      finalName: Schema.String,
+      bytes: Schema.Int,
+    }),
+  ),
+});
+export type PromotionReceipt = typeof PromotionReceipt.Type;
+
+export const PendingPromotion = Schema.Struct({
+  conversationId: WorkspaceId,
+  reservationId: LocalTransactionId,
+  submissionId: LocalTransactionId,
+});
+export type PendingPromotion = typeof PendingPromotion.Type;
+
+/** Public metadata for the preload-only dropped-file staging channel. */
+export const DroppedFileStageInput = Schema.Struct({
+  conversationId: WorkspaceId,
+  submissionId: LocalTransactionId,
+  fileName: Schema.String,
+});
+export type DroppedFileStageInput = typeof DroppedFileStageInput.Type;
 
 /**
  * A file the model reads as bytes rather than text: an image for a vision
@@ -331,17 +382,10 @@ export type AttachedFolder = typeof AttachedFolder.Type;
 export const FolderStatus = Schema.Struct({
   folders: Schema.Array(AttachedFolder),
   sandbox: SandboxAvailability,
-  /**
-   * The chat's own workspace, always present on a work conversation. Kept
-   * apart from `folders`: those are user picks with picker/detach UI, this
-   * one is app-managed and pinned.
-   */
-  workspace: Schema.optionalKey(
-    Schema.Struct({
-      /** The workspace directory's real absolute path. */
-      path: Schema.String,
-      bytes: Schema.Int,
-    }),
-  ),
+  /** The app-managed workspace, separate from user-picked folders. */
+  workspace: Schema.Struct({
+    /** The workspace directory's real absolute path. */
+    path: Schema.String,
+  }),
 });
 export type FolderStatus = typeof FolderStatus.Type;

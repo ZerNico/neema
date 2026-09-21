@@ -46,7 +46,6 @@ const connect = (): DesktopClient => {
     folderStatus: notUsed("folderStatus"),
     chooseFolder: notUsed("chooseFolder"),
     detachFolder: notUsed("detachFolder"),
-    rebindFolder: notUsed("rebindFolder"),
     listDirectory: notUsed("listDirectory"),
     fileInfo: ({ path }) =>
       Effect.suspend(() => {
@@ -63,9 +62,13 @@ const connect = (): DesktopClient => {
     searchFiles: notUsed("searchFiles"),
     runCommand: notUsed("runCommand"),
     setUpSandbox: notUsed("setUpSandbox"),
-    importFile: notUsed("importFile"),
-    importFileFromPath: notUsed("importFileFromPath"),
-    discardImport: notUsed("discardImport"),
+    stageFile: notUsed("stageFile"),
+    discardStagedFile: notUsed("discardStagedFile"),
+    discardSubmission: notUsed("discardSubmission"),
+    promoteSubmission: notUsed("promoteSubmission"),
+    commitPromotion: notUsed("commitPromotion"),
+    rollbackPromotion: notUsed("rollbackPromotion"),
+    listPendingPromotions: notUsed("listPendingPromotions"),
     cloneWorkspace: notUsed("cloneWorkspace"),
     copyFolderGrants: notUsed("copyFolderGrants"),
     discardWorkspace: notUsed("discardWorkspace"),
@@ -102,6 +105,7 @@ const connect = (): DesktopClient => {
   const respond = makeDesktopResponder(handlers);
   return makeDesktopClient({
     protocolVersion: PROTOCOL_VERSION,
+    stageDroppedFile: async () => null,
     // Round-tripped through JSON, because contextBridge carries nothing else.
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify(payload)) as unknown;
@@ -124,8 +128,10 @@ const wrote = (path: string, name: DesktopToolActivity["name"] = "write_local_fi
 
 const show = (activity: DesktopToolActivity) =>
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-      <LocalFileConversationProvider conversationId="c1">
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+    >
+      <LocalFileConversationProvider conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7">
         <DesktopActivityBlock activity={activity} />
       </LocalFileConversationProvider>
     </QueryClientProvider>,

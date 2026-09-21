@@ -5,8 +5,15 @@ import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
-import { useDesktop, useDesktopOutdated, type FolderState } from "~/modules/desktop/client/bridge.ts";
-import { useWorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import {
+  useDesktop,
+  useDesktopOutdated,
+  type FolderState,
+} from "~/modules/desktop/client/bridge.ts";
+import {
+  useWorkspaceImports,
+  type WorkspaceImports,
+} from "~/modules/desktop/client/use-workspace-imports.ts";
 import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -27,6 +34,7 @@ interface ComposerProps {
     researchEnabled: boolean,
     skillIds?: ReadonlyArray<string>,
     workspaceFiles?: ReadonlyArray<string>,
+    workspaceImports?: WorkspaceImports,
   ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
   onStop?: (() => void) | undefined;
@@ -183,6 +191,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               submitted.researchEnabled,
               current.skillIds,
               workspaceFiles,
+              workspaceImports,
             )
           : submitted.onSend(content, attachmentIds, submitted.researchEnabled, current.skillIds);
         void request.then(
@@ -217,7 +226,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(onStop ? { onStop } : {})}
         disabled={sendDisabled}
         textareaDisabled={textareaDisabled ?? disabled}
-        controlsDisabled={controlsDisabled ?? disabled}
+        controlsDisabled={controlsDisabled ?? sendDisabled}
         modelId={modelId}
         onModelChange={onModelChange}
         searchEnabled={searchEnabled}

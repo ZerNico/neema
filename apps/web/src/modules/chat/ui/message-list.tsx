@@ -103,8 +103,6 @@ const CitedAnswer = memo(function CitedAnswer({
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
 });
 
-
-
 export interface DisplayMessage {
   images?: ReadonlyArray<AssistantImage>;
   id: string;
@@ -120,6 +118,11 @@ export interface DisplayMessage {
   questionActions?: QuestionActions | undefined;
   /** Decisions this message is waiting on, by tool-call id. */
   desktopApprovals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
+  /**
+   * The attempt's roots (name + absolute path), so delete lists group by the
+   * folder that owns each path. Absent on user bubbles and browser history.
+   */
+  desktopRoots?: ReadonlyArray<{ name: string; path: string }> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /**
@@ -525,6 +528,7 @@ const AssistantBody = memo(function AssistantBody({
         <DesktopActivityBlock
           key={part.key}
           activity={part.activity}
+          roots={message.desktopRoots ?? []}
           {...(approval ? { approval } : {})}
         />
       );

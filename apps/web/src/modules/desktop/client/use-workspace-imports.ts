@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Effect } from "effect";
-import { LIMITS, filePathForFile } from "@chat/desktop-rpc";
+import { LIMITS, stageDroppedFile, type PromotionReceipt } from "@chat/desktop-rpc";
 import {
   attachmentKind,
   formatFileSize,
@@ -8,54 +8,34 @@ import {
 } from "~/modules/attachments/constants.ts";
 import { desktopClient } from "./bridge.ts";
 
-/**
- * The composer chip row for work chats inside the desktop app: drops and
- * pastes are copied into the chat's local workspace instead of being uploaded
- * as server attachments. The file lands on disk the moment the chip appears
- * (import at add time), so a send never has to move bytes first.
- *
- * Mirrors the `use-attachment-uploads` state machine (same statuses, same
- * queued-submit contract) so the composer composes the two with no new
- * shapes.
- */
+/** One composer file held outside the model-visible workspace until send. */
 export interface WorkspaceImport {
   readonly localId: string;
   readonly fileName: string;
   readonly size: number;
   readonly kind: "image" | "pdf" | "text";
   readonly status: "importing" | "complete" | "error";
-  /** The name the file landed under in the workspace; set once imported. */
   readonly storedName: string | null;
   readonly error: string | null;
-  /**
-   * The drop's path on this machine, when the shell knows one. Import copies
-   * from it instead of shipping bytes; a paste has none and uses base64.
-   */
-  readonly sourcePath: string | null;
 }
 
 export interface WorkspaceImports {
   readonly items: ReadonlyArray<WorkspaceImport>;
-  /** Names of the files a send would report as added to the workspace. */
   readonly fileNames: ReadonlyArray<string>;
   readonly importing: boolean;
   readonly hasError: boolean;
   readonly isFull: boolean;
-  /** Transient message for a rejected drop (too many files, too large). */
   readonly notice: string | null;
-  /** A send is waiting for the in-flight imports to settle. */
   readonly queued: boolean;
+  readonly submissionId: string;
   addFiles(files: ArrayLike<File> | Iterable<File>): void;
   remove(localId: string): void;
-  /**
-   * Runs `send` now, or once every import settles. A failed import cancels the
-   * queue instead, so the draft and the chips stay put and the user can retry.
-   */
   submit(send: (fileNames: ReadonlyArray<string>) => void): void;
   cancelQueue(): void;
-  /** Forgets every chip without deleting anything; the files stay in the workspace. */
+  promote(reservationId: string): Promise<PromotionReceipt>;
+  commit(reservationId: string): Promise<void>;
+  rollback(reservationId: string): Promise<void>;
   markClaimed(): void;
-  /** Drops every chip, removing the files no message claimed. */
   reset(): void;
   dismissNotice(): void;
 }
@@ -70,7 +50,6 @@ const readBase64 = (file: File): Promise<string> =>
     reader.onload = () => {
       const result = reader.result;
       if (typeof result !== "string") return reject(new Error("Could not read that file."));
-      // `data:<type>;base64,<payload>`; strip the header the IPC does not want.
       const comma = result.indexOf(",");
       resolve(comma === -1 ? result : result.slice(comma + 1));
     };
@@ -81,50 +60,66 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
   const [items, setItems] = useState<ReadonlyArray<WorkspaceImport>>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [queued, setQueued] = useState(false);
-
-  // Mirrored in a ref: imports settle in callbacks that must see the current
-  // row set without re-subscribing.
+  const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID());
   const itemsRef = useRef<ReadonlyArray<WorkspaceImport>>(items);
   const cancelled = useRef(new Set<string>());
   const pendingSend = useRef<((fileNames: ReadonlyArray<string>) => void) | null>(null);
+  const promoted = useRef(false);
 
-  const commit = useCallback((next: ReadonlyArray<WorkspaceImport>) => {
+  const commitItems = useCallback((next: ReadonlyArray<WorkspaceImport>) => {
     itemsRef.current = next;
     setItems(next);
   }, []);
 
   const patch = useCallback(
     (localId: string, changes: Partial<WorkspaceImport>) => {
-      commit(
+      commitItems(
         itemsRef.current.map((item) => (item.localId === localId ? { ...item, ...changes } : item)),
       );
     },
-    [commit],
+    [commitItems],
   );
 
-  const discard = useCallback(
-    (storedName: string) => {
-      // Best-effort: the file is local, so a lost removal is a stray file in a
-      // folder the user can open, not a leak.
+  const discardFile = useCallback(
+    (ownedSubmissionId: string, storedName: string) => {
       const client = desktopClient();
       if (!client) return;
-      void Effect.runPromise(client.discardImport({ conversationId, name: storedName })).catch(
-        () => {},
-      );
+      void Effect.runPromise(
+        client.discardStagedFile({
+          conversationId,
+          submissionId: ownedSubmissionId,
+          name: storedName,
+        }),
+      ).catch(() => {});
     },
     [conversationId],
   );
 
-  // Runs after anything that can empty the in-flight set. Only the last
-  // import to settle sees none left, so a queued send fires exactly once.
+  const discardSubmission = useCallback(
+    (ownedSubmissionId: string) => {
+      const client = desktopClient();
+      if (!client) return;
+      void Effect.runPromise(
+        client.discardSubmission({ conversationId, submissionId: ownedSubmissionId }),
+      ).catch(() => {});
+    },
+    [conversationId],
+  );
+
+  useEffect(() => {
+    const ownedSubmissionId = submissionId;
+    return () => {
+      for (const item of itemsRef.current)
+        if (item.status === "importing") cancelled.current.add(item.localId);
+      if (!promoted.current) discardSubmission(ownedSubmissionId);
+    };
+  }, [discardSubmission, submissionId]);
+
   const drainQueue = useCallback(() => {
     const send = pendingSend.current;
-    if (!send) return;
-    if (itemsRef.current.some((item) => item.status === "importing")) return;
+    if (!send || itemsRef.current.some((item) => item.status === "importing")) return;
     pendingSend.current = null;
     setQueued(false);
-    // A failed import cancels the send; the draft and chips stay put so the
-    // user can drop the chip and try again.
     if (itemsRef.current.some((item) => item.status === "error")) return;
     send(itemsRef.current.flatMap((item) => (item.storedName ? [item.storedName] : [])));
   }, []);
@@ -138,71 +133,70 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
 
       const room = MAX_ATTACHMENTS_PER_MESSAGE - itemsRef.current.length;
       const accepted = incoming.slice(0, Math.max(room, 0));
-      if (accepted.length < incoming.length) {
+      if (accepted.length < incoming.length)
         setNotice(`You can add at most ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
-      }
       if (accepted.length === 0) return;
 
+      const ownedSubmissionId = submissionId;
       const added = accepted.map((file): WorkspaceImport => {
-        // A dropped file still carries its path inside the desktop shell, and
-        // the copy then happens entirely in the shell: the cap is the high
-        // one. A paste has no path, so it ships as base64 and stays low.
-        const sourcePath = filePathForFile(file);
-        const limit = sourcePath !== null ? LIMITS.importPathBytes : LIMITS.importBytes;
-        const oversized = file.size > limit;
+        const oversized = file.size > LIMITS.importPathBytes;
         return {
           localId: nextLocalId(),
           fileName: file.name,
           size: file.size,
           kind: attachmentKind(file.type),
-          // Oversized files never reach the shell: base64 over IPC would
-          // buffer the whole thing in both processes first.
           status: oversized ? "error" : "importing",
           storedName: null,
-          error: oversized ? `Too large. The limit is ${formatFileSize(limit)}.` : null,
-          sourcePath,
+          error: oversized
+            ? `Too large. The limit is ${formatFileSize(LIMITS.importPathBytes)}.`
+            : null,
         };
       });
-      commit([...itemsRef.current, ...added]);
+      commitItems([...itemsRef.current, ...added]);
 
       added.forEach((item, index) => {
         if (item.status === "error") return;
         const file = accepted[index]!;
-        const send = item.sourcePath
-          ? Effect.runPromise(
-              client.importFileFromPath({
-                conversationId,
-                fileName: file.name,
-                sourcePath: item.sourcePath,
-              }),
-            )
-          : readBase64(file).then((base64) =>
-              Effect.runPromise(
-                client.importFile({ conversationId, fileName: file.name, base64 }),
-              ),
-            );
-        void send.then(
-            (receipt) => {
-              // Removed mid-flight: the chip is gone, so remove the file too.
-              if (cancelled.current.delete(item.localId)) {
-                discard(receipt.path);
-                return;
-              }
-              patch(item.localId, { status: "complete", storedName: receipt.path });
-              drainQueue();
-            },
-            (error: unknown) => {
-              if (cancelled.current.delete(item.localId)) return;
-              patch(item.localId, {
-                status: "error",
-                error: error instanceof Error ? error.message : "Could not add that file.",
-              });
-              drainQueue();
-            },
+        const stage = Effect.runPromise(
+          stageDroppedFile(file, {
+            conversationId,
+            submissionId: ownedSubmissionId,
+            fileName: file.name,
+          }),
+        ).then(async (receipt) => {
+          if (receipt) return receipt;
+          if (file.size > LIMITS.importBytes)
+            throw new Error(`Too large. The limit is ${formatFileSize(LIMITS.importBytes)}.`);
+          return Effect.runPromise(
+            client.stageFile({
+              conversationId,
+              submissionId: ownedSubmissionId,
+              fileName: file.name,
+              base64: await readBase64(file),
+            }),
           );
+        });
+        void stage.then(
+          (receipt) => {
+            if (cancelled.current.delete(item.localId)) {
+              discardFile(ownedSubmissionId, receipt.name);
+              return;
+            }
+            patch(item.localId, { status: "complete", storedName: receipt.name });
+            drainQueue();
+          },
+          (error: unknown) => {
+            if (cancelled.current.delete(item.localId)) return;
+            patch(item.localId, {
+              status: "error",
+              error: error instanceof Error ? error.message : "Could not add that file.",
+            });
+            drainQueue();
+          },
+        );
       });
     },
-    [commit, conversationId, discard, drainQueue, patch],
+    [commitItems, conversationId, discardFile, drainQueue, patch, submissionId],
   );
 
   const remove = useCallback(
@@ -210,67 +204,91 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
       const item = itemsRef.current.find((candidate) => candidate.localId === localId);
       if (!item) return;
       if (item.status === "importing") cancelled.current.add(localId);
-      // An import no message claimed yet goes back out of the workspace.
-      if (item.status === "complete" && item.storedName) discard(item.storedName);
-      commit(itemsRef.current.filter((candidate) => candidate.localId !== localId));
-      // Dropping the last importing chip is the other way the queue unblocks.
+      if (item.status === "complete" && item.storedName) discardFile(submissionId, item.storedName);
+      commitItems(itemsRef.current.filter((candidate) => candidate.localId !== localId));
       drainQueue();
     },
-    [commit, discard, drainQueue],
+    [commitItems, discardFile, drainQueue, submissionId],
   );
 
-  const dropAll = useCallback(
-    (deleteUnclaimed: boolean) => {
-      for (const item of itemsRef.current) {
-        if (item.status === "importing") cancelled.current.add(item.localId);
-        if (deleteUnclaimed && item.status === "complete" && item.storedName) {
-          discard(item.storedName);
-        }
-      }
-      commit([]);
-      pendingSend.current = null;
-      setQueued(false);
-      setNotice(null);
-    },
-    [commit, discard],
-  );
-
-  const cancelQueue = useCallback(() => {
+  const reset = useCallback(() => {
+    for (const item of itemsRef.current)
+      if (item.status === "importing") cancelled.current.add(item.localId);
+    discardSubmission(submissionId);
+    commitItems([]);
     pendingSend.current = null;
     setQueued(false);
-  }, []);
-
-  const importing = items.some((item) => item.status === "importing");
-  const hasError = items.some((item) => item.status === "error");
+    setNotice(null);
+    promoted.current = false;
+    setSubmissionId(crypto.randomUUID());
+  }, [commitItems, discardSubmission, submissionId]);
 
   const fileNames = useMemo(
     () => items.flatMap((item) => (item.storedName ? [item.storedName] : [])),
     [items],
   );
 
-  const submit = useCallback((send: (fileNames: ReadonlyArray<string>) => void) => {
-    if (itemsRef.current.some((item) => item.status === "importing")) {
-      pendingSend.current = send;
-      setQueued(true);
-      return;
-    }
-    send(itemsRef.current.flatMap((item) => (item.storedName ? [item.storedName] : [])));
-  }, []);
-
   return {
     items,
     fileNames,
-    importing,
-    hasError,
+    importing: items.some((item) => item.status === "importing"),
+    hasError: items.some((item) => item.status === "error"),
     isFull: items.length >= MAX_ATTACHMENTS_PER_MESSAGE,
     notice,
     queued,
+    submissionId,
     addFiles,
     remove,
-    submit,
-    cancelQueue,
-    markClaimed: useCallback(() => dropAll(false), [dropAll]),
-    reset: useCallback(() => dropAll(true), [dropAll]),
+    submit: useCallback((send: (fileNames: ReadonlyArray<string>) => void) => {
+      if (itemsRef.current.some((item) => item.status === "importing")) {
+        pendingSend.current = send;
+        setQueued(true);
+        return;
+      }
+      send(itemsRef.current.flatMap((item) => (item.storedName ? [item.storedName] : [])));
+    }, []),
+    cancelQueue: useCallback(() => {
+      pendingSend.current = null;
+      setQueued(false);
+    }, []),
+    promote: useCallback(
+      async (reservationId: string) => {
+        const client = desktopClient();
+        if (!client) throw new Error("The desktop workspace is unavailable.");
+        const receipt = await Effect.runPromise(
+          client.promoteSubmission({ conversationId, submissionId, reservationId }),
+        );
+        promoted.current = true;
+        return receipt;
+      },
+      [conversationId, submissionId],
+    ),
+    commit: useCallback(
+      async (reservationId: string) => {
+        const client = desktopClient();
+        if (!client) return;
+        await Effect.runPromise(client.commitPromotion({ conversationId, reservationId }));
+      },
+      [conversationId],
+    ),
+    rollback: useCallback(
+      async (reservationId: string) => {
+        const client = desktopClient();
+        if (!client) return;
+        await Effect.runPromise(client.rollbackPromotion({ conversationId, reservationId }));
+        promoted.current = false;
+      },
+      [conversationId],
+    ),
+    markClaimed: useCallback(() => {
+      commitItems([]);
+      pendingSend.current = null;
+      setQueued(false);
+      setNotice(null);
+      promoted.current = false;
+      setSubmissionId(crypto.randomUUID());
+    }, [commitItems]),
+    reset,
     dismissNotice: useCallback(() => setNotice(null), []),
   };
 }

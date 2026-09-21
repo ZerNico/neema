@@ -185,7 +185,7 @@ export const desktopToolsSystemHint = (
   return [
     addressSpace,
     workspace
-      ? `Files the user drops into the chat land in the workspace; keep anything you create for this chat there too.`
+      ? `Files the user drops into the chat land in the workspace, and the message that names them says so; keep anything you create for this chat there too.`
       : null,
     "Find your way with find_files and search_files before reading; both skip what .gitignore skips. Read a file before changing it. Prefer edit_local_file for a change inside an existing file, and write_local_file only for a new file or a rewrite. Images and PDFs come back through read_local_file for you to look at when the model can take them.",
     commands

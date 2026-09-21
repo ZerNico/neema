@@ -36,7 +36,8 @@ import {
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { DROPPED_FILE_CHANNEL, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { makeDroppedFileHandler } from "./dropped-file.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -233,6 +234,23 @@ const openConnectWindow = (current: string | null) => {
   return window;
 };
 
+/**
+ * Abandoned staging, temp files and interrupted clone directories accumulate.
+ * Cleanup runs once the origin-scoped root is known, both at startup and after
+ * switching servers. Promotion journals survive until authenticated recovery.
+ */
+const sweepTransientWorkspaces = () => {
+  if (serverOrigin === null) return;
+  void runtime
+    .runPromise(
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.sweepTransient();
+      }),
+    )
+    .catch((cause: unknown) => console.error("[desktop] workspace cleanup failed", cause));
+};
+
 const connectFlow = makeConnectFlow({
   fixedServer: () => devOrigin !== null,
   hasMain: hasMainWindow,
@@ -279,6 +297,7 @@ const connectFlow = makeConnectFlow({
   },
   openMain: (origin) => {
     serverOrigin = origin;
+    sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
   },
   closeMain: () => {
@@ -421,16 +440,7 @@ void app.whenReady().then(async () => {
   machine = await loadMachineIdentity(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
-  // Draft workspaces abandoned by chats that were never sent accumulate; an
-  // mtime sweep clears them. Fired, not awaited: the shell must not wait on
-  // it. Skipped before a server is configured: the root is keyed by origin.
-  if (serverOrigin !== null)
-    void runtime
-      .runPromise(Effect.gen(function* () {
-        const workspaces = yield* WorkspaceRegistry;
-        yield* workspaces.sweepDrafts();
-      }))
-      .catch((cause: unknown) => console.error("[desktop] draft workspace sweep failed", cause));
+  sweepTransientWorkspaces();
   // The pinned dev server is decided from the environment, before start() runs.
   const pinned = Boolean(process.env.CHAT_DESKTOP_SERVER);
   const actions = [
@@ -518,6 +528,25 @@ void app.whenReady().then(async () => {
     if (typeof tag !== "string") return refusalReply("failed", "Malformed request.");
     return executions.request(tag, payload);
   });
+
+  ipcMain.handle(
+    DROPPED_FILE_CHANNEL,
+    makeDroppedFileHandler({
+      contents: () => mainWindow?.webContents,
+      origin: () => serverOrigin,
+      stage: (input, sourcePath) =>
+        Effect.gen(function* () {
+          const workspaces = yield* WorkspaceRegistry;
+          return yield* workspaces.stageFileFromPath(
+            input.conversationId,
+            input.submissionId,
+            input.fileName,
+            sourcePath,
+          );
+        }),
+      run: (effect) => runtime.runPromise(effect),
+    }),
+  );
 
   if (devReload && process.send) {
     // Only the owning dev supervisor can request a restart, never the web page.

@@ -29,6 +29,8 @@ import {
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
+const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
+
 const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
@@ -124,9 +126,13 @@ const groupDeletePaths = (
   for (const path of paths) {
     // Longest first: a nested root (site and site/sub both attached) claims
     // its own paths rather than lending them to the outer one.
-    const owner = [...roots]
-      .sort((a, b) => b.path.length - a.path.length)
-      .find((root) => path === root.path || path.startsWith(root.path + "/"));
+    let owner: { name: string; path: string } | undefined;
+    for (const root of roots)
+      if (
+        (path === root.path || path.startsWith(root.path + "/")) &&
+        (!owner || root.path.length > owner.path.length)
+      )
+        owner = root;
     if (owner && path !== owner.path) {
       const items = grouped.get(owner.name) ?? [];
       items.push(path.slice(owner.path.length + 1));
@@ -295,7 +301,7 @@ function ApprovalCard({
 export function DesktopActivityBlock({
   activity,
   approval,
-  roots = [],
+  roots = EMPTY_ROOTS,
 }: {
   activity: DesktopToolActivity;
   approval?: DesktopApprovalRequest | undefined;

@@ -28,7 +28,6 @@ const controllers: WorkController[] = [];
 function setup(overrides: Partial<WorkDependencies> = {}) {
   const completed = deferred<void>();
   const deps: WorkDependencies = {
-    beforeExecute: async () => {},
     claim: vi.fn(async () => "token"),
     execute: vi.fn(async () => result),
     complete: vi.fn(async () => {
@@ -210,19 +209,6 @@ describe("app-owned Work execution", () => {
     await delivered.promise;
     expect(deps.execute).toHaveBeenCalledTimes(1);
     expect(attempts).toBe(2);
-  });
-
-  it("does not claim before first-send folder rebinding finishes", async () => {
-    const barrier = deferred<void>();
-    const beforeExecute = vi.fn(() => barrier.promise);
-    const { controller, deps, completed } = setup({ beforeExecute });
-    controller.reconcile(snapshot(call("one")));
-    controller.decide("one", "allow");
-    expect(deps.claim).not.toHaveBeenCalled();
-    barrier.resolve();
-    await completed;
-    expect(deps.execute).toHaveBeenCalledTimes(1);
-    expect(beforeExecute).toHaveBeenCalledWith("a");
   });
 
   it("deduplicates concurrent snapshot refreshes while execution is pending", async () => {

@@ -12,7 +12,6 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import {
-  DRAFT_CONVERSATION,
   desktopShellOutdated,
   makeDesktopClient,
   readDesktopAuth,
@@ -23,8 +22,6 @@ import {
   type DesktopError,
   type FolderStatus,
 } from "@chat/desktop-rpc";
-
-export { DRAFT_CONVERSATION };
 
 /**
  * The site's side of the desktop bridge.
@@ -146,10 +143,8 @@ export const prepareWorkFolder = async (
           if (controller.signal.aborted) aborted();
         });
       }
-      await wait(waitForDraftBinding(conversationId));
       controller.signal.throwIfAborted();
       if (busy()) continue;
-      const binding = draftBinding;
       const prepared = queryClient.prefetchQuery({ ...options, staleTime: 0 });
       try {
         // Prefetch swallows cancellation as well as IPC failures; only the latter can render.
@@ -157,12 +152,12 @@ export const prepareWorkFolder = async (
       } catch (error) {
         controller.signal.throwIfAborted();
         if (isCancelledError(error)) {
-          if (busy() || binding !== draftBinding) continue;
+          if (busy()) continue;
           throw error;
         }
       }
       controller.signal.throwIfAborted();
-      if (busy() || binding !== draftBinding) continue;
+      if (busy()) continue;
       return;
     }
   } finally {
@@ -277,29 +272,15 @@ export const desktopSendFields = (folder: FolderState | null): DesktopSendFields
     .map((item) => ({ name: item.name, path: item.path }));
   // The workspace travels with its real path: it is the model's cwd and the
   // root every absolute path in the workspace falls under.
-  const folders = folder.status.workspace
-    ? [{ name: WORKSPACE_FOLDER_NAME, path: folder.status.workspace.path }, ...attached]
-    : attached;
+  const folders = [
+    { name: WORKSPACE_FOLDER_NAME, path: folder.status.workspace.path },
+    ...attached,
+  ];
   return {
     fromDesktop: true,
-    ...(folders.length > 0 ? { desktopFolders: folders } : {}),
-    desktopCommands: folders.length > 0 && folder.status.sandbox.kind === "ready",
+    desktopFolders: folders,
+    desktopCommands: folder.status.sandbox.kind === "ready",
   };
-};
-
-/**
- * Carries a folder picked before the first message onto the conversation that
- * message created. A no-op in a browser, and harmless when nothing was picked.
- */
-export const rebindDraftFolder = async (conversationId: string): Promise<void> => {
-  const client = desktopClient();
-  if (!client) return;
-  await Effect.runPromise(
-    client.rebindFolder({
-      fromConversationId: DRAFT_CONVERSATION,
-      toConversationId: conversationId,
-    }),
-  );
 };
 
 /** Shown when a work chat tries to act before the machine has answered about folders. */
@@ -319,12 +300,8 @@ export const copyWorkspaceToBranch = async (
 ): Promise<void> => {
   const client = desktopClient();
   if (!client) return;
-  await Effect.runPromise(
-    client.copyFolderGrants({ fromConversationId, toConversationId }),
-  );
-  await Effect.runPromise(
-    client.cloneWorkspace({ fromConversationId, toConversationId }),
-  );
+  await Effect.runPromise(client.copyFolderGrants({ fromConversationId, toConversationId }));
+  await Effect.runPromise(client.cloneWorkspace({ fromConversationId, toConversationId }));
 };
 
 /**
@@ -372,79 +349,4 @@ export const useLocalMachineId = (): string | null => {
     retry: false,
   });
   return query.data?.machineId ?? null;
-};
-
-type DraftBinding = {
-  conversationId: string | null;
-  /** Resolves once the create response has named the destination. */
-  readonly named: Promise<void>;
-  readonly done: Promise<void>;
-};
-
-let draftBinding: DraftBinding | null = null;
-
-/**
- * Holds dispatch for a first send's rebind. Pass the call's conversation id so
- * other chats are not stalled once that destination is known.
- */
-export const waitForDraftBinding = async (conversationId?: string) => {
-  for (;;) {
-    const current = draftBinding;
-    if (!current) return;
-    if (conversationId === undefined || conversationId === DRAFT_CONVERSATION) {
-      await current.done;
-      continue;
-    }
-    if (current.conversationId === null) {
-      await current.named;
-      continue;
-    }
-    if (current.conversationId !== conversationId) return;
-    await current.done;
-  }
-};
-
-/**
- * The server can publish a local call before the create-turn response arrives.
- * Hold dispatch until its draft grant has the durable conversation id.
- */
-export const withDraftFolderBinding = async <A extends { conversationId: string }>(
-  send: () => Promise<A>,
-  queryClient: QueryClient,
-): Promise<A> => {
-  const previous = draftBinding;
-  let name!: () => void;
-  let release!: () => void;
-  const current: DraftBinding = {
-    conversationId: null,
-    named: new Promise<void>((resolve) => {
-      name = resolve;
-    }),
-    done: new Promise<void>((resolve) => {
-      release = resolve;
-    }),
-  };
-  draftBinding = current;
-  try {
-    await previous?.done;
-    const result = await send();
-    current.conversationId = result.conversationId;
-    name();
-    const keys = [folderQueryKey(DRAFT_CONVERSATION), folderQueryKey(result.conversationId)];
-    await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey, exact: true })));
-    try {
-      await rebindDraftFolder(result.conversationId);
-    } catch {
-      // Create already committed. The destination stays without a grant.
-    } finally {
-      await Promise.all(
-        keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
-      );
-    }
-    return result;
-  } finally {
-    if (draftBinding === current) draftBinding = null;
-    name();
-    release();
-  }
 };

@@ -13,7 +13,11 @@ it("explains approval modes and preserves their stored values when selected", as
       <FolderStrip
         folder={{
           readiness: "ready",
-          status: { folders: [{ name: "site", path: "/home/user/site", alive: true }], sandbox: { kind: "ready" } },
+          status: {
+            folders: [{ name: "site", path: "/home/user/site", alive: true }],
+            sandbox: { kind: "ready" },
+            workspace: { path: "/data/workspaces/chat" },
+          },
           busy: false,
           refusal: null,
           refresh: vi.fn(),
@@ -81,7 +85,11 @@ it("replaces a lost folder by name when choosing it again", async () => {
     <FolderStrip
       folder={{
         readiness: "ready",
-        status: { folders: [{ name: "site", path: "/home/user/site", alive: false }], sandbox: { kind: "ready" } },
+        status: {
+          folders: [{ name: "site", path: "/home/user/site", alive: false }],
+          sandbox: { kind: "ready" },
+          workspace: { path: "/data/workspaces/chat" },
+        },
         busy: false,
         refusal: null,
         refresh: vi.fn(),
@@ -104,7 +112,7 @@ it("keeps the workspace implicit: no chip, only the attach invite", () => {
         status: {
           folders: [],
           sandbox: { kind: "ready" },
-          workspace: { path: "/data/workspaces/abc", bytes: 512 },
+          workspace: { path: "/data/workspaces/abc" },
         },
         busy: false,
         refusal: null,
@@ -118,5 +126,7 @@ it("keeps the workspace implicit: no chip, only the attach invite", () => {
   // The workspace is app-managed and always present, so it earns no chip;
   // the strip shows only folders the user chose.
   expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Add a folder from this computer" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Add a folder from this computer" }),
+  ).toBeInTheDocument();
 });

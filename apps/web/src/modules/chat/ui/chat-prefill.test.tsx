@@ -154,7 +154,7 @@ describe("one-shot new-chat prefill", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({
-      conversationId: null,
+      conversation: { kind: "new", id: expect.any(String), mode: "chat" },
       content: "Make it a writing coach instead.",
       modelId: "normal-default",
       attachmentIds: [],

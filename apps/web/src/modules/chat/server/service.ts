@@ -88,6 +88,24 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
 export class ChatService extends Context.Service<
   ChatService,
   {
+    reserveWorkTurn(input: {
+      id: string;
+      userId: string;
+      conversation: TurnFields["conversation"];
+    }): Effect.Effect<
+      { reservationId: string; conversationId: string },
+      ConversationNotFound | ConversationBusy | InvalidMessage
+    >;
+    getWorkTurnReservation(input: { userId: string; reservationId: string }): Effect.Effect<
+      {
+        reservationId: string;
+        conversationId: string;
+        status: "reserved" | "activated" | "aborted" | "expired";
+        assistantMessageId: string | null;
+      },
+      ConversationNotFound
+    >;
+    abortWorkTurn(input: { userId: string; reservationId: string }): Effect.Effect<void>;
     sendMessage(
       input: SendTurnInput,
     ): Effect.Effect<
@@ -128,6 +146,7 @@ export class ChatService extends Context.Service<
       | MessageNotFound
       | ModelNotFound
       | RetryNotAllowed
+      | ConversationBusy
       | AgentNotAvailable
       | WorkDesktopRequired
       | KnowledgeRejected
@@ -148,7 +167,7 @@ export class ChatService extends Context.Service<
       messageId: string;
     }): Effect.Effect<
       { conversationId: string },
-      ConversationNotFound | MessageNotFound | BranchNotAllowed
+      ConversationNotFound | MessageNotFound | BranchNotAllowed | ConversationBusy
     >;
     editMessage(
       input: EditContent & {
@@ -178,6 +197,7 @@ export class ChatService extends Context.Service<
       | MessageNotFound
       | ModelNotFound
       | EditNotAllowed
+      | ConversationBusy
       | ToolUnavailable
       | InvalidMessage
       | AttachmentNotAvailable
@@ -392,7 +412,8 @@ function makeChatService() {
             return yield* new WorkDesktopRequired();
           // Re-stamped on every attempt, retry included: the banner must
           // name the machine the chat actually last worked on.
-          const desktopMachineId = defaults.mode === "work" ? (input.desktopMachineId ?? null) : null;
+          const desktopMachineId =
+            defaults.mode === "work" ? (input.desktopMachineId ?? null) : null;
           const desktopMachineName =
             defaults.mode === "work" ? (input.desktopMachineName ?? null) : null;
           // An edit that submits a selection is changing it, so it cannot take the
@@ -461,6 +482,34 @@ function makeChatService() {
           Effect.provideService(AgentRepo, agents),
         );
 
+    const reserveWorkTurn = Effect.fn("ChatService.reserveWorkTurn")(function* (input: {
+      id: string;
+      userId: string;
+      conversation: TurnFields["conversation"];
+    }) {
+      const row = yield* repo.reserveWorkTurn(input);
+      return { reservationId: row.id, conversationId: row.conversationId };
+    });
+
+    const getWorkTurnReservation = Effect.fn("ChatService.getWorkTurnReservation")(
+      function* (input: { userId: string; reservationId: string }) {
+        const row = yield* repo.getWorkTurnReservation(input.userId, input.reservationId);
+        return {
+          reservationId: row.id,
+          conversationId: row.conversationId,
+          status: row.status,
+          assistantMessageId: row.assistantMessageId,
+        };
+      },
+    );
+
+    const abortWorkTurn = Effect.fn("ChatService.abortWorkTurn")(function* (input: {
+      userId: string;
+      reservationId: string;
+    }) {
+      yield* repo.abortWorkTurn(input.userId, input.reservationId);
+    });
+
     const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
       // Dropped files count as content on their own: an import-only send is a
       // question with chips and no bubble. Both names and text, since the
@@ -476,14 +525,19 @@ function makeChatService() {
       }
       // The server stays authoritative even when the composer hides the toggle.
       yield* repo.research?.reap() ?? Effect.void;
-      if (input.questionResponse && input.conversationId)
-        yield* repo.getConversation(input.userId, input.conversationId);
-      const { model, attachmentFileNames, researchEnabled } = yield* validateGenerationOptions(input);
+      if (input.questionResponse && input.conversation.kind === "existing")
+        yield* repo.getConversation(input.userId, input.conversation.id);
+      const { model, attachmentFileNames, researchEnabled } =
+        yield* validateGenerationOptions(input);
       const searchAvailable = yield* searchToolEnabled;
 
       // The association is fixed at creation; its configuration is live for
       // every subsequent attempt. Swapping or removal is not a chat setting.
-      if (input.agentId !== undefined && input.conversationId && !input.questionResponse)
+      if (
+        input.agentId !== undefined &&
+        input.conversation.kind === "existing" &&
+        !input.questionResponse
+      )
         return yield* new InvalidMessage({
           reason: "the agent is chosen when a chat starts and cannot change afterwards",
         });
@@ -493,10 +547,10 @@ function makeChatService() {
       // empty conversation or a user message nobody will answer.
       const turnFields: TurnFields = {
         userId: input.userId,
-        conversationId: input.conversationId,
+        conversation: input.conversation,
+        ...(input.reservationId !== undefined ? { reservationId: input.reservationId } : {}),
         modelId: input.modelId,
         attachmentIds: input.attachmentIds,
-        ...(input.mode !== undefined ? { mode: input.mode } : {}),
         ...(input.collectionIds !== undefined ? { collectionIds: input.collectionIds } : {}),
         ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
         associateAgentId: agentId ?? undefined,
@@ -526,37 +580,39 @@ function makeChatService() {
           : { ...turnFields, content: input.content },
       );
 
-      if (turn.conversationCreated) {
+      if (turn.activatedNow && turn.conversationCreated) {
         yield* sync.publish(input.userId, {
           type: "conversation.created",
           conversationId: turn.conversation.id,
         });
       }
 
-      yield* sync.publish(input.userId, {
-        type: "message.created",
-        conversationId: turn.conversation.id,
-        messageId: turn.assistant.id,
-      });
+      if (turn.activatedNow)
+        yield* sync.publish(input.userId, {
+          type: "message.created",
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+        });
 
-      yield* engine.startGeneration({
-        desktopExecutorId: input.desktopExecutorId,
-        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
-        deviceSessionId: input.deviceSessionId,
-        userId: input.userId,
-        conversationId: turn.conversation.id,
-        messageId: turn.assistant.id,
-        generationId: turn.assistant.generationId ?? undefined,
-        modelId: input.modelId,
-        searchEnabled: turn.config.searchEnabled,
-        timeZone: input.timeZone,
-        openDocumentId: input.openDocumentId,
-      });
+      if (turn.activatedNow)
+        yield* engine.startGeneration({
+          desktopExecutorId: input.desktopExecutorId,
+          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+          deviceSessionId: input.deviceSessionId,
+          userId: input.userId,
+          conversationId: turn.conversation.id,
+          messageId: turn.assistant.id,
+          generationId: turn.assistant.generationId ?? undefined,
+          modelId: input.modelId,
+          searchEnabled: turn.config.searchEnabled,
+          timeZone: input.timeZone,
+          openDocumentId: input.openDocumentId,
+        });
 
       // Only a brand-new conversation has a pending title. Forked after the
       // answer so the reply never waits on it, and detached so it survives the
       // response ending.
-      if (turn.conversationCreated) {
+      if (turn.activatedNow && turn.conversationCreated) {
         yield* Effect.forkDetach(
           generateConversationTitle(titleDeps, {
             userId: input.userId,
@@ -1065,7 +1121,8 @@ function makeChatService() {
         message.generationId && repo.research
           ? yield* repo.research.cancelForGeneration(message.id, message.generationId)
           : false;
-      const stopped = (yield* engine.stopGeneration(input.messageId, input.generationId)) || durable;
+      const stopped =
+        (yield* engine.stopGeneration(input.messageId, input.generationId)) || durable;
       return { stopped };
     });
 
@@ -1114,6 +1171,9 @@ function makeChatService() {
     });
 
     return ChatService.of({
+      reserveWorkTurn,
+      getWorkTurnReservation,
+      abortWorkTurn,
       sendMessage,
       retryMessage,
       branchConversation,

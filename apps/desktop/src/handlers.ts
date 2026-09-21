@@ -109,7 +109,6 @@ export const makeHandlers = (shell: Shell) =>
       remember: (conversationId: string, folder: string) =>
         store.remember(key(conversationId), folder),
       forget: (conversationId: string, folder: string) => store.forget(key(conversationId), folder),
-      forgetAll: (conversationId: string) => store.forgetAll(key(conversationId)),
     };
 
     /**
@@ -176,8 +175,7 @@ export const makeHandlers = (shell: Shell) =>
         return { path: target.relative, kind };
       });
 
-    // Dead grants and the sandbox are data inside the status, not faults; a
-    // failed size walk (a broken tree, not an absent one) still refuses.
+    // Dead grants and sandbox availability are data inside the status, not faults.
     const status = (conversationId: string): Effect.Effect<FolderStatus, DesktopError> =>
       Effect.gen(function* () {
         const folders = yield* grants.lookup(conversationId);
@@ -190,13 +188,10 @@ export const makeHandlers = (shell: Shell) =>
             alive: alive._tag === "Success",
           })),
         );
-        // Measured, not created: a chat the user only looked at gets a size,
-        // not a directory on disk.
-        const bytes = yield* workspaces.size(conversationId);
         return {
           folders: listed,
           sandbox: yield* sandbox.availability(),
-          workspace: { path: workspaces.path(conversationId), bytes },
+          workspace: { path: workspaces.path(conversationId) },
         };
       });
 
@@ -258,56 +253,39 @@ export const makeHandlers = (shell: Shell) =>
           return yield* status(conversationId);
         }),
 
-      rebindFolder: ({ fromConversationId, toConversationId }) =>
+      stageFile: ({ conversationId, submissionId, fileName, base64 }) =>
         Effect.gen(function* () {
-          const folders = yield* grants.lookup(fromConversationId);
-          const dest = yield* grants.lookup(toConversationId);
-          // Same rule as choose: the name is the address, so two folders that
-          // share one cannot both sit on the destination.
-          for (const folder of folders) {
-            if (folderName(folder) === WORKSPACE_FOLDER_NAME) return yield* reservedName;
-            const clash = dest.find(
-              (existing) => existing !== folder && folderName(existing) === folderName(folder),
-            );
-            if (clash) return yield* Effect.fail(alreadyAttached(folderName(folder)));
-          }
-          // Nothing under the draft key is the ordinary case: the chat was
-          // started without picking a folder first.
-          for (const folder of folders) yield* grants.remember(toConversationId, folder);
-          if (folders.length > 0) yield* grants.forgetAll(fromConversationId);
-          // Files dropped into the draft composer travel with the rebind, so
-          // the first send's imports exist under the real conversation id by
-          // the time its tools run.
-          yield* workspaces.rebind(fromConversationId, toConversationId);
-          return yield* status(toConversationId);
-        }),
-
-      importFile: ({ conversationId, fileName, base64 }) =>
-        Effect.gen(function* () {
-          // Base64 length bounds the decoded size, so the refusal happens
-          // before the bytes exist in memory, not after.
+          // Refuse before decoding, while the oversized payload is still text.
           if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
             return yield* new DesktopError({
               reason: "too-large",
               message: "That file is too large to add to the workspace.",
             });
           }
-          const receipt = yield* workspaces.importFile(
+          return yield* workspaces.stageFile(
             conversationId,
+            submissionId,
             fileName,
             Buffer.from(base64, "base64"),
           );
-          return receipt;
         }),
 
-      importFileFromPath: ({ conversationId, fileName, sourcePath }) =>
-        // No containment on the source: the path came from the user's own
-        // drop, and refusing to copy out of folders the chat cannot see is
-        // the whole point of an import.
-        workspaces.importFileFromPath(conversationId, fileName, sourcePath),
+      discardStagedFile: ({ conversationId, submissionId, name }) =>
+        workspaces.discardStagedFile(conversationId, submissionId, name),
 
-      discardImport: ({ conversationId, name }) =>
-        workspaces.discardImport(conversationId, name),
+      discardSubmission: ({ conversationId, submissionId }) =>
+        workspaces.discardSubmission(conversationId, submissionId),
+
+      promoteSubmission: ({ conversationId, submissionId, reservationId }) =>
+        workspaces.promote(conversationId, submissionId, reservationId),
+
+      commitPromotion: ({ conversationId, reservationId }) =>
+        workspaces.commit(conversationId, reservationId),
+
+      rollbackPromotion: ({ conversationId, reservationId }) =>
+        workspaces.rollback(conversationId, reservationId),
+
+      listPendingPromotions: () => workspaces.pendingPromotions(),
 
       cloneWorkspace: ({ fromConversationId, toConversationId }) =>
         workspaces.clone(fromConversationId, toConversationId),

@@ -12,10 +12,15 @@ import {
   FolderStatus,
   FoundPaths,
   LIMITS,
+  LocalTransactionId,
   MoveReceipt,
+  PendingPromotion,
+  PromotionReceipt,
   RevealMode,
   SandboxAvailability,
   SearchMatches,
+  StagedFileReceipt,
+  WorkspaceId,
   WriteReceipt,
 } from "./schema.ts";
 
@@ -37,7 +42,7 @@ const deletedPathsMax = LIMITS.deletedPaths;
 export const DesktopRpcs = RpcGroup.make(
   /** What the composer strip renders: every attached folder and whether it is still there. */
   Rpc.make("folderStatus", {
-    payload: { conversationId: Schema.String },
+    payload: { conversationId: WorkspaceId },
     success: FolderStatus,
   }),
 
@@ -49,7 +54,7 @@ export const DesktopRpcs = RpcGroup.make(
    */
   Rpc.make("chooseFolder", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       /** Detach this name first, so a relocated folder can reclaim it. */
       replace: Schema.optionalKey(Schema.String),
     },
@@ -58,17 +63,7 @@ export const DesktopRpcs = RpcGroup.make(
   }),
 
   Rpc.make("detachFolder", {
-    payload: { conversationId: Schema.String, name: Schema.String },
-    success: FolderStatus,
-  }),
-
-  /**
-   * Moves the grants from one key to another, which is how folders picked
-   * before the first message survive: a new chat has no id yet, so the strip
-   * attaches under a draft key and rebinds once the conversation exists.
-   */
-  Rpc.make("rebindFolder", {
-    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    payload: { conversationId: WorkspaceId, name: Schema.String },
     success: FolderStatus,
   }),
 
@@ -100,7 +95,7 @@ export const DesktopRpcs = RpcGroup.make(
 
   Rpc.make("listDirectory", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
     },
@@ -110,7 +105,7 @@ export const DesktopRpcs = RpcGroup.make(
 
   Rpc.make("readFile", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
     },
@@ -121,7 +116,7 @@ export const DesktopRpcs = RpcGroup.make(
   /** Size alone, for a preview that needs the dialog's facts without the bytes. */
   Rpc.make("fileInfo", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
     },
@@ -131,7 +126,7 @@ export const DesktopRpcs = RpcGroup.make(
 
   Rpc.make("writeFile", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       callId: Schema.String,
       path: Schema.String,
       text: Schema.String,
@@ -143,7 +138,7 @@ export const DesktopRpcs = RpcGroup.make(
   /** The raw bytes of an image or document, for a model that can take them. */
   Rpc.make("readBinary", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
     },
@@ -158,7 +153,7 @@ export const DesktopRpcs = RpcGroup.make(
    */
   Rpc.make("editFile", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       callId: Schema.String,
       path: Schema.String,
       old: Schema.String,
@@ -172,7 +167,7 @@ export const DesktopRpcs = RpcGroup.make(
   /** Renames or relocates within the folder. Never overwrites. */
   Rpc.make("movePath", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       from: Schema.String,
       to: Schema.String,
       callId: Schema.String,
@@ -188,7 +183,7 @@ export const DesktopRpcs = RpcGroup.make(
    */
   Rpc.make("deletePath", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       paths: Schema.Array(Schema.String).check(
         Schema.isMinLength(1),
         Schema.isMaxLength(deletedPathsMax),
@@ -202,7 +197,7 @@ export const DesktopRpcs = RpcGroup.make(
   /** Files whose path matches a glob, `.gitignore` respected. */
   Rpc.make("findFiles", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       pattern: Schema.String,
       callId: Schema.String,
     },
@@ -213,7 +208,7 @@ export const DesktopRpcs = RpcGroup.make(
   /** Lines matching a regular expression, `.gitignore` respected. */
   Rpc.make("searchFiles", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       callId: Schema.String,
       pattern: Schema.String,
       /** Narrows to paths matching this glob; absent searches everything. */
@@ -225,7 +220,7 @@ export const DesktopRpcs = RpcGroup.make(
 
   Rpc.make("runCommand", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       /** Correlates the sandbox violation record with the tool call. */
       callId: Schema.String,
       /**
@@ -261,7 +256,7 @@ export const DesktopRpcs = RpcGroup.make(
    */
   Rpc.make("revealPath", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
       path: Schema.String,
       mode: RevealMode,
     },
@@ -280,43 +275,59 @@ export const DesktopRpcs = RpcGroup.make(
    * have added.
    */
 
-  /**
-   * Writes a file the user pasted into the chat's workspace, by sanitized
-   * basename at its root. Binary (base64, capped at `LIMITS.importBytes`
-   * decoded), any type: only some are readable back by the model, and the
-   * rest still matter to commands. Drops with a local path use
-   * `importFileFromPath`, which moves no bytes over the bridge.
-   */
-  Rpc.make("importFile", {
+  /** Stages pasted bytes outside every model-visible workspace. */
+  Rpc.make("stageFile", {
     payload: {
-      conversationId: Schema.String,
+      conversationId: WorkspaceId,
+      submissionId: LocalTransactionId,
       fileName: Schema.String,
       base64: Schema.String,
     },
-    success: WriteReceipt,
+    success: StagedFileReceipt,
     error: DesktopError,
   }),
 
-  /**
-   * Copies a dropped file from where it already lives on this machine into
-   * the chat's workspace, capped at `LIMITS.importPathBytes`. The path comes
-   * from the drop event, which is the user's own consent; the copy is
-   * contained to the workspace root all the same.
-   */
-  Rpc.make("importFileFromPath", {
+  Rpc.make("discardStagedFile", {
     payload: {
-      conversationId: Schema.String,
-      fileName: Schema.String,
-      sourcePath: Schema.String,
+      conversationId: WorkspaceId,
+      submissionId: LocalTransactionId,
+      name: Schema.String,
     },
-    success: WriteReceipt,
+    success: Schema.Void,
     error: DesktopError,
   }),
 
-  /** Removes a file `importFile` just placed, when its chip is removed. */
-  Rpc.make("discardImport", {
-    payload: { conversationId: Schema.String, name: Schema.String },
+  Rpc.make("discardSubmission", {
+    payload: { conversationId: WorkspaceId, submissionId: LocalTransactionId },
     success: Schema.Void,
+    error: DesktopError,
+  }),
+
+  /** Atomically links one complete staged submission into the live workspace. */
+  Rpc.make("promoteSubmission", {
+    payload: {
+      conversationId: WorkspaceId,
+      submissionId: LocalTransactionId,
+      reservationId: LocalTransactionId,
+    },
+    success: PromotionReceipt,
+    error: DesktopError,
+  }),
+
+  Rpc.make("commitPromotion", {
+    payload: { conversationId: WorkspaceId, reservationId: LocalTransactionId },
+    success: Schema.Void,
+    error: DesktopError,
+  }),
+
+  Rpc.make("rollbackPromotion", {
+    payload: { conversationId: WorkspaceId, reservationId: LocalTransactionId },
+    success: Schema.Void,
+    error: DesktopError,
+  }),
+
+  Rpc.make("listPendingPromotions", {
+    success: Schema.Array(PendingPromotion),
     error: DesktopError,
   }),
 
@@ -326,18 +337,14 @@ export const DesktopRpcs = RpcGroup.make(
    * whatever the destination's lazy creation already holds.
    */
   Rpc.make("cloneWorkspace", {
-    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    payload: { fromConversationId: WorkspaceId, toConversationId: WorkspaceId },
     success: Schema.Void,
     error: DesktopError,
   }),
 
-  /**
-   * Remembers the source conversation's folder grants under the destination
-   * too. Copy, not move: `rebindFolder` empties the source, which is the
-   * draft flow's contract and would be wrong for a branch.
-   */
+  /** Copies the source conversation's local folder grants onto a branch. */
   Rpc.make("copyFolderGrants", {
-    payload: { fromConversationId: Schema.String, toConversationId: Schema.String },
+    payload: { fromConversationId: WorkspaceId, toConversationId: WorkspaceId },
     success: FolderStatus,
     error: DesktopError,
   }),
@@ -347,7 +354,7 @@ export const DesktopRpcs = RpcGroup.make(
    * delete-conversation action; nothing on the server waits for it.
    */
   Rpc.make("discardWorkspace", {
-    payload: { conversationId: Schema.String },
+    payload: { conversationId: WorkspaceId },
     success: Schema.Void,
     error: DesktopError,
   }),

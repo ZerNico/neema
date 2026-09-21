@@ -2,17 +2,21 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { DesktopRpcs } from "./group.ts";
 
-const path = { conversationId: "chat", path: "work/file" };
+const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
+const BRANCH = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
+const SUBMISSION = "550e8400-e29b-41d4-a716-446655440000";
+const RESERVATION = "550e8400-e29b-41d4-a716-446655440001";
+const path = { conversationId: CONVERSATION, path: "work/file" };
 const cases = [
   { tag: "listDirectory", payload: path },
   { tag: "readFile", payload: path },
   { tag: "readBinary", payload: path },
   { tag: "writeFile", payload: { ...path, text: "hello" } },
   { tag: "editFile", payload: { ...path, old: "hello", new: "world", all: false } },
-  { tag: "movePath", payload: { conversationId: "chat", from: "work/a", to: "work/b" } },
-  { tag: "deletePath", payload: { conversationId: "chat", paths: ["work/file"] } },
-  { tag: "findFiles", payload: { conversationId: "chat", pattern: "*.ts" } },
-  { tag: "searchFiles", payload: { conversationId: "chat", pattern: "needle" } },
+  { tag: "movePath", payload: { conversationId: CONVERSATION, from: "work/a", to: "work/b" } },
+  { tag: "deletePath", payload: { conversationId: CONVERSATION, paths: ["work/file"] } },
+  { tag: "findFiles", payload: { conversationId: CONVERSATION, pattern: "*.ts" } },
+  { tag: "searchFiles", payload: { conversationId: CONVERSATION, pattern: "needle" } },
 ];
 
 describe("model operation identity", () => {
@@ -27,7 +31,7 @@ describe("model operation identity", () => {
     const rpc = DesktopRpcs.requests.get("runCommand")!;
     const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
     const payload = {
-      conversationId: "chat",
+      conversationId: CONVERSATION,
       command: "true",
       timeoutMs: 100,
     };
@@ -38,18 +42,52 @@ describe("model operation identity", () => {
 
 describe("user-driven workspace operations", () => {
   const tags = [
-    { tag: "importFile", payload: { conversationId: "chat", fileName: "a.bin", base64: "AA==" } },
     {
-      tag: "importFileFromPath",
-      payload: { conversationId: "chat", fileName: "a.bin", sourcePath: "/tmp/a.bin" },
+      tag: "stageFile",
+      payload: {
+        conversationId: CONVERSATION,
+        submissionId: SUBMISSION,
+        fileName: "a.bin",
+        base64: "AA==",
+      },
     },
-    { tag: "discardImport", payload: { conversationId: "chat", name: "a.bin" } },
-    { tag: "cloneWorkspace", payload: { fromConversationId: "chat", toConversationId: "branch" } },
+    {
+      tag: "discardStagedFile",
+      payload: {
+        conversationId: CONVERSATION,
+        submissionId: SUBMISSION,
+        name: "a.bin",
+      },
+    },
+    {
+      tag: "discardSubmission",
+      payload: { conversationId: CONVERSATION, submissionId: SUBMISSION },
+    },
+    {
+      tag: "promoteSubmission",
+      payload: {
+        conversationId: CONVERSATION,
+        submissionId: SUBMISSION,
+        reservationId: RESERVATION,
+      },
+    },
+    {
+      tag: "commitPromotion",
+      payload: { conversationId: CONVERSATION, reservationId: RESERVATION },
+    },
+    {
+      tag: "rollbackPromotion",
+      payload: { conversationId: CONVERSATION, reservationId: RESERVATION },
+    },
+    {
+      tag: "cloneWorkspace",
+      payload: { fromConversationId: CONVERSATION, toConversationId: BRANCH },
+    },
     {
       tag: "copyFolderGrants",
-      payload: { fromConversationId: "chat", toConversationId: "branch" },
+      payload: { fromConversationId: CONVERSATION, toConversationId: BRANCH },
     },
-    { tag: "discardWorkspace", payload: { conversationId: "chat" } },
+    { tag: "discardWorkspace", payload: { conversationId: CONVERSATION } },
   ];
 
   it.each(tags)("$tag carries no callId", ({ tag, payload }) => {
@@ -58,4 +96,13 @@ describe("user-driven workspace operations", () => {
     // A callId would mean the model could fire a user action on its own.
     expect(Object.keys(decode(payload) as object)).not.toContain("callId");
   });
+
+  it.each(["../outside", "/tmp/outside", "__draft__", "not-a-uuid", SUBMISSION])(
+    "rejects unsafe workspace id %s",
+    (conversationId) => {
+      const rpc = DesktopRpcs.requests.get("folderStatus")!;
+      const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
+      expect(() => decode({ conversationId })).toThrow();
+    },
+  );
 });

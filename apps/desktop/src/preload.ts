@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { BRIDGE_KEY, PROTOCOL_VERSION } from "@chat/desktop-rpc";
+import { BRIDGE_KEY, DROPPED_FILE_CHANNEL, PROTOCOL_VERSION } from "@chat/desktop-rpc";
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
 import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
 import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
@@ -21,9 +21,14 @@ if (location.protocol === "file:") {
     build: __BUILD_STAMP__,
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
-    // The drop's File cannot cross the bridge, but its path can: this is how
-    // a big file lands in the workspace as a copy, not as base64 over IPC.
-    filePathForFile: (file: File) => webUtils.getPathForFile(file),
+    // The host path never crosses into the remote page. A synthetic File has
+    // no path and returns null so pasted data can use the bounded base64 RPC.
+    stageDroppedFile: (file: File, payload: unknown) => {
+      const sourcePath = webUtils.getPathForFile(file);
+      return sourcePath === ""
+        ? Promise.resolve(null)
+        : ipcRenderer.invoke(DROPPED_FILE_CHANNEL, { payload, sourcePath });
+    },
     request: (tag: unknown, payload: unknown) =>
       ipcRenderer.invoke("chat-desktop:request", { tag, payload }),
   });

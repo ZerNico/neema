@@ -40,9 +40,13 @@ import {
   type ToolSource,
 } from "../client/use-message-stream.ts";
 import {
+  abortWorkTurn,
+  activateWorkTurn,
   answerQuestion,
   branchConversation,
   editMessage,
+  getWorkTurnReservation,
+  reserveWorkTurn,
   retryMessage,
   sendMessage,
   stopGeneration,
@@ -51,12 +55,11 @@ import {
 import type { ConversationMode, PermissionLevel } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
-  DRAFT_CONVERSATION,
   copyWorkspaceToBranch,
   desktopClient,
   useLocalMachineId,
-  withDraftFolderBinding,
 } from "~/modules/desktop/client/bridge.ts";
+import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import {
   ForeignMachineBanner,
   foreignMachineStamp,
@@ -77,6 +80,8 @@ import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import { uuidv7 } from "uuidv7";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
@@ -88,6 +93,83 @@ import { prefersReducedMotion } from "~/ui/motion.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
+
+export const sendReservedWorkspaceTurn = async (input: {
+  conversation:
+    | { kind: "new"; id: string; mode: ConversationMode }
+    | { kind: "existing"; id: string };
+  imports: WorkspaceImports;
+  activate: (
+    reservationId: string,
+    files: ReadonlyArray<string>,
+  ) => Promise<{ conversationId: string; assistantMessageId: string }>;
+}) => {
+  const reservationId = crypto.randomUUID();
+  await reserveWorkTurn({ data: { reservationId, conversation: input.conversation } });
+  let receipt;
+  try {
+    receipt = await input.imports.promote(reservationId);
+  } catch (error) {
+    await abortWorkTurn({ data: { reservationId } }).catch(() => {});
+    throw error;
+  }
+  const files = receipt.files.map((file) => file.finalName);
+  let activated: { conversationId: string; assistantMessageId: string };
+  try {
+    activated = await input.activate(reservationId, files);
+  } catch (initialError) {
+    let status;
+    try {
+      status = await getWorkTurnReservation({ data: { reservationId } });
+    } catch {
+      // The server may have committed. Keep the journal for startup recovery.
+      throw initialError;
+    }
+    if (status.status === "activated" && status.assistantMessageId) {
+      activated = {
+        conversationId: status.conversationId,
+        assistantMessageId: status.assistantMessageId,
+      };
+    } else if (status.status === "reserved") {
+      // Activation is idempotent; one retry resolves a lost response without
+      // creating another turn or starting another generation.
+      try {
+        activated = await input.activate(reservationId, files);
+      } catch (retryError) {
+        let retryStatus;
+        try {
+          retryStatus = await getWorkTurnReservation({ data: { reservationId } });
+        } catch {
+          // The retry may have committed too. Leave recovery evidence intact.
+          throw retryError;
+        }
+        if (retryStatus.status === "activated" && retryStatus.assistantMessageId) {
+          activated = {
+            conversationId: retryStatus.conversationId,
+            assistantMessageId: retryStatus.assistantMessageId,
+          };
+        } else {
+          if (retryStatus.status === "reserved") {
+            try {
+              await abortWorkTurn({ data: { reservationId } });
+            } catch {
+              throw retryError;
+            }
+          }
+          await input.imports.rollback(reservationId).catch(() => {});
+          throw retryError;
+        }
+      }
+    } else {
+      await input.imports.rollback(reservationId).catch(() => {});
+      throw initialError;
+    }
+  }
+  // A failed local cleanup leaves the journal for authenticated recovery. The
+  // server turn owns the files now, so they must never be rolled back.
+  await input.imports.commit(reservationId).catch(() => {});
+  return activated;
+};
 
 /**
  * Durable message_tool_calls row → the same family-discriminated shape used by
@@ -668,25 +750,43 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
-    }) =>
-      sendMessage({
+      workspaceImports?: WorkspaceImports;
+    }) => {
+      const conversation = { kind: "existing" as const, id: conversationId };
+      const fields = {
+        modelId: effectiveModelId!,
+        content: input.content,
+        searchEnabled,
+        timeZone: browserTimeZone(),
+        ...documentFocus(),
+        attachmentIds: input.attachmentIds,
+        researchEnabled: input.researchEnabled,
+        skillIds: [...(input.skillIds ?? [])],
+        ...context.sendFields,
+      };
+      if (input.workspaceImports && input.workspaceFiles?.length)
+        return sendReservedWorkspaceTurn({
+          conversation,
+          imports: input.workspaceImports,
+          activate: async (reservationId, workspaceFiles) =>
+            activateWorkTurn({
+              data: {
+                reservationId,
+                conversation,
+                ...fields,
+                ...(await work.attemptFields()),
+                workspaceFiles: [...workspaceFiles],
+              },
+            }),
+        });
+      return sendMessage({
         data: {
-          conversationId,
-          modelId: effectiveModelId!,
-          content: input.content,
-          searchEnabled,
+          conversation,
+          ...fields,
           ...(await work.attemptFields()),
-          timeZone: browserTimeZone(),
-          ...documentFocus(),
-          attachmentIds: input.attachmentIds,
-          researchEnabled: input.researchEnabled,
-          skillIds: [...(input.skillIds ?? [])],
-          ...(input.workspaceFiles && input.workspaceFiles.length > 0
-            ? { workspaceFiles: [...input.workspaceFiles] }
-            : {}),
-          ...context.sendFields,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       resetSearchEnabled();
       context.settle();
@@ -1198,6 +1298,28 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return result;
   }, [data.generations, data.messages]);
+  // The server keeps root names only, so display resolves them against this
+  // machine's live workspace and grants. Unresolved names drop out; grouping
+  // then falls back to the path's first segment.
+  const desktopRootsByMessage = useMemo(() => {
+    if (data.conversation.mode !== "work") return new Map<string, never>();
+    const workspacePath =
+      folder?.readiness === "ready" ? (folder.status.workspace?.path ?? null) : null;
+    const grants =
+      folder?.readiness === "ready" ? folder.status.folders.filter((item) => item.alive) : [];
+    const result = new Map<string, ReadonlyArray<{ name: string; path: string }>>();
+    for (const row of data.generations ?? []) {
+      const names = row.desktopRoots ?? [];
+      const roots = names.flatMap((name) => {
+        if (name === WORKSPACE_FOLDER_NAME)
+          return workspacePath ? [{ name, path: workspacePath }] : [];
+        const grant = grants.find((item) => item.name === name);
+        return grant ? [{ name, path: grant.path }] : [];
+      });
+      if (roots.length > 0) result.set(row.messageId, roots);
+    }
+    return result;
+  }, [data.generations, data.conversation.mode, folder]);
   // Below the per-message maps it seeds from. Opening an editor while another is
   // open is an ordinary switch: the previous draft goes with its unmounted row.
   const openEdit = useCallback(
@@ -1293,6 +1415,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
           : {}),
         ...(desktopApprovalRequests.size > 0 ? { desktopApprovals: desktopApprovalRequests } : {}),
+        ...(desktopRootsByMessage.has(message.id)
+          ? { desktopRoots: desktopRootsByMessage.get(message.id)! }
+          : {}),
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
@@ -1336,6 +1461,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     collectionsByUserMessage,
     skillsByUserMessage,
     workspaceFilesByUserMessage,
+    desktopRootsByMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,
@@ -1526,7 +1652,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <ResearchPanelOwner messages={display} />
             {/* A Work row names a path; only this view knows whose folders it
               resolves against. */}
-            <LocalFileConversationProvider conversationId={conversationId}>
+            <LocalFileConversationProvider
+              conversationId={conversationId}
+              workspaceRoot={folder?.status?.workspace.path ?? null}
+            >
               <VirtualMessageList
                 messages={withDocuments}
                 followKey={stream.lastSeq}
@@ -1570,13 +1699,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                   permissionLevel: data.conversation.permissionLevel,
                   onChange: (level) => workSettingsMutation.mutate(level),
                 }}
-                onSend={(content, attachmentIds, researchEnabled, skillIds, workspaceFiles) =>
+                onSend={(
+                  content,
+                  attachmentIds,
+                  researchEnabled,
+                  skillIds,
+                  workspaceFiles,
+                  workspaceImports,
+                ) =>
                   sendMutation.mutateAsync({
                     content,
                     attachmentIds,
                     researchEnabled,
                     ...(skillIds ? { skillIds } : {}),
                     ...(workspaceFiles ? { workspaceFiles } : {}),
+                    ...(workspaceImports ? { workspaceImports } : {}),
                   })
                 }
                 {...(stoppableId
@@ -1655,9 +1792,10 @@ export function NewChatView({
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
   const [mode, setMode] = useState<ConversationMode>("chat");
-  // No conversation yet, so a folder picked here hangs on the draft key until
-  // the first message creates one to rebind it onto.
-  const work = useWorkGate(DRAFT_CONVERSATION, mode === "work");
+  // The final id exists before local folders or files do, so the first prompt
+  // and every desktop capability already name the durable workspace path.
+  const [conversationId] = useState(uuidv7);
+  const work = useWorkGate(conversationId, mode === "work");
   const folder = work.folder;
   const isMobile = useIsMobile();
   useEffect(() => {
@@ -1684,30 +1822,47 @@ export function NewChatView({
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
+      workspaceImports?: WorkspaceImports;
       mode: ConversationMode;
-    }) =>
-      withDraftFolderBinding(
-        async () =>
-          sendMessage({
-            data: {
-              conversationId: null,
-              modelId: modelId!,
-              content: input.content,
-              searchEnabled,
-              mode: input.mode,
-              ...(await work.attemptFields(input.mode === "work")),
-              timeZone: browserTimeZone(),
-              attachmentIds: input.attachmentIds,
-              researchEnabled: input.researchEnabled,
-              skillIds: [...(input.skillIds ?? [])],
-              ...(input.workspaceFiles && input.workspaceFiles.length > 0
-                ? { workspaceFiles: [...input.workspaceFiles] }
-                : {}),
-              ...context.sendFields,
-            },
-          }),
-        queryClient,
-      ),
+    }) => {
+      const conversation = {
+        kind: "new" as const,
+        id: conversationId,
+        mode: input.mode,
+      };
+      const fields = {
+        modelId: modelId!,
+        content: input.content,
+        searchEnabled,
+        timeZone: browserTimeZone(),
+        attachmentIds: input.attachmentIds,
+        researchEnabled: input.researchEnabled,
+        skillIds: [...(input.skillIds ?? [])],
+        ...context.sendFields,
+      };
+      if (input.workspaceImports && input.workspaceFiles?.length)
+        return sendReservedWorkspaceTurn({
+          conversation,
+          imports: input.workspaceImports,
+          activate: async (reservationId, workspaceFiles) =>
+            activateWorkTurn({
+              data: {
+                reservationId,
+                conversation,
+                ...fields,
+                ...(await work.attemptFields(true)),
+                workspaceFiles: [...workspaceFiles],
+              },
+            }),
+        });
+      return sendMessage({
+        data: {
+          conversation,
+          ...fields,
+          ...(await work.attemptFields(input.mode === "work")),
+        },
+      });
+    },
     // Fires when the request starts, i.e. after any queued upload settled.
     // the composer should not move while it is still waiting on those.
     onMutate: (input) => {
@@ -1793,17 +1948,25 @@ export function NewChatView({
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             initialSkillId={initialSkillId}
-            conversationId={DRAFT_CONVERSATION}
+            conversationId={conversationId}
             folder={folder}
             readOnly={work.readOnly}
             mode={{ kind: "choose", value: mode, onChange: setMode }}
-            onSend={(content, attachmentIds, researchEnabled, skillIds, workspaceFiles) =>
+            onSend={(
+              content,
+              attachmentIds,
+              researchEnabled,
+              skillIds,
+              workspaceFiles,
+              workspaceImports,
+            ) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
                 researchEnabled,
                 ...(skillIds ? { skillIds } : {}),
                 ...(workspaceFiles ? { workspaceFiles } : {}),
+                ...(workspaceImports ? { workspaceImports } : {}),
                 mode,
               })
             }

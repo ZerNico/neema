@@ -88,20 +88,21 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it.each([undefined, { protocolVersion: PROTOCOL_VERSION, request: () => {} }])(
-  "keeps the original header without a chrome capability (%s)",
-  (channel) => {
-    vi.stubGlobal("__chatDesktop", channel);
-    render(<App />);
-    expect(screen.getByRole("banner").parentElement).toHaveAttribute(
-      "data-slot",
-      "sidebar-wrapper",
-    );
-    expect(document.querySelector(".desktop-titlebar-content")).toBeEmptyDOMElement();
-    expect(document.documentElement).not.toHaveAttribute("data-desktop-chrome");
-    expect(chrome.setTheme).not.toHaveBeenCalled();
+it.each([
+  undefined,
+  {
+    protocolVersion: PROTOCOL_VERSION,
+    request: () => {},
+    stageDroppedFile: async () => null,
   },
-);
+])("keeps the original header without a chrome capability (%s)", (channel) => {
+  vi.stubGlobal("__chatDesktop", channel);
+  render(<App />);
+  expect(screen.getByRole("banner").parentElement).toHaveAttribute("data-slot", "sidebar-wrapper");
+  expect(document.querySelector(".desktop-titlebar-content")).toBeEmptyDOMElement();
+  expect(document.documentElement).not.toHaveAttribute("data-desktop-chrome");
+  expect(chrome.setTheme).not.toHaveBeenCalled();
+});
 
 it("portals one header without losing context or remounting controls on route/fullscreen changes", async () => {
   vi.stubGlobal("__chatDesktop", { chrome });

@@ -590,7 +590,7 @@ describe("generation-time enforcement", () => {
 
         const sent = yield* chat.sendMessage({
           userId: member,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: privateModel,
           content: "hello",
           searchEnabled: false,
@@ -600,7 +600,7 @@ describe("generation-time enforcement", () => {
         const denied = yield* chat
           .sendMessage({
             userId: outsider,
-            conversationId: null,
+            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId: privateModel,
             content: "hello",
             searchEnabled: false,

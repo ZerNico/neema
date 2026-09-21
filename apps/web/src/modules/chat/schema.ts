@@ -2,6 +2,7 @@ import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { AttachmentIds } from "~/modules/attachments/schema.ts";
+import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
 
 // Blank content is allowed when the turn carries attachments; the service
 // rejects the turn that has neither.
@@ -69,23 +70,48 @@ const generationFields = {
 export const ConversationMode = Schema.Literals(["chat", "work"]);
 export type ConversationMode = typeof ConversationMode.Type;
 
-export const SendMessageInput = Schema.Struct({
-  conversationId: Schema.NullOr(Schema.String),
+export const ConversationReference = Schema.Union([
+  Schema.Struct({ kind: Schema.Literals(["new"]), id: WorkspaceId, mode: ConversationMode }),
+  Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
+]);
+export type ConversationReference = typeof ConversationReference.Type;
+
+const WorkspaceFiles = Schema.Array(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+).check(Schema.isMaxLength(50));
+
+const sendFields = {
   ...generationFields,
-  /**
-   * Basenames of files the composer copied into the chat's local workspace for
-   * this send (desktop work chats only). The service stores them on the
-   * attempt's generation config, so the transcript renders them as chips and
-   * retry replays them. Send only: an edit naming different files than the
-   * stored row would fork reality, and a retry re-sends the stored content.
-   */
-  workspaceFiles: Schema.optionalKey(
-    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))).check(
-      Schema.isMaxLength(50),
-    ),
-  ),
-  /** Chosen when a chat starts and fixed from then on; ignored on later sends. */
-  mode: Schema.optionalKey(ConversationMode),
+  /** Names only; absolute workspace paths remain attempt-scoped desktop fields. */
+  workspaceFiles: Schema.optionalKey(WorkspaceFiles),
+};
+
+export const SendMessageInput = Schema.Struct({
+  conversation: ConversationReference,
+  ...sendFields,
+});
+
+export const ReserveWorkTurnInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversation: ConversationReference,
+});
+
+export const ActivateWorkTurnInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversation: ConversationReference,
+  ...sendFields,
+  workspaceFiles: WorkspaceFiles.check(Schema.isMinLength(1)),
+});
+
+export const WorkTurnReservationInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+});
+
+export const WorkTurnReservationStatus = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversationId: WorkspaceId,
+  status: Schema.Literals(["reserved", "activated", "aborted", "expired"]),
+  assistantMessageId: Schema.NullOr(Schema.String),
 });
 
 export const AnswerQuestionInput = Schema.Struct({
