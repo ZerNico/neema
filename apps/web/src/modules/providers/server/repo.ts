@@ -15,7 +15,7 @@ export type ModelAccess = ModelRow["access"];
 /** A model as the chat picker consumes it: only what the picker renders. */
 export type ChatModelRow = Pick<
   ModelRow,
-  "id" | "displayName" | "contextLength" | "capabilities"
+  "id" | "displayName" | "description" | "contextLength" | "capabilities"
 > & {
   providerName: string;
   isDefault: boolean;
@@ -188,6 +188,7 @@ export class ProviderRepo extends Context.Service<
               id: models.id,
               defaultPriority: models.defaultPriority,
               displayName: models.displayName,
+              description: models.description,
               contextLength: models.contextLength,
               capabilities: models.capabilities,
               providerName: providers.name,

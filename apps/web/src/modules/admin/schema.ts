@@ -51,8 +51,14 @@ const EmbeddingCapabilitiesSchema = Schema.Struct({
   files: Schema.Literal(false),
 });
 
+/** One short line in the picker; longer text would crowd the list. */
+export const MODEL_DESCRIPTION_MAX = 120;
+
 const CommonModelSettings = {
   displayName: Schema.String.check(Schema.isMinLength(1)),
+  description: Schema.optionalKey(
+    Schema.NullOr(Schema.String.check(Schema.isMaxLength(MODEL_DESCRIPTION_MAX))),
+  ),
   contextLength: Schema.NullOr(PositiveInteger),
   enabled: Schema.Boolean,
   access: Schema.Literals(["public", "groups"]),

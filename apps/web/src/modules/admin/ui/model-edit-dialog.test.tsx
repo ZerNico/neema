@@ -109,6 +109,9 @@ describe("ModelEditDialog", () => {
     fireEvent.change(screen.getByLabelText("Output $/1M"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("switch", { name: "Enabled" }));
     fireEvent.click(screen.getByRole("switch", { name: "Vision" }));
+    fireEvent.change(screen.getByLabelText("Description (optional)"), {
+      target: { value: "  Quick everyday answers " },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
@@ -116,6 +119,7 @@ describe("ModelEditDialog", () => {
         data: {
           modelId: "m1",
           displayName: "Tiny Chat Plus",
+          description: "Quick everyday answers",
           type: "chat",
           contextLength: 200_000,
           embeddingDimensions: null,

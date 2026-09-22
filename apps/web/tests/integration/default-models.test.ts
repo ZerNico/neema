@@ -149,6 +149,7 @@ describe("default model priority", () => {
           new Set([
             "capabilities",
             "contextLength",
+            "description",
             "displayName",
             "id",
             "isDefault",

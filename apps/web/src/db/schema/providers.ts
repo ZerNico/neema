@@ -40,6 +40,8 @@ export const models = pgTable(
     // provider-side identifier, e.g. "anthropic/claude-sonnet-5"
     modelKey: text("model_key").notNull(),
     displayName: text("display_name").notNull(),
+    /** Admin-written line under the name in model pickers, for people who don't know models. */
+    description: text(),
     type: text({ enum: ["chat", "embedding"] })
       .$type<ModelType>()
       .notNull(),

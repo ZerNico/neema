@@ -32,6 +32,7 @@ import {
   FieldTitle,
 } from "~/ui/primitives/field";
 import { FieldSet } from "~/ui/field-set.tsx";
+import { MODEL_DESCRIPTION_MAX } from "../schema.ts";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import {
@@ -67,6 +68,7 @@ export interface PickableGroup {
 
 export interface ModelSettingsDraft {
   displayName: string;
+  description: string;
   type: ModelType;
   contextLength: string;
   embeddingDimensions: string;
@@ -80,6 +82,7 @@ export interface ModelSettingsDraft {
 
 export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({
   displayName: "",
+  description: "",
   type: "chat",
   contextLength: "",
   embeddingDimensions: "",
@@ -115,6 +118,7 @@ export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings
     if (embeddingDimensions === undefined) return null;
     return normalizeModelSettings({
       displayName: draft.displayName.trim(),
+      description: draft.description.trim() || null,
       type: "embedding",
       contextLength,
       embeddingDimensions,
@@ -137,6 +141,7 @@ export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings
 
   return normalizeModelSettings({
     displayName: draft.displayName.trim(),
+    description: draft.description.trim() || null,
     type: "chat",
     contextLength,
     embeddingDimensions: null,
@@ -230,6 +235,19 @@ export function ModelSettingsFields({
               </SelectContent>
             </Select>
           </Field>
+          {draft.type === "chat" ? (
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${id}-description`}>Description (optional)</FieldLabel>
+              <Input
+                id={`${id}-description`}
+                value={draft.description}
+                maxLength={MODEL_DESCRIPTION_MAX}
+                placeholder="Fast, good for everyday questions"
+                onChange={(event) => patch({ description: event.target.value })}
+              />
+              <FieldDescription>Shown under the name when someone picks a model.</FieldDescription>
+            </Field>
+          ) : null}
           {modelKey === undefined ? null : (
             <Field>
               <FieldLabel htmlFor={`${id}-model-key`}>Model ID</FieldLabel>

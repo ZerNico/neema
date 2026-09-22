@@ -108,6 +108,18 @@ describe("ModelPicker", () => {
     expect(options[0]).toHaveTextContent("GPT-5");
   });
 
+  it("shows the admin's description under a model and finds it by that too", async () => {
+    const { user } = renderPicker({
+      models: [{ ...MODELS[2]!, description: "Fast, good for everyday questions" }, MODELS[0]!],
+    });
+    await openPicker();
+    expect(screen.getByText("Fast, good for everyday questions")).toBeVisible();
+    await user.type(screen.getByPlaceholderText("Search models…"), "everyday");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent("GPT-5");
+  });
+
   it("reports the empty label when nothing matches", async () => {
     const { user } = renderPicker({ emptyLabel: "No models match" });
     await openPicker();

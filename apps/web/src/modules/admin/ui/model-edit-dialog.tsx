@@ -42,6 +42,7 @@ export interface EditableModel {
   providerId: string;
   modelKey: string;
   displayName: string;
+  description?: string | null;
   type: ModelType;
   contextLength: number | null;
   embeddingDimensions: number | null;
@@ -106,6 +107,7 @@ function ModelEditForm({
   );
   const [draft, setDraft] = useState<ModelSettingsDraft>({
     displayName: model.displayName,
+    description: model.description ?? "",
     type: model.type,
     contextLength: model.contextLength === null ? "" : String(model.contextLength),
     embeddingDimensions:

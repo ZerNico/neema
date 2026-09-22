@@ -129,6 +129,7 @@ describe("AddModelDialog", () => {
           providerId: "provider-1",
           modelKey: "catalog-model",
           displayName: "Catalog Model",
+          description: null,
           type: "embedding",
           contextLength: 128_000,
           embeddingDimensions: null,

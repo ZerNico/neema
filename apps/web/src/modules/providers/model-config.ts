@@ -16,6 +16,8 @@ export type ModelPricing = { input: number; output: number } | { input: number; 
 
 interface CommonModelSettings {
   displayName: string;
+  /** Absent leaves a stored description as it is; null clears it. */
+  description?: string | null;
   contextLength: number | null;
   enabled: boolean;
   access: ModelAccess;

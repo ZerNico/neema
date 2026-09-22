@@ -18,6 +18,8 @@ import {
 export interface PickableModel {
   id: string;
   displayName: string;
+  /** The admin's plain-words note; optional so callers without it still fit. */
+  description?: string | null;
   providerName: string;
   contextLength: number | null;
   capabilities: Capabilities | null;
@@ -34,7 +36,8 @@ interface ProviderGroup {
 const matches = (model: PickableModel, query: string): boolean => {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
-  const haystack = `${model.displayName} ${model.providerName}`.toLowerCase();
+  const haystack =
+    `${model.displayName} ${model.providerName} ${model.description ?? ""}`.toLowerCase();
   return needle.split(/\s+/).every((word) => haystack.includes(word));
 };
 
@@ -128,7 +131,14 @@ export function ModelPicker({
                 {(model: PickableModel) => (
                   // oxlint-disable-next-line shadcn/no-restyle -- reserves room for the selected check, which sits absolute at right-2
                   <ComboboxItem key={model.id} value={model} className="pr-9">
-                    <span className="min-w-0 flex-1 truncate">{model.displayName}</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{model.displayName}</span>
+                      {model.description ? (
+                        <span className="text-muted-foreground truncate text-xs">
+                          {model.description}
+                        </span>
+                      ) : null}
+                    </span>
                     <CapabilityIcons capabilities={model.capabilities} audience="user" />
                   </ComboboxItem>
                 )}
