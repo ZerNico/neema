@@ -1,5 +1,6 @@
 import {
   CloudServerIcon,
+  HelpCircleIcon,
   Logout03Icon,
   Settings02Icon,
   UserCircleIcon,
@@ -101,6 +102,10 @@ export function AccountMenu({
         <DropdownMenuItem render={<Link to="/settings" />}>
           <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />
           Settings
+        </DropdownMenuItem>
+        <DropdownMenuItem render={<Link to="/help" />}>
+          <HugeiconsIcon icon={HelpCircleIcon} strokeWidth={2} />
+          Help
         </DropdownMenuItem>
         {isAdmin ? (
           <DropdownMenuItem render={<Link to="/admin" />}>

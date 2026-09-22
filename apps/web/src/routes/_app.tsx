@@ -16,6 +16,7 @@ import {
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
+import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { AppHeader } from "~/ui/desktop-chrome.tsx";
@@ -65,26 +66,28 @@ function AuthenticatedLayout({
     <DesktopWorkProvider userId={identity.userId}>
       <AppMotionProvider>
         <ConfirmProvider>
-          <SidebarProvider>
-            <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
-            <SidebarInset className="h-svh overflow-hidden">
-              <DetailPanelProvider>
-                <AppHeader>
-                  <SidebarTrigger />
-                  <WorkAttention />
-                </AppHeader>
-                <WorkConnectionNotice />
-                {/* The detail rail is a sibling of the content, not an overlay:
+          <FeatureTourProvider enabled={!identity.impersonatedBy}>
+            <SidebarProvider>
+              <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
+              <SidebarInset className="h-svh overflow-hidden">
+                <DetailPanelProvider>
+                  <AppHeader>
+                    <SidebarTrigger />
+                    <WorkAttention />
+                  </AppHeader>
+                  <WorkConnectionNotice />
+                  {/* The detail rail is a sibling of the content, not an overlay:
                 opening it shrinks the chat column instead of covering it. */}
-                <div className="flex min-h-0 flex-1">
-                  <main className="min-w-0 flex-1">
-                    <Outlet />
-                  </main>
-                  <DetailPanelRail />
-                </div>
-              </DetailPanelProvider>
-            </SidebarInset>
-          </SidebarProvider>
+                  <div className="flex min-h-0 flex-1">
+                    <main className="min-w-0 flex-1">
+                      <Outlet />
+                    </main>
+                    <DetailPanelRail />
+                  </div>
+                </DetailPanelProvider>
+              </SidebarInset>
+            </SidebarProvider>
+          </FeatureTourProvider>
         </ConfirmProvider>
       </AppMotionProvider>
     </DesktopWorkProvider>

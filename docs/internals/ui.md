@@ -148,6 +148,9 @@ false`), so a page body is written against data already there. This includes loc
   answer and "About usage" on the usage page.
 - `/settings/usage` has no admin guard: it renders the same `usage-dashboard.tsx` as the admin
   analytics page, so anything worded there is ordinary-user copy.
+- A concept someone meets in the app (agents, knowledge, skills, schedules, memory) gets an entry in
+  `modules/help/features.ts`. That list is the welcome tour, the "New in neema" tour for existing users
+  and the Help page at once; seen keys live in `user_seen_features`, so never rename a shipped key.
 - One state, one word. A document being prepared says "preparing" in the knowledge pages, the
   collection page and the composer's picker; it used to say "indexing" in one of the three.
 
