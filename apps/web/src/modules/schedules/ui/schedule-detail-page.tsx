@@ -1,11 +1,17 @@
-import { Delete02Icon, MoreHorizontalIcon, PlayIcon } from "@hugeicons/core-free-icons";
+import {
+  BubbleChatIcon,
+  Delete02Icon,
+  MoreHorizontalIcon,
+  PlayIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useStore } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useId } from "react";
 import { toast } from "sonner";
+import { scheduleAuthoringRequest } from "../authoring.ts";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
 import { ScheduleSettings } from "../schema.ts";
 import {
@@ -28,6 +34,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 
@@ -141,6 +148,20 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     },
   });
   const dirty = useStore(form.store, (state) => state.isDirty);
+  const submitting = useStore(form.store, (state) => state.isSubmitting);
+  // Same guard as the agent and skill editors; a successful save resets the
+  // form, so `dirty` is also "not yet saved".
+  useBlocker({
+    shouldBlockFn: async () =>
+      dirty &&
+      !submitting &&
+      !(await confirm({
+        title: "Discard unsaved changes?",
+        description: "Your schedule has not been saved.",
+        confirmLabel: "Discard changes",
+      })),
+    enableBeforeUnload: dirty,
+  });
   return (
     <Page
       title={schedule.name}
@@ -173,6 +194,19 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
               <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                render={
+                  <Link
+                    to="/"
+                    search={{}}
+                    state={{ chatPrefill: scheduleAuthoringRequest(scheduleId) }}
+                  />
+                }
+              >
+                <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
+                Edit with chat
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {/* A menu item closes on activation, so it cannot carry a
                 spinner; disabling it is the pending signal. */}
               <DropdownMenuItem
@@ -202,7 +236,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             </DropdownMenuContent>
           </DropdownMenu>
           <form.AppForm>
-            <form.SubmitButton size="sm" form={formId}>
+            <form.SubmitButton size="sm" form={formId} disabled={!dirty}>
               Save changes
             </form.SubmitButton>
           </form.AppForm>

@@ -5,17 +5,12 @@ import { agentAuthoringRequest } from "../authoring.ts";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { DropdownMenuItem } from "~/ui/primitives/dropdown-menu";
 
-export function AgentAuthoringLaunchButton({
-  targetAgentId = null,
-  disabled = false,
-}: {
-  targetAgentId?: string | null;
-  disabled?: boolean;
-}) {
+/** Creation through chat; editing an existing agent is the menu item below. */
+export function AgentAuthoringLaunchButton({ disabled = false }: { disabled?: boolean }) {
   const content = (
     <>
       <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} data-icon="inline-start" />
-      {targetAgentId ? "Edit with chat" : "Create with chat"}
+      Create with chat
     </>
   );
   if (disabled)
@@ -28,7 +23,7 @@ export function AgentAuthoringLaunchButton({
     <Link
       to="/"
       search={{}}
-      state={{ chatPrefill: agentAuthoringRequest(targetAgentId) }}
+      state={{ chatPrefill: agentAuthoringRequest() }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
       {content}

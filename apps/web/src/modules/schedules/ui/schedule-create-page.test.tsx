@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSchedule } from "../server/functions.ts";
+import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { ScheduleCreatePage } from "./schedule-create-page.tsx";
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -33,6 +34,7 @@ vi.mock("@tanstack/react-router", () => ({
     <a href={to}>{children}</a>
   ),
   useNavigate: () => navigate,
+  useBlocker: vi.fn(),
 }));
 vi.stubGlobal(
   "matchMedia",
@@ -48,7 +50,9 @@ const renderPage = () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <ScheduleCreatePage />
+      <ConfirmProvider>
+        <ScheduleCreatePage />
+      </ConfirmProvider>
     </QueryClientProvider>,
   );
   return userEvent.setup();
@@ -94,17 +98,9 @@ describe("ScheduleCreatePage", () => {
   });
 
   it("writes the picked cadence as cron and text, in the reader's timezone, then opens it", async () => {
-    vi.mocked(createSchedule).mockResolvedValue({ id: "s-new" } as never);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <ScheduleCreatePage />
-      </QueryClientProvider>,
-    );
+    const user = renderPage();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Digest" } });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "Frequency" }));
-    await user.click(await screen.findByRole("option", { name: "Weekdays" }));
+    await pick(user, "Frequency", "Weekdays");
     fireEvent.change(screen.getByLabelText("Time"), { target: { value: "07:30" } });
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Summarize the news" } });
     fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));

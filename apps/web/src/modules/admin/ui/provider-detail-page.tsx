@@ -1,7 +1,7 @@
 import {
   AiBrain01Icon,
   Delete02Icon,
-  MoreVerticalIcon,
+  MoreHorizontalIcon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -126,7 +126,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
             <DropdownMenuTrigger
               render={<Button variant="ghost" size="icon-sm" aria-label="Provider actions" />}
             >
-              <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
+              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setEditing(true)}>

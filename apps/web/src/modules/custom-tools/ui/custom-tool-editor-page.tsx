@@ -4,7 +4,7 @@ import {
   Alert02Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
-  MoreVerticalIcon,
+  MoreHorizontalIcon,
   PlayIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -433,7 +433,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                 <DropdownMenuTrigger
                   render={<Button variant="ghost" size="icon-sm" aria-label="Module actions" />}
                 >
-                  <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
+                  <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
@@ -462,9 +462,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             size="sm"
             pending={save.isPending}
             onClick={() => save.mutate()}
-            disabled={!canSave}
+            disabled={!canSave || (!!tool && !dirty)}
           >
-            {tool ? "Save" : "Create"}
+            {tool ? "Save changes" : "Create module"}
           </PendingButton>
         </>
       }

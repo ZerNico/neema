@@ -142,8 +142,14 @@ export function AgentsPage() {
     <CreateSplitButton
       label="New agent"
       disabled={atLimit}
-      chat={<Link to="/" search={{}} state={{ chatPrefill: agentAuthoringRequest() }} />}
-      manual={<Link to="/agents/new" />}
+      options={[
+        {
+          label: "Create with chat",
+          icon: BubbleChatIcon,
+          link: <Link to="/" search={{}} state={{ chatPrefill: agentAuthoringRequest() }} />,
+        },
+        { label: "Set up manually", icon: PencilEdit02Icon, link: <Link to="/agents/new" /> },
+      ]}
     />
   );
   return (

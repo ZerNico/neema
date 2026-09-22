@@ -1,6 +1,6 @@
 import {
   Delete02Icon,
-  MoreVerticalIcon,
+  MoreHorizontalIcon,
   PencilEdit02Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -155,7 +155,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
               />
             }
           >
-            <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
+            <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setRenaming(true)}>

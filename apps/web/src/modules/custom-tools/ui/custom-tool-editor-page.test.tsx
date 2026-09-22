@@ -146,7 +146,7 @@ describe("CustomToolEditorPage", () => {
     const user = userEvent.setup();
     vi.mocked(saveCustomTool).mockResolvedValue(detail({ id: "created" }) as never);
     renderEditor();
-    const create = screen.getByRole("button", { name: "Create" });
+    const create = screen.getByRole("button", { name: "Create module" });
     expect(create).toBeDisabled();
     expect(screen.getByLabelText("Name")).not.toHaveAttribute("aria-invalid");
 
@@ -225,15 +225,15 @@ describe("CustomToolEditorPage", () => {
     );
     renderEditor();
     await user.type(screen.getByLabelText("Name"), "Echo");
-    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("button", { name: "Create module" }));
     const slug = await screen.findByLabelText("Identifier");
     await waitFor(() => expect(slug).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByText("That identifier is taken.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create module" })).toBeDisabled();
 
     fireEvent.change(slug, { target: { value: "echo_two" } });
     expect(slug).not.toHaveAttribute("aria-invalid");
-    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Create module" })).toBeEnabled();
   });
 
   it("preloads the stored module when editing and keeps its identifier editable", async () => {
@@ -262,7 +262,7 @@ describe("CustomToolEditorPage", () => {
     fireEvent.change(slug, { target: { value: "weather" } });
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(saveCustomTool).toHaveBeenCalled());
     expect(vi.mocked(saveCustomTool).mock.calls[0]![0]).toMatchObject({
       data: { toolId: "t1", expectedVersion: "v1", slug: "weather" },
@@ -279,15 +279,15 @@ describe("CustomToolEditorPage", () => {
     renderEditor(detail());
     const slug = screen.getByLabelText("Identifier");
     fireEvent.change(slug, { target: { value: "taken_name" } });
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(slug).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByText("That identifier is taken.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
 
     fireEvent.change(slug, { target: { value: "free_name" } });
     expect(slug).not.toHaveAttribute("aria-invalid");
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
   });
 
   it("runs the test panel and renders output and logs", async () => {

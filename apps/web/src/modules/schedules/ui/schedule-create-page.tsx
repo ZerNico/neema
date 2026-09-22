@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useStore } from "@tanstack/react-form";
+import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useId } from "react";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import { ScheduleSettings } from "../schema.ts";
 import { createSchedule } from "../server/functions.ts";
 import { ScheduleSettingsFields } from "./schedule-settings-fields.tsx";
 import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
+import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { Page } from "~/ui/page-shell.tsx";
 
@@ -18,6 +20,7 @@ const message = (error: unknown, fallback: string) =>
 export function ScheduleCreatePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const formId = useId();
   const form = useAppForm({
     // The reader's own zone is the likelier intent than the draft's UTC, and
@@ -38,6 +41,19 @@ export function ScheduleCreatePage() {
         toast.error(message(error, "Could not create the schedule."));
       }
     },
+  });
+  const dirty = useStore(form.store, (state) => state.isDirty);
+  const submitting = useStore(form.store, (state) => state.isSubmitting);
+  useBlocker({
+    shouldBlockFn: async () =>
+      dirty &&
+      !submitting &&
+      !(await confirm({
+        title: "Discard unsaved changes?",
+        description: "Your schedule has not been saved.",
+        confirmLabel: "Discard changes",
+      })),
+    enableBeforeUnload: dirty,
   });
   return (
     <Page

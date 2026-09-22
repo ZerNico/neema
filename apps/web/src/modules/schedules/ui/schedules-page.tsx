@@ -1,7 +1,13 @@
-import { ArrowRight01Icon, Calendar03Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowRight01Icon,
+  BubbleChatIcon,
+  Calendar03Icon,
+  PencilEdit02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { scheduleAuthoringRequest } from "../authoring.ts";
 import { cadenceText, parseCadence } from "../cadence.ts";
 import { schedulesQuery } from "../client/queries.ts";
 import type { ScheduleSummary } from "../schema.ts";
@@ -9,9 +15,6 @@ import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { CreateSplitButton } from "~/ui/create-split-button.tsx";
 import { EmptyState, ErrorState, ListCard, ListRow, ListSkeleton, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
-
-const SCHEDULE_AUTHORING_REQUEST =
-  "Help me set up a scheduled task. Ask what it should do and how often, then prepare a draft for me to review before it goes live.";
 
 // A paused schedule already carries its badge; the line just drops the next run.
 const nextFireLabel = (schedule: ScheduleSummary) => {
@@ -31,8 +34,14 @@ export function SchedulesPage() {
   const newSchedule = (
     <CreateSplitButton
       label="New schedule"
-      chat={<Link to="/" search={{}} state={{ chatPrefill: SCHEDULE_AUTHORING_REQUEST }} />}
-      manual={<Link to="/schedules/new" />}
+      options={[
+        {
+          label: "Create with chat",
+          icon: BubbleChatIcon,
+          link: <Link to="/" search={{}} state={{ chatPrefill: scheduleAuthoringRequest() }} />,
+        },
+        { label: "Set up manually", icon: PencilEdit02Icon, link: <Link to="/schedules/new" /> },
+      ]}
     />
   );
   return (

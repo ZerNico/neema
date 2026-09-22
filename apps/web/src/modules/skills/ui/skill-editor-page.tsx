@@ -148,7 +148,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
     },
     onError: () =>
       toast.error(
-        "Could not save this revision. Your draft is preserved; another editor may have changed the skill.",
+        "Could not save your changes. They’re still here; someone else may have changed this skill in the meantime.",
       ),
   });
   const remove = useMutation({
@@ -224,7 +224,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                     files.find((file) => file.path === "SKILL.md")?.content ?? "",
                     "text/markdown",
                   );
-                  toast.info("Markdown export excludes supporting files.");
+                  toast.info("The download has the main instructions only, not the skill’s other files.");
                 }}
               >
                 <HugeiconsIcon icon={File02Icon} strokeWidth={2} />
@@ -237,7 +237,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: "Delete this skill?",
+                        title: initial ? `Delete “${initial.name}”?` : "Delete this skill?",
                         description:
                           "Chats that used it stay readable, but it can no longer be used or selected.",
                         confirmLabel: "Delete skill",
@@ -258,7 +258,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
             disabled={!validation.value || (!!initial && !dirty)}
             onClick={() => save.mutate(files.map((file) => ({ ...file })))}
           >
-            Save
+            {initial ? "Save changes" : "Create skill"}
           </PendingButton>
         </>
       }

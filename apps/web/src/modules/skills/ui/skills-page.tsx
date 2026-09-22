@@ -1,4 +1,9 @@
-import { ArrowRight01Icon, Book02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowRight01Icon,
+  Book02Icon,
+  FileImportIcon,
+  PencilEdit02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -12,7 +17,8 @@ import {
   Page,
   Section,
 } from "~/ui/page-shell.tsx";
-import { Button, buttonVariants } from "~/ui/primitives/button";
+import { CreateSplitButton } from "~/ui/create-split-button.tsx";
+import { Button } from "~/ui/primitives/button";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { skillsQuery } from "../client/queries.ts";
 import type { SkillSummary } from "../schema.ts";
@@ -26,10 +32,13 @@ export function SkillsPage() {
       .includes(search.toLowerCase()),
   );
   const create = (
-    <Link to="/skills/new" className={buttonVariants({ size: "sm" })}>
-      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      New skill
-    </Link>
+    <CreateSplitButton
+      label="New skill"
+      options={[
+        { label: "Write it yourself", icon: PencilEdit02Icon, link: <Link to="/skills/new" /> },
+        { label: "Import a skill", icon: FileImportIcon, link: <Link to="/skills/import" /> },
+      ]}
+    />
   );
   const list = (items: SkillSummary[]) => (
     <ListCard>
@@ -59,17 +68,9 @@ export function SkillsPage() {
   return (
     <Page
       title="Skills"
-      description="Reusable instructions for the tasks you do often."
       rootPath="/"
       rootLabel="Chat"
-      actions={
-        <>
-          <Link to="/skills/import" className={buttonVariants({ size: "sm", variant: "outline" })}>
-            Import
-          </Link>
-          {create}
-        </>
-      }
+      actions={create}
     >
       {/* Searching an empty library is noise; the empty state says more. */}
       {query.data?.length ? (

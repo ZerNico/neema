@@ -158,6 +158,8 @@ describe("AgentEditorPage", () => {
       detail({ icon: "robot", collections: [{ id: "missing", name: null, available: false }] }),
     );
     expect(screen.getByText("A collection you can no longer read")).toBeVisible();
+    // Save waits for a change; an edit elsewhere must not drop the unreadable ID.
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(updateAgent).toHaveBeenCalledWith({
@@ -253,10 +255,13 @@ describe("AgentEditorPage", () => {
     expect(name).toHaveValue("My unsaved name");
     fireEvent.click(screen.getByRole("button", { name: "Reload agent" }));
     await waitFor(() => expect(name).toHaveValue("Other editor"));
+    // The reload leaves nothing to save; the next edit saves against revision 2.
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    fireEvent.change(name, { target: { value: "Other editor, amended" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(updateAgent).toHaveBeenLastCalledWith({
-        data: expect.objectContaining({ expectedRevision: 2, name: "Other editor" }),
+        data: expect.objectContaining({ expectedRevision: 2, name: "Other editor, amended" }),
       }),
     );
   });

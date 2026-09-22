@@ -1,4 +1,4 @@
-import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -148,7 +148,7 @@ export function UsersPage() {
                         />
                       }
                     >
-                      <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
+                      <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {!isSelf &&

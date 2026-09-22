@@ -1,4 +1,9 @@
-import { BubbleChatIcon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+  BubbleChatIcon,
+  MoreHorizontalIcon,
+  PlusSignIcon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -46,7 +51,7 @@ export function ChatsPage() {
   const empty = conversations.length === 0 && !pages.isPending;
 
   return (
-    <Page title="Chats" rootPath="/" rootLabel="Back to chat">
+    <Page title="Chats" rootPath="/" rootLabel="Chat">
       <SearchInput
         value={search}
         onChange={(event) => setSearch(event.target.value)}
@@ -67,7 +72,8 @@ export function ChatsPage() {
             title="No chats yet"
             description="Your chats will show up here."
             action={
-              <Link to="/" className={cn(buttonVariants({ variant: "outline" }))}>
+              <Link to="/" className={buttonVariants({ size: "sm" })}>
+                <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
                 New chat
               </Link>
             }

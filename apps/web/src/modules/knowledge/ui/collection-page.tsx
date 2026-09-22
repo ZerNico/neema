@@ -413,7 +413,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   variant="destructive"
                   onClick={() => {
                     void confirm({
-                      title: "Delete this collection?",
+                      title: `Delete “${collection.name}”?`,
                       description:
                         "Every document and note in it is removed. Chats that cited them will show those sources as unavailable.",
                       confirmLabel: "Delete collection",
@@ -423,7 +423,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   }}
                 >
                   <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  Delete
+                  Delete collection
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

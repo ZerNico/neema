@@ -11,7 +11,10 @@ import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
 import { AgentSettings, AgentResourceIds, type AgentDetail } from "../schema.ts";
 import { createAgent, deleteAgent, updateAgent } from "../server/functions.ts";
 import { AgentSettingsFields } from "./agent-settings-fields.tsx";
-import { AgentAuthoringLaunchButton } from "./agent-authoring-launch.tsx";
+import {
+  AgentAuthoringLaunchButton,
+  AgentAuthoringLaunchMenuItem,
+} from "./agent-authoring-launch.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
@@ -21,6 +24,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
@@ -181,7 +185,6 @@ function AgentForm({
           {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
           {agent ? (
             <>
-              <AgentAuthoringLaunchButton targetAgentId={agent.id} />
               <Link
                 to="/"
                 search={{ agent: agent.id }}
@@ -200,6 +203,8 @@ function AgentForm({
                   <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <AgentAuthoringLaunchMenuItem agentId={agent.id} />
+                  <DropdownMenuSeparator />
                   {/* A menu item closes on activation, so it cannot carry a
                     spinner; disabling it is the pending signal. */}
                   <DropdownMenuItem
@@ -217,7 +222,7 @@ function AgentForm({
             <AgentAuthoringLaunchButton />
           )}
           <form.AppForm>
-            <form.SubmitButton size="sm" form={formId}>
+            <form.SubmitButton size="sm" form={formId} disabled={!!agent && !dirty}>
               {agent ? "Save changes" : "Create agent"}
             </form.SubmitButton>
           </form.AppForm>

@@ -154,7 +154,9 @@ export function Page({
               {back.label}
             </Link>
           )}
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* min-h-8 is the height of the sm actions, so a page without them
+              keeps its title and body on the same lines as one with them. */}
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-4">
             <h1 className="min-w-0 break-words text-lg font-medium">{title}</h1>
             {actions ? (
               <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>

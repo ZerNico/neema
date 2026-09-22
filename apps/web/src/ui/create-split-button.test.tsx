@@ -1,3 +1,4 @@
+import { BubbleChatIcon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { CreateSplitButton } from "./create-split-button.tsx";
@@ -7,13 +8,15 @@ const renderButton = (disabled = false) =>
     <CreateSplitButton
       label="New thing"
       disabled={disabled}
-      chat={<a href="/chat-draft" />}
-      manual={<a href="/things/new" />}
+      options={[
+        { label: "Create with chat", icon: BubbleChatIcon, link: <a href="/chat-draft" /> },
+        { label: "Set up manually", icon: PencilEdit02Icon, link: <a href="/things/new" /> },
+      ]}
     />,
   );
 
 describe("CreateSplitButton", () => {
-  it("creates through chat by default and offers the manual form in its menu", async () => {
+  it("does the first option on the button and lists every option in its menu", async () => {
     renderButton();
     expect(screen.getByRole("link", { name: "New thing" })).toHaveAttribute("href", "/chat-draft");
     fireEvent.click(screen.getByRole("button", { name: "More ways to create: New thing" }));
