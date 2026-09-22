@@ -199,11 +199,13 @@ describe("conversation-owned schedule draft", () => {
   it("renders a widget from the persisted reference and opens the panel on click only", async () => {
     const view = await fixture({ open: false });
     const widget = await screen.findByRole("button", { name: "Open schedule draft: Digest" });
-    expect(screen.queryByRole("textbox", { name: "Cadence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Frequency" })).not.toBeInTheDocument();
     fireEvent.click(widget);
-    expect(await screen.findByRole("textbox", { name: "Cadence" })).toHaveValue(
-      "every weekday at 7am",
+    // The model's cron reads back as the picker's own shape.
+    expect(await screen.findByRole("combobox", { name: "Frequency" })).toHaveTextContent(
+      "Weekdays",
     );
+    expect(screen.getByLabelText("Time")).toHaveValue("07:00");
     expect(getScheduleDraft).toHaveBeenCalledWith({ data: { draftId: "draft-1" } });
     expect(view.gone).not.toHaveBeenCalled();
   });
@@ -265,7 +267,9 @@ describe("conversation-owned schedule draft", () => {
     const { gone } = await fixture();
     fireEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard draft", hidden: false }));
-    await waitFor(() => expect(discardScheduleDraft).toHaveBeenCalledWith({ data: { draftId: "draft-1" } }));
+    await waitFor(() =>
+      expect(discardScheduleDraft).toHaveBeenCalledWith({ data: { draftId: "draft-1" } }),
+    );
     await waitFor(() => expect(gone).toHaveBeenCalledWith("draft-1"));
   });
 });

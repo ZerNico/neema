@@ -7,14 +7,13 @@ import { toast } from "sonner";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
-import { absoluteLabel } from "~/modules/chat/ui/timestamps.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import type { CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
-import { previewSchedule } from "../server/functions.ts";
+import { ScheduleTimingFields } from "./schedule-timing-fields.tsx";
 import { withForm } from "~/ui/form/app-form.tsx";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
@@ -28,17 +27,8 @@ import {
   ComboboxList,
   ComboboxTrigger,
 } from "~/ui/primitives/combobox";
-import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
+import { FieldError } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
-
-const TIMEZONES: ReadonlyArray<string> = (() => {
-  try {
-    return Intl.supportedValuesOf("timeZone");
-  } catch {
-    return ["UTC"];
-  }
-})();
 
 /** The detail page and the chat draft panel share these; each host owns persistence. */
 export const ScheduleSettingsFields = withForm({
@@ -52,109 +42,14 @@ export const ScheduleSettingsFields = withForm({
     const [skillPickerOpen, setSkillPickerOpen] = useState(false);
     const [skillAnchor, setSkillAnchor] = useState<HTMLButtonElement | null>(null);
     const [creatingCollection, setCreatingCollection] = useState(false);
-    const [preview, setPreview] = useState<string[] | null>(null);
-    const [previewing, setPreviewing] = useState(false);
-    const refreshPreview = async () => {
-      const { cron, timezone, endAt } = form.state.values;
-      setPreviewing(true);
-      try {
-        setPreview(await previewSchedule({ data: { cron, timezone, endAt } }));
-      } catch (error) {
-        setPreview(null);
-        toast.error(error instanceof Error && error.message ? error.message : "Invalid schedule.");
-      } finally {
-        setPreviewing(false);
-      }
-    };
     return (
       <>
         <div className="flex flex-col gap-5">
           <form.AppField name="name">
             {(field) => <field.TextField label="Name" placeholder="Morning briefing" />}
           </form.AppField>
-          <form.AppField name="scheduleText">
-            {(field) => (
-              <field.TextField label="Cadence" placeholder="Every weekday at 7am" />
-            )}
-          </form.AppField>
         </div>
-        <Section
-          title="Timing"
-          description="The cron expression is interpreted in the chosen timezone."
-        >
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap items-end gap-3">
-              <form.Field name="cron">
-                {(field) => (
-                  <Field className="min-w-40 flex-1">
-                    <FieldLabel>Cron expression</FieldLabel>
-                    <Input
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                      onBlur={field.handleBlur}
-                      placeholder="0 7 * * 1-5"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                    />
-                    <FieldError errors={field.state.meta.errors} />
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="timezone">
-                {(field) => (
-                  <Field className="min-w-40 flex-1">
-                    <FieldLabel>Timezone</FieldLabel>
-                    <Combobox
-                      items={[...TIMEZONES]}
-                      value={field.state.value}
-                      onValueChange={(value: string | null) => {
-                        if (value) field.handleChange(value);
-                      }}
-                    >
-                      <ComboboxTrigger
-                        aria-label="Timezone"
-                        render={
-                          <Button variant="outline" className="w-full justify-between" />
-                        }
-                      >
-                        <span className="truncate">{field.state.value}</span>
-                      </ComboboxTrigger>
-                      <ComboboxContent align="start" className="w-72">
-                        <ComboboxInput placeholder="Search timezones…" showTrigger={false} />
-                        <ComboboxEmpty>No matching timezone</ComboboxEmpty>
-                        <ComboboxList>
-                          {(zone: string) => (
-                            <ComboboxItem key={zone} value={zone}>
-                              {zone}
-                            </ComboboxItem>
-                          )}
-                        </ComboboxList>
-                      </ComboboxContent>
-                    </Combobox>
-                    <FieldError errors={field.state.meta.errors} />
-                  </Field>
-                )}
-              </form.Field>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={previewing}
-                onClick={() => void refreshPreview()}
-              >
-                Preview next runs
-              </Button>
-              {preview ? (
-                <span className="text-muted-foreground text-xs">
-                  {preview.length === 0
-                    ? "No upcoming runs"
-                    : preview.map((fire) => absoluteLabel(new Date(fire))).join(" · ")}
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </Section>
+        <ScheduleTimingFields form={form} />
         <div>
           <form.AppField name="prompt">
             {(field) => (
@@ -479,7 +374,8 @@ export const ScheduleSettingsFields = withForm({
             onOpenChange={setCreatingCollection}
             onCreated={(collectionId) => {
               const current = form.getFieldValue("collectionIds");
-              if (current.length < 5) form.setFieldValue("collectionIds", [...current, collectionId]);
+              if (current.length < 5)
+                form.setFieldValue("collectionIds", [...current, collectionId]);
             }}
           />
         ) : null}
