@@ -18,6 +18,7 @@ import { createTitleRevealRegistry } from "./conversation-title.tsx";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
+import { NeemaGlyph } from "~/ui/brand.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import {
   Sidebar,
@@ -51,6 +52,16 @@ export function AppSidebar({
   return (
     <Sidebar>
       <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton render={<Link to="/" />}>
+              <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-6 items-center justify-center rounded-md">
+                <NeemaGlyph className="size-4" />
+              </span>
+              <span className="font-semibold">neema</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
           <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
           New chat
