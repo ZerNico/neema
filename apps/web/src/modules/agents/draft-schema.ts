@@ -3,7 +3,7 @@ import {
   AGENT_LIMITS,
   AgentName,
   AgentSettings,
-  AgentSkillIds,
+  AgentResourceIds,
   AgentStarter,
   type AgentDetail,
 } from "./schema.ts";
@@ -13,7 +13,8 @@ export const DraftSettings = Schema.Struct({
   ...AgentSettings.fields,
   name: AgentName,
   starters: Schema.Array(AgentStarter).check(Schema.isMaxLength(AGENT_LIMITS.maxStarters)),
-  skillIds: AgentSkillIds,
+  skillIds: AgentResourceIds,
+  customToolIds: AgentResourceIds,
 });
 export type DraftSettings = typeof DraftSettings.Type;
 export const AgentDraftPatch = DraftSettings.mapFields(Struct.map(Schema.optionalKey));
@@ -29,6 +30,7 @@ export const EMPTY_AGENT_DRAFT: DraftSettings = {
   starters: [],
   collectionIds: [],
   skillIds: [],
+  customToolIds: [],
 };
 export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   name: agent.name,
@@ -41,6 +43,7 @@ export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   starters: [...agent.starters],
   collectionIds: agent.collections.map(({ id }) => id),
   skillIds: (agent.skills ?? []).map(({ id }) => id),
+  customToolIds: (agent.customTools ?? []).map(({ id }) => id),
 });
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));

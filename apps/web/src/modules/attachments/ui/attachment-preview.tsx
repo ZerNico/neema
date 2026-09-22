@@ -27,6 +27,11 @@ export interface AttachmentPreviewTarget {
    * what it fetched.
    */
   readonly truncated?: boolean;
+  /**
+   * No content to show (a binary file the bridge will not decode). The dialog
+   * still opens, so its actions remain: the file manager is the preview there.
+   */
+  readonly unsupported?: boolean;
 }
 
 // Text files can be as large as any other attachment; the dialog is a peek,
@@ -80,7 +85,11 @@ export function AttachmentPreviewDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        {target.kind === "image" ? (
+        {target.unsupported ? (
+          <p className="text-muted-foreground text-sm">
+            There’s no preview for this kind of file.
+          </p>
+        ) : target.kind === "image" ? (
           <img
             src={target.url}
             alt={target.fileName}

@@ -20,8 +20,8 @@ const Path = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)
 
 export const listFolderTool = Tool.make("list_folder", {
   description:
-    'List a folder on the user\'s computer. "." lists the attached folders; every other path ' +
-    'starts with one of their names, like "site/src". You cannot reach anything outside them.',
+    'List a directory on the user\'s computer by its absolute path. "." lists the roots this chat ' +
+    "can reach, each with its absolute path. You cannot reach anything outside them.",
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -29,7 +29,7 @@ export const listFolderTool = Tool.make("list_folder", {
 
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a file on the user's computer, starting with an attached folder's name. Text comes back as " +
+    "Read a file on the user's computer by its absolute path. Text comes back as " +
     "text, truncated when long; an image or PDF comes back for you to look at when you can take " +
     "it, otherwise as extracted text or a note that you cannot.",
   parameters: Schema.Struct({ path: Path }),
@@ -40,9 +40,10 @@ export const readLocalFileTool = Tool.make("read_local_file", {
 export const findFilesTool = Tool.make("find_files", {
   description:
     "Find files and folders across the attached folders by glob, newest first: `*.ts` at any depth, " +
-    "`src/**/*.test.ts`, `{a,b}.md`. A folder whose name matches is included, and so is every file " +
-    "inside it, so `*extracted*` finds `DVR/extracted_images/` and its contents. Skips what " +
-    ".gitignore skips. Capped, so narrow the pattern if the result says it was truncated.",
+    "`src/**/*.test.ts`, `{a,b}.md`. Results come back as absolute paths. A folder whose name " +
+    "matches is included, and so is every file inside it, so `*extracted*` finds " +
+    "`DVR/extracted_images/` and its contents. Skips what .gitignore skips. Capped, so narrow " +
+    "the pattern if the result says it was truncated.",
   parameters: Schema.Struct({
     pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
   }),
@@ -53,8 +54,8 @@ export const findFilesTool = Tool.make("find_files", {
 export const searchFilesTool = Tool.make("search_files", {
   description:
     "Search file contents across the attached folders with a regular expression. Returns matching " +
-    "lines with their file and line number; skips binary files and what .gitignore skips. Pass " +
-    "a glob to narrow which files are searched.",
+    "lines with their absolute path and line number; skips binary files and what .gitignore " +
+    "skips. Pass a glob to narrow which files are searched.",
   parameters: Schema.Struct({
     pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
     glob: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
@@ -65,9 +66,10 @@ export const searchFilesTool = Tool.make("search_files", {
 
 export const editLocalFileTool = Tool.make("edit_local_file", {
   description:
-    "Replace text inside a file on the user's computer. `old` must match exactly, whitespace " +
-    "included, and exactly once unless `all` is true; include enough surrounding lines to make " +
-    "it unique. Returns a diff of what changed. The user is asked before it happens and may refuse.",
+    "Replace text inside a file on the user's computer, by its absolute path. `old` must match " +
+    "exactly, whitespace included, and exactly once unless `all` is true; include enough " +
+    "surrounding lines to make it unique. Returns a diff of what changed. The user is asked " +
+    "before it happens and may refuse.",
   parameters: Schema.Struct({
     path: Path,
     old: Schema.String.check(Schema.isMinLength(1)),
@@ -80,8 +82,8 @@ export const editLocalFileTool = Tool.make("edit_local_file", {
 
 export const moveLocalFileTool = Tool.make("move_local_file", {
   description:
-    "Rename or move a file or folder within the attached folders. Never overwrites an existing " +
-    "path. The user is asked before it happens and may refuse.",
+    "Rename or move a file or folder by absolute paths, anywhere inside the attached folders. " +
+    "Never overwrites an existing path. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ from: Path, to: Path }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -89,8 +91,9 @@ export const moveLocalFileTool = Tool.make("move_local_file", {
 
 export const deleteLocalFileTool = Tool.make("delete_local_file", {
   description:
-    "Delete files or folders, and everything inside a folder, within the attached folders. " +
-    `Pass every path in one call rather than one call per file, up to ${LIMITS.deletedPaths}. ` +
+    "Delete files or folders by absolute path, and everything inside a folder, within the " +
+    `attached folders. Pass every path in one call rather than one call per file, up to ` +
+    `${LIMITS.deletedPaths}. ` +
     "The user is asked once for that list and may refuse. This cannot be undone.",
   parameters: Schema.Struct({
     paths: Schema.Array(Path).check(Schema.isMinLength(1), Schema.isMaxLength(LIMITS.deletedPaths)),
@@ -101,7 +104,7 @@ export const deleteLocalFileTool = Tool.make("delete_local_file", {
 
 export const writeLocalFileTool = Tool.make("write_local_file", {
   description:
-    "Create or replace a text file on the user's computer, starting with an attached folder's name. " +
+    "Create or replace a text file on the user's computer by its absolute path. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
     "creating it. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ path: Path, text: Schema.String }),
@@ -109,18 +112,26 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
   failureMode: "return",
 });
 
+export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
+  description:
+    "Copy a file this chat already holds on the server into the chat's workspace on the user's " +
+    "computer, so a command or another local tool can reach it. Name it by the attachment id a " +
+    "tool result gave you. Returns the absolute path it landed at; an existing name is never " +
+    "overwritten, the copy gets a new one.",
+  parameters: Schema.Struct({ attachmentId: Schema.String.check(Schema.isMinLength(1)) }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export const runCommandTool = Tool.make("run_command", {
   description:
-    "Run a shell command on the user's computer, inside one of the attached folders. The command " +
-    "starts in the folder named here, so its paths are relative to that folder and leave the " +
-    "folder's own name out, unlike the paths the file tools take. It runs " +
-    "sandboxed: it may write only inside the attached folders and reach only package " +
-    "registries. The user is asked before it happens and may refuse. Prefer the file tools " +
-    "over commands to inspect or change files.",
+    "Run a shell command on the user's computer. The command starts in this chat's workspace, " +
+    "and paths inside it are absolute: it may `cd` and `cp` anywhere inside the workspace and " +
+    "the attached folders. It runs sandboxed: writes land only inside those roots and only " +
+    "package registries are reachable. The user is asked before it happens and may refuse. " +
+    "Prefer the file tools over commands to inspect or change files.",
   parameters: Schema.Struct({
     command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),
-    /** The attached folder to run in, by name. */
-    folder: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
   }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -179,6 +190,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     searchFilesTool,
     readLocalFileTool,
     writeLocalFileTool,
+    saveToWorkspaceTool,
     editLocalFileTool,
     moveLocalFileTool,
     deleteLocalFileTool,
@@ -192,6 +204,8 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       read_local_file: handle("read_local_file", DESKTOP_TIMEOUTS.quick),
       // Changes wait on a person as well as a machine.
       write_local_file: handle("write_local_file", DESKTOP_TIMEOUTS.command),
+      // A download plus a write; nobody is asked, but the bytes take time.
+      save_to_workspace: handle("save_to_workspace", DESKTOP_TIMEOUTS.command),
       edit_local_file: handle("edit_local_file", DESKTOP_TIMEOUTS.command),
       move_local_file: handle("move_local_file", DESKTOP_TIMEOUTS.command),
       delete_local_file: handle("delete_local_file", DESKTOP_TIMEOUTS.command),

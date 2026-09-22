@@ -32,21 +32,31 @@ import { useDesktop } from "../client/bridge.ts";
  * far below the view that knows the conversation, and every row would otherwise
  * carry an id it has no other use for.
  */
-const LocalFileConversationContext = createContext<string | null>(null);
+const LocalFileConversationContext = createContext<{
+  conversationId: string;
+  workspaceRoot: string | null;
+} | null>(null);
 
 export function LocalFileConversationProvider({
   conversationId,
+  workspaceRoot,
   children,
 }: {
   conversationId: string;
+  workspaceRoot?: string | null;
   children: ReactNode;
 }) {
   return (
-    <LocalFileConversationContext.Provider value={conversationId}>
+    <LocalFileConversationContext.Provider
+      value={{ conversationId, workspaceRoot: workspaceRoot ?? null }}
+    >
       {children}
     </LocalFileConversationContext.Provider>
   );
 }
+
+/** The conversation the rendered file paths resolve against; null above the view. */
+export const useLocalFileConversation = () => useContext(LocalFileConversationContext);
 
 /** Read as bytes, because the picture is the thing rather than the source. */
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
@@ -66,8 +76,7 @@ const parentOf = (path: string) => {
   return cut === -1 ? null : path.slice(0, cut);
 };
 
-const blobUrl = (parts: BlobPart[], type: string) =>
-  URL.createObjectURL(new Blob(parts, { type }));
+const blobUrl = (parts: BlobPart[], type: string) => URL.createObjectURL(new Blob(parts, { type }));
 
 const decode = (base64: string) => {
   const binary = atob(base64);
@@ -102,20 +111,38 @@ const readLocalFile = async (
       url: blobUrl([decode(file.base64)], file.mediaType),
     };
   }
-  const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
-  // An SVG is markup, so the desktop hands it over as text, never as bytes.
-  // `<img>` is what makes it safe: secure static mode runs no script and
-  // fetches nothing. A half-read one holds no picture, so it falls back to
-  // source.
-  const drawable = extension === "svg" && !file.truncated;
-  const blob = new Blob([file.text], { type: drawable ? "image/svg+xml" : "text/plain" });
-  return {
-    fileName,
-    size: blob.size,
-    kind: drawable ? "image" : "text",
-    url: URL.createObjectURL(blob),
-    truncated: file.truncated,
-  };
+  try {
+    const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
+    // An SVG is markup, so the desktop hands it over as text, never as bytes.
+    // `<img>` is what makes it safe: secure static mode runs no script and
+    // fetches nothing. A half-read one holds no picture, so it falls back to
+    // source.
+    const drawable = extension === "svg" && !file.truncated;
+    const blob = new Blob([file.text], { type: drawable ? "image/svg+xml" : "text/plain" });
+    return {
+      fileName,
+      size: blob.size,
+      kind: drawable ? "image" : "text",
+      url: URL.createObjectURL(blob),
+      truncated: file.truncated,
+    };
+  } catch (error) {
+    // A binary file is still worth opening: the dialog shows the "no preview"
+    // body with its actions, which beats a bare toast.
+    if (error instanceof DesktopError && error.reason === "not-text") {
+      const info = await run(
+        client.fileInfo({ conversationId, path, callId: crypto.randomUUID() }),
+      );
+      return {
+        fileName,
+        size: info.bytes,
+        kind: "text",
+        url: "",
+        unsupported: true,
+      };
+    }
+    throw error;
+  }
 };
 
 const refusalCopy = (reason: DesktopError["reason"]) => {
@@ -183,9 +210,7 @@ function LocalFileActions({
     // The header row has no room for a sentence, and the desktop's refusals
     // are already written as ones the reader can act on.
     onError: (error) =>
-      toast.error(
-        error instanceof DesktopError ? error.message : "That could not be opened.",
-      ),
+      toast.error(error instanceof DesktopError ? error.message : "That could not be opened."),
   });
   // A button that can only ever refuse is worse than no button. The desktop
   // still checks, and still refuses a file marked executable, which no
@@ -224,7 +249,8 @@ export interface LocalFilePreview {
  */
 export function useLocalFilePreview(path: string | null): LocalFilePreview | null {
   const client = useDesktop();
-  const conversationId = useContext(LocalFileConversationContext);
+  const local = useContext(LocalFileConversationContext);
+  const conversationId = local?.conversationId ?? null;
   const [target, setTarget] = useState<AttachmentPreviewTarget | null>(null);
   // An object URL outlives the render that made it, so the last one has to be
   // reachable from teardown as well as from the close that usually revokes it.
@@ -246,7 +272,8 @@ export function useLocalFilePreview(path: string | null): LocalFilePreview | nul
     mutationFn: () => readLocalFile(client!, conversationId!, path!),
     onSuccess: (opened) => {
       release();
-      live.current = opened.url;
+      // An unsupported file carries no object URL to hold on to.
+      live.current = opened.url === "" ? null : opened.url;
       setTarget(opened);
     },
     onError: (error) => {
@@ -277,9 +304,7 @@ export function useLocalFilePreview(path: string | null): LocalFilePreview | nul
       target === null ? null : (
         <AttachmentPreviewDialog
           target={target}
-          actions={
-            <LocalFileActions client={client} conversationId={conversationId} path={path} />
-          }
+          actions={<LocalFileActions client={client} conversationId={conversationId} path={path} />}
           open
           onOpenChange={(next) => {
             if (next) return;

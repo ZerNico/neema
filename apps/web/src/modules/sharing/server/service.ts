@@ -61,11 +61,11 @@ export class SharingService extends Context.Service<
           return Effect.void;
         });
       const owned = (userId: string, resource: SharedResource) => {
-        const { table, available } = sharingResources[resource.kind];
+        const { table, available, managedBy } = sharingResources[resource.kind];
         return db
           .select({ audience: table.audience })
           .from(table)
-          .where(and(eq(table.id, resource.id), eq(table.userId, userId), available));
+          .where(and(eq(table.id, resource.id), managedBy(userId), available));
       };
       return SharingService.of({
         detail: Effect.fn("SharingService.detail")(function* (userId, resource) {
@@ -143,7 +143,11 @@ export class SharingService extends Context.Service<
                   .select({ id: table.id })
                   .from(table)
                   .where(
-                    and(eq(table.id, resource.id), eq(table.userId, userId), descriptor.available),
+                    and(
+                      eq(table.id, resource.id),
+                      descriptor.managedBy(userId),
+                      descriptor.available,
+                    ),
                   )
                   .for("update");
                 if (!actor || rows.length === 0)

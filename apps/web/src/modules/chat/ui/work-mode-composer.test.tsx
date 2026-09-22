@@ -28,10 +28,18 @@ vi.mock("~/modules/attachments/server/functions.ts", () => ({
 
 // The bridge is what tells the page whether a machine is behind it. Faked at
 // the hook so a test can be a browser tab or the desktop app, with any folder.
-const NONE: FolderStatus = { folders: [], sandbox: { kind: "ready" } };
+const NONE: FolderStatus = {
+  folders: [],
+  sandbox: { kind: "ready" },
+  workspace: { path: "/data/workspaces/chat" },
+};
 const bridge = vi.hoisted(() => ({
   desktop: false as boolean,
-  status: { folders: [], sandbox: { kind: "ready" } } as FolderStatus,
+  status: {
+    folders: [],
+    sandbox: { kind: "ready" },
+    workspace: { path: "/data/workspaces/chat" },
+  } as FolderStatus,
   choose: vi.fn(),
 }));
 vi.mock("~/modules/desktop/client/bridge.ts", async (importOriginal) => {
@@ -156,7 +164,11 @@ describe("work mode", () => {
         refresh: () => {},
         setUpSandbox: () => {},
         choose: () =>
-          setStatus({ folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } }),
+          setStatus({
+            folders: [{ name: "site", path: "/home/user/site", alive: true }],
+            sandbox: { kind: "ready" },
+            workspace: { path: "/data/workspaces/chat" },
+          }),
         detach: () => setStatus(NONE),
       };
       return (
@@ -182,14 +194,21 @@ describe("work mode", () => {
     await userEvent.click(sendButton());
     expect(sent).toHaveBeenLastCalledWith({
       fromDesktop: true,
-      desktopFolders: ["site"],
+      desktopFolders: [
+        { name: "workspace", path: "/data/workspaces/chat" },
+        { name: "site", path: "/home/user/site" },
+      ],
       desktopCommands: true,
     });
     await userEvent.click(screen.getByRole("button", { name: "site" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Detach site" }));
     await type("Continue without files");
     await userEvent.click(sendButton());
-    expect(sent).toHaveBeenLastCalledWith({ fromDesktop: true, desktopCommands: false });
+    expect(sent).toHaveBeenLastCalledWith({
+      fromDesktop: true,
+      desktopFolders: [{ name: "workspace", path: "/data/workspaces/chat" }],
+      desktopCommands: true,
+    });
   });
   it("is not offered in a browser, where it could not be honoured", () => {
     render(<NewChat onSend={vi.fn()} />);
@@ -218,7 +237,11 @@ describe("work mode", () => {
 
   it("sends once a folder is attached", async () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
+    bridge.status = {
+      folders: [{ name: "site", path: "/home/user/site", alive: true }],
+      sandbox: { kind: "ready" },
+      workspace: { path: "/data/workspaces/chat" },
+    };
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<NewChat onSend={onSend} />);
     await userEvent.click(screen.getByRole("button", { name: "Work with a folder" }));
@@ -243,7 +266,11 @@ describe("work mode", () => {
 
   it("asks a work chat on a new machine to pick its folder again, without blocking", async () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: false }], sandbox: { kind: "ready" } };
+    bridge.status = {
+      folders: [{ name: "site", path: "/home/user/site", alive: false }],
+      sandbox: { kind: "ready" },
+      workspace: { path: "/data/workspaces/chat" },
+    };
     render(<ExistingChat mode="work" onSend={vi.fn().mockResolvedValue(undefined)} />);
     // The lost folder is still listed, marked, and can be chosen again.
     expect(screen.getByRole("button", { name: /site/ })).toHaveAttribute(
@@ -256,7 +283,11 @@ describe("work mode", () => {
 
   it("never shows a folder on a plain chat, even in the desktop app", () => {
     bridge.desktop = true;
-    bridge.status = { folders: [{ name: "site", alive: true }], sandbox: { kind: "ready" } };
+    bridge.status = {
+      folders: [{ name: "site", path: "/home/user/site", alive: true }],
+      sandbox: { kind: "ready" },
+      workspace: { path: "/data/workspaces/chat" },
+    };
     render(<ExistingChat mode="chat" onSend={vi.fn()} />);
     expect(screen.queryByText("site")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

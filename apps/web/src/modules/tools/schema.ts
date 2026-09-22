@@ -5,6 +5,7 @@ import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schem
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
 import { ScheduleDraftToolEnvelope } from "~/modules/schedules/tool-schema.ts";
+import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
 import { PlanStep } from "./plan-schema.ts";
@@ -188,6 +189,7 @@ const desktopEnvelopeFields = {
 export const ToolChunkEnvelope = Schema.Union([
   AgentDraftToolEnvelope,
   ScheduleDraftToolEnvelope,
+  CustomToolEnvelope,
   DocumentToolEnvelope,
   KnowledgeToolEnvelope,
   SkillToolEnvelope,

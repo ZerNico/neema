@@ -170,9 +170,7 @@ describe("research composer", () => {
     await enableResearch();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("Investigate this", [], true, []),
-    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], true, []));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
     expect(await researchItem()).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

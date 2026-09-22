@@ -12,18 +12,16 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import {
-  DRAFT_CONVERSATION,
   desktopShellOutdated,
   makeDesktopClient,
   readDesktopAuth,
   readDesktopChannel,
+  WORKSPACE_FOLDER_NAME,
   type DesktopAuth,
   type DesktopClient,
   type DesktopError,
   type FolderStatus,
 } from "@chat/desktop-rpc";
-
-export { DRAFT_CONVERSATION };
 
 /**
  * The site's side of the desktop bridge.
@@ -145,10 +143,8 @@ export const prepareWorkFolder = async (
           if (controller.signal.aborted) aborted();
         });
       }
-      await wait(waitForDraftBinding(conversationId));
       controller.signal.throwIfAborted();
       if (busy()) continue;
-      const binding = draftBinding;
       const prepared = queryClient.prefetchQuery({ ...options, staleTime: 0 });
       try {
         // Prefetch swallows cancellation as well as IPC failures; only the latter can render.
@@ -156,12 +152,12 @@ export const prepareWorkFolder = async (
       } catch (error) {
         controller.signal.throwIfAborted();
         if (isCancelledError(error)) {
-          if (busy() || binding !== draftBinding) continue;
+          if (busy()) continue;
           throw error;
         }
       }
       controller.signal.throwIfAborted();
-      if (busy() || binding !== draftBinding) continue;
+      if (busy()) continue;
       return;
     }
   } finally {
@@ -242,8 +238,12 @@ export const useFolder = (conversationId: string): FolderState | null => {
 export interface DesktopSendFields {
   /** Submission policy information, not cryptographic proof of a desktop client. */
   readonly fromDesktop: true;
-  /** The attached folders' names; the server stores no path. */
-  readonly desktopFolders?: ReadonlyArray<string>;
+  /**
+   * The folders this chat can reach, by name and real path. The path is the
+   * model's address for everything inside and crosses as attempt-scoped prompt
+   * text; the server persists the names alone.
+   */
+  readonly desktopFolders?: ReadonlyArray<{ name: string; path: string }>;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
 }
@@ -267,32 +267,52 @@ export const folderUsable = (
  */
 export const desktopSendFields = (folder: FolderState | null): DesktopSendFields | null => {
   if (!folderUsable(folder)) return null;
-  const names = folder.status.folders.filter((item) => item.alive).map((item) => item.name);
+  const attached = folder.status.folders
+    .filter((item) => item.alive)
+    .map((item) => ({ name: item.name, path: item.path }));
+  // The workspace travels with its real path: it is the model's cwd and the
+  // root every absolute path in the workspace falls under.
+  const folders = [
+    { name: WORKSPACE_FOLDER_NAME, path: folder.status.workspace.path },
+    ...attached,
+  ];
   return {
     fromDesktop: true,
-    ...(names.length > 0 ? { desktopFolders: names } : {}),
-    desktopCommands: names.length > 0 && folder.status.sandbox.kind === "ready",
+    desktopFolders: folders,
+    desktopCommands: folder.status.sandbox.kind === "ready",
   };
-};
-
-/**
- * Carries a folder picked before the first message onto the conversation that
- * message created. A no-op in a browser, and harmless when nothing was picked.
- */
-export const rebindDraftFolder = async (conversationId: string): Promise<void> => {
-  const client = desktopClient();
-  if (!client) return;
-  await Effect.runPromise(
-    client.rebindFolder({
-      fromConversationId: DRAFT_CONVERSATION,
-      toConversationId: conversationId,
-    }),
-  );
 };
 
 /** Shown when a work chat tries to act before the machine has answered about folders. */
 export const WORK_FOLDER_UNAVAILABLE =
   "Wait for the folder check before continuing this work chat.";
+
+/**
+ * How a branch keeps the source chat's local state on this machine: the
+ * user-attached folder grants are copied over, then the workspace directory is
+ * copied. Both are awaited before the view navigates, so the destination's
+ * first send cannot race its own lazy workspace creation against the copy.
+ * Either failure throws; the caller toasts and navigates anyway.
+ */
+export const copyWorkspaceToBranch = async (
+  fromConversationId: string,
+  toConversationId: string,
+): Promise<void> => {
+  const client = desktopClient();
+  if (!client) return;
+  await Effect.runPromise(client.copyFolderGrants({ fromConversationId, toConversationId }));
+  await Effect.runPromise(client.cloneWorkspace({ fromConversationId, toConversationId }));
+};
+
+/**
+ * Best-effort removal of a deleted conversation's workspace. A failure is a
+ * stray local directory, nothing the server waits for.
+ */
+export const discardWorkspace = (conversationId: string): void => {
+  const client = desktopClient();
+  if (!client) return;
+  void Effect.runPromise(client.discardWorkspace({ conversationId })).catch(() => {});
+};
 
 export const requireWorkFolder = (working: boolean, folder: FolderState | null) => {
   const fields = working ? desktopSendFields(folder) : null;
@@ -304,80 +324,29 @@ export const desktopAttemptFields = async (fields: DesktopSendFields | null) => 
   const client = desktopClient();
   if (!fields || !client) return {};
   const session = await Effect.runPromise(client.executionSession(undefined));
-  return { ...fields, desktopExecutorId: session.id };
-};
-
-type DraftBinding = {
-  conversationId: string | null;
-  /** Resolves once the create response has named the destination. */
-  readonly named: Promise<void>;
-  readonly done: Promise<void>;
-};
-
-let draftBinding: DraftBinding | null = null;
-
-/**
- * Holds dispatch for a first send's rebind. Pass the call's conversation id so
- * other chats are not stalled once that destination is known.
- */
-export const waitForDraftBinding = async (conversationId?: string) => {
-  for (;;) {
-    const current = draftBinding;
-    if (!current) return;
-    if (conversationId === undefined || conversationId === DRAFT_CONVERSATION) {
-      await current.done;
-      continue;
-    }
-    if (current.conversationId === null) {
-      await current.named;
-      continue;
-    }
-    if (current.conversationId !== conversationId) return;
-    await current.done;
-  }
-};
-
-/**
- * The server can publish a local call before the create-turn response arrives.
- * Hold dispatch until its draft grant has the durable conversation id.
- */
-export const withDraftFolderBinding = async <A extends { conversationId: string }>(
-  send: () => Promise<A>,
-  queryClient: QueryClient,
-): Promise<A> => {
-  const previous = draftBinding;
-  let name!: () => void;
-  let release!: () => void;
-  const current: DraftBinding = {
-    conversationId: null,
-    named: new Promise<void>((resolve) => {
-      name = resolve;
-    }),
-    done: new Promise<void>((resolve) => {
-      release = resolve;
-    }),
+  return {
+    ...fields,
+    desktopExecutorId: session.id,
+    // Which machine sent this attempt. The site stamps it onto the generation
+    // so another machine opening the chat later can say where the files are.
+    desktopMachineId: session.machineId,
+    desktopMachineName: session.machineName,
   };
-  draftBinding = current;
-  try {
-    await previous?.done;
-    const result = await send();
-    current.conversationId = result.conversationId;
-    name();
-    const keys = [folderQueryKey(DRAFT_CONVERSATION), folderQueryKey(result.conversationId)];
-    await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey, exact: true })));
-    try {
-      await rebindDraftFolder(result.conversationId);
-    } catch {
-      // Create already committed. The destination stays without a grant.
-    } finally {
-      await Promise.all(
-        keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
-      );
-    }
-    return result;
-  } finally {
-    if (draftBinding === current) draftBinding = null;
-    name();
-    release();
-  }
+};
+
+/**
+ * This machine's stable id, or null in a browser. One query for the whole
+ * session: the id is fixed at shell first-run. The foreign-machine banner
+ * compares the conversation's latest stamp against it.
+ */
+export const useLocalMachineId = (): string | null => {
+  const client = useDesktop();
+  const query = useQuery({
+    queryKey: ["desktop-machine"],
+    enabled: client !== null,
+    queryFn: () => Effect.runPromise(client!.executionSession(undefined)),
+    staleTime: Infinity,
+    retry: false,
+  });
+  return query.data?.machineId ?? null;
 };

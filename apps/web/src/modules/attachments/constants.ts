@@ -104,6 +104,13 @@ export const textLanguage = (fileName: string): string => {
 export const attachmentKind = (mediaType: string): AttachmentKind =>
   mediaType.startsWith("image/") ? "image" : mediaType === PDF_MEDIA_TYPE ? "pdf" : "text";
 
+/** Best-effort display kind for local files whose MIME type was never uploaded. */
+export const attachmentKindForFileName = (fileName: string): AttachmentKind => {
+  const extension = fileExtension(fileName);
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension)) return "image";
+  return extension === "pdf" ? "pdf" : "text";
+};
+
 export const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;

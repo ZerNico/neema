@@ -12,6 +12,9 @@ import {
   ListConversationsInput,
   MessageIdInput,
   RenameConversationInput,
+  ReserveWorkTurnInput,
+  WorkTurnReservationInput,
+  ActivateWorkTurnInput,
   UpdateWorkSettingsInput,
   RetryMessageInput,
   SendMessageInput,
@@ -74,7 +77,7 @@ export const sendMessage = createServerFn({ method: "POST" })
       ChatService.use((chat) =>
         chat.sendMessage({
           userId: context.session.user.id,
-          conversationId: data.conversationId,
+          conversation: data.conversation,
           modelId: data.modelId,
           content: data.content,
           researchEnabled: data.researchEnabled,
@@ -83,8 +86,10 @@ export const sendMessage = createServerFn({ method: "POST" })
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          desktopMachineId: data.desktopMachineId,
+          desktopMachineName: data.desktopMachineName,
+          workspaceFiles: data.workspaceFiles,
           deviceSessionId: context.session.session.id,
-          mode: data.mode,
           timeZone: data.timeZone,
           openDocumentId: data.openDocumentId,
           attachmentIds: data.attachmentIds,
@@ -122,6 +127,118 @@ export const sendMessage = createServerFn({ method: "POST" })
     ),
   );
 
+export const reserveWorkTurn = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ReserveWorkTurnInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.reserveWorkTurn({
+          id: data.reservationId,
+          userId: context.session.user.id,
+          conversation: data.conversation,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+        }),
+      ),
+    ),
+  );
+
+export const activateWorkTurn = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ActivateWorkTurnInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.sendMessage({
+          userId: context.session.user.id,
+          reservationId: data.reservationId,
+          conversation: data.conversation,
+          modelId: data.modelId,
+          content: data.content,
+          researchEnabled: data.researchEnabled,
+          searchEnabled: data.searchEnabled,
+          desktopFolders: data.desktopFolders,
+          desktopCommands: data.desktopCommands,
+          fromDesktop: data.fromDesktop,
+          desktopExecutorId: data.desktopExecutorId,
+          desktopMachineId: data.desktopMachineId,
+          desktopMachineName: data.desktopMachineName,
+          workspaceFiles: data.workspaceFiles,
+          deviceSessionId: context.session.session.id,
+          timeZone: data.timeZone,
+          openDocumentId: data.openDocumentId,
+          attachmentIds: data.attachmentIds,
+          agentId: data.agentId,
+          collectionIds: data.collectionIds,
+          skillIds: data.skillIds,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          AgentNotAvailable: () =>
+            Effect.die(new Response("The selected agent is not available", { status: 404 })),
+          WorkDesktopRequired: () =>
+            Effect.die(
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
+            ),
+          KnowledgeNotAvailable: () =>
+            Effect.die(new Response("A selected collection is not available", { status: 404 })),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
+          ToolUnavailable: (e) =>
+            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AttachmentUnsupported: (e) =>
+            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+        }),
+      ),
+    ),
+  );
+
+export const getWorkTurnReservation = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(WorkTurnReservationInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.getWorkTurnReservation({
+          userId: context.session.user.id,
+          reservationId: data.reservationId,
+        }),
+      ).pipe(
+        Effect.catchTag("ConversationNotFound", () =>
+          Effect.die(new Response("Not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
+export const abortWorkTurn = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(WorkTurnReservationInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.abortWorkTurn({
+          userId: context.session.user.id,
+          reservationId: data.reservationId,
+        }),
+      ),
+    ),
+  );
+
 export const answerQuestion = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(AnswerQuestionInput))
@@ -130,7 +247,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
       ChatService.use((chat) =>
         chat.sendMessage({
           userId: context.session.user.id,
-          conversationId: data.conversationId,
+          conversation: { kind: "existing", id: data.conversationId },
           modelId: data.modelId,
           searchEnabled: data.searchEnabled,
           researchEnabled: data.researchEnabled,
@@ -138,6 +255,8 @@ export const answerQuestion = createServerFn({ method: "POST" })
           desktopCommands: data.desktopCommands,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          desktopMachineId: data.desktopMachineId,
+          desktopMachineName: data.desktopMachineName,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
           openDocumentId: data.openDocumentId,
@@ -189,6 +308,8 @@ export const retryMessage = createServerFn({ method: "POST" })
         chat.retryMessage({
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
+          desktopMachineId: data.desktopMachineId,
+          desktopMachineName: data.desktopMachineName,
           deviceSessionId: context.session.session.id,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
@@ -205,6 +326,8 @@ export const retryMessage = createServerFn({ method: "POST" })
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
           InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           AttachmentNotAvailable: () =>
             Effect.die(new Response("An attachment is no longer available", { status: 409 })),
@@ -244,6 +367,8 @@ export const branchConversation = createServerFn({ method: "POST" })
           ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           BranchNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
         }),
       ),
     ),
@@ -302,6 +427,8 @@ export const editMessage = createServerFn({ method: "POST" })
           ToolUnavailable: (e) =>
             Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
           EditNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
           InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
           AttachmentUnsupported: (e) =>
             Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),

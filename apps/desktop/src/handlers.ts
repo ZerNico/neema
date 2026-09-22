@@ -5,6 +5,7 @@ import {
   DesktopError,
   LIMITS,
   UNOPENABLE_EXTENSIONS,
+  WORKSPACE_FOLDER_NAME,
   type DeleteFailure,
   type DesktopHandlers,
   type DirectoryEntry,
@@ -14,7 +15,8 @@ import {
 } from "@chat/desktop-rpc";
 import { unifiedDiff } from "./diff.ts";
 import { GrantStore } from "./grants.ts";
-import { exists, folderName, resolveAcross, resolveInFolder } from "./folders.ts";
+import { WorkspaceRegistry } from "./workspaces.ts";
+import { exists, folderName, resolveAmongRoots, resolveInFolder } from "./folders.ts";
 import { Sandbox } from "./sandbox.ts";
 import { ripgrepAvailable, searchWithRipgrep } from "./ripgrep.ts";
 import { globToRegExp, globMatches, walkFiles } from "./walk.ts";
@@ -73,19 +75,10 @@ export interface Shell {
   revealPath(absolute: string, mode: RevealMode): Promise<string | null>;
   /** The server whose conversation ids these are; part of every grant key. */
   serverOrigin(): string;
-  executionSession(): { id: string };
+  executionSession(): { id: string; machineId: string; machineName: string };
   cancelCall(callId: string): boolean;
   setWorkState(state: { active: number; needsApproval: number }): void;
 }
-
-const noFolder = new DesktopError({
-  reason: "no-folder",
-  message: "No folder is attached to this chat on this computer.",
-});
-
-/** Which segment of a many-folder path is the folder, for the name the model sees back. */
-const prefixed = (folder: string, relative: string) =>
-  relative === "." ? folder : `${folder}/${relative}`;
 
 const alreadyAttached = (name: string) =>
   new DesktopError({
@@ -93,31 +86,21 @@ const alreadyAttached = (name: string) =>
     message: `A folder named ${name} is already attached. Rename one of them, or choose a different folder.`,
   });
 
+const reservedName = new DesktopError({
+  reason: "already-exists",
+  message: `\`${WORKSPACE_FOLDER_NAME}\` is reserved for this chat's own workspace. Choose a differently named folder.`,
+});
+
 const deleteFailureReason = (reason: DesktopError["reason"]): DeleteFailure["reason"] =>
   reason === "outside-folder" || reason === "not-found" || reason === "no-folder"
     ? reason
     : "failed";
 
-/**
- * A glob may name a folder (`site/**`). Strip that so it applies inside the
- * folder it names and skips the others. Find and search share this so a
- * pattern like `workspace` plus nested files is not searched as a nested path.
- */
-const globScope = (
-  glob: string | undefined,
-  name: string,
-  folders: ReadonlyArray<string>,
-): { glob: string | undefined; skip: boolean } => {
-  if (!glob) return { glob: undefined, skip: false };
-  const [head, ...rest] = glob.split("/");
-  if (!folders.some((folder) => folderName(folder) === head)) return { glob, skip: false };
-  return head === name ? { glob: rest.join("/") || undefined, skip: false } : { glob, skip: true };
-};
-
 export const makeHandlers = (shell: Shell) =>
   Effect.gen(function* () {
     const store = yield* GrantStore;
     const sandbox = yield* Sandbox;
+    const workspaces = yield* WorkspaceRegistry;
     // Every grant is looked up under the origin the shell is connected to, so
     // the handlers cannot forget to scope one.
     const key = (conversationId: string) => ({ origin: shell.serverOrigin(), conversationId });
@@ -126,24 +109,45 @@ export const makeHandlers = (shell: Shell) =>
       remember: (conversationId: string, folder: string) =>
         store.remember(key(conversationId), folder),
       forget: (conversationId: string, folder: string) => store.forget(key(conversationId), folder),
-      forgetAll: (conversationId: string) => store.forgetAll(key(conversationId)),
     };
 
-    /** The attached folders, or a refusal. Used by everything that touches disk. */
-    const foldersFor = (conversationId: string) =>
-      Effect.flatMap(grants.lookup(conversationId), (folders) =>
-        folders.length === 0 ? Effect.fail(noFolder) : Effect.succeed(folders),
-      );
+    /**
+     * The roots the model can address, workspace first: name for receipts and
+     * the strip, real path for containment and the sandbox allowlist. A work
+     * chat always has at least its own workspace, so the tools never meet an
+     * empty world.
+     */
+    const rootsFor = (conversationId: string) =>
+      Effect.map(grants.lookup(conversationId), (folders) => [
+        { name: WORKSPACE_FOLDER_NAME, root: workspaces.path(conversationId) },
+        ...folders.map((folder) => ({ name: folderName(folder), root: folder })),
+      ]);
 
-    /** A model path, `site/src/index.ts`, resolved inside the folder it names. */
+    /**
+     * A model path, absolute on disk, resolved inside the root that owns it.
+     * Receipts name it back as `workspace/src/index.ts`, the short form the
+     * transcript shows; the address the model sends is always the real path.
+     *
+     * The workspace root is ensured first: it is created on demand, so
+     * resolving against the bare path would fail for a chat whose first touch
+     * is a write, and a path under a nonexistent workspace must not fall
+     * through to a grant that happens to share a prefix.
+     */
     const locate = (conversationId: string, path: string) =>
-      Effect.flatMap(foldersFor(conversationId), (folders) => resolveAcross(folders, path));
+      Effect.gen(function* () {
+        yield* workspaces.ensure(conversationId);
+        const roots = yield* rootsFor(conversationId);
+        return yield* resolveAmongRoots(roots, path);
+      });
 
-    /** One path from a batch. The folder root is the user's to detach, never to delete. */
+    /** One path from a batch. A folder root is the owner's to detach, never to delete. */
     const removeAt = (conversationId: string, path: string) =>
       Effect.gen(function* () {
         const target = yield* locate(conversationId, path);
-        if (target.absolute === target.root) {
+        // `resolveInFolder` against the root yields `relative: "."`; across
+        // folders it is the prefixed name. Either way, the root itself is not
+        // a delete target.
+        if (target.absolute === target.root || !target.relative.includes("/")) {
           return yield* Effect.fail(
             new DesktopError({
               reason: "outside-folder",
@@ -171,7 +175,8 @@ export const makeHandlers = (shell: Shell) =>
         return { path: target.relative, kind };
       });
 
-    const status = (conversationId: string): Effect.Effect<FolderStatus> =>
+    // Dead grants and sandbox availability are data inside the status, not faults.
+    const status = (conversationId: string): Effect.Effect<FolderStatus, DesktopError> =>
       Effect.gen(function* () {
         const folders = yield* grants.lookup(conversationId);
         const listed = yield* Effect.forEach(folders, (folder) =>
@@ -179,10 +184,15 @@ export const makeHandlers = (shell: Shell) =>
           // Resolving its own root is the cheapest proof that it is still there.
           Effect.map(resolveInFolder(folder, ".").pipe(Effect.result), (alive) => ({
             name: folderName(folder),
+            path: folder,
             alive: alive._tag === "Success",
           })),
         );
-        return { folders: listed, sandbox: yield* sandbox.availability() };
+        return {
+          folders: listed,
+          sandbox: yield* sandbox.availability(),
+          workspace: { path: workspaces.path(conversationId) },
+        };
       });
 
     const handlers: DesktopHandlers = {
@@ -208,6 +218,8 @@ export const makeHandlers = (shell: Shell) =>
           });
           // Cancelling is an answer, not a fault: report what is attached now.
           if (picked === null) return yield* status(conversationId);
+          // The workspace already answers to this name, so no user folder may.
+          if (folderName(picked) === WORKSPACE_FOLDER_NAME) return yield* reservedName;
           // The name is how the model addresses the folder, so two folders
           // with the same name cannot both be attached to one chat.
           let current = yield* grants.lookup(conversationId);
@@ -233,40 +245,78 @@ export const makeHandlers = (shell: Shell) =>
 
       detachFolder: ({ conversationId, name }) =>
         Effect.gen(function* () {
+          // The workspace is app-managed; there is no detach for it.
+          if (name === WORKSPACE_FOLDER_NAME) return yield* reservedName;
           const folders = yield* grants.lookup(conversationId);
           const match = folders.find((folder) => folderName(folder) === name);
           if (match) yield* grants.forget(conversationId, match);
           return yield* status(conversationId);
         }),
 
-      rebindFolder: ({ fromConversationId, toConversationId }) =>
+      stageFile: ({ conversationId, submissionId, fileName, base64 }) =>
+        Effect.gen(function* () {
+          // Refuse before decoding, while the oversized payload is still text.
+          if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
+            return yield* new DesktopError({
+              reason: "too-large",
+              message: "That file is too large to add to the workspace.",
+            });
+          }
+          return yield* workspaces.stageFile(
+            conversationId,
+            submissionId,
+            fileName,
+            Buffer.from(base64, "base64"),
+          );
+        }),
+
+      discardStagedFile: ({ conversationId, submissionId, name }) =>
+        workspaces.discardStagedFile(conversationId, submissionId, name),
+
+      discardSubmission: ({ conversationId, submissionId }) =>
+        workspaces.discardSubmission(conversationId, submissionId),
+
+      promoteSubmission: ({ conversationId, submissionId, reservationId }) =>
+        workspaces.promote(conversationId, submissionId, reservationId),
+
+      commitPromotion: ({ conversationId, reservationId }) =>
+        workspaces.commit(conversationId, reservationId),
+
+      rollbackPromotion: ({ conversationId, reservationId }) =>
+        workspaces.rollback(conversationId, reservationId),
+
+      listPendingPromotions: () => workspaces.pendingPromotions(),
+
+      cloneWorkspace: ({ fromConversationId, toConversationId }) =>
+        workspaces.clone(fromConversationId, toConversationId),
+
+      copyFolderGrants: ({ fromConversationId, toConversationId }) =>
         Effect.gen(function* () {
           const folders = yield* grants.lookup(fromConversationId);
           const dest = yield* grants.lookup(toConversationId);
-          // Same rule as choose: the name is the address, so two folders that
-          // share one cannot both sit on the destination.
           for (const folder of folders) {
             const clash = dest.find(
               (existing) => existing !== folder && folderName(existing) === folderName(folder),
             );
             if (clash) return yield* Effect.fail(alreadyAttached(folderName(folder)));
           }
-          // Nothing under the draft key is the ordinary case: the chat was
-          // started without picking a folder first.
+          // Copy, never move: the source conversation keeps its folders.
           for (const folder of folders) yield* grants.remember(toConversationId, folder);
-          if (folders.length > 0) yield* grants.forgetAll(fromConversationId);
           return yield* status(toConversationId);
         }),
+
+      discardWorkspace: ({ conversationId }) => workspaces.discard(conversationId),
 
       listDirectory: ({ conversationId, path }) =>
         Effect.gen(function* () {
           if (path === "." || path === "") {
-            // The root of the model's world is the list of attached folders.
-            const folders = yield* foldersFor(conversationId);
+            // The root of the model's world is the list of roots it may
+            // address, by their real paths.
+            const roots = yield* rootsFor(conversationId);
             return {
               path: ".",
-              entries: folders.map((folder) => ({
-                name: folderName(folder),
+              entries: roots.map(({ root }) => ({
+                name: root,
                 kind: "directory" as const,
               })),
               truncated: false,
@@ -308,6 +358,28 @@ export const makeHandlers = (shell: Shell) =>
             entries,
             truncated: found.length > kept.length,
           };
+        }),
+
+      fileInfo: ({ conversationId, path }) =>
+        Effect.gen(function* () {
+          const target = yield* locate(conversationId, path);
+          const info = yield* Effect.tryPromise({
+            try: () => stat(target.absolute),
+            catch: () =>
+              new DesktopError({
+                reason: "not-found",
+                message: `${target.relative} does not exist.`,
+              }),
+          });
+          if (!info.isFile()) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "not-a-file",
+                message: `${target.relative} is not a file.`,
+              }),
+            );
+          }
+          return { path: target.relative, bytes: info.size };
         }),
 
       readFile: ({ conversationId, path }) =>
@@ -533,9 +605,9 @@ export const makeHandlers = (shell: Shell) =>
 
       deletePath: ({ conversationId, paths }) =>
         Effect.gen(function* () {
-          // Conversation-level: nothing to delete against. Per-path misses
-          // stay in the receipt so one missing file does not abort the rest.
-          yield* foldersFor(conversationId);
+          // Per-path misses stay in the receipt so one missing file does not
+          // abort the rest.
+          yield* rootsFor(conversationId);
           const deleted: { path: string; kind: "file" | "directory" }[] = [];
           const failed: DeleteFailure[] = [];
           for (const path of new Set(paths)) {
@@ -553,30 +625,26 @@ export const makeHandlers = (shell: Shell) =>
 
       findFiles: ({ conversationId, pattern }) =>
         Effect.gen(function* () {
-          const folders = yield* foldersFor(conversationId);
-          // Each folder answers for itself; the cap applies to the union so a
+          const roots = yield* rootsFor(conversationId);
+          // Each root answers for itself; the cap applies to the union so a
           // big first folder cannot hide the second entirely.
-          const perFolder = Math.max(1, Math.floor(LIMITS.foundPaths / folders.length));
+          const perRoot = Math.max(1, Math.floor(LIMITS.foundPaths / roots.length));
           let paths: string[] = [];
           let truncated = false;
-          for (const folder of folders) {
-            const name = folderName(folder);
-            const scope = globScope(pattern, name, folders);
-            if (scope.skip) continue;
-            const inner = scope.glob ?? "*";
+          for (const { root } of roots) {
             const matcher = yield* Effect.try({
-              try: () => globToRegExp(inner),
+              try: () => globToRegExp(pattern),
               catch: () =>
                 new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
             });
-            const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
-            if (root._tag === "Failure") continue;
+            const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
+            if (resolved._tag === "Failure") continue;
             // Walker, not rg: `--files` never names a directory, so a glob like
             // `**/*extracted*` would miss `DVR/extracted_images/` and every file
             // inside it whose own name does not match.
             const walked = yield* Effect.promise(() =>
               walkFiles(
-                root.success.absolute,
+                resolved.success.absolute,
                 WALK_LIMIT,
                 (rel) => globMatches(matcher, rel),
                 (rel) => matcher.test(rel),
@@ -584,8 +652,15 @@ export const makeHandlers = (shell: Shell) =>
             );
             // Newest first: the file just changed is the one being asked about.
             const sorted = walked.files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-            paths.push(...sorted.slice(0, perFolder).map((file) => prefixed(name, file.relative)));
-            truncated ||= walked.truncated || sorted.length > perFolder;
+            // The absolute path is the address the model sends back, so the
+            // result lists those, not the display form. A directory's relative
+            // ends in `/`; keep the mark on the absolute form too.
+            paths.push(
+              ...sorted
+                .slice(0, perRoot)
+                .map((file) => (file.relative.endsWith("/") ? `${file.absolute}/` : file.absolute)),
+            );
+            truncated ||= walked.truncated || sorted.length > perRoot;
           }
           if (paths.length > LIMITS.foundPaths) {
             paths = paths.slice(0, LIMITS.foundPaths);
@@ -596,7 +671,7 @@ export const makeHandlers = (shell: Shell) =>
 
       searchFiles: ({ conversationId, pattern, glob }) =>
         Effect.gen(function* () {
-          const folders = yield* foldersFor(conversationId);
+          const roots = yield* rootsFor(conversationId);
           const regex = yield* Effect.try({
             try: () => new RegExp(pattern),
             catch: () =>
@@ -608,38 +683,37 @@ export const makeHandlers = (shell: Shell) =>
           const matches: SearchMatch[] = [];
           let filesSearched = 0;
           let truncated = false;
-          for (const folder of folders) {
+          for (const { root } of roots) {
             if (matches.length >= LIMITS.matches) {
               truncated = true;
               break;
             }
-            const name = folderName(folder);
-            const scope = globScope(glob, name, folders);
-            if (scope.skip) continue;
-            const root = yield* resolveInFolder(folder, ".").pipe(Effect.result);
-            if (root._tag === "Failure") continue;
+            const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
+            if (resolved._tag === "Failure") continue;
             if (yield* Effect.promise(ripgrepAvailable)) {
-              const fast = yield* searchWithRipgrep(root.success.absolute, pattern, scope.glob);
+              const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
               for (const hit of fast.matches) {
                 if (matches.length >= LIMITS.matches) {
                   truncated = true;
                   break;
                 }
-                matches.push({ ...hit, path: prefixed(name, hit.path) });
+                // rg reports root-relative paths; the model's address is the
+                // absolute one.
+                matches.push({ ...hit, path: join(resolved.success.absolute, hit.path) });
               }
               filesSearched += fast.filesSearched;
               truncated ||= fast.truncated;
               continue;
             }
-            const matcher = scope.glob
+            const matcher = glob
               ? yield* Effect.try({
-                  try: () => globToRegExp(scope.glob!),
+                  try: () => globToRegExp(glob),
                   catch: () =>
                     new DesktopError({ reason: "bad-pattern", message: `Could not read ${glob}.` }),
                 })
               : null;
             const walked = yield* Effect.promise(() =>
-              walkFiles(root.success.absolute, WALK_LIMIT, (rel) =>
+              walkFiles(resolved.success.absolute, WALK_LIMIT, (rel) =>
                 matcher ? matcher.test(rel) : true,
               ),
             );
@@ -659,7 +733,7 @@ export const makeHandlers = (shell: Shell) =>
                 const line = lines[index]!;
                 if (!regex.test(line)) continue;
                 matches.push({
-                  path: prefixed(name, file.relative),
+                  path: file.absolute,
                   line: index + 1,
                   text: line.length > LIMITS.matchChars ? line.slice(0, LIMITS.matchChars) : line,
                 });
@@ -700,22 +774,43 @@ export const makeHandlers = (shell: Shell) =>
           return { path: target.relative, created: !existed, bytes };
         }),
 
-      runCommand: ({ conversationId, callId, command, folder, timeoutMs }) =>
+      saveToWorkspace: ({ conversationId, fileName, base64 }) =>
         Effect.gen(function* () {
-          const folders = yield* foldersFor(conversationId);
-          // The named folder is the cwd; every attached folder is writable, so
-          // a script in one can reach another by its prefixed path.
-          const cwd = yield* locate(conversationId, folder);
-          const roots = yield* Effect.forEach(folders, (item) =>
-            Effect.map(resolveInFolder(item, ".").pipe(Effect.result), (root) =>
-              root._tag === "Success" ? root.success.absolute : null,
+          // Same ceiling as a composer import, refused while it is still text.
+          if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
+            return yield* new DesktopError({
+              reason: "too-large",
+              message: "That file is too large to save to the workspace.",
+            });
+          }
+          const landed = yield* workspaces.landFile(
+            conversationId,
+            fileName,
+            Buffer.from(base64, "base64"),
+          );
+          return {
+            path: join(workspaces.path(conversationId), landed.name),
+            created: true,
+            bytes: landed.bytes,
+          };
+        }),
+
+      runCommand: ({ conversationId, callId, command, timeoutMs }) =>
+        Effect.gen(function* () {
+          const roots = yield* rootsFor(conversationId);
+          // The command starts in this chat's workspace; every attached folder
+          // is writable too, so `cd` and `cp` between them just work.
+          const cwd = yield* workspaces.ensure(conversationId);
+          const allowed = yield* Effect.forEach(roots, ({ root }) =>
+            Effect.map(resolveInFolder(root, ".").pipe(Effect.result), (resolved) =>
+              resolved._tag === "Success" ? resolved.success.absolute : null,
             ),
           );
           return yield* sandbox.run({
             callId,
             command,
-            cwd: cwd.absolute,
-            allowWrite: roots.filter((root): root is string => root !== null),
+            cwd,
+            allowWrite: allowed.filter((root): root is string => root !== null),
             timeoutMs,
           });
         }),

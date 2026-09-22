@@ -6,6 +6,7 @@ import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import type { AgentSettings } from "~/modules/agents/schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -216,6 +217,7 @@ beforeAll(async () => {
   );
   const ReposLayer = Layer.mergeAll(
     KnowledgeRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     GroupRepo.layer,
     AttachmentRepo.layer,
@@ -2027,9 +2029,7 @@ describe("knowledge ingestion", () => {
         ),
       ),
     );
-    expect(
-      (remaining as { rows: ReadonlyArray<{ total: number }> }).rows[0]!.total,
-    ).toBe(1);
+    expect((remaining as { rows: ReadonlyArray<{ total: number }> }).rows[0]!.total).toBe(1);
 
     // Deleting the document is the last reference, so now the bytes go.
     const documents = await run(

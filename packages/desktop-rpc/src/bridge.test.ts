@@ -26,13 +26,24 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   folderStatus: unimplemented("folderStatus"),
   chooseFolder: unimplemented("chooseFolder"),
   detachFolder: unimplemented("detachFolder"),
-  rebindFolder: unimplemented("rebindFolder"),
   listDirectory: unimplemented("listDirectory"),
+  fileInfo: unimplemented("fileInfo"),
   readFile: unimplemented("readFile"),
   writeFile: unimplemented("writeFile"),
+  saveToWorkspace: unimplemented("saveToWorkspace"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),
+  stageFile: unimplemented("stageFile"),
+  discardStagedFile: unimplemented("discardStagedFile"),
+  discardSubmission: unimplemented("discardSubmission"),
+  promoteSubmission: unimplemented("promoteSubmission"),
+  commitPromotion: unimplemented("commitPromotion"),
+  rollbackPromotion: unimplemented("rollbackPromotion"),
+  listPendingPromotions: unimplemented("listPendingPromotions"),
+  cloneWorkspace: unimplemented("cloneWorkspace"),
+  copyFolderGrants: unimplemented("copyFolderGrants"),
+  discardWorkspace: unimplemented("discardWorkspace"),
   ...overrides,
 });
 
@@ -41,6 +52,7 @@ const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
   const respond = makeDesktopResponder(handlers(implemented));
   return {
     protocolVersion: PROTOCOL_VERSION,
+    stageDroppedFile: async () => null,
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify({ tag, payload })) as {
         tag: string;
@@ -61,7 +73,11 @@ describe("the desktop channel", () => {
     );
 
     const contents = await Effect.runPromise(
-      client.readFile({ conversationId: "c1", path: "notes.md", callId: "c" }),
+      client.readFile({
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        path: "notes.md",
+        callId: "c",
+      }),
     );
 
     expect(contents).toEqual({ path: "notes.md", text: "hello", truncated: false });
@@ -81,7 +97,13 @@ describe("the desktop channel", () => {
     );
 
     const outcome = await Effect.runPromise(
-      Effect.result(client.readFile({ conversationId: "c1", path: "../secrets", callId: "c" })),
+      Effect.result(
+        client.readFile({
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          path: "../secrets",
+          callId: "c",
+        }),
+      ),
     );
 
     expect(outcome._tag).toBe("Failure");
@@ -121,7 +143,8 @@ describe("the desktop channel", () => {
     let work = { active: 0, needsApproval: 0 };
     const client = makeDesktopClient(
       connect({
-        executionSession: () => Effect.succeed({ id: "session" }),
+        executionSession: () =>
+          Effect.succeed({ id: "session", machineId: "machine", machineName: "Test Mac" }),
         cancelCall: ({ callId }) => Effect.succeed(callId === "call"),
         setWorkState: (state) =>
           Effect.sync(() => {
@@ -134,12 +157,20 @@ describe("the desktop channel", () => {
           }),
       }),
     );
-    expect(await Effect.runPromise(client.executionSession(undefined))).toEqual({ id: "session" });
+    expect(await Effect.runPromise(client.executionSession(undefined))).toEqual({
+      id: "session",
+      machineId: "machine",
+      machineName: "Test Mac",
+    });
     expect(await Effect.runPromise(client.cancelCall({ callId: "call" }))).toBe(true);
     await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1 }));
     expect(work).toEqual({ active: 2, needsApproval: 1 });
     await Effect.runPromise(
-      client.readFile({ callId: "call", conversationId: "c", path: "work/file" }),
+      client.readFile({
+        callId: "call",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        path: "work/file",
+      }),
     );
     expect(receivedId).toBe("call");
   });
@@ -159,7 +190,11 @@ describe("the desktop channel", () => {
     // rather than decode as a missing value.
     expect(
       await Effect.runPromise(
-        client.revealPath({ conversationId: "c", path: "site/logo.png", mode: "reveal" }),
+        client.revealPath({
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          path: "site/logo.png",
+          mode: "reveal",
+        }),
       ),
     ).toBeUndefined();
     expect(asked).toEqual([{ path: "site/logo.png", mode: "reveal" }]);
@@ -169,7 +204,7 @@ describe("the desktop channel", () => {
         // `mode` is closed, so a site asking for something else never reaches
         // the handler that would hand a path to the operating system.
         client.revealPath({
-          conversationId: "c",
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           path: "site/logo.png",
           mode: "execute" as "open",
         }),
@@ -185,6 +220,13 @@ describe("the desktop channel", () => {
     expect(readDesktopChannel()).toBeNull();
 
     globals.__chatDesktop = { protocolVersion: PROTOCOL_VERSION, request: () => {} };
+    expect(readDesktopChannel()).toBeNull();
+
+    globals.__chatDesktop = {
+      protocolVersion: PROTOCOL_VERSION,
+      request: () => {},
+      stageDroppedFile: () => {},
+    };
     expect(readDesktopChannel()).not.toBeNull();
 
     delete globals.__chatDesktop;

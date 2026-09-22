@@ -23,8 +23,10 @@ import {
   scheduleDraftResultOk,
 } from "~/modules/schedules/tool-schema.ts";
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
-import { applyImageChunk } from "../client/use-message-stream.ts";
-import type { AssistantImage } from "../assistant-output.ts";
+import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
+import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
+import { applyFileChunk } from "../client/use-message-stream.ts";
+import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
@@ -50,9 +52,13 @@ import {
   type ToolSource,
 } from "../client/use-message-stream.ts";
 import {
+  abortWorkTurn,
+  activateWorkTurn,
   answerQuestion,
   branchConversation,
   editMessage,
+  getWorkTurnReservation,
+  reserveWorkTurn,
   retryMessage,
   sendMessage,
   stopGeneration,
@@ -60,7 +66,16 @@ import {
 } from "../server/functions.ts";
 import type { ConversationMode, PermissionLevel } from "../schema.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
-import { DRAFT_CONVERSATION, withDraftFolderBinding } from "~/modules/desktop/client/bridge.ts";
+import {
+  copyWorkspaceToBranch,
+  desktopClient,
+  useLocalMachineId,
+} from "~/modules/desktop/client/bridge.ts";
+import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
+import {
+  ForeignMachineBanner,
+  foreignMachineStamp,
+} from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
@@ -77,6 +92,8 @@ import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import { uuidv7 } from "uuidv7";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
@@ -88,6 +105,83 @@ import { prefersReducedMotion } from "~/ui/motion.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
+
+export const sendReservedWorkspaceTurn = async (input: {
+  conversation:
+    | { kind: "new"; id: string; mode: ConversationMode }
+    | { kind: "existing"; id: string };
+  imports: WorkspaceImports;
+  activate: (
+    reservationId: string,
+    files: ReadonlyArray<string>,
+  ) => Promise<{ conversationId: string; assistantMessageId: string }>;
+}) => {
+  const reservationId = crypto.randomUUID();
+  await reserveWorkTurn({ data: { reservationId, conversation: input.conversation } });
+  let receipt;
+  try {
+    receipt = await input.imports.promote(reservationId);
+  } catch (error) {
+    await abortWorkTurn({ data: { reservationId } }).catch(() => {});
+    throw error;
+  }
+  const files = receipt.files.map((file) => file.finalName);
+  let activated: { conversationId: string; assistantMessageId: string };
+  try {
+    activated = await input.activate(reservationId, files);
+  } catch (initialError) {
+    let status;
+    try {
+      status = await getWorkTurnReservation({ data: { reservationId } });
+    } catch {
+      // The server may have committed. Keep the journal for startup recovery.
+      throw initialError;
+    }
+    if (status.status === "activated" && status.assistantMessageId) {
+      activated = {
+        conversationId: status.conversationId,
+        assistantMessageId: status.assistantMessageId,
+      };
+    } else if (status.status === "reserved") {
+      // Activation is idempotent; one retry resolves a lost response without
+      // creating another turn or starting another generation.
+      try {
+        activated = await input.activate(reservationId, files);
+      } catch (retryError) {
+        let retryStatus;
+        try {
+          retryStatus = await getWorkTurnReservation({ data: { reservationId } });
+        } catch {
+          // The retry may have committed too. Leave recovery evidence intact.
+          throw retryError;
+        }
+        if (retryStatus.status === "activated" && retryStatus.assistantMessageId) {
+          activated = {
+            conversationId: retryStatus.conversationId,
+            assistantMessageId: retryStatus.assistantMessageId,
+          };
+        } else {
+          if (retryStatus.status === "reserved") {
+            try {
+              await abortWorkTurn({ data: { reservationId } });
+            } catch {
+              throw retryError;
+            }
+          }
+          await input.imports.rollback(reservationId).catch(() => {});
+          throw retryError;
+        }
+      }
+    } else {
+      await input.imports.rollback(reservationId).catch(() => {});
+      throw initialError;
+    }
+  }
+  // A failed local cleanup leaves the journal for authenticated recovery. The
+  // server turn owns the files now, so they must never be rolled back.
+  await input.imports.commit(reservationId).catch(() => {});
+  return activated;
+};
 
 /**
  * Durable message_tool_calls row → the same family-discriminated shape used by
@@ -255,6 +349,26 @@ export function toActivity(row: {
       ...(outcome ? { outcome } : {}),
       ...(reason ? { reason } : {}),
       ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+
+  if (isCustomToolName(row.toolName)) {
+    // Must precede the web fallback below: a `custom_…` row holds a
+    // CustomToolActivity, not web targets.
+    const stored = Option.getOrNull(Schema.decodeUnknownOption(CustomToolActivity)(row.result));
+    return {
+      family: "custom",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      displayName: stored?.displayName ?? row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...(stored?.resultPreview !== undefined ? { resultPreview: stored.resultPreview } : {}),
+      ...(stored?.resultChars !== undefined ? { resultChars: stored.resultChars } : {}),
+      ...(row.error ? { error: row.error.message } : stored?.error ? { error: stored.error } : {}),
+      ...(stored?.fileIds?.length ? { fileIds: stored.fileIds } : {}),
     };
   }
 
@@ -435,6 +549,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // what the very next message reports. A plain chat never offers the tools.
   const work = useWorkGate(conversationId, data.conversation.mode === "work");
   const folder = work.folder;
+  const localMachineId = useLocalMachineId();
+  const foreignMachine =
+    data.conversation.mode === "work"
+      ? foreignMachineStamp(
+          conversationId,
+          localMachineId,
+          data.generations ?? [],
+          data.messages.filter((m) => m.role === "assistant").map((m) => m.id),
+        )
+      : null;
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
@@ -480,11 +604,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         durableCompactions,
       );
     return {
-      images: data.pendingChunks
-        .filter((chunk) => chunk.kind === "image")
-        .reduce<AssistantImage[]>(
-          (images, chunk) => applyImageChunk(images, chunk.delta),
-          [...(streamingMessage.assistantOutput?.images ?? [])],
+      files: data.pendingChunks
+        .filter((chunk) => chunk.kind === "file")
+        .reduce<AssistantFile[]>(
+          (files, chunk) => applyFileChunk(files, chunk.delta),
+          [...(streamingMessage.assistantOutput?.files ?? [])],
         ),
       text,
       reasoning,
@@ -720,22 +844,44 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       attachmentIds: ReadonlyArray<string>;
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
-    }) =>
-      sendMessage({
+      workspaceFiles?: ReadonlyArray<string>;
+      workspaceImports?: WorkspaceImports;
+    }) => {
+      const conversation = { kind: "existing" as const, id: conversationId };
+      const fields = {
+        modelId: effectiveModelId!,
+        content: input.content,
+        searchEnabled,
+        timeZone: browserTimeZone(),
+        ...documentFocus(),
+        attachmentIds: input.attachmentIds,
+        researchEnabled: input.researchEnabled,
+        skillIds: [...(input.skillIds ?? [])],
+        ...context.sendFields,
+      };
+      if (input.workspaceImports && input.workspaceFiles?.length)
+        return sendReservedWorkspaceTurn({
+          conversation,
+          imports: input.workspaceImports,
+          activate: async (reservationId, workspaceFiles) =>
+            activateWorkTurn({
+              data: {
+                reservationId,
+                conversation,
+                ...fields,
+                ...(await work.attemptFields()),
+                workspaceFiles: [...workspaceFiles],
+              },
+            }),
+        });
+      return sendMessage({
         data: {
-          conversationId,
-          modelId: effectiveModelId!,
-          content: input.content,
-          searchEnabled,
+          conversation,
+          ...fields,
           ...(await work.attemptFields()),
-          timeZone: browserTimeZone(),
-          ...documentFocus(),
-          attachmentIds: input.attachmentIds,
-          researchEnabled: input.researchEnabled,
-          skillIds: [...(input.skillIds ?? [])],
-          ...context.sendFields,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       resetSearchEnabled();
       context.settle();
@@ -826,6 +972,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
     onSuccess: async (result) => {
+      // A work chat's local state is what makes the branch usable: grants and
+      // workspace are copied before the view opens, so the destination's first
+      // send cannot race its own lazy creation. Local and fast; a failure
+      // opens the branch without its files rather than not opening it.
+      if (data.conversation.mode === "work" && desktopClient()) {
+        try {
+          await copyWorkspaceToBranch(conversationId, result.conversationId);
+        } catch {
+          toast.error("The branch opened without its local files.");
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       await navigate({
         to: "/chat/$conversationId",
@@ -1219,6 +1376,45 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return result;
   }, [data.generations, data.messages]);
+  // Workspace imports belong to the send that claimed them: the user message
+  // before the attempt. Names only; the workspace path is this machine's.
+  const workspaceFilesByUserMessage = useMemo(() => {
+    const byAssistant = new Map(
+      (data.generations ?? []).map((row) => [row.messageId, row.workspaceFiles ?? []] as const),
+    );
+    const result = new Map<string, ReadonlyArray<string>>();
+    let previousUser: string | null = null;
+    for (const message of data.messages) {
+      if (message.role === "user") previousUser = message.id;
+      else if (message.role === "assistant" && previousUser) {
+        const files = byAssistant.get(message.id);
+        if (files && files.length > 0) result.set(previousUser, files);
+      }
+    }
+    return result;
+  }, [data.generations, data.messages]);
+  // The server keeps root names only, so display resolves them against this
+  // machine's live workspace and grants. Unresolved names drop out; grouping
+  // then falls back to the path's first segment.
+  const desktopRootsByMessage = useMemo(() => {
+    if (data.conversation.mode !== "work") return new Map<string, never>();
+    const workspacePath =
+      folder?.readiness === "ready" ? (folder.status.workspace?.path ?? null) : null;
+    const grants =
+      folder?.readiness === "ready" ? folder.status.folders.filter((item) => item.alive) : [];
+    const result = new Map<string, ReadonlyArray<{ name: string; path: string }>>();
+    for (const row of data.generations ?? []) {
+      const names = row.desktopRoots ?? [];
+      const roots = names.flatMap((name) => {
+        if (name === WORKSPACE_FOLDER_NAME)
+          return workspacePath ? [{ name, path: workspacePath }] : [];
+        const grant = grants.find((item) => item.name === name);
+        return grant ? [{ name, path: grant.path }] : [];
+      });
+      if (roots.length > 0) result.set(row.messageId, roots);
+    }
+    return result;
+  }, [data.generations, data.conversation.mode, folder]);
   // Below the per-message maps it seeds from. Opening an editor while another is
   // open is an ordinary switch: the previous draft goes with its unmounted row.
   const openEdit = useCallback(
@@ -1290,7 +1486,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
           : {}),
         reasoning,
-        images: message.assistantOutput?.images ?? [],
+        files: message.assistantOutput?.files ?? [],
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
@@ -1314,6 +1510,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
           : {}),
         ...(desktopApprovalRequests.size > 0 ? { desktopApprovals: desktopApprovalRequests } : {}),
+        ...(desktopRootsByMessage.has(message.id)
+          ? { desktopRoots: desktopRootsByMessage.get(message.id)! }
+          : {}),
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
@@ -1323,6 +1522,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           : {}),
         ...(collectionsByUserMessage.has(message.id)
           ? { collectionIds: collectionsByUserMessage.get(message.id)! }
+          : {}),
+        ...(workspaceFilesByUserMessage.has(message.id)
+          ? { workspaceFiles: workspaceFilesByUserMessage.get(message.id)! }
           : {}),
         ...(message.role === "user" && message.status === "complete"
           ? {
@@ -1353,6 +1555,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     agentByMessage,
     collectionsByUserMessage,
     skillsByUserMessage,
+    workspaceFilesByUserMessage,
+    desktopRootsByMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,
@@ -1426,7 +1630,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         // Overlay live stream state onto only the active assistant row.
         const live = {
           ...projected,
-          images: stream.images,
+          files: stream.files,
           rawTextLength: stream.rawTextLength,
           reasoning: stream.reasoning,
           reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
@@ -1554,6 +1758,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               </div>
             </div>
           ) : null}
+          {foreignMachine ? (
+            <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
+          ) : null}
           {data.branchedFrom ? (
             // Outside the scroller, on the message column's geometry: lineage is a
             // property of the conversation, not of its first message.
@@ -1576,7 +1783,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <ResearchPanelOwner messages={display} />
             {/* A Work row names a path; only this view knows whose folders it
               resolves against. */}
-            <LocalFileConversationProvider conversationId={conversationId}>
+            <LocalFileConversationProvider
+              conversationId={conversationId}
+              workspaceRoot={folder?.status?.workspace.path ?? null}
+            >
               <VirtualMessageList
                 messages={withDocuments}
                 followKey={stream.lastSeq}
@@ -1615,6 +1825,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               ) : null}
               <Composer
                 ref={composer}
+                conversationId={conversationId}
                 folder={folder}
                 readOnly={work.readOnly}
                 mode={{ kind: "fixed", value: data.conversation.mode }}
@@ -1622,12 +1833,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                   permissionLevel: data.conversation.permissionLevel,
                   onChange: (level) => workSettingsMutation.mutate(level),
                 }}
-                onSend={(content, attachmentIds, researchEnabled, skillIds) =>
+                onSend={(
+                  content,
+                  attachmentIds,
+                  researchEnabled,
+                  skillIds,
+                  workspaceFiles,
+                  workspaceImports,
+                ) =>
                   sendMutation.mutateAsync({
                     content,
                     attachmentIds,
                     researchEnabled,
                     ...(skillIds ? { skillIds } : {}),
+                    ...(workspaceFiles ? { workspaceFiles } : {}),
+                    ...(workspaceImports ? { workspaceImports } : {}),
                   })
                 }
                 {...(stoppableId
@@ -1707,9 +1927,10 @@ export function NewChatView({
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
   const [mode, setMode] = useState<ConversationMode>("chat");
-  // No conversation yet, so a folder picked here hangs on the draft key until
-  // the first message creates one to rebind it onto.
-  const work = useWorkGate(DRAFT_CONVERSATION, mode === "work");
+  // The final id exists before local folders or files do, so the first prompt
+  // and every desktop capability already name the durable workspace path.
+  const [conversationId] = useState(uuidv7);
+  const work = useWorkGate(conversationId, mode === "work");
   const folder = work.folder;
   const isMobile = useIsMobile();
   useEffect(() => {
@@ -1735,27 +1956,48 @@ export function NewChatView({
       attachmentIds: ReadonlyArray<string>;
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
+      workspaceFiles?: ReadonlyArray<string>;
+      workspaceImports?: WorkspaceImports;
       mode: ConversationMode;
-    }) =>
-      withDraftFolderBinding(
-        async () =>
-          sendMessage({
-            data: {
-              conversationId: null,
-              modelId: modelId!,
-              content: input.content,
-              searchEnabled,
-              mode: input.mode,
-              ...(await work.attemptFields(input.mode === "work")),
-              timeZone: browserTimeZone(),
-              attachmentIds: input.attachmentIds,
-              researchEnabled: input.researchEnabled,
-              skillIds: [...(input.skillIds ?? [])],
-              ...context.sendFields,
-            },
-          }),
-        queryClient,
-      ),
+    }) => {
+      const conversation = {
+        kind: "new" as const,
+        id: conversationId,
+        mode: input.mode,
+      };
+      const fields = {
+        modelId: modelId!,
+        content: input.content,
+        searchEnabled,
+        timeZone: browserTimeZone(),
+        attachmentIds: input.attachmentIds,
+        researchEnabled: input.researchEnabled,
+        skillIds: [...(input.skillIds ?? [])],
+        ...context.sendFields,
+      };
+      if (input.workspaceImports && input.workspaceFiles?.length)
+        return sendReservedWorkspaceTurn({
+          conversation,
+          imports: input.workspaceImports,
+          activate: async (reservationId, workspaceFiles) =>
+            activateWorkTurn({
+              data: {
+                reservationId,
+                conversation,
+                ...fields,
+                ...(await work.attemptFields(true)),
+                workspaceFiles: [...workspaceFiles],
+              },
+            }),
+        });
+      return sendMessage({
+        data: {
+          conversation,
+          ...fields,
+          ...(await work.attemptFields(input.mode === "work")),
+        },
+      });
+    },
     // Fires when the request starts, i.e. after any queued upload settled.
     // the composer should not move while it is still waiting on those.
     onMutate: (input) => {
@@ -1841,15 +2083,25 @@ export function NewChatView({
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             initialSkillId={initialSkillId}
+            conversationId={conversationId}
             folder={folder}
             readOnly={work.readOnly}
             mode={{ kind: "choose", value: mode, onChange: setMode }}
-            onSend={(content, attachmentIds, researchEnabled, skillIds) =>
+            onSend={(
+              content,
+              attachmentIds,
+              researchEnabled,
+              skillIds,
+              workspaceFiles,
+              workspaceImports,
+            ) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
                 researchEnabled,
                 ...(skillIds ? { skillIds } : {}),
+                ...(workspaceFiles ? { workspaceFiles } : {}),
+                ...(workspaceImports ? { workspaceImports } : {}),
                 mode,
               })
             }

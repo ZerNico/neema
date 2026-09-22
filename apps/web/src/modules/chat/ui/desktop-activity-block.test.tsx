@@ -111,6 +111,39 @@ describe("DesktopActivityBlock", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
+  it("groups absolute paths under the attempt's roots, longest match first", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          callId: "call-3d",
+          name: "delete_local_file",
+          args: {
+            paths: [
+              "/workspaces/abc/notes.txt",
+              "/home/nico/site/sub/old.log",
+              "/home/nico/site/README.md",
+            ],
+          },
+        })}
+        approval={{ kind: "delete", decide: vi.fn() }}
+        roots={[
+          { name: "workspace", path: "/workspaces/abc" },
+          { name: "site", path: "/home/nico/site" },
+          // Nested roots: the inner one must claim its own paths.
+          { name: "sub", path: "/home/nico/site/sub" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(screen.getByText("sub")).toBeInTheDocument();
+    expect(screen.getByText("site")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "notes.txt",
+      "old.log",
+      "README.md",
+    ]);
+  });
+
   it("still names a delete that used the older single path argument", () => {
     show(
       <DesktopActivityBlock

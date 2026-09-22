@@ -11,6 +11,7 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { modelGroupAccess, models, providers } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -31,6 +32,7 @@ import {
   FakeDocumentParser,
   FakeWebSearch,
   FakeUrlReader,
+  FakeCustomToolRuntime,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
@@ -101,6 +103,7 @@ beforeAll(async () => {
   );
   const ReposLayer = Layer.mergeAll(
     AnalyticsRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
@@ -120,6 +123,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeCustomToolRuntime,
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,
@@ -597,7 +601,7 @@ describe("generation-time enforcement", () => {
 
         const sent = yield* chat.sendMessage({
           userId: member,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: privateModel,
           content: "hello",
           searchEnabled: false,
@@ -607,7 +611,7 @@ describe("generation-time enforcement", () => {
         const denied = yield* chat
           .sendMessage({
             userId: outsider,
-            conversationId: null,
+            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId: privateModel,
             content: "hello",
             searchEnabled: false,

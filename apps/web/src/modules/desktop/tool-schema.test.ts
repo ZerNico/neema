@@ -1,29 +1,83 @@
 import { describe, expect, it } from "vitest";
-import { deletePathsOf, desktopToolsSystemHint, forTranscript } from "./tool-schema.ts";
+import {
+  approvalKind,
+  deletePathsOf,
+  desktopToolsSystemHint,
+  forTranscript,
+} from "./tool-schema.ts";
 
 describe("desktop tools system hint", () => {
-  it("separates the file-tool address space from a command's working folder", () => {
-    const hint = desktopToolsSystemHint(["DVR"], true);
-    // The two rules are opposites, and a model told only the first one writes
-    // `cd DVR && python DVR/main.py`, which fails twice over.
-    expect(hint).toContain('Every path starts with that name, like "DVR/README.md"');
-    expect(hint).toContain('a command in "DVR" takes "main.py"');
-    expect(hint).toContain('"cd DVR" would fail');
+  it("names the absolute path as the address space", () => {
+    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], true);
+    expect(hint).toContain('attached a folder on their computer at "/home/user/DVR" ("DVR")');
+    expect(hint).toContain('Paths are absolute, like "/home/user/DVR/README.md"');
+    expect(hint).toContain("anything outside the attached folders is refused");
     expect(hint).toContain("Put every path you mean to delete in one delete_local_file call");
   });
 
-  it("names a folder the user actually attached in both examples", () => {
-    const hint = desktopToolsSystemHint(["site", "notes"], true);
-    expect(hint).toContain('"site/README.md"');
-    expect(hint).toContain('"site/main.py"');
+  it("names every attached folder with its path", () => {
+    const hint = desktopToolsSystemHint(
+      [
+        { name: "site", path: "/home/user/site" },
+        { name: "notes", path: "/home/user/notes" },
+      ],
+      true,
+    );
+    expect(hint).toContain('"/home/user/site" ("site"), "/home/user/notes" ("notes")');
+    expect(hint).toContain('Paths are absolute, like "/home/user/site/README.md"');
+    expect(hint).toContain('list_folder with "." lists them');
     expect(hint).not.toContain("DVR");
   });
 
-  it("says nothing about command paths where commands are unavailable", () => {
-    const hint = desktopToolsSystemHint(["DVR"], false);
+  it("says nothing about commands where they are unavailable", () => {
+    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], false);
     expect(hint).toContain("Running commands is unavailable on this computer");
-    expect(hint).not.toContain("cd DVR");
-    expect(hint).not.toContain("main.py");
+    expect(hint).not.toContain("sandboxed");
+  });
+
+  it("credits the workspace to the chat, never to the user", () => {
+    const hint = desktopToolsSystemHint(
+      [{ name: "workspace", path: "/data/workspaces/abc" }],
+      true,
+    );
+    // The user never picked it; "has attached" must not credit them with it.
+    expect(hint).not.toContain("has attached");
+    expect(hint).toContain(
+      "this chat's own workspace on the user's computer at \"/data/workspaces/abc\"",
+    );
+    expect(hint).toContain("Files the user drops into the chat land in the workspace");
+    expect(hint).toContain('Paths are absolute, like "/data/workspaces/abc/README.md"');
+    expect(hint).toContain("save_to_workspace copies it into the workspace by its attachment id");
+  });
+
+  it("names the workspace first and the attached folders after it", () => {
+    const hint = desktopToolsSystemHint(
+      [
+        { name: "workspace", path: "/data/workspaces/abc" },
+        { name: "site", path: "/home/user/site" },
+      ],
+      true,
+    );
+    expect(hint).toContain(
+      'workspace at "/data/workspaces/abc" and inside a folder the user attached at "/home/user/site" ("site")',
+    );
+    expect(hint).toContain("Files the user drops into the chat land in the workspace");
+    expect(hint).toContain("Commands run sandboxed and start in the workspace");
+    expect(hint).toContain("`cd` and `cp` between them work");
+  });
+
+  it("leaves the workspace unmentioned when the shell predates it", () => {
+    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], true);
+    expect(hint).not.toContain("drops into the chat");
+  });
+});
+
+describe("approvalKind", () => {
+  it("asks for nothing when a chat's own file is saved into the workspace", () => {
+    // The workspace is app-owned and a drop lands there unasked; the copy
+    // never overwrites, so there is nothing for a person to weigh.
+    expect(approvalKind("save_to_workspace")).toBeNull();
+    expect(approvalKind("write_local_file")).toBe("edit");
   });
 });
 

@@ -1,6 +1,7 @@
 import {
   ArrowDown01Icon,
   Delete02Icon,
+  Download04Icon,
   Edit02Icon,
   File01Icon,
   Folder01Icon,
@@ -29,12 +30,15 @@ import {
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
+const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
+
 const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
   read_local_file: File01Icon,
   write_local_file: PencilEdit02Icon,
+  save_to_workspace: Download04Icon,
   edit_local_file: Edit02Icon,
   move_local_file: FolderTransferIcon,
   delete_local_file: Delete02Icon,
@@ -48,7 +52,7 @@ const argText = (activity: DesktopToolActivity) => {
   const args = activity.args ?? {};
   switch (activity.name) {
     case "run_command":
-      return text(args.folder) ? `${text(args.folder)}: ${text(args.command)}` : text(args.command);
+      return text(args.command);
     case "find_files":
     case "search_files":
       return text(args.pattern);
@@ -94,6 +98,8 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Reading ${what}` : "Reading a file";
     case "write_local_file":
       return what ? `Writing ${what}` : "Writing a file";
+    case "save_to_workspace":
+      return "Saving a file to the workspace";
     case "edit_local_file":
       return what ? `Editing ${what}` : "Editing a file";
     case "move_local_file":
@@ -109,11 +115,36 @@ const runningLabel = (activity: DesktopToolActivity) => {
   }
 };
 
-/** First-segment groups so a Downloads cleanup is names, not fifty full paths. */
-const groupDeletePaths = (paths: ReadonlyArray<string>) => {
+/**
+ * Groups absolute paths under the root that owns them, so a Downloads cleanup
+ * reads as `Downloads` plus short names, not fifty full paths. `roots` is the
+ * attempt's folder list (name + path); a path under no known root renders in
+ * full, since a receipt from an older machine is still honest that way.
+ */
+const groupDeletePaths = (
+  paths: ReadonlyArray<string>,
+  roots: ReadonlyArray<{ name: string; path: string }>,
+) => {
   const grouped = new Map<string, string[]>();
   const loose: string[] = [];
   for (const path of paths) {
+    // Longest first: a nested root (site and site/sub both attached) claims
+    // its own paths rather than lending them to the outer one.
+    let owner: { name: string; path: string } | undefined;
+    for (const root of roots)
+      if (
+        (path === root.path || path.startsWith(root.path + "/")) &&
+        (!owner || root.path.length > owner.path.length)
+      )
+        owner = root;
+    if (owner && path !== owner.path) {
+      const items = grouped.get(owner.name) ?? [];
+      items.push(path.slice(owner.path.length + 1));
+      grouped.set(owner.name, items);
+      continue;
+    }
+    // No known root owns it (a receipt from another machine): fall back to the
+    // first segment, which older transcripts already show as the folder name.
     const slash = path.indexOf("/");
     if (slash <= 0) {
       loose.push(path);
@@ -133,7 +164,11 @@ const groupDeletePaths = (paths: ReadonlyArray<string>) => {
 };
 
 /** What the reader is being asked to allow, in their words. */
-const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
+const approvalTitle = (
+  activity: DesktopToolActivity,
+  kind: PendingKind,
+  roots: ReadonlyArray<{ name: string; path: string }>,
+) => {
   switch (kind) {
     case "read":
       return activity.name === "list_folder"
@@ -146,7 +181,7 @@ const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
-      const groups = groupDeletePaths(listed);
+      const groups = groupDeletePaths(listed, roots);
       const only = groups.length === 1 ? groups[0] : undefined;
       return only?.folder
         ? `Delete ${listed.length} files in ${only.folder}`
@@ -161,8 +196,14 @@ const approvalTitle = (activity: DesktopToolActivity, kind: PendingKind) => {
   }
 };
 
-function DeletePathList({ paths }: { paths: ReadonlyArray<string> }) {
-  const groups = groupDeletePaths(paths);
+function DeletePathList({
+  paths,
+  roots,
+}: {
+  paths: ReadonlyArray<string>;
+  roots: ReadonlyArray<{ name: string; path: string }>;
+}) {
+  const groups = groupDeletePaths(paths, roots);
   const folderInTitle = groups.length === 1 && groups[0]?.folder !== null;
   return (
     <div className="bg-muted max-h-64 min-w-0 max-w-full overflow-auto rounded-xl px-3 py-2 text-xs">
@@ -208,9 +249,11 @@ export interface DesktopApprovalRequest {
 function ApprovalCard({
   activity,
   approval,
+  roots,
 }: {
   activity: DesktopToolActivity;
   approval: DesktopApprovalRequest;
+  roots: ReadonlyArray<{ name: string; path: string }>;
 }) {
   const listed = activity.name === "delete_local_file" ? deletePathsOf(activity.args) : [];
   const what = listed.length > 1 ? "" : argText(activity);
@@ -225,10 +268,10 @@ function ApprovalCard({
             className="size-4 shrink-0"
             aria-hidden
           />
-          <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind)}</span>
+          <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind, roots)}</span>
         </div>
         {listed.length > 1 ? (
-          <DeletePathList paths={listed} />
+          <DeletePathList paths={listed} roots={roots} />
         ) : what ? (
           <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
             {what}
@@ -262,9 +305,12 @@ function ApprovalCard({
 export function DesktopActivityBlock({
   activity,
   approval,
+  roots = EMPTY_ROOTS,
 }: {
   activity: DesktopToolActivity;
   approval?: DesktopApprovalRequest | undefined;
+  /** The attempt's folders (name + path), so delete lists group by owner. */
+  roots?: ReadonlyArray<{ name: string; path: string }> | undefined;
 }) {
   const running = activity.status === "running";
   const failed = activity.status === "error";
@@ -272,7 +318,8 @@ export function DesktopActivityBlock({
   // Null in a browser, which is what keeps a Work chat readable there without
   // offering a machine it cannot reach. Nothing is read until this is called.
   const preview = useLocalFilePreview(previewablePath(activity));
-  if (running && approval) return <ApprovalCard activity={activity} approval={approval} />;
+  if (running && approval)
+    return <ApprovalCard activity={activity} approval={approval} roots={roots} />;
   const detail = activity.result?.detail ?? "";
   const violations = activity.result?.violations ?? [];
   const label = activity.result?.summary ?? runningLabel(activity);

@@ -4,7 +4,9 @@ import { uuidv7 } from "uuidv7";
 import {
   agents,
   agentCollections,
+  agentCustomTools,
   agentSkills,
+  customTools,
   skills,
   knowledgeCollections,
   user,
@@ -13,6 +15,7 @@ import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
 import { skillReadable } from "~/modules/skills/server/access.ts";
 import { Db } from "~/server/db.ts";
+import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
   AGENT_LIMITS,
@@ -27,6 +30,7 @@ export interface StoredAgent {
   ownerName: string | null;
   collectionIds: ReadonlyArray<string>;
   skillIds?: ReadonlyArray<string>;
+  customToolIds: ReadonlyArray<string>;
 }
 const owned = (userId: string, agentId: string) =>
   and(eq(agents.id, agentId), eq(agents.userId, userId));
@@ -112,7 +116,7 @@ export class AgentRepo extends Context.Service<
             if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
               return yield* new AgentRejected({ reason: "agent limit reached" });
           }
-          const { collectionIds, skillIds = [], ...settings } = input;
+          const { collectionIds, skillIds = [], customToolIds = [], ...settings } = input;
           if (skillIds.length) {
             const available = yield* tx
               .select({ id: skills.id })
@@ -120,6 +124,14 @@ export class AgentRepo extends Context.Service<
               .where(and(inArray(skills.id, [...skillIds]), skillReadable(userId)));
             if (available.length !== skillIds.length)
               return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
+          }
+          if (customToolIds.length) {
+            const available = yield* tx
+              .select({ id: customTools.id })
+              .from(customTools)
+              .where(and(inArray(customTools.id, [...customToolIds]), customToolUsableBy(userId)));
+            if (available.length !== customToolIds.length)
+              return yield* new AgentRejected({ reason: "a selected custom tool is unavailable" });
           }
           if (collectionIds.length) {
             const available = yield* tx
@@ -148,6 +160,7 @@ export class AgentRepo extends Context.Service<
               .where(owned(userId, id));
             yield* tx.delete(agentCollections).where(eq(agentCollections.agentId, id));
             yield* tx.delete(agentSkills).where(eq(agentSkills.agentId, id));
+            yield* tx.delete(agentCustomTools).where(eq(agentCustomTools.agentId, id));
           } else {
             yield* tx.insert(agents).values({ id, userId, ...values });
           }
@@ -163,6 +176,10 @@ export class AgentRepo extends Context.Service<
             yield* tx
               .insert(agentSkills)
               .values(skillIds.map((skillId, position) => ({ agentId: id, skillId, position })));
+          if (customToolIds.length)
+            yield* tx
+              .insert(agentCustomTools)
+              .values(customToolIds.map((toolId, position) => ({ agentId: id, toolId, position })));
           return { agentId: id, configRevision: update ? update.expectedRevision + 1 : 1 };
         }).pipe(Effect.catchTag("EffectDrizzleQueryError", Effect.die));
       });
@@ -218,6 +235,9 @@ export class AgentRepo extends Context.Service<
               skillIds: sql<
                 string[]
               >`array(select ask.skill_id from agent_skills ask where ask.agent_id = ${agents.id} order by ask.position)`,
+              customToolIds: sql<
+                string[]
+              >`array(select act.tool_id from agent_custom_tools act where act.agent_id = ${agents.id} order by act.position)`,
               collectionIds: sql<
                 string[]
               >`array(select ac.collection_id from agent_collections ac where ac.agent_id = ${agents.id} order by ac.position)`,

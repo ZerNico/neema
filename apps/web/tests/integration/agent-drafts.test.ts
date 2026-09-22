@@ -26,6 +26,7 @@ import { DraftService } from "~/modules/drafts/server/service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { storedAgentToDraftSettings } from "~/modules/agents/server/draft-map.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { initialResearchProgress, lockResearchFence } from "~/modules/chat/server/research/repo.ts";
@@ -71,6 +72,7 @@ beforeAll(async () => {
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
   const core = Layer.mergeAll(
+    CustomToolRepo.layer,
     AgentRepo.layer,
     DraftRepo.layer,
     KnowledgeRepo.layer,

@@ -28,7 +28,7 @@ import {
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { acceptGeneratedImage } from "~/modules/chat/server/generated-images.ts";
+import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -439,7 +439,7 @@ describe("attachment claiming", () => {
 
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "look",
           attachmentIds: [second.id, first.id],
@@ -452,7 +452,7 @@ describe("attachment claiming", () => {
         const reclaim = yield* repo
           .createTurn({
             userId,
-            conversationId: turn.conversation.id,
+            conversation: { kind: "existing", id: turn.conversation.id },
             modelId,
             content: "again",
             attachmentIds: [first.id],
@@ -488,7 +488,7 @@ describe("attachment claiming", () => {
         const error = yield* repo
           .createTurn({
             userId: bob,
-            conversationId: null,
+            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId,
             content: "steal",
             attachmentIds: [his.id, hers.id],
@@ -514,7 +514,7 @@ describe("attachment claiming", () => {
         const error = yield* repo
           .createTurn({
             userId,
-            conversationId: null,
+            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId,
             content: "twice",
             attachmentIds: [only.id, only.id],
@@ -541,7 +541,7 @@ describe("attachment replacement on edit", () => {
 
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "first",
           attachmentIds: [kept.id, dropped.id],
@@ -599,7 +599,7 @@ describe("attachment replacement on edit", () => {
 
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "both",
           attachmentIds: [first.id, second.id],
@@ -659,7 +659,7 @@ describe("attachment replacement on edit", () => {
         const hers = yield* upload(alice, "hers.txt", "alice bytes");
         const turn = yield* repo.createTurn({
           userId: alice,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "mine",
           attachmentIds: [hers.id],
@@ -712,7 +712,7 @@ describe("attachment access policy", () => {
 
         yield* repo.createTurn({
           userId: alice,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "sent",
           attachmentIds: [own.id],
@@ -766,7 +766,7 @@ describe("attachment access policy", () => {
 
         yield* repo.createTurn({
           userId: alice,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "sent",
           attachmentIds: [claimedLater.id],
@@ -809,7 +809,7 @@ describe("attachment cleanup", () => {
 
         yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "sent",
           attachmentIds: [claimed.id],
@@ -918,7 +918,7 @@ describe("generated assistant image transactions", () => {
         const db = yield* Db;
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: "draw",
           attachmentIds: [],
@@ -941,7 +941,7 @@ describe("generated assistant image transactions", () => {
         };
         const image = yield* acceptGeneratedImage(service, input);
         const stored = yield* repo.getMessage(turn.assistant.id);
-        expect(stored?.assistantOutput?.images).toEqual([image]);
+        expect(stored?.assistantOutput?.files).toEqual([image]);
         const chunks = yield* db
           .select()
           .from(messageChunks)
@@ -969,7 +969,7 @@ describe("generated assistant image transactions", () => {
         const cloned = (yield* repo.listMessages(branch.id)).find(
           (message) => message.role === "assistant",
         )!;
-        const clonedImage = cloned.assistantOutput!.images[0]!;
+        const clonedImage = cloned.assistantOutput!.files[0]!;
         expect(cloned.generationId).toBeNull();
         expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
         expect(clonedImage).toMatchObject({

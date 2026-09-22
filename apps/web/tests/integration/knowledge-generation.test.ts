@@ -12,6 +12,7 @@ import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -37,7 +38,7 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 import { makeFakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
-import { FakeDocumentParser } from "./unused-services.ts";
+import { FakeDocumentParser, FakeCustomToolRuntime } from "./unused-services.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
 
@@ -214,7 +215,9 @@ const send = (input: {
     Effect.flatMap(ChatService, (chat) =>
       chat.sendMessage({
         userId: input.userId,
-        conversationId: input.conversationId ?? null,
+        conversation: input.conversationId
+          ? { kind: "existing", id: input.conversationId }
+          : { kind: "new", id: uuidv7(), mode: "chat" },
         modelId: input.modelId ?? smallModelId,
         content: input.content ?? "Summarize the notes.",
         searchEnabled: input.searchEnabled ?? false,
@@ -280,6 +283,7 @@ beforeAll(async () => {
   const ReposLayer = Layer.mergeAll(
     SkillRepo.layer,
     AnalyticsRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     GroupRepo.layer,
@@ -299,6 +303,7 @@ beforeAll(async () => {
     FakeReader,
     MemoryBlobStore,
     FakeDocumentParser,
+    FakeCustomToolRuntime,
     makeFakeMemoryService({ autoSave: true }),
   ).pipe(Layer.provideMerge(ReposLayer));
   const KnowledgeLayer = Layer.mergeAll(
@@ -582,7 +587,7 @@ describe("knowledge-backed generations", () => {
             Effect.flatMap(ChatService, (chat) =>
               chat.sendMessage({
                 userId: owner,
-                conversationId: first.conversationId,
+                conversation: { kind: "existing", id: first.conversationId },
                 modelId: smallModelId,
                 content: "Again",
                 searchEnabled: false,
@@ -881,7 +886,7 @@ describe("knowledge-backed generations", () => {
             Effect.flatMap(ChatService, (chat) =>
               chat.sendMessage({
                 userId: recipient,
-                conversationId: first.conversationId,
+                conversation: { kind: "existing", id: first.conversationId },
                 modelId: smallModelId,
                 content: "Should not append",
                 searchEnabled: false,
@@ -937,11 +942,8 @@ describe("knowledge-backed generations", () => {
       });
       await settle(first.assistantMessageId);
       const fence = async () =>
-        (
-          await exec(
-            `select generation_id from messages where id = '${first.assistantMessageId}'`,
-          )
-        ).rows[0]!;
+        (await exec(`select generation_id from messages where id = '${first.assistantMessageId}'`))
+          .rows[0]!;
       const original = await fence();
       await editAgent(owner, agentId);
       if (action === "retry")
@@ -1002,7 +1004,7 @@ describe("knowledge-backed generations", () => {
         Effect.flatMap(ChatService, (chat) =>
           chat.sendMessage({
             userId: owner,
-            conversationId: first.conversationId,
+            conversation: { kind: "existing", id: first.conversationId },
             modelId: researchModelId,
             searchEnabled: false,
             researchEnabled: false,
@@ -1311,7 +1313,7 @@ describe("knowledge-backed generations", () => {
         ChatService.use((chat) =>
           chat.sendMessage({
             userId: owner,
-            conversationId: sent.conversationId,
+            conversation: { kind: "existing", id: sent.conversationId },
             modelId: noToolModelId,
             searchEnabled: !searchEnabled,
             researchEnabled: false,
@@ -1344,7 +1346,7 @@ describe("knowledge-backed generations", () => {
       Effect.flatMap(ChatService, (chat) =>
         chat.sendMessage({
           userId: owner,
-          conversationId: sent.conversationId,
+          conversation: { kind: "existing", id: sent.conversationId },
           modelId,
           searchEnabled: false,
           researchEnabled: false,
@@ -1390,7 +1392,7 @@ describe("knowledge-backed generations", () => {
           Effect.flatMap(ChatService, (chat) =>
             chat.sendMessage({
               userId: stranger,
-              conversationId: null,
+              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
               modelId: smallModelId,
               content: "Hi",
               searchEnabled: false,
@@ -1533,7 +1535,8 @@ describe("knowledge-backed generations", () => {
     };
     const hostTurn = (input: GatewayInput, brief: string, answer: string) =>
       input.prompt.content.some(
-        (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+        (message) =>
+          message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
       )
         ? Stream.make(text(answer), finish())
         : tool(input, "deep_research", { brief });
@@ -1574,10 +1577,7 @@ describe("knowledge-backed generations", () => {
           });
         return Stream.make(finish());
       }
-      return Stream.make(
-        text("The contract fixes ninety days[^2]; the web agrees[^1]."),
-        finish(),
-      );
+      return Stream.make(text("The contract fixes ninety days[^2]; the web agrees[^1]."), finish());
     };
     const sent = await send({
       userId: owner,
@@ -1641,7 +1641,8 @@ describe("knowledge-backed generations", () => {
     };
     const hostTurn = (input: GatewayInput, brief: string, answer: string) =>
       input.prompt.content.some(
-        (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+        (message) =>
+          message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
       )
         ? Stream.make(text(answer), finish())
         : tool(input, "deep_research", { brief });

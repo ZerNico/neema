@@ -35,15 +35,18 @@ import {
 } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Layer, ManagedRuntime } from "effect";
-import { makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { DROPPED_FILE_CHANNEL, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import { makeDroppedFileHandler } from "./dropped-file.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
 import { disposeOwnedProcesses } from "./process.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
+import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
 import { Sandbox } from "./sandbox.ts";
+import { WorkspaceRegistry } from "./workspaces.ts";
 import {
   SIGN_IN_SCHEME,
   SIGN_IN_TICKET,
@@ -133,8 +136,19 @@ const lifecycle = makeLifecycle({
 });
 
 const runtime = ManagedRuntime.make(
-  Layer.mergeAll(GrantStore.layerAt(grantsFile(app.getPath("userData"))), Sandbox.layer),
+  Layer.mergeAll(
+    GrantStore.layerAt(grantsFile(app.getPath("userData"))),
+    WorkspaceRegistry.layerAt(() => {
+      if (serverOrigin === null) throw new Error("No server is configured.");
+      return serverOrigin;
+    }, app.getPath("userData")),
+    Sandbox.layer,
+  ),
 );
+
+// Placeholder until whenReady loads the real one; nothing can call
+// executionSession before the handlers exist, and those wait for whenReady.
+let machine: MachineIdentity = { id: "unknown", name: "Unknown machine" };
 
 const desktopShell: Shell = {
   // Requests only arrive from the configured origin's page (`isPageSender`),
@@ -143,7 +157,13 @@ const desktopShell: Shell = {
     if (serverOrigin === null) throw new Error("No server is configured.");
     return serverOrigin;
   },
-  executionSession: () => ({ id: executions.id }),
+  // Minted on first launch, persisted beside the grants; a reinstall gets a
+  // fresh one, which the site then treats exactly like a foreign machine.
+  executionSession: () => ({
+    id: executions.id,
+    machineId: machine.id,
+    machineName: machine.name,
+  }),
   cancelCall: (callId) => executions.cancelCall(callId),
   setWorkState: (state) => {
     workState = state;
@@ -214,6 +234,23 @@ const openConnectWindow = (current: string | null) => {
   return window;
 };
 
+/**
+ * Abandoned staging, temp files and interrupted clone directories accumulate.
+ * Cleanup runs once the origin-scoped root is known, both at startup and after
+ * switching servers. Promotion journals survive until authenticated recovery.
+ */
+const sweepTransientWorkspaces = () => {
+  if (serverOrigin === null) return;
+  void runtime
+    .runPromise(
+      Effect.gen(function* () {
+        const workspaces = yield* WorkspaceRegistry;
+        yield* workspaces.sweepTransient();
+      }),
+    )
+    .catch((cause: unknown) => console.error("[desktop] workspace cleanup failed", cause));
+};
+
 const connectFlow = makeConnectFlow({
   fixedServer: () => devOrigin !== null,
   hasMain: hasMainWindow,
@@ -260,6 +297,7 @@ const connectFlow = makeConnectFlow({
   },
   openMain: (origin) => {
     serverOrigin = origin;
+    sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
   },
   closeMain: () => {
@@ -399,8 +437,10 @@ else if (!devReload) {
 
 void app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  machine = await loadMachineIdentity(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
+  sweepTransientWorkspaces();
   // The pinned dev server is decided from the environment, before start() runs.
   const pinned = Boolean(process.env.CHAT_DESKTOP_SERVER);
   const actions = [
@@ -488,6 +528,25 @@ void app.whenReady().then(async () => {
     if (typeof tag !== "string") return refusalReply("failed", "Malformed request.");
     return executions.request(tag, payload);
   });
+
+  ipcMain.handle(
+    DROPPED_FILE_CHANNEL,
+    makeDroppedFileHandler({
+      contents: () => mainWindow?.webContents,
+      origin: () => serverOrigin,
+      stage: (input, sourcePath) =>
+        Effect.gen(function* () {
+          const workspaces = yield* WorkspaceRegistry;
+          return yield* workspaces.stageFileFromPath(
+            input.conversationId,
+            input.submissionId,
+            input.fileName,
+            sourcePath,
+          );
+        }),
+      run: (effect) => runtime.runPromise(effect),
+    }),
+  );
 
   if (devReload && process.send) {
     // Only the owning dev supervisor can request a restart, never the web page.

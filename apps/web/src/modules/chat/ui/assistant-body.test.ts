@@ -211,9 +211,9 @@ describe("generated image body ordering", () => {
       streaming: false,
       tools: [web("search", 0, 0)],
       compactions: [],
-      images: [image("before", 0), image("after", 1)],
+      files: [image("before", 0), image("after", 1)],
     });
-    expect(result.parts.map((part) => part.kind)).toEqual(["image", "web", "image"]);
+    expect(result.parts.map((part) => part.kind)).toEqual(["file", "web", "file"]);
   });
   it("waits for smoothed UTF-16 text to reach the image anchor", () => {
     expect(
@@ -222,7 +222,7 @@ describe("generated image body ordering", () => {
         streaming: true,
         tools: [],
         compactions: [],
-        images: [image("image", 0, 3)],
+        files: [image("image", 0, 3)],
       }).parts.map((part) => part.kind),
     ).toEqual(["text"]);
     expect(
@@ -231,8 +231,8 @@ describe("generated image body ordering", () => {
         streaming: true,
         tools: [],
         compactions: [],
-        images: [image("image", 0, 3)],
+        files: [image("image", 0, 3)],
       }).parts.map((part) => part.kind),
-    ).toEqual(["text", "image"]);
+    ).toEqual(["text", "file"]);
   });
 });

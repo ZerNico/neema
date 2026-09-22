@@ -39,6 +39,32 @@ export const relations = defineRelations(schema, (r) => ({
   agentSkills: {
     agent: r.one.agents({ from: r.agentSkills.agentId, to: r.agents.id, optional: false }),
   },
+  customTools: {
+    creator: r.one.user({ from: r.customTools.createdBy, to: r.user.id }),
+  },
+  agentCustomTools: {
+    agent: r.one.agents({ from: r.agentCustomTools.agentId, to: r.agents.id, optional: false }),
+  },
+  customToolUserGrants: {
+    tool: r.one.customTools({
+      from: r.customToolUserGrants.toolId,
+      to: r.customTools.id,
+      optional: false,
+    }),
+    user: r.one.user({ from: r.customToolUserGrants.userId, to: r.user.id, optional: false }),
+  },
+  customToolGroupGrants: {
+    tool: r.one.customTools({
+      from: r.customToolGroupGrants.toolId,
+      to: r.customTools.id,
+      optional: false,
+    }),
+    group: r.one.groups({
+      from: r.customToolGroupGrants.groupId,
+      to: r.groups.id,
+      optional: false,
+    }),
+  },
   messageSkills: {
     message: r.one.messages({
       from: r.messageSkills.messageId,

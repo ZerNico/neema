@@ -1,7 +1,9 @@
-import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
 
 export default defineConfig({
+  plugins: [customToolRuntimeWorker()],
   resolve: {
     alias: {
       "~": fileURLToPath(new URL("./src", import.meta.url)),

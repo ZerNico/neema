@@ -99,6 +99,32 @@ describe("buildHistoryMessages without attachments", () => {
     ]);
   });
 
+  it("names the files a desktop send copied into the workspace", async () => {
+    const { deps } = harness({ rows: [] });
+    const messages = await build(deps, [
+      {
+        id: "m1",
+        role: "user",
+        content: "can you see whats in this file?",
+        workspaceFiles: ["dump.sql"],
+      },
+      { id: "m2", role: "user", content: "", workspaceFiles: ["a.txt", "b.png"] },
+      { id: "m3", role: "user", content: "plain question" },
+    ]);
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content:
+          "[The user added this file to the workspace: dump.sql]\ncan you see whats in this file?",
+      },
+      {
+        role: "user",
+        content: "[The user added these files to the workspace: a.txt, b.png]\n",
+      },
+      { role: "user", content: "plain question" },
+    ]);
+  });
+
   it("keeps markers when a web tool is armed for this generation", async () => {
     const { deps } = harness({ rows: [] });
     const messages = await build(
@@ -345,7 +371,7 @@ describe("assistant image replay", () => {
     id: "answer",
     role: "assistant",
     content: "😀after",
-    assistantOutput: { v: 1, images: [image] },
+    assistantOutput: { v: 1, files: [image] },
     providerReplay: {
       v: 1,
       providerId: "provider",
@@ -431,7 +457,7 @@ describe("assistant image replay", () => {
           completedAt,
           assistantOutput: {
             v: 1,
-            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+            files: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
           },
           providerReplay: {
             ...message.providerReplay!,
@@ -463,7 +489,7 @@ describe("assistant image replay", () => {
           { type: "text", text: "after" },
         ]);
         expect(JSON.stringify(rendered)).not.toContain("opaque");
-        expect(history.assistantOutput?.images[0]?.textOffset).toBe(prefix.length);
+        expect(history.assistantOutput?.files[0]?.textOffset).toBe(prefix.length);
         expect(history.content).toBe(content);
       }),
     );
@@ -503,7 +529,7 @@ describe("assistant image replay", () => {
           completedAt,
           assistantOutput: {
             v: 1,
-            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+            files: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
           },
           providerReplay: {
             ...message.providerReplay!,

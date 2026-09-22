@@ -1,6 +1,9 @@
 vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("~/modules/custom-tools/server/functions.ts", () => ({
+  listUsableCustomTools: vi.fn().mockResolvedValue([]),
+}));
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -59,6 +62,7 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
+  useBlocker: () => {},
 }));
 vi.stubGlobal(
   "matchMedia",
@@ -133,6 +137,7 @@ describe("AgentEditorPage", () => {
           starters: ["Review carefully"],
           collectionIds: [],
           skillIds: [],
+          customToolIds: [],
         },
       }),
     );

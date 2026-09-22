@@ -3,6 +3,7 @@ export * from "./analytics.ts";
 export * from "./attachments.ts";
 export * from "./auth.ts";
 export * from "./chat.ts";
+export * from "./custom-tools.ts";
 export * from "./documents.ts";
 export * from "./drafts.ts";
 export * from "./groups.ts";

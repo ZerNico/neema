@@ -29,6 +29,7 @@ const ui: DraftKindUi<DraftSettings> = {
     starters: "Conversation starters",
     collectionIds: "Collections",
     skillIds: "Skills",
+    customToolIds: "Custom tools",
   },
   Fields: AgentSettingsFields,
   targetLink: (agentId) => (

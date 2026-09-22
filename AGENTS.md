@@ -44,6 +44,14 @@ edit the wrong thing.
   each document has immutable versions; search runs over the current version's chunks.
 - **conversation document**: editable Markdown owned by one chat. It has one current row
   and a revision token, never knowledge versions or transcript content.
+- **custom tool**: an admin-authored TypeScript module containing one or more
+  model-callable functions named `custom_<module>__<function>`. Offered in every
+  chat the sender may use it in; an agent narrows the offer to what it attached.
+  Exact npm dependencies are bundled into the module's one stored row; a save
+  replaces it and an attempt resolves modules as they are at turn time, so a
+  tool-call row carries the display name it needs. A function may return files;
+  they become attachments of the answer. Workers contain hangs, not authority: code is
+  trusted and has the server’s filesystem, environment, network and process access.
 - **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
   permission. `ambient` skills are offered automatically; explicit ones are pinned.
 - **memory**: a saved user fact the model may reference or write. One save attempt
@@ -94,7 +102,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  schedule-draft, document, desktop.
+  schedule-draft, document, desktop, custom.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -185,6 +193,9 @@ skipped one on purpose.
   transactional guard under research.
 - `docs/internals/documents.md`: editable conversation Markdown, transcript boundaries,
   exact-match patches, focus and client reconciliation.
+- `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
+  model, the `custom_` prefix contract, current module bundles and worker
+  containment.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
@@ -296,7 +307,9 @@ Differs from most Effect 3 material online.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
   ticket. The 90-day refresh and the Devices label "Chat Desktop on …" key on
   the `ChatDesktop/` token stored on that session at redemption, not on the
-  current request's user agent. See `docs/internals/desktop.md`.
+  current request's user agent. A work attempt additionally stamps the sending
+  install's machine id onto its generation config — attempt metadata for the
+  foreign-chat banner, never auth. See `docs/internals/desktop.md`.
 - First registered user becomes admin via the `user.create.before` hook. Do not
   bypass Better Auth for user creation. That first account is also the one
   account no policy can refuse, since there is nobody to ask yet.

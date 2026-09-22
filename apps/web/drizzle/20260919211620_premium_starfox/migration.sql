@@ -1,0 +1,1 @@
+ALTER TABLE "message_generation_config" ADD COLUMN "workspace_files" jsonb DEFAULT '[]' NOT NULL;

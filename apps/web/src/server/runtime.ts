@@ -12,6 +12,10 @@ import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { CustomToolBuilder } from "~/modules/custom-tools/server/builder.ts";
+import { CustomToolInstaller } from "~/modules/custom-tools/server/installer.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
 import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
@@ -52,6 +56,7 @@ const ReposLayer = Layer.mergeAll(
   AnalyticsRepo.layer,
   AgentRepo.layer,
   ChatRepo.layer,
+  CustomToolRepo.layer,
   MemoryRepo.layer,
   OAuthRepo.layer,
   SignupRepo.layer,
@@ -65,6 +70,10 @@ const ReposLayer = Layer.mergeAll(
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
 );
+const CustomToolsLayer = CustomToolBuilder.layer.pipe(
+  Layer.provideMerge(CustomToolInstaller.layer),
+  Layer.provideMerge(CustomToolRuntime.layer),
+);
 // CoreLayer feeds both sides of the top merge. StreamEngine.provideMerge'd
 // draft services (AgentDraftService, ScheduleDraftService) each resolve their
 // own DraftService + repo layers with Db, SyncBus, and the provider/agent
@@ -74,6 +83,7 @@ const CoreLayer = Layer.mergeAll(
   AiGateway.layer,
   ExternalCompletion.layer,
   ToolsLayer,
+  CustomToolsLayer,
   AttachmentService.layer,
   DocumentParser.layer,
   DraftService.layer,

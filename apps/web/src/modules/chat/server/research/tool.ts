@@ -131,7 +131,10 @@ export const prepareResearchTool = (input: {
         ),
       );
     if (typeof queued === "object" && "refused" in queued)
-      return { outcome: "unavailable" as const, message: queued.refused } satisfies ResearchToolResult;
+      return {
+        outcome: "unavailable" as const,
+        message: queued.refused,
+      } satisfies ResearchToolResult;
 
     const claim = yield* input.store.claim(queued);
     if (!claim)

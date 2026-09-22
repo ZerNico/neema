@@ -12,12 +12,13 @@ import {
 } from "~/db/schema/index.ts";
 import { attachmentKind } from "../constants.ts";
 import type { Attachment, MessageAttachment } from "../schema.ts";
-import { AttachmentNotAvailable } from "../errors.ts";
+import { AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 
 export interface AttachmentAssociation {
-  before(tx: DbTx): Effect.Effect<void>;
+  /** May refuse with a rejection; the upload then never stores bytes for this row. */
+  before(tx: DbTx): Effect.Effect<void, AttachmentRejected>;
   after(tx: DbTx, attachment: Attachment): Effect.Effect<void>;
 }
 

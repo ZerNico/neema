@@ -30,6 +30,7 @@ import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -51,7 +52,7 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend, SearchBackendError } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { FakeBlobStore, FakeDocumentParser } from "./unused-services.ts";
+import { FakeBlobStore, FakeDocumentParser, FakeCustomToolRuntime } from "./unused-services.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
@@ -229,139 +230,140 @@ const twoTools = (
     Stream.concat(Stream.make(finish("tool-calls"))),
   );
 const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
-    Stream.suspend((): ReturnType<AiGateway["Service"]["streamChat"]> => {
-      requests.push(input);
-      const phase = phaseOf(input);
-      if (overflowPhase === phase) {
-        overflowPhase = null;
-        return Stream.fail(
-          new ProviderContextOverflow({ providerId: "fake", message: "context length exceeded" }),
-        );
-      }
-      if (hold?.phase === phase) {
-        const gate = hold;
-        return Stream.fromEffect(
-          Deferred.succeed(gate.reached, undefined).pipe(
-            Effect.andThen(gate.release ? Deferred.await(gate.release) : Effect.never),
-            Effect.onInterrupt(() => Deferred.succeed(gate.interrupted, undefined)),
-            Effect.as(text("Held stage resumed.")),
-          ),
-        ).pipe(Stream.concat(Stream.make(finish())));
-      }
-      if (phase === "host") {
-        // Counted rather than read back from the prompt: the next turn renders
-        // the question as prose, not as the tool name.
-        if (hostAsksFirst && hostAsks++ === 0)
-          return tool(input, "ask_user", {
-            questions: [
-              {
-                question: "Which region?",
-                options: [{ label: "Europe" }, { label: "Asia" }],
-                multiSelect: false,
-              },
-            ],
-          });
-        if (hostDraft && hostDraftTurns++ > 0)
-          return hostDraftTurns === 2
-            ? Stream.make(text("I found useful guidance for the draft.\n")).pipe(
-                Stream.concat(
-                  tool(input, "draft_agent", {
-                    changes: { name: "Research agent", instructions: "PRIVATE_INITIAL_DRAFT" },
-                  }),
-                ),
-              )
-            : hostDraftTurns === 3
-              ? tool(input, "update_agent_draft", {
-                  // Named explicitly: a chat may already hold another draft, and
-                  // an unaddressed update is ambiguous then.
-                  draftId: focusedDraftId(input),
-                  expectedRevision: 1,
-                  changes: { instructions: "PRIVATE_RESEARCH_DRAFT" },
-                })
-              : Stream.make(text("# Findings\nSupported conclusion[^1].\n"), finish());
-        const madeCalls = input.prompt.content.filter(
-          (message) => message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
-        ).length;
-        if (input.toolkit?.tools["deep_research"] && madeCalls < hostPlan) {
-          const research = { name: "deep_research", params: { brief: hostBrief }, id: "host-research" };
-          return hostReadsAlongside
-            ? twoTools(input, [
-                research,
-                { name: "read_url", params: { urls: [HOLD_URL] }, id: "host-read" },
-              ])
-            : tool(input, research.name, research.params);
-        }
-        return Stream.make(
-          text("# Findings\nSupported conclusion[^1].\n"),
-          text("Coverage remains limited where sources disagreed.\n"),
-          finish(),
-        );
-      }
-      if (phase === "compaction")
-        return compactionFails
-          ? Stream.fail(
-              new ProviderUnreachable({ providerId: "fake", message: "summary unavailable" }),
-            )
-          : Stream.make(
-              text(
-                "The tasks found supporting evidence[^1]; disagreements remain unresolved. https://evidence.example/source",
-              ),
-              finish(),
-            );
-      if (phase === "coordinator") {
-        const message = "PRIVATE_PROVIDER_PAYLOAD authorization=secret request body";
-        if (coordinatorFailure === "provider")
-          return Stream.fail(
-            new ProviderUnreachable({
-              providerId: "fake",
-              message,
-              diagnostic: { kind: "InvalidRequestError", status: 400 },
-            }),
-          );
-        if (coordinatorFailure === "context")
-          return Stream.fail(new ProviderContextOverflow({ providerId: "fake", message }));
-        if (coordinatorFailure === "defect") return Stream.die(new Error(message));
-        if (coordinatorTurns === 0 && coordinatorFirstResponse) {
-          coordinatorTurns++;
-          if (coordinatorFirstResponse === "finish") return tool(input, "finish_research", {});
-          if (coordinatorFirstResponse === "text")
-            return Stream.make(text("No investigation is needed for this question."), finish());
-          return Stream.make(finish());
-        }
-        return ++coordinatorTurns <= dispatchWaves
-          ? tool(input, "dispatch_research", {
-              tasks: [
-                {
-                  title: "Evidence A",
-                  assignment: "Investigate evidence for the user's question from primary sources.",
-                },
-                {
-                  title: "Evidence B",
-                  assignment: "Independently investigate disagreements and limitations.",
-                },
-              ],
-            })
-          : tool(input, "finish_research", {});
-      }
-      if (phase === "worker") {
-        if (finishWorkersEarly && input.prompt.content.some((message) => message.role === "tool"))
-          return Stream.make(finish());
-        const call = ++searchCalls;
-        return tool(input, "web_search", {
-          queries: Array.from(
-            { length: queriesPerSearch },
-            (_, i) => `shared evidence ${call}-${i}`,
-          ),
+  Stream.suspend((): ReturnType<AiGateway["Service"]["streamChat"]> => {
+    requests.push(input);
+    const phase = phaseOf(input);
+    if (overflowPhase === phase) {
+      overflowPhase = null;
+      return Stream.fail(
+        new ProviderContextOverflow({ providerId: "fake", message: "context length exceeded" }),
+      );
+    }
+    if (hold?.phase === phase) {
+      const gate = hold;
+      return Stream.fromEffect(
+        Deferred.succeed(gate.reached, undefined).pipe(
+          Effect.andThen(gate.release ? Deferred.await(gate.release) : Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(gate.interrupted, undefined)),
+          Effect.as(text("Held stage resumed.")),
+        ),
+      ).pipe(Stream.concat(Stream.make(finish())));
+    }
+    if (phase === "host") {
+      // Counted rather than read back from the prompt: the next turn renders
+      // the question as prose, not as the tool name.
+      if (hostAsksFirst && hostAsks++ === 0)
+        return tool(input, "ask_user", {
+          questions: [
+            {
+              question: "Which region?",
+              options: [{ label: "Europe" }, { label: "Asia" }],
+              multiSelect: false,
+            },
+          ],
         });
+      if (hostDraft && hostDraftTurns++ > 0)
+        return hostDraftTurns === 2
+          ? Stream.make(text("I found useful guidance for the draft.\n")).pipe(
+              Stream.concat(
+                tool(input, "draft_agent", {
+                  changes: { name: "Research agent", instructions: "PRIVATE_INITIAL_DRAFT" },
+                }),
+              ),
+            )
+          : hostDraftTurns === 3
+            ? tool(input, "update_agent_draft", {
+                // Named explicitly: a chat may already hold another draft, and
+                // an unaddressed update is ambiguous then.
+                draftId: focusedDraftId(input),
+                expectedRevision: 1,
+                changes: { instructions: "PRIVATE_RESEARCH_DRAFT" },
+              })
+            : Stream.make(text("# Findings\nSupported conclusion[^1].\n"), finish());
+      const madeCalls = input.prompt.content.filter(
+        (message) =>
+          message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
+      ).length;
+      if (input.toolkit?.tools["deep_research"] && madeCalls < hostPlan) {
+        const research = {
+          name: "deep_research",
+          params: { brief: hostBrief },
+          id: "host-research",
+        };
+        return hostReadsAlongside
+          ? twoTools(input, [
+              research,
+              { name: "read_url", params: { urls: [HOLD_URL] }, id: "host-read" },
+            ])
+          : tool(input, research.name, research.params);
       }
       return Stream.make(
-        text(
-          "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) +
-            reportSuffix,
-        ),
-        finish(reportFinishReason),
+        text("# Findings\nSupported conclusion[^1].\n"),
+        text("Coverage remains limited where sources disagreed.\n"),
+        finish(),
       );
-    });
+    }
+    if (phase === "compaction")
+      return compactionFails
+        ? Stream.fail(
+            new ProviderUnreachable({ providerId: "fake", message: "summary unavailable" }),
+          )
+        : Stream.make(
+            text(
+              "The tasks found supporting evidence[^1]; disagreements remain unresolved. https://evidence.example/source",
+            ),
+            finish(),
+          );
+    if (phase === "coordinator") {
+      const message = "PRIVATE_PROVIDER_PAYLOAD authorization=secret request body";
+      if (coordinatorFailure === "provider")
+        return Stream.fail(
+          new ProviderUnreachable({
+            providerId: "fake",
+            message,
+            diagnostic: { kind: "InvalidRequestError", status: 400 },
+          }),
+        );
+      if (coordinatorFailure === "context")
+        return Stream.fail(new ProviderContextOverflow({ providerId: "fake", message }));
+      if (coordinatorFailure === "defect") return Stream.die(new Error(message));
+      if (coordinatorTurns === 0 && coordinatorFirstResponse) {
+        coordinatorTurns++;
+        if (coordinatorFirstResponse === "finish") return tool(input, "finish_research", {});
+        if (coordinatorFirstResponse === "text")
+          return Stream.make(text("No investigation is needed for this question."), finish());
+        return Stream.make(finish());
+      }
+      return ++coordinatorTurns <= dispatchWaves
+        ? tool(input, "dispatch_research", {
+            tasks: [
+              {
+                title: "Evidence A",
+                assignment: "Investigate evidence for the user's question from primary sources.",
+              },
+              {
+                title: "Evidence B",
+                assignment: "Independently investigate disagreements and limitations.",
+              },
+            ],
+          })
+        : tool(input, "finish_research", {});
+    }
+    if (phase === "worker") {
+      if (finishWorkersEarly && input.prompt.content.some((message) => message.role === "tool"))
+        return Stream.make(finish());
+      const call = ++searchCalls;
+      return tool(input, "web_search", {
+        queries: Array.from({ length: queriesPerSearch }, (_, i) => `shared evidence ${call}-${i}`),
+      });
+    }
+    return Stream.make(
+      text(
+        "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) + reportSuffix,
+      ),
+      finish(reportFinishReason),
+    );
+  });
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
@@ -436,6 +438,7 @@ beforeAll(async () => {
   );
   const repos = Layer.mergeAll(
     AnalyticsRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     ScheduleRepo.layer,
     ChatRepo.layer,
@@ -456,6 +459,7 @@ beforeAll(async () => {
         FakeReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeCustomToolRuntime,
         MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
         ExternalCompletion.layer,
         SyncBus.layer,
@@ -556,7 +560,7 @@ const send = (
   Effect.flatMap(ChatService, (service) =>
     service.sendMessage({
       userId,
-      conversationId,
+      conversation: { kind: "existing", id: conversationId },
       modelId,
       content,
       researchEnabled: true,
@@ -663,9 +667,7 @@ describe("deep research as a tool call", () => {
             .every((call) => call.researchRunId === run.id),
         ).toBe(true);
         const calls = yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id));
-        expect(calls.length).toBe(
-          requests.filter((request) => phaseOf(request) !== "host").length,
-        );
+        expect(calls.length).toBe(requests.filter((request) => phaseOf(request) !== "host").length);
         expect(calls.every((call) => call.usageComplete)).toBe(true);
         expect(
           yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id)),
@@ -725,9 +727,9 @@ describe("deep research as a tool call", () => {
           "load_skill,read_skill_file,read_url,web_search",
       ),
     ).toBe(true);
-    expect(workers.every((request) => !promptText(request).includes("turned on deep research"))).toBe(
-      true,
-    );
+    expect(
+      workers.every((request) => !promptText(request).includes("turned on deep research")),
+    ).toBe(true);
     for (const worker of workers) {
       const prompt = promptText(worker);
       expect(
@@ -747,7 +749,9 @@ describe("deep research as a tool call", () => {
     const sent = await runtime.runPromise(
       send(input.userId, input.conversationId, "Investigate the evidence.", true),
     );
-    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    await runtime.runPromise(
+      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
+    );
     const run = await runtime.runPromise(awaitRunStatus(sent.assistantMessageId, "terminal"));
     expect(run.status).toBe("terminal");
     const during = await runtime.runPromise(
@@ -791,7 +795,9 @@ describe("deep research as a tool call", () => {
     };
     const gate = hold;
     const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    await runtime.runPromise(
+      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
+    );
     const other = await runtime.runPromise(
       ChatRepo.use((repo) => repo.createConversation({ userId: input.userId, modelId })),
     );
@@ -839,7 +845,7 @@ describe("deep research as a tool call", () => {
         return yield* ChatService.use((service) =>
           service.sendMessage({
             userId: input.userId,
-            conversationId: input.conversationId,
+            conversation: { kind: "existing", id: input.conversationId },
             modelId,
             questionResponse: { callId: call.id, response: { kind: "skip" } },
             searchEnabled: false,
@@ -893,7 +899,7 @@ describe("deep research as a tool call", () => {
       Effect.flatMap(ChatService, (service) =>
         service.sendMessage({
           userId: input.userId,
-          conversationId: input.conversationId,
+          conversation: { kind: "existing", id: input.conversationId },
           modelId,
           content: "Just answer.",
           researchEnabled: false,
@@ -1239,7 +1245,7 @@ describe("durable deep research", () => {
     requests.length = 0;
     backendSearches = 0;
     coordinatorTurns = 0;
-      await runtime.runPromise(
+    await runtime.runPromise(
       ChatService.use((service) =>
         service.retryMessage({ ...input, messageId: sent.assistantMessageId }),
       ),
@@ -1319,7 +1325,9 @@ describe("ending a run", () => {
     };
     const gate = hold;
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))));
+    await runtime.runPromise(
+      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
+    );
     const firstGeneration = await generationOf(sent.assistantMessageId);
     const firstRun = (await runFor(sent.assistantMessageId))!;
     await runtime.runPromise(
@@ -1336,7 +1344,7 @@ describe("ending a run", () => {
     );
     await runtime.runPromise(collect(sent.assistantMessageId, firstGeneration));
     hold = null;
-      coordinatorTurns = 0;
+    coordinatorTurns = 0;
     await runtime.runPromise(
       ChatService.use((service) =>
         service.retryMessage({ ...input, messageId: sent.assistantMessageId }),
@@ -1375,7 +1383,8 @@ describe("ending a run", () => {
         const repo = yield* ChatRepo;
         const db = yield* Db;
         const turn = yield* repo.createTurn({
-          ...input,
+          userId: input.userId,
+          conversation: { kind: "existing", id: input.conversationId },
           modelId,
           content: "first",
           attachmentIds: [],
@@ -1445,9 +1454,9 @@ describe("ending a run", () => {
           ),
         );
         expect(late._tag).toBe("Failure");
-        expect(
-          yield* db.select().from(usageEvents).where(eq(usageEvents.id, runId)),
-        ).toHaveLength(1);
+        expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, runId))).toHaveLength(
+          1,
+        );
         // The call that started it is untouched: only the generation settles it.
         expect((yield* repo.listToolCalls([turn.assistant.id]))[0]).toMatchObject({
           id: rowId,
@@ -1537,7 +1546,7 @@ describe("ending a run", () => {
     hold = null;
     requests.length = 0;
     coordinatorTurns = 0;
-      evidenceUrl = "https://evidence.example/followup";
+    evidenceUrl = "https://evidence.example/followup";
     const second = await runtime.runPromise(send(input.userId, input.conversationId));
     await runtime.runPromise(collect(second.assistantMessageId));
     await runtime.runPromise(
@@ -1734,10 +1743,7 @@ describe("what the investigation may see", () => {
         const run = (yield* runOf(message.id))!;
         const calls = yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id));
         expect(calls).toHaveLength(runRequests().length);
-        const tasks = yield* db
-          .select()
-          .from(researchTasks)
-          .where(eq(researchTasks.runId, run.id));
+        const tasks = yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id));
         expect(tasks.length).toBeLessThanOrEqual(RESEARCH_LIMITS.tasks);
         const webCalls = (yield* repo.listToolCalls([message.id])).filter(
           (call) => call.toolName === "web_search",
@@ -1789,7 +1795,8 @@ describe("what the investigation may see", () => {
       // The investigation receives only the brief, so overflow repair must
       // compact that projection rather than borrowing the host's history.
       hostBrief =
-        "Investigate the evidence. " + "Compare independent sources and investigate gaps. ".repeat(100);
+        "Investigate the evidence. " +
+        "Compare independent sources and investigate gaps. ".repeat(100);
       overflowPhase = phase;
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
       await runtime.runPromise(collect(sent.assistantMessageId));

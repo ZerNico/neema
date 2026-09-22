@@ -226,7 +226,7 @@ describe("ordinary image attempt identity", () => {
     eventIndex: 1,
     callIndex: 0,
   };
-  it("deduplicates ref-only image chunks and clears them for same-message retries", () => {
+  it("deduplicates ref-only file chunks and clears them for same-message retries", () => {
     const client = new QueryClient();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -240,31 +240,31 @@ describe("ordinary image attempt identity", () => {
       old.emit("chunk", {
         runId: "generation-1",
         seq: 1,
-        kind: "image",
+        kind: "file",
         delta: JSON.stringify(image),
       });
       old.emit("chunk", {
         runId: "generation-1",
         seq: 2,
-        kind: "image",
+        kind: "file",
         delta: JSON.stringify(image),
       });
     });
-    expect(result.current.images).toEqual([image]);
+    expect(result.current.files).toEqual([image]);
     expect(result.current.text).toBe("");
     act(() => old.emit("done", { runId: "generation-1", status: "complete" }));
     expect(result.current.status).toBe("complete");
     rerender({ runId: "generation-2" });
-    expect(result.current.images).toEqual([]);
+    expect(result.current.files).toEqual([]);
     act(() =>
       old.emit("chunk", {
         runId: "generation-1",
         seq: 3,
-        kind: "image",
+        kind: "file",
         delta: JSON.stringify(image),
       }),
     );
-    expect(result.current.images).toEqual([]);
+    expect(result.current.files).toEqual([]);
     expect(result.current.lastSeq).toBe(0);
   });
 });

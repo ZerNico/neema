@@ -1364,8 +1364,35 @@ describe("generated image replies", () => {
     reasoningSeen: false,
     toolActivities: [],
     status: "complete",
-    images: [image],
+    files: [image],
   };
+  it("renders a tool's document as a chip at its place in the text", () => {
+    render(
+      <MessageBubble
+        message={{
+          ...message,
+          content: "Here is the report.",
+          files: [
+            {
+              ...image,
+              attachment: {
+                id: "tool-pdf",
+                fileName: "q3.pdf",
+                size: 2048,
+                mediaType: "application/pdf",
+                kind: "pdf",
+              },
+              textOffset: 19,
+              origin: { toolCallId: "call-1" },
+            },
+          ],
+        }}
+      />,
+    );
+    const chip = screen.getByRole("link", { name: /q3\.pdf/ });
+    expect(chip).toHaveAttribute("href", "/api/files/tool-pdf");
+    expect(screen.queryByRole("img")).toBeNull();
+  });
   it("renders a reloaded image-only reply with authenticated open/download actions and no empty copy", () => {
     render(<MessageBubble message={message} />);
     const img = screen.getByRole("img", { name: "Generated image" });
@@ -1395,7 +1422,7 @@ describe("generated image replies", () => {
     const { rerender } = render(<MessageBubble message={message} />);
     fireEvent.load(screen.getByRole("img", { name: "Generated image" }));
     const edited = { ...image, attachment: { ...image.attachment, id: "edited-private" } };
-    rerender(<MessageBubble message={{ ...message, images: [edited] }} />);
+    rerender(<MessageBubble message={{ ...message, files: [edited] }} />);
     expect(screen.getByRole("img", { name: "Generated image" })).toHaveAttribute(
       "src",
       "/api/files/edited-private",

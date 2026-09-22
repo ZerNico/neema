@@ -43,7 +43,8 @@ import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { acceptGeneratedImage } from "./generated-images.ts";
+import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
+import { fileForModel } from "./file-for-model.ts";
 import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
 import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
@@ -96,6 +97,11 @@ import {
 } from "~/modules/knowledge/tool-schema.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { customToolName } from "~/modules/custom-tools/schema.ts";
+import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
+import { prepareCustomTools } from "~/modules/custom-tools/server/tools.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
@@ -105,8 +111,6 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { isWebSource, sourceTarget, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
 import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { attachmentKind } from "~/modules/attachments/constants.ts";
-import { buildTextFence } from "~/modules/attachments/server/validation.ts";
 import {
   DesktopToolName,
   DesktopToolResult,
@@ -129,7 +133,7 @@ import {
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
 } from "./compaction.ts";
-import { buildHistoryMessages, type PromptDeps, PDF_TEXT_LABEL } from "./prompt.ts";
+import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -227,6 +231,11 @@ export class StreamEngine extends Context.Service<
       searchEnabled: boolean;
       generationId?: string | undefined;
       desktopExecutorId?: string | undefined;
+      /**
+       * The folders the sending machine named, paths included. Never stored:
+       * the paths exist for this attempt's prompt and tool traffic alone.
+       */
+      desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
       /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
@@ -283,6 +292,8 @@ export class StreamEngine extends Context.Service<
       const knowledgeSearch = yield* KnowledgeSearch;
       const knowledgeService = yield* KnowledgeService;
       const skillReader = yield* SkillReader;
+      const customToolRuntime = yield* CustomToolRuntime;
+      const customToolRepo = yield* CustomToolRepo;
       const attachments = yield* AttachmentRepo;
       const promptDeps: PromptDeps = {
         attachments,
@@ -359,6 +370,7 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
+        desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
@@ -370,17 +382,58 @@ export class StreamEngine extends Context.Service<
         // The frozen configuration this answer runs with. Dispatch consumes it
         // read-only: identity is decided at turn time, access is rechecked here.
         const config = yield* repo.getGenerationConfig(input.messageId);
+        // Modules are read here rather than stored with the config: a plain
+        // chat offers every module the sender may use, an agent narrows that
+        // to what it attached, and a disabled, deleted or no-longer-shared
+        // module drops out rather than failing the attempt. The list is held
+        // for this generation only.
+        const customToolManifests = yield* customToolRepo.resolveForAttempt(
+          input.userId,
+          config.resolvedAgent?.customToolIds ?? "all",
+        );
         const runtimeContext = runtimeContextMessage(new Date(), input.timeZone);
         // Snapshot the model row up front: the ledger wants its display name
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
-        const completed = history.filter(
+        const rawCompleted = history.filter(
           (m) =>
             m.id !== input.messageId &&
             (m.status === "complete" ||
-              (m.status !== "streaming" && !!m.assistantOutput?.images.length)),
+              (m.status !== "streaming" && !!m.assistantOutput?.files.length)),
         );
+        // Desktop sends carry their drops on the assistant attempt's config,
+        // not the user message text. Key each prior attempt's names back to its
+        // preceding user message, then add this attempt's own names to the last
+        // user message. Without this annotation the model never learns what its
+        // workspace gained.
+        const workspaceFilesByAttempt = yield* repo.listWorkspaceFilesByMessage(
+          rawCompleted
+            .filter((message) => message.role === "assistant")
+            .map((message) => message.id),
+        );
+        const workspaceFilesBySend = new Map<string, ReadonlyArray<string>>();
+        for (let index = 0; index < rawCompleted.length; index++) {
+          const files = workspaceFilesByAttempt.get(rawCompleted[index]!.id);
+          if (!files) continue;
+          for (let previous = index - 1; previous >= 0; previous--) {
+            const candidate = rawCompleted[previous]!;
+            if (candidate.role !== "user") continue;
+            workspaceFilesBySend.set(candidate.id, files);
+            break;
+          }
+        }
+        const currentSend = rawCompleted.at(-1);
+        if (
+          currentSend?.role === "user" &&
+          config.workspaceFiles &&
+          config.workspaceFiles.length > 0
+        )
+          workspaceFilesBySend.set(currentSend.id, config.workspaceFiles);
+        const completed = rawCompleted.map((message) => {
+          const files = workspaceFilesBySend.get(message.id);
+          return files ? Object.assign({}, message, { workspaceFiles: files }) : message;
+        });
         const readerUrls = extractUserMessageUrls(completed);
 
         // Conversation-scoped citations (Onyx-style): gather every source from
@@ -664,6 +717,25 @@ export class StreamEngine extends Context.Service<
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
           const planTools = config.planEnabled ? preparePlanTool() : undefined;
+          // Admin-authored tools are resolved once as this generation starts,
+          // then held stable for its remaining tool rounds. An edit or deletion
+          // mid-flight changes nothing here.
+          const customTools = customToolManifests.length
+            ? prepareCustomTools(customToolManifests, customToolRuntime)
+            : undefined;
+          // Display names by model-facing tool name. This map, not the
+          // `custom_` prefix, decides what is a custom tool call: a model can
+          // invent a `custom_…` name, and the SDK still forwards that part.
+          const customToolNames = new Map(
+            customToolManifests.flatMap((tool) =>
+              tool.functions.map((fn) => [customToolName(tool.slug, fn.key), fn.name] as const),
+            ),
+          );
+          const customToolDisplayName = (name: string) => {
+            const displayName = customToolNames.get(name);
+            if (!displayName) throw new Error(`Missing pinned custom tool manifest for ${name}`);
+            return displayName;
+          };
           let knowledgeContext: PreparedKnowledgeContext | null = null;
           const knowledgeTools = knowledgeSession
             ? yield* prepareKnowledgeTools({
@@ -718,6 +790,7 @@ export class StreamEngine extends Context.Service<
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
+            ...(customTools ? [customTools.group] : []),
             ...(askTools ? [askTools] : []),
           ];
           // Reserve retrieval schemas before preparation: a context selection
@@ -784,7 +857,7 @@ export class StreamEngine extends Context.Service<
           for (let index = 0; index < historySuffix.length; index++) {
             const message = historySuffix[index]!;
             historyGroups.push(
-              message.assistantOutput?.images.length || message.providerReplay?.turns.length
+              message.assistantOutput?.files.length || message.providerReplay?.turns.length
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
@@ -882,12 +955,12 @@ export class StreamEngine extends Context.Service<
               : []),
             // After the web hint, so the ranking between them is the last word.
             ...(researchTool ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }] : []),
-            ...(desktopTools && config.desktopFolders
+            ...(desktopTools
               ? [
                   {
                     role: "system" as const,
                     content: desktopToolsSystemHint(
-                      config.desktopFolders,
+                      input.desktopFolders ?? [],
                       config.desktopCommands ?? false,
                     ),
                   },
@@ -1070,7 +1143,7 @@ export class StreamEngine extends Context.Service<
             const message = historySuffix[index]!;
             retainedHistory.set(
               index,
-              message.assistantOutput?.images.length || message.providerReplay?.turns.length
+              message.assistantOutput?.files.length || message.providerReplay?.turns.length
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
@@ -1345,7 +1418,7 @@ export class StreamEngine extends Context.Service<
                                     messageId: input.messageId,
                                     runId: fence.generationId,
                                     seq,
-                                    chunkKind: "image",
+                                    chunkKind: "file",
                                     delta: JSON.stringify(image),
                                   });
                                   return image;
@@ -1398,7 +1471,9 @@ export class StreamEngine extends Context.Service<
                                             ? "research"
                                             : part.name === "web_search" || part.name === "read_url"
                                               ? "web"
-                                              : null;
+                                              : customToolNames.has(part.name)
+                                                ? "custom"
+                                                : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1545,6 +1620,20 @@ export class StreamEngine extends Context.Service<
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "custom") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                              displayName: customToolDisplayName(part.name),
                             });
                             return;
                           }
@@ -1765,42 +1854,15 @@ export class StreamEngine extends Context.Service<
                                     truncated: false,
                                   };
                             if (result.file) {
-                              const bytes = Buffer.from(result.file.base64, "base64");
-                              const kind = attachmentKind(result.file.mediaType);
-                              const canTake =
-                                kind === "image"
-                                  ? (model?.capabilities.vision ?? false)
-                                  : kind === "pdf" && (model?.capabilities.files ?? false);
-                              if (canTake) {
-                                turnFiles.push({
-                                  type: "file",
-                                  mediaType: result.file.mediaType,
+                              turnFiles.push(
+                                yield* fileForModel(promptDeps.parser, {
                                   fileName: result.file.name,
-                                  data: bytes,
-                                });
-                              } else if (kind === "pdf") {
-                                // Same fallback an attached PDF takes for a
-                                // model without document input.
-                                const parsed = yield* promptDeps.parser
-                                  .parsePdf({ bytes, fileName: result.file.name })
-                                  .pipe(Effect.result);
-                                turnFiles.push({
-                                  type: "text",
-                                  text:
-                                    parsed._tag === "Success"
-                                      ? buildTextFence({
-                                          fileName: result.file.name,
-                                          text: parsed.success.text,
-                                          label: PDF_TEXT_LABEL,
-                                        })
-                                      : `${result.file.name} is a PDF, and its text could not be extracted on this server.`,
-                                });
-                              } else {
-                                turnFiles.push({
-                                  type: "text",
-                                  text: `${result.file.name} is an image, and this model cannot look at images. Tell the user rather than guessing at its contents.`,
-                                });
-                              }
+                                  mediaType: result.file.mediaType,
+                                  bytes: Buffer.from(result.file.base64, "base64"),
+                                  vision: model?.capabilities.vision ?? false,
+                                  files: model?.capabilities.files ?? false,
+                                }),
+                              );
                             }
                             // The model reads the full detail through the
                             // prompt; the row and the chunk keep an excerpt.
@@ -1986,6 +2048,120 @@ export class StreamEngine extends Context.Service<
                               callId: rowId,
                               name: part.name,
                               ...activity,
+                            });
+                            return;
+                          }
+
+                          if (customToolNames.has(part.name)) {
+                            if (isPreliminary) return;
+                            // Files the call returned become attachments of
+                            // this answer, stored under the fence like a
+                            // model's own image; a shared one also rides the
+                            // next round as a user file part.
+                            const fileIds: string[] = [];
+                            // Ids by returned name, patched into the result the
+                            // model reads so a later save_to_workspace can name
+                            // the file; the part is already in turnParts and
+                            // the round has not been folded yet.
+                            const storedIds = new Map<string, string>();
+                            for (const item of customTools?.takeFiles(part.id) ?? []) {
+                              if (!fence || Option.isNone(imageAttachments)) break;
+                              yield* flush;
+                              const stored = yield* writer.withPermits(1)(
+                                acceptGeneratedFile(imageAttachments.value, {
+                                  fence,
+                                  fileName: item.name,
+                                  mediaType: item.mediaType,
+                                  bytes: item.bytes,
+                                  origin: { toolCallId: rowId },
+                                  textOffset: assembled.length,
+                                  turnIndex: turn,
+                                  callIndex,
+                                  eventIndex: seq + 1,
+                                  seq: seq + 1,
+                                }).pipe(
+                                  Effect.tap((file) =>
+                                    Effect.gen(function* () {
+                                      seq += 1;
+                                      yield* PubSub.publish(pubsub, {
+                                        kind: "chunk",
+                                        messageId: input.messageId,
+                                        runId: fence.generationId,
+                                        seq,
+                                        chunkKind: "file",
+                                        delta: JSON.stringify(file),
+                                      });
+                                    }),
+                                  ),
+                                  Effect.uninterruptible,
+                                  // A file the validator refuses (wrong bytes for
+                                  // its type, over the answer's budget) is dropped
+                                  // with a log line; the text result still lands.
+                                  Effect.catchTag("AttachmentRejected", (error) =>
+                                    Effect.logWarning(
+                                      `custom tool file ${item.name} rejected: ${error.reason}`,
+                                    ).pipe(Effect.as(null)),
+                                  ),
+                                ),
+                              );
+                              if (!stored) continue;
+                              fileIds.push(stored.attachment.id);
+                              storedIds.set(item.name, stored.attachment.id);
+                              if (item.share)
+                                turnFiles.push(
+                                  yield* fileForModel(promptDeps.parser, {
+                                    fileName: item.name,
+                                    mediaType: stored.attachment.mediaType,
+                                    bytes: item.bytes,
+                                    vision: model?.capabilities.vision ?? false,
+                                    files: model?.capabilities.files ?? false,
+                                  }),
+                                );
+                            }
+                            if (storedIds.size > 0) {
+                              const result = part.result as {
+                                files?: ReadonlyArray<{ name: string }>;
+                              };
+                              const named = {
+                                ...result,
+                                files: (result.files ?? []).map((file) => {
+                                  const attachmentId = storedIds.get(file.name);
+                                  return attachmentId ? { ...file, attachmentId } : file;
+                                }),
+                              };
+                              Object.assign(part, { result: named, encodedResult: named });
+                            }
+                            const activity = projectCustomToolResult({
+                              name: part.name,
+                              displayName: customToolDisplayName(part.name),
+                              raw: part.result,
+                              isFailure: part.isFailure,
+                              fileIds,
+                            });
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: activity.status === "complete" ? "complete" : "error",
+                              ...(activity.error
+                                ? { error: { code: "CustomToolFailed", message: activity.error } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "custom",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              displayName: activity.displayName,
+                              status: activity.status === "complete" ? "complete" : "error",
+                              ...(activity.resultPreview !== undefined
+                                ? { resultPreview: activity.resultPreview }
+                                : {}),
+                              ...(activity.resultChars !== undefined
+                                ? { resultChars: activity.resultChars }
+                                : {}),
+                              ...(activity.error ? { error: activity.error } : {}),
+                              ...(activity.fileIds ? { fileIds: activity.fileIds } : {}),
                             });
                             return;
                           }

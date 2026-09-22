@@ -2,6 +2,7 @@ import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { AttachmentIds } from "~/modules/attachments/schema.ts";
+import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
 
 // Blank content is allowed when the turn carries attachments; the service
 // rejects the turn that has neither.
@@ -13,14 +14,30 @@ const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength
 /** The document open in the panel when the message was sent; the model reads it first. */
 const OpenDocumentId = Schema.optionalKey(ResourceId);
 export const desktopSubmissionFields = {
+  /**
+   * The folders reachable on the sending machine, by real absolute path. Paths
+   * live in attempt-scoped prompt text and tool traffic, never in a row: the
+   * generation config keeps the names alone, so the same conversation
+   * continued on another machine resolves its own folders or none.
+   */
   desktopFolders: Schema.optionalKey(
-    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))).check(
-      Schema.isMaxLength(32),
-    ),
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+        path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
+      }),
+    ).check(Schema.isMaxLength(32)),
   ),
   desktopCommands: Schema.optionalKey(Schema.Boolean),
   fromDesktop: Schema.optionalKey(Schema.Boolean),
   desktopExecutorId: Schema.optionalKey(ResourceId),
+  /**
+   * Which machine sent the attempt. Stored per generation so the client can
+   * tell "this chat last worked here" from "elsewhere" and offer take-over.
+   * Display text only; names are never an address.
+   */
+  desktopMachineId: Schema.optionalKey(ResourceId),
+  desktopMachineName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
 };
 const DesktopSubmission = Schema.Struct(desktopSubmissionFields);
 export type DesktopSubmission = {
@@ -53,11 +70,48 @@ const generationFields = {
 export const ConversationMode = Schema.Literals(["chat", "work"]);
 export type ConversationMode = typeof ConversationMode.Type;
 
-export const SendMessageInput = Schema.Struct({
-  conversationId: Schema.NullOr(Schema.String),
+export const ConversationReference = Schema.Union([
+  Schema.Struct({ kind: Schema.Literals(["new"]), id: WorkspaceId, mode: ConversationMode }),
+  Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
+]);
+export type ConversationReference = typeof ConversationReference.Type;
+
+const WorkspaceFiles = Schema.Array(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+).check(Schema.isMaxLength(50));
+
+const sendFields = {
   ...generationFields,
-  /** Chosen when a chat starts and fixed from then on; ignored on later sends. */
-  mode: Schema.optionalKey(ConversationMode),
+  /** Names only; absolute workspace paths remain attempt-scoped desktop fields. */
+  workspaceFiles: Schema.optionalKey(WorkspaceFiles),
+};
+
+export const SendMessageInput = Schema.Struct({
+  conversation: ConversationReference,
+  ...sendFields,
+});
+
+export const ReserveWorkTurnInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversation: ConversationReference,
+});
+
+export const ActivateWorkTurnInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversation: ConversationReference,
+  ...sendFields,
+  workspaceFiles: WorkspaceFiles.check(Schema.isMinLength(1)),
+});
+
+export const WorkTurnReservationInput = Schema.Struct({
+  reservationId: LocalTransactionId,
+});
+
+export const WorkTurnReservationStatus = Schema.Struct({
+  reservationId: LocalTransactionId,
+  conversationId: WorkspaceId,
+  status: Schema.Literals(["reserved", "activated", "aborted", "expired"]),
+  assistantMessageId: Schema.NullOr(Schema.String),
 });
 
 export const AnswerQuestionInput = Schema.Struct({

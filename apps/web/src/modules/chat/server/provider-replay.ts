@@ -1,6 +1,6 @@
 import { Generated } from "@effect/ai-openrouter";
 import { Schema } from "effect";
-import { IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
+import { ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 
 export interface ProviderReplay {
   v: 1;
@@ -23,7 +23,7 @@ export const replayDetails = (value: unknown) => {
   }
 };
 export const boundedReplay = (replay: ProviderReplay): ProviderReplay => {
-  if (Buffer.byteLength(JSON.stringify(replay), "utf8") > IMAGE_OUTPUT_LIMITS.replayBytes)
+  if (Buffer.byteLength(JSON.stringify(replay), "utf8") > ASSISTANT_FILE_LIMITS.replayBytes)
     throw new Error("Image replay metadata exceeds the supported limit.");
   return replay;
 };

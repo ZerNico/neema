@@ -5,23 +5,30 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "~/modules/attachments/constants.ts";
 
-export const IMAGE_OUTPUT_LIMITS = {
+/** Bounds for everything an answer produces itself: model images and tool files alike. */
+export const ASSISTANT_FILE_LIMITS = {
   count: MAX_ATTACHMENTS_PER_MESSAGE,
   bytes: MAX_ATTACHMENT_BYTES,
   totalBytes: MAX_ATTACHMENT_BYTES * 2,
   replayBytes: 256 * 1024,
 } as const;
 const Offset = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-export const AssistantImage = Schema.Struct({
+/**
+ * One file an assistant answer produced, anchored to the text it appeared in.
+ * `origin` names the custom tool call that returned it; absent for a model's
+ * own image output.
+ */
+export const AssistantFile = Schema.Struct({
   v: Schema.Literal(1),
   attachment: Attachment,
   textOffset: Offset,
   turnIndex: Offset,
   eventIndex: Offset,
   callIndex: Offset,
+  origin: Schema.optional(Schema.Struct({ toolCallId: Schema.String })),
 });
-export type AssistantImage = typeof AssistantImage.Type;
+export type AssistantFile = typeof AssistantFile.Type;
 export interface AssistantOutput {
   v: 1;
-  images: ReadonlyArray<AssistantImage>;
+  files: ReadonlyArray<AssistantFile>;
 }

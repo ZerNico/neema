@@ -1,4 +1,4 @@
-import type { AssistantImage } from "../assistant-output.ts";
+import type { AssistantFile } from "../assistant-output.ts";
 import type {
   CompactionActivity,
   ToolActivity,
@@ -8,12 +8,12 @@ import type {
 } from "../client/use-message-stream.ts";
 
 type PositionedActivity =
-  | { kind: "image"; activity: AssistantImage }
+  | { kind: "file"; activity: AssistantFile }
   | { kind: "tool"; activity: ToolActivity }
   | { kind: "compaction"; activity: CompactionActivity };
 
 export type AssistantBodyPart =
-  | { kind: "image"; key: string; image: AssistantImage }
+  | { kind: "file"; key: string; file: AssistantFile }
   | { kind: "text"; key: string; content: string; streaming: boolean }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
@@ -33,14 +33,14 @@ export function projectAssistantBody({
   streaming,
   tools,
   compactions,
-  images = [],
+  files = [],
 }: {
   content: string;
   rawTextLength?: number;
   streaming: boolean;
   tools: ToolActivity[];
   compactions: CompactionActivity[];
-  images?: ReadonlyArray<AssistantImage>;
+  files?: ReadonlyArray<AssistantFile>;
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
   const researchRuns = new Set(
     tools.flatMap((activity) =>
@@ -48,7 +48,7 @@ export function projectAssistantBody({
     ),
   );
   const activities: PositionedActivity[] = [
-    ...images.map((activity): PositionedActivity => ({ kind: "image", activity })),
+    ...files.map((activity): PositionedActivity => ({ kind: "file", activity })),
     ...tools
       .filter(
         (activity) =>
@@ -76,7 +76,7 @@ export function projectAssistantBody({
           : a.kind === "compaction"
             ? -1
             : 1
-        : orderOf(a) - orderOf(b) || (a.kind === b.kind ? 0 : a.kind === "image" ? -1 : 1)),
+        : orderOf(a) - orderOf(b) || (a.kind === b.kind ? 0 : a.kind === "file" ? -1 : 1)),
   );
   let previous = 0;
   const chronological = activities.every(({ activity }) => {
@@ -94,11 +94,11 @@ export function projectAssistantBody({
 
   const parts: AssistantBodyPart[] = [];
   const appendActivity = (item: PositionedActivity) => {
-    if (item.kind === "image") {
+    if (item.kind === "file") {
       parts.push({
-        kind: "image",
-        key: `image-${item.activity.attachment.id}`,
-        image: item.activity,
+        kind: "file",
+        key: `file-${item.activity.attachment.id}`,
+        file: item.activity,
       });
     } else if (item.kind === "compaction") {
       parts.push({ ...item, key: `compaction-${item.activity.eventId}` });

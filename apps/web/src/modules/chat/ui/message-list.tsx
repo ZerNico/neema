@@ -1,6 +1,6 @@
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
-import type { AssistantImage } from "../assistant-output.ts";
+import type { AssistantFile } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +31,7 @@ import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
@@ -43,6 +44,7 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Disclosure,
@@ -103,10 +105,8 @@ const CitedAnswer = memo(function CitedAnswer({
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
 });
 
-
-
 export interface DisplayMessage {
-  images?: ReadonlyArray<AssistantImage>;
+  files?: ReadonlyArray<AssistantFile>;
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
@@ -120,6 +120,11 @@ export interface DisplayMessage {
   questionActions?: QuestionActions | undefined;
   /** Decisions this message is waiting on, by tool-call id. */
   desktopApprovals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
+  /**
+   * The attempt's roots (name + absolute path), so delete lists group by the
+   * folder that owns each path. Absent on user bubbles and browser history.
+   */
+  desktopRoots?: ReadonlyArray<{ name: string; path: string }> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /**
@@ -145,6 +150,12 @@ export interface DisplayMessage {
   inheritedSources?: ToolSource[];
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
+  /**
+   * Files this send copied into the chat's workspace, by basename. The path
+   * joins against the machine's current workspace root at click time: the
+   * server stores names only, and a browser renders these inert.
+   */
+  workspaceFiles?: ReadonlyArray<string>;
   /** Edit this completed user message. */
   onEdit?: () => void;
   editDisabled?: boolean;
@@ -310,6 +321,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
       ) : (
         <div className="group/user flex w-full flex-col items-end">
           {(message.attachments && message.attachments.length > 0) ||
+          (message.workspaceFiles && message.workspaceFiles.length > 0) ||
           (message.collectionIds && message.collectionIds.length > 0) ||
           (message.skills && message.skills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
@@ -334,6 +346,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
                   href={attachmentUrl(attachment.id)}
                   preview={attachmentUrl(attachment.id)}
                 />
+              ))}
+              {message.workspaceFiles?.map((name) => (
+                <WorkspaceFileChip key={name} fileName={name} />
               ))}
             </AttachmentChipRow>
           ) : null}
@@ -369,10 +384,23 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
-function AssistantImageAttachment({ image }: { image: AssistantImage }) {
+function AssistantFileAttachment({ file }: { file: AssistantFile }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-  const url = attachmentUrl(image.attachment.id);
+  const url = attachmentUrl(file.attachment.id);
+  const { attachment } = file;
+  if (attachment.kind !== "image")
+    // A document sits where the tool produced it, as the chip a sent message
+    // uses; the click opens the same preview the composer's chips open.
+    return (
+      <AttachmentChipRow className="my-3">
+        <AttachmentChip
+          item={{ fileName: attachment.fileName, size: attachment.size, kind: attachment.kind }}
+          href={url}
+          preview={url}
+        />
+      </AttachmentChipRow>
+    );
   return (
     <figure className="my-3 max-w-full space-y-2">
       {state === "loading" && (
@@ -389,7 +417,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={`Preview ${image.attachment.fileName}`}
+          aria-label={`Preview ${attachment.fileName}`}
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -398,7 +426,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
         >
           <img
             src={url}
-            alt="Generated image"
+            alt={file.origin ? attachment.fileName : "Generated image"}
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
             className="max-h-144 max-w-full rounded-2xl object-contain"
@@ -406,12 +434,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
         </a>
       )}
       <AttachmentPreviewDialog
-        target={{
-          fileName: image.attachment.fileName,
-          size: image.attachment.size,
-          kind: "image",
-          url,
-        }}
+        target={{ fileName: attachment.fileName, size: attachment.size, kind: "image", url }}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
       />
@@ -434,13 +457,12 @@ const AssistantBody = memo(function AssistantBody({
     content: message.content,
     rawTextLength: message.rawTextLength ?? message.content.length,
     streaming,
-    images: message.images ?? [],
+    files: message.files ?? [],
     tools: message.toolActivities,
     compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
   });
   return parts.map((part) => {
-    if (part.kind === "image")
-      return <AssistantImageAttachment key={part.key} image={part.image} />;
+    if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">
@@ -508,6 +530,9 @@ const AssistantBody = memo(function AssistantBody({
       return <ScheduleDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "document")
       return <DocumentActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "custom") {
+      return <CustomToolActivityBlock key={part.key} activity={part.activity} />;
+    }
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }
@@ -517,6 +542,7 @@ const AssistantBody = memo(function AssistantBody({
         <DesktopActivityBlock
           key={part.key}
           activity={part.activity}
+          roots={message.desktopRoots ?? []}
           {...(approval ? { approval } : {})}
         />
       );
@@ -725,7 +751,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   // "Thinking" is the phase before any visible answer text arrives, but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive =
-    streaming && message.content.length === 0 && !message.images?.length && !toolRunning;
+    streaming && message.content.length === 0 && !message.files?.length && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
   const compactionActivities = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
@@ -770,7 +796,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         />
         {streaming &&
         message.content.length === 0 &&
-        !message.images?.length &&
+        !message.files?.length &&
         !showReasoning &&
         !toolRunning &&
         !compacting ? (
@@ -788,7 +814,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {/* A turn that only asked a question or only ran research has nothing to
             copy and no answer to branch from; the row would be chrome around
             an empty message. Its actions return with the text. */}
-        {streaming || (message.content.length === 0 && !message.images?.length) ? null : (
+        {streaming || (message.content.length === 0 && !message.files?.length) ? null : (
           <MessageActions
             onOpenSources={openSources}
             content={message.content}

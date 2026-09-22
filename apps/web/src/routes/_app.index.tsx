@@ -3,7 +3,6 @@ import { useCallback } from "react";
 import { readChatPrefill } from "~/modules/agents/authoring.ts";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import { NewChatView } from "~/modules/chat/ui/chat-view.tsx";
-import { DRAFT_CONVERSATION, prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import {
   chatModelsQuery,
   researchAvailabilityQuery,
@@ -23,9 +22,8 @@ export const Route = createFileRoute("/_app/")({
       ? { skill: search["skill"] }
       : {}),
   }),
-  loader: async ({ context, abortController }) => {
+  loader: async ({ context }) => {
     await Promise.all([
-      prepareWorkFolder(context.queryClient, DRAFT_CONVERSATION, abortController.signal),
       context.queryClient.ensureQueryData(chatModelsQuery),
       context.queryClient.prefetchQuery(agentsQuery),
       // The composer's collection and skill pickers mount with the view, so

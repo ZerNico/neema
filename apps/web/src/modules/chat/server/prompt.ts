@@ -20,6 +20,13 @@ export interface HistoryMessage {
   readonly completedAt?: Date | null;
   readonly assistantOutput?: AssistantOutput | null;
   readonly providerReplay?: ProviderReplay | null;
+  /**
+   * Files this send copied into the chat's workspace, by name. A desktop work
+   * chat has no attachment links for them (they never touch the server), so
+   * the line here is the only place the model is told what the chips it sees
+   * mean. Nothing is inlined: the bytes are a `read_local_file` away.
+   */
+  readonly workspaceFiles?: ReadonlyArray<string>;
 }
 
 /**
@@ -87,6 +94,18 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       (message.role === "assistant" ? normalizeAssistantText(message.content) : message.content),
   });
 
+  // A workspace import is named ahead of the text, like an attachment part,
+  // so a question that is only a drop still reads as "about these files".
+  const withWorkspaceFiles = (message: HistoryMessage): Prompt.MessageEncoded => {
+    const files = message.workspaceFiles ?? [];
+    if (message.role !== "user" || files.length === 0) return plain(message);
+    const line = `[The user added ${files.length === 1 ? "this file" : "these files"} to the workspace: ${files.join(", ")}]`;
+    return {
+      role: "user" as const,
+      content: line + "\n" + messageTimestamp(message) + message.content,
+    };
+  };
+
   const rows = yield* deps.attachments.listWithBlobsForMessages(
     input.messages
       .filter((message) => message.role === "user" || message.role === "assistant")
@@ -95,10 +114,10 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   if (
     rows.length === 0 &&
     !input.messages.some(
-      (message) => message.assistantOutput?.images.length || message.providerReplay?.turns.length,
+      (message) => message.assistantOutput?.files.length || message.providerReplay?.turns.length,
     )
   )
-    return input.messages.map(plain);
+    return input.messages.map(withWorkspaceFiles);
 
   const byMessage = new Map<string, Array<AttachmentWithBlob>>();
   for (const row of rows) {
@@ -142,29 +161,51 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     const attached = byMessage.get(message.id);
     if (
       message.role === "assistant" &&
-      (message.assistantOutput?.images.length || message.providerReplay?.turns.length)
+      (message.assistantOutput?.files.length || message.providerReplay?.turns.length)
     ) {
-      const images = message.assistantOutput?.images ?? [];
+      const files = message.assistantOutput?.files ?? [];
       // Metadata-only estimates may compact this entire turn away. Refuse an
       // incompatible retained image only when constructing the actual request.
-      if (images.length && !input.deferAssistantBytes && input.modelSupportsVision === false)
+      const retainedImage = files.find((file) => file.attachment.kind === "image");
+      if (retainedImage && !input.deferAssistantBytes && input.modelSupportsVision === false)
         return yield* new AttachmentUnsupported({
-          fileName: images[0]!.attachment.fileName,
+          fileName: retainedImage.attachment.fileName,
           reason: "This model cannot read images retained in the conversation.",
         });
-      const imagePart = (image: (typeof images)[number]) =>
+      // A model's own image goes back as bytes. A tool's file is replayed the
+      // way an upload would be: PDF bytes for a model with document input,
+      // otherwise its text, so switching models later never fails on it.
+      const filePart = (file: (typeof files)[number]) =>
         Effect.gen(function* () {
-          const row = attached?.find((row) => row.id === image.attachment.id);
-          if (!row || image.textOffset > message.content.length)
-            return yield* new AttachmentNotAvailable({ attachmentId: image.attachment.id });
-          return {
-            type: "file" as const,
-            mediaType: row.mediaType,
-            fileName: row.fileName,
-            data: input.deferAssistantBytes
-              ? new URL("https://deferred-image.invalid/")
-              : yield* loadBytes(row),
+          const row = attached?.find((row) => row.id === file.attachment.id);
+          if (!row || file.textOffset > message.content.length)
+            return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
+          const kind = attachmentKind(row.mediaType);
+          if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
+            const part: Prompt.AssistantMessagePartEncoded = {
+              type: "file",
+              mediaType: row.mediaType,
+              fileName: row.fileName,
+              data: input.deferAssistantBytes
+                ? new URL("https://deferred-file.invalid/")
+                : yield* loadBytes(row),
+            };
+            return part;
+          }
+          const text = input.deferAssistantBytes
+            ? ""
+            : kind === "pdf"
+              ? yield* pdfText(row)
+              : decoder.decode(yield* loadBytes(row));
+          const part: Prompt.AssistantMessagePartEncoded = {
+            type: "text",
+            text: buildTextFence({
+              fileName: row.fileName,
+              text,
+              ...(kind === "pdf" ? { label: PDF_TEXT_LABEL } : {}),
+            }),
           };
+          return part;
         });
       const replay = message.providerReplay;
       const compatible =
@@ -184,8 +225,8 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
             ];
       if (input.expandAssistantTurns && replay?.turns.length) {
         const end = turns.at(-1)!.endOffset;
-        const trailing = images.filter(
-          (image) => !turns.some((turn) => turn.turnIndex === image.turnIndex),
+        const trailing = files.filter(
+          (file) => !turns.some((turn) => turn.turnIndex === file.turnIndex),
         );
         if (end < message.content.length || trailing.length)
           turns.push({
@@ -234,14 +275,14 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           if (text) parts.push({ type: "text", text });
         };
         let cursor = turn.startOffset;
-        for (const image of images.filter(
-          (image) => turn.turnIndex === -1 || image.turnIndex === turn.turnIndex,
+        for (const file of files.filter(
+          (file) => turn.turnIndex === -1 || file.turnIndex === turn.turnIndex,
         )) {
-          if (image.textOffset < cursor || image.textOffset > turn.endOffset)
-            return yield* new AttachmentNotAvailable({ attachmentId: image.attachment.id });
-          if (image.textOffset > cursor) appendText(cursor, image.textOffset);
-          parts.push(yield* imagePart(image));
-          cursor = image.textOffset;
+          if (file.textOffset < cursor || file.textOffset > turn.endOffset)
+            return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
+          if (file.textOffset > cursor) appendText(cursor, file.textOffset);
+          parts.push(yield* filePart(file));
+          cursor = file.textOffset;
         }
         if (cursor < turn.endOffset) appendText(cursor, turn.endOffset);
         const turnCalls = calls.filter(
@@ -280,11 +321,18 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       continue;
     }
     if (message.role !== "user" || !attached || attached.length === 0) {
-      messages.push(plain(message));
+      messages.push(withWorkspaceFiles(message));
       continue;
     }
 
     const parts: Array<Prompt.UserMessagePartEncoded> = [];
+    const workspaceFiles = message.workspaceFiles ?? [];
+    if (workspaceFiles.length > 0) {
+      parts.push({
+        type: "text",
+        text: `[The user added ${workspaceFiles.length === 1 ? "this file" : "these files"} to the workspace: ${workspaceFiles.join(", ")}]`,
+      });
+    }
     for (const row of attached) {
       const kind = attachmentKind(row.mediaType);
       if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {

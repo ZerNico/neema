@@ -46,9 +46,16 @@ const connect = (): DesktopClient => {
     folderStatus: notUsed("folderStatus"),
     chooseFolder: notUsed("chooseFolder"),
     detachFolder: notUsed("detachFolder"),
-    rebindFolder: notUsed("rebindFolder"),
     listDirectory: notUsed("listDirectory"),
+    fileInfo: ({ path }) =>
+      Effect.suspend(() => {
+        asked.push({ tag: "fileInfo", path });
+        return files[path] === undefined
+          ? refuse("not-found", `${path} does not exist.`)
+          : Effect.succeed({ path, bytes: 4 });
+      }),
     writeFile: notUsed("writeFile"),
+    saveToWorkspace: notUsed("saveToWorkspace"),
     editFile: notUsed("editFile"),
     movePath: notUsed("movePath"),
     deletePath: notUsed("deletePath"),
@@ -56,6 +63,16 @@ const connect = (): DesktopClient => {
     searchFiles: notUsed("searchFiles"),
     runCommand: notUsed("runCommand"),
     setUpSandbox: notUsed("setUpSandbox"),
+    stageFile: notUsed("stageFile"),
+    discardStagedFile: notUsed("discardStagedFile"),
+    discardSubmission: notUsed("discardSubmission"),
+    promoteSubmission: notUsed("promoteSubmission"),
+    commitPromotion: notUsed("commitPromotion"),
+    rollbackPromotion: notUsed("rollbackPromotion"),
+    listPendingPromotions: notUsed("listPendingPromotions"),
+    cloneWorkspace: notUsed("cloneWorkspace"),
+    copyFolderGrants: notUsed("copyFolderGrants"),
+    discardWorkspace: notUsed("discardWorkspace"),
     readFile: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "readFile", path });
@@ -89,6 +106,7 @@ const connect = (): DesktopClient => {
   const respond = makeDesktopResponder(handlers);
   return makeDesktopClient({
     protocolVersion: PROTOCOL_VERSION,
+    stageDroppedFile: async () => null,
     // Round-tripped through JSON, because contextBridge carries nothing else.
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify(payload)) as unknown;
@@ -111,8 +129,10 @@ const wrote = (path: string, name: DesktopToolActivity["name"] = "write_local_fi
 
 const show = (activity: DesktopToolActivity) =>
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-      <LocalFileConversationProvider conversationId="c1">
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+    >
+      <LocalFileConversationProvider conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7">
         <DesktopActivityBlock activity={activity} />
       </LocalFileConversationProvider>
     </QueryClientProvider>,
@@ -244,15 +264,22 @@ describe("a work file row on the desktop", () => {
     await waitFor(() => expect(asked.at(-1)).toEqual({ tag: "revealPath:reveal", path: "site" }));
   });
 
-  it("says there is no preview for a file it cannot read, and opens nothing", async () => {
+  it("opens the dialog for a file with no preview, so its actions stay reachable", async () => {
     const row = wrote("site/report.bin");
     show(row);
     await click(row);
 
-    await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
-    expect(sonner.error.mock.calls[0]![0]).toBe("There’s no preview for this kind of file.");
+    expect(await screen.findByText("There’s no preview for this kind of file.")).toBeTruthy();
+    // No image extension, so the read goes straight to text and the refusal
+    // turns into a size-only dialog.
+    expect(asked.map((call) => call.tag)).toEqual(["readFile", "fileInfo"]);
+    // No bytes were handed over: nothing to render, nothing to revoke.
     expect(handed).toEqual([]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sonner.error).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Show in folder" }));
+    await waitFor(() =>
+      expect(asked.at(-1)).toEqual({ tag: "revealPath:reveal", path: "site/report.bin" }),
+    );
   });
 
   it("follows a move to where the file now is, and ignores a row with no file", async () => {

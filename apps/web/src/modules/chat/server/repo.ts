@@ -47,6 +47,7 @@ import {
   messages,
   messageToolCalls,
   usageEvents,
+  workTurnReservations,
 } from "~/db/schema/index.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -92,10 +93,19 @@ export interface GenerationConfig {
   /** Whether `deep_research` was offered; the model still chooses. */
   readonly researchEnabled: boolean;
   readonly planEnabled: boolean;
-  /** Folder names when this attempt could reach a machine; null when it could not. */
+  /**
+   * Names when this attempt could reach a machine; null when it could not.
+   * Names alone persist: the paths stay on the machine that granted them and
+   * reach the model only through attempt-scoped prompt text and tool traffic.
+   */
   readonly desktopFolders?: ReadonlyArray<string> | null;
   /** Whether that machine could sandbox a command at the time. */
   readonly desktopCommands?: boolean;
+  /** The machine the attempt was sent from; null predates machine stamping. */
+  readonly desktopMachineId?: string | null;
+  readonly desktopMachineName?: string | null;
+  /** Workspace files this turn's send claimed; empty for every other attempt. */
+  readonly workspaceFiles?: ReadonlyArray<string>;
 }
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
@@ -136,11 +146,15 @@ export const PLAIN_GENERATION: GenerationConfig = {
 };
 
 /** Everything about a turn except its content; `CreateTurnInput` adds that. */
+export type ConversationReference =
+  | { readonly kind: "new"; readonly id: string; readonly mode: "chat" | "work" }
+  | { readonly kind: "existing"; readonly id: string };
+
 export type TurnFields = {
-  /** Applied only when this turn creates the conversation. */
-  mode?: "chat" | "work" | undefined;
   userId: string;
-  conversationId: string | null;
+  conversation: ConversationReference;
+  /** Present only when a reserved file-bearing Work send activates. */
+  reservationId?: string | undefined;
   modelId: string;
   attachmentIds: ReadonlyArray<string>;
   /** Installs only the association on a new conversation, after live resolution. */
@@ -157,6 +171,7 @@ export type TurnFields = {
   resolve?: ResolveGeneration | undefined;
 };
 export type CreateTurnInput = TurnFields & TurnContent;
+export type WorkTurnReservationRow = typeof workTurnReservations.$inferSelect;
 
 export type ConversationRow = typeof conversations.$inferSelect;
 /** A list row plus the live state the list surfaces (sidebar spinner). */
@@ -212,7 +227,7 @@ const GENERATION_LEASE = sql`interval '45 seconds'`;
 const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
 export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
 
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "image";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -336,6 +351,9 @@ const toConfig = (
   planEnabled: row.planEnabled,
   desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
+  desktopMachineId: row.desktopMachineId,
+  desktopMachineName: row.desktopMachineName,
+  workspaceFiles: row.workspaceFiles,
 });
 
 const readDefaults = Effect.fn("chat.readDefaults")(function* (
@@ -437,6 +455,9 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       researchEnabled: config.researchEnabled,
       desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
+      desktopMachineId: config.desktopMachineId ?? null,
+      desktopMachineName: config.desktopMachineName ?? null,
+      workspaceFiles: [...(config.workspaceFiles ?? [])],
       collectionIds: [...config.collectionIds],
     })
     .pipe(Effect.orDie);
@@ -502,6 +523,19 @@ export class ChatRepo extends Context.Service<
       conversationId: string,
     ): Effect.Effect<ConversationRow, ConversationNotFound>;
     createConversation(input: { userId: string; modelId: string }): Effect.Effect<ConversationRow>;
+    reserveWorkTurn(input: {
+      id: string;
+      userId: string;
+      conversation: ConversationReference;
+    }): Effect.Effect<
+      WorkTurnReservationRow,
+      ConversationNotFound | ConversationBusy | InvalidMessage
+    >;
+    getWorkTurnReservation(
+      userId: string,
+      reservationId: string,
+    ): Effect.Effect<WorkTurnReservationRow, ConversationNotFound>;
+    abortWorkTurn(userId: string, reservationId: string): Effect.Effect<void>;
     /**
      * One atomic turn: resolve (or create) the conversation, write the user
      * message, claim its attachments, and open the assistant row. Claiming has
@@ -515,6 +549,8 @@ export class ChatRepo extends Context.Service<
         userMessage: MessageRow;
         assistant: MessageRow;
         config: GenerationConfig;
+        /** False when an activation retry returned the already-created turn. */
+        activatedNow: boolean;
       },
       | ResolveError
       | ConversationNotFound
@@ -529,12 +565,33 @@ export class ChatRepo extends Context.Service<
      * no configuration is inferred from history or old tool calls.
      */
     getGenerationConfig(messageId: string): Effect.Effect<GenerationConfig>;
+    /**
+     * One display field for the prompt builder: the workspace files each of
+     * these attempts claimed. Missing rows (a system message, a pre-migration
+     * row) map to none; the line is additive, never load-bearing.
+     */
+    listWorkspaceFilesByMessage(
+      messageIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>>;
     listGenerationDisplay(messageIds: ReadonlyArray<string>): Effect.Effect<
       Array<{
         messageId: string;
         agent: { name: string; icon: string } | null;
         collectionIds: ReadonlyArray<string>;
         skills?: ReadonlyArray<{ id: string; name: string }>;
+        /**
+         * The machine this attempt was sent from, when it was. The banner
+         * compares the latest answer's stamp with the local machine id.
+         */
+        desktopMachine?: { id: string; name: string | null } | null;
+        /** Workspace files the turn's send claimed; shown as chips on the question. */
+        workspaceFiles: ReadonlyArray<string>;
+        /**
+         * The attempt's roots, names only. The display layer prefixes them with
+         * the machine's current workspace path, so delete lists group by owner
+         * without the server ever storing one.
+         */
+        desktopRoots?: ReadonlyArray<string>;
       }>
     >;
     updateConversation(
@@ -568,7 +625,10 @@ export class ChatRepo extends Context.Service<
       userId: string;
       sourceConversationId: string;
       throughMessageId: string;
-    }): Effect.Effect<ConversationRow, ConversationNotFound | MessageNotFound | BranchNotAllowed>;
+    }): Effect.Effect<
+      ConversationRow,
+      ConversationNotFound | MessageNotFound | BranchNotAllowed | ConversationBusy
+    >;
     listMessages(conversationId: string): Effect.Effect<MessageRow[]>;
     insertMessage(input: {
       conversationId: string;
@@ -693,7 +753,7 @@ export class ChatRepo extends Context.Service<
         generationId?: string | undefined;
         searchEnabled?: boolean | undefined;
       },
-      AttachmentNotAvailable | ResolveError
+      AttachmentNotAvailable | ResolveError | ConversationBusy
     >;
     createAssistantForEdit(
       input: EditContent & {
@@ -712,7 +772,7 @@ export class ChatRepo extends Context.Service<
       },
     ): Effect.Effect<
       { message: MessageRow; orphanedKeys: ReadonlyArray<string>; config: GenerationConfig } | null,
-      ResolveError | AttachmentNotAvailable
+      ResolveError | AttachmentNotAvailable | ConversationBusy
     >;
     /**
      * Removes messages entirely (chunks/tool calls go via FK cascade).
@@ -746,6 +806,35 @@ export class ChatRepo extends Context.Service<
       const db = yield* Db;
       const attachments = yield* AttachmentRepo;
       const research = createResearchStore(db);
+      const lockWorkTurn = (tx: DbTx, conversationId: string) =>
+        tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${conversationId}, 94731))`);
+      const expireWorkTurns = (tx: DbTx) =>
+        tx
+          .update(workTurnReservations)
+          .set({ status: "expired", updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(workTurnReservations.status, "reserved"),
+              sql`${workTurnReservations.expiresAt} <= now()`,
+            ),
+          );
+      const rejectReservedWorkTurn = (tx: DbTx, conversationId: string) =>
+        Effect.gen(function* () {
+          yield* lockWorkTurn(tx, conversationId).pipe(Effect.orDie);
+          yield* expireWorkTurns(tx).pipe(Effect.orDie);
+          const live = yield* tx
+            .select({ id: workTurnReservations.id })
+            .from(workTurnReservations)
+            .where(
+              and(
+                eq(workTurnReservations.conversationId, conversationId),
+                eq(workTurnReservations.status, "reserved"),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.orDie);
+          if (live.length > 0) return yield* new ConversationBusy({ conversationId });
+        });
       const generationWrite = <A, E, R>(run: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
           const fence = yield* GenerationFence;
@@ -840,13 +929,220 @@ export class ChatRepo extends Context.Service<
           return rows[0]!;
         }),
 
+        reserveWorkTurn: Effect.fn("ChatRepo.reserveWorkTurn")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* lockWorkTurn(tx, input.conversation.id);
+                yield* expireWorkTurns(tx);
+                if (input.conversation.kind === "new") {
+                  if (input.conversation.mode !== "work")
+                    return yield* new InvalidMessage({
+                      reason: "workspace files require a work chat",
+                    });
+                  const existing = yield* tx
+                    .select({ id: conversations.id })
+                    .from(conversations)
+                    .where(eq(conversations.id, input.conversation.id))
+                    .limit(1)
+                    .pipe(Effect.orDie);
+                  if (existing.length > 0)
+                    return yield* new InvalidMessage({
+                      reason: "the proposed conversation id already exists",
+                    });
+                } else {
+                  const existing = yield* tx
+                    .select()
+                    .from(conversations)
+                    .where(
+                      and(
+                        eq(conversations.id, input.conversation.id),
+                        eq(conversations.userId, input.userId),
+                      ),
+                    )
+                    .for("update")
+                    .pipe(Effect.orDie);
+                  const conversation = existing[0];
+                  if (!conversation)
+                    return yield* new ConversationNotFound({
+                      conversationId: input.conversation.id,
+                    });
+                  if (conversation.mode !== "work")
+                    return yield* new InvalidMessage({
+                      reason: "workspace files require a work chat",
+                    });
+                  const streaming = yield* tx
+                    .select({ id: messages.id })
+                    .from(messages)
+                    .where(
+                      and(
+                        eq(messages.conversationId, conversation.id),
+                        eq(messages.status, "streaming"),
+                      ),
+                    )
+                    .limit(1)
+                    .pipe(Effect.orDie);
+                  if (streaming.length > 0)
+                    return yield* new ConversationBusy({ conversationId: conversation.id });
+                }
+                const live = yield* tx
+                  .select({ id: workTurnReservations.id })
+                  .from(workTurnReservations)
+                  .where(
+                    and(
+                      eq(workTurnReservations.conversationId, input.conversation.id),
+                      eq(workTurnReservations.status, "reserved"),
+                    ),
+                  )
+                  .limit(1)
+                  .pipe(Effect.orDie);
+                if (live.length > 0)
+                  return yield* new ConversationBusy({ conversationId: input.conversation.id });
+                const rows = yield* tx
+                  .insert(workTurnReservations)
+                  .values({
+                    id: input.id,
+                    userId: input.userId,
+                    conversationId: input.conversation.id,
+                    intent: input.conversation.kind,
+                    expiresAt: sql`now() + interval '2 minutes'`,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                return rows[0]!;
+              }),
+            )
+            .pipe(
+              Effect.catchTag("SqlError", Effect.die),
+              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+            );
+        }),
+
+        getWorkTurnReservation: Effect.fn("ChatRepo.getWorkTurnReservation")(
+          function* (userId, reservationId) {
+            yield* db
+              .update(workTurnReservations)
+              .set({ status: "expired", updatedAt: sql`now()` })
+              .where(
+                and(
+                  eq(workTurnReservations.id, reservationId),
+                  eq(workTurnReservations.status, "reserved"),
+                  sql`${workTurnReservations.expiresAt} <= now()`,
+                ),
+              )
+              .pipe(Effect.orDie);
+            const rows = yield* db
+              .select()
+              .from(workTurnReservations)
+              .where(
+                and(
+                  eq(workTurnReservations.id, reservationId),
+                  eq(workTurnReservations.userId, userId),
+                ),
+              )
+              .limit(1)
+              .pipe(Effect.orDie);
+            const row = rows[0];
+            if (!row) return yield* new ConversationNotFound({ conversationId: reservationId });
+            return row;
+          },
+        ),
+
+        abortWorkTurn: Effect.fn("ChatRepo.abortWorkTurn")(function* (userId, reservationId) {
+          yield* db
+            .update(workTurnReservations)
+            .set({ status: "aborted", updatedAt: sql`now()` })
+            .where(
+              and(
+                eq(workTurnReservations.id, reservationId),
+                eq(workTurnReservations.userId, userId),
+                eq(workTurnReservations.status, "reserved"),
+              ),
+            )
+            .pipe(Effect.orDie);
+        }),
+
         createTurn: Effect.fn("ChatRepo.createTurn")(function* (input) {
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                const conversationId = input.conversation.id;
+                yield* lockWorkTurn(tx, conversationId);
+                yield* expireWorkTurns(tx);
+                let reservation: WorkTurnReservationRow | null = null;
+                if (input.reservationId) {
+                  const rows = yield* tx
+                    .select()
+                    .from(workTurnReservations)
+                    .where(
+                      and(
+                        eq(workTurnReservations.id, input.reservationId),
+                        eq(workTurnReservations.userId, input.userId),
+                      ),
+                    )
+                    .for("update")
+                    .pipe(Effect.orDie);
+                  reservation = rows[0] ?? null;
+                  if (!reservation || reservation.conversationId !== conversationId)
+                    return yield* new ConversationNotFound({ conversationId });
+                  if (reservation.intent !== input.conversation.kind)
+                    return yield* new InvalidMessage({ reason: "the reservation intent changed" });
+                  if (reservation.status === "activated" && reservation.assistantMessageId) {
+                    const conversationRows = yield* tx
+                      .select()
+                      .from(conversations)
+                      .where(
+                        and(
+                          eq(conversations.id, conversationId),
+                          eq(conversations.userId, input.userId),
+                        ),
+                      )
+                      .pipe(Effect.orDie);
+                    const turnMessages = yield* tx
+                      .select()
+                      .from(messages)
+                      .where(eq(messages.conversationId, conversationId))
+                      .orderBy(asc(messages.createdAt), asc(messages.id))
+                      .pipe(Effect.orDie);
+                    const assistantIndex = turnMessages.findIndex(
+                      (message) => message.id === reservation!.assistantMessageId,
+                    );
+                    const userMessage = turnMessages
+                      .slice(0, assistantIndex)
+                      .reverse()
+                      .find((message) => message.role === "user");
+                    const assistant = turnMessages[assistantIndex];
+                    if (!conversationRows[0] || !assistant || !userMessage)
+                      return yield* Effect.die("Activated Work turn is incomplete");
+                    return {
+                      conversation: conversationRows[0],
+                      conversationCreated: reservation.intent === "new",
+                      userMessage,
+                      assistant,
+                      config: yield* readConfig(tx, assistant.id),
+                      activatedNow: false,
+                    };
+                  }
+                  if (reservation.status !== "reserved")
+                    return yield* new ConversationBusy({ conversationId });
+                } else {
+                  const live = yield* tx
+                    .select({ id: workTurnReservations.id })
+                    .from(workTurnReservations)
+                    .where(
+                      and(
+                        eq(workTurnReservations.conversationId, conversationId),
+                        eq(workTurnReservations.status, "reserved"),
+                      ),
+                    )
+                    .limit(1)
+                    .pipe(Effect.orDie);
+                  if (live.length > 0) return yield* new ConversationBusy({ conversationId });
+                }
+
                 let conversationCreated = false;
                 let conversation: ConversationRow;
-                if (input.conversationId) {
+                if (input.conversation.kind === "existing") {
                   // FOR UPDATE serializes turns per conversation, so two
                   // concurrent sends cannot both pass the streaming check.
                   const rows = yield* tx
@@ -854,21 +1150,14 @@ export class ChatRepo extends Context.Service<
                     .from(conversations)
                     .where(
                       and(
-                        eq(conversations.id, input.conversationId),
+                        eq(conversations.id, conversationId),
                         eq(conversations.userId, input.userId),
                       ),
                     )
                     .for("update")
                     .pipe(Effect.orDie);
                   const row = rows[0];
-                  if (!row) {
-                    return yield* new ConversationNotFound({
-                      conversationId: input.conversationId,
-                    });
-                  }
-                  // Same rule retry/edit enforce: one generation at a time.
-                  // A second tab sending mid-stream would otherwise start a
-                  // generation whose history misses the in-flight answer.
+                  if (!row) return yield* new ConversationNotFound({ conversationId });
                   const streaming = yield* tx
                     .select({ id: messages.id })
                     .from(messages)
@@ -876,20 +1165,28 @@ export class ChatRepo extends Context.Service<
                       and(eq(messages.conversationId, row.id), eq(messages.status, "streaming")),
                     )
                     .pipe(Effect.orDie);
-                  if (streaming.length > 0) {
+                  if (streaming.length > 0)
                     return yield* new ConversationBusy({ conversationId: row.id });
-                  }
                   conversation = row;
                 } else {
+                  const existing = yield* tx
+                    .select({ id: conversations.id })
+                    .from(conversations)
+                    .where(eq(conversations.id, conversationId))
+                    .limit(1)
+                    .pipe(Effect.orDie);
+                  if (existing.length > 0)
+                    return yield* new InvalidMessage({
+                      reason: "the proposed conversation id already exists",
+                    });
                   const rows = yield* tx
                     .insert(conversations)
-                    // title stays null until generation resolves it.
                     .values({
-                      id: uuidv7(),
+                      id: conversationId,
                       userId: input.userId,
                       modelId: input.modelId,
                       title: null,
-                      mode: input.mode ?? "chat",
+                      mode: input.conversation.mode,
                       ...(input.scheduleId !== undefined
                         ? { scheduleId: input.scheduleId }
                         : {}),
@@ -905,7 +1202,7 @@ export class ChatRepo extends Context.Service<
                 let continuation: GenerationConfig | undefined;
                 if (input.questionResponse) {
                   const { callId, response } = input.questionResponse;
-                  if (!input.conversationId || input.attachmentIds.length > 0)
+                  if (input.conversation.kind !== "existing" || input.attachmentIds.length > 0)
                     return yield* new QuestionUnavailable({ callId });
                   const tail = (yield* tx
                     .select()
@@ -980,6 +1277,16 @@ export class ChatRepo extends Context.Service<
                   .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })
                   .where(eq(conversations.id, conversation.id))
                   .pipe(Effect.orDie);
+                if (reservation)
+                  yield* tx
+                    .update(workTurnReservations)
+                    .set({
+                      status: "activated",
+                      assistantMessageId: assistantRows[0]!.id,
+                      updatedAt: sql`now()`,
+                    })
+                    .where(eq(workTurnReservations.id, reservation.id))
+                    .pipe(Effect.orDie);
 
                 return {
                   conversation,
@@ -987,15 +1294,36 @@ export class ChatRepo extends Context.Service<
                   userMessage,
                   assistant: assistantRows[0]!,
                   config,
+                  activatedNow: true,
                 };
               }),
             )
-            .pipe(Effect.catchTag("SqlError", Effect.die));
+            .pipe(
+              Effect.catchTag("SqlError", Effect.die),
+              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+            );
         }),
 
         getConversationDefaults: (conversationId) => readDefaults(db, conversationId),
 
         getGenerationConfig: (messageId) => readConfig(db, messageId),
+        listWorkspaceFilesByMessage: Effect.fn("ChatRepo.listWorkspaceFilesByMessage")(
+          function* (messageIds) {
+            if (messageIds.length === 0) return new Map<string, ReadonlyArray<string>>();
+            const rows = yield* db
+              .select({
+                messageId: messageGenerationConfig.messageId,
+                workspaceFiles: messageGenerationConfig.workspaceFiles,
+              })
+              .from(messageGenerationConfig)
+              .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
+              .pipe(Effect.orDie);
+            const byMessage = new Map<string, ReadonlyArray<string>>();
+            for (const row of rows)
+              if (row.workspaceFiles.length > 0) byMessage.set(row.messageId, row.workspaceFiles);
+            return byMessage;
+          },
+        ),
         listGenerationDisplay: Effect.fn("ChatRepo.listGenerationDisplay")(function* (messageIds) {
           if (messageIds.length === 0) return [];
           const rows = yield* db
@@ -1009,15 +1337,42 @@ export class ChatRepo extends Context.Service<
               skills: sql<
                 Array<{ id: string; name: string }>
               >`coalesce((select jsonb_agg(jsonb_build_object('id', entry->>'skillId', 'name', entry->>'name')) from jsonb_array_elements(${messageGenerationConfig.skills}) entry where (entry->>'explicit')::boolean), '[]'::jsonb)`,
+              desktopMachineId: messageGenerationConfig.desktopMachineId,
+              desktopMachineName: messageGenerationConfig.desktopMachineName,
+              workspaceFiles: messageGenerationConfig.workspaceFiles,
+              desktopFolders: messageGenerationConfig.desktopFolders,
             })
             .from(messageGenerationConfig)
             .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
             .pipe(Effect.orDie);
           if (rows.length !== new Set(messageIds).size)
             return yield* Effect.die(new Error("Missing generation configuration in conversation"));
-          return rows.filter(
-            (row) => row.agent || row.collectionIds.length > 0 || row.skills.length > 0,
-          );
+          return rows
+            .filter(
+              (row) =>
+                row.agent ||
+                row.collectionIds.length > 0 ||
+                row.skills.length > 0 ||
+                row.desktopMachineId !== null ||
+                row.workspaceFiles.length > 0 ||
+                (row.desktopFolders?.length ?? 0) > 0,
+            )
+            .map(({ desktopMachineId, desktopMachineName, desktopFolders, ...row }) =>
+              Object.assign(
+                {},
+                row,
+                {
+                  desktopMachine:
+                    desktopMachineId === null
+                      ? null
+                      : { id: desktopMachineId, name: desktopMachineName },
+                },
+                // Browser-sent attempts (and work chats with no folder) store null.
+                desktopFolders && desktopFolders.length > 0
+                  ? { desktopRoots: [...desktopFolders] }
+                  : {},
+              ),
+            );
         }),
 
         updateConversation: Effect.fn("ChatRepo.updateConversation")(
@@ -1082,6 +1437,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* rejectReservedWorkTurn(tx, input.sourceConversationId);
                 // Locks both sides of what is being copied: the conversation
                 // row against a concurrent rename/title/delete, the messages
                 // against a retry or edit rewinding history mid-copy.
@@ -1324,10 +1680,10 @@ export class ChatRepo extends Context.Service<
                     .set({
                       assistantOutput: {
                         ...message.assistantOutput,
-                        images: message.assistantOutput.images.map((image) => {
-                          const id = attachmentIds.get(image.attachment.id);
-                          if (!id) throw new Error("Missing cloned assistant image");
-                          return { ...image, attachment: { ...image.attachment, id } };
+                        files: message.assistantOutput.files.map((file) => {
+                          const id = attachmentIds.get(file.attachment.id);
+                          if (!id) throw new Error("Missing cloned assistant file");
+                          return { ...file, attachment: { ...file.attachment, id } };
                         }),
                       },
                     })
@@ -1808,6 +2164,7 @@ export class ChatRepo extends Context.Service<
                   .where(eq(messages.id, input.messageId))
                   .pipe(Effect.orDie))[0];
                 if (!target) return lost;
+                yield* rejectReservedWorkTurn(tx, target.conversationId);
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)
@@ -1970,6 +2327,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* rejectReservedWorkTurn(tx, input.conversationId);
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)

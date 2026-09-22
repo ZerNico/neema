@@ -1,4 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { FakeCustomToolRuntime } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
@@ -32,6 +33,7 @@ import {
   type CompactionDeps,
 } from "~/modules/chat/server/compaction.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import {
@@ -261,6 +263,7 @@ beforeAll(async () => {
     AnalyticsRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
+    CustomToolRepo.layer,
     ProviderRepo.layer,
     ScheduleRepo.layer,
   ).pipe(
@@ -276,6 +279,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeCustomToolRuntime,
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,
@@ -366,7 +370,7 @@ const seedConversation = Effect.fn("test.seedConversation")(function* (
   const repo = yield* ChatRepo;
   const first = yield* repo.createTurn({
     userId,
-    conversationId: null,
+    conversation: { kind: "new", id: uuidv7(), mode: "chat" },
     modelId,
     content: `question 0 ${"x".repeat(2000)}`,
     attachmentIds: [],
@@ -379,7 +383,7 @@ const seedConversation = Effect.fn("test.seedConversation")(function* (
   for (let turn = 1; turn < turns; turn++) {
     const next = yield* repo.createTurn({
       userId,
-      conversationId: first.conversation.id,
+      conversation: { kind: "existing", id: first.conversation.id },
       modelId,
       content: `question ${turn} ${"x".repeat(2000)}`,
       attachmentIds: [],
@@ -526,7 +530,7 @@ describe("context compaction", () => {
         for (let turn = 8; turn < 14; turn++) {
           const next = yield* repo.createTurn({
             userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId,
             content: `question ${turn} ${"x".repeat(2000)}`,
             attachmentIds: [],
@@ -718,7 +722,7 @@ describe("context compaction", () => {
         for (let turn = 8; turn < 10; turn++) {
           const next = yield* repo.createTurn({
             userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId,
             content: `question ${turn} ${"x".repeat(2000)}`,
             attachmentIds: [],
@@ -931,7 +935,7 @@ describe("question history compaction", () => {
           const conversationId = yield* seedConversation(userId, 8);
           const asking = yield* repo.createTurn({
             userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId: smallModelId,
             content: "Help me choose an approach.",
             attachmentIds: [],
@@ -967,7 +971,7 @@ describe("question history compaction", () => {
           });
           const reply = yield* repo.createTurn({
             userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId: smallModelId,
             attachmentIds: [],
             questionResponse: {
@@ -1008,7 +1012,7 @@ const askAgain = Effect.fn("test.askAgain")(function* (userId: string, conversat
   const repo = yield* ChatRepo;
   const turn = yield* repo.createTurn({
     userId,
-    conversationId,
+    conversation: { kind: "existing", id: conversationId },
     modelId: smallModelId,
     content: `question latest ${"z".repeat(2000)}`,
     attachmentIds: [],
@@ -1192,7 +1196,7 @@ describe("compaction inside a generation", () => {
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: smallModelId,
           content: `Read ${userUrl}`,
           attachmentIds: [],
@@ -1393,7 +1397,7 @@ describe("compaction inside a generation", () => {
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
@@ -1483,7 +1487,7 @@ describe("compaction inside a generation", () => {
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
@@ -1534,7 +1538,7 @@ describe("compaction inside a generation", () => {
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
           userId,
-          conversationId: null,
+          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],

@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -49,6 +50,7 @@ export const validateAgentSettings = Effect.fn(function* (
     starters: settings.starters.map((starter) => starter.trim()),
     collectionIds: [...new Set(settings.collectionIds)],
     skillIds: [...new Set(settings.skillIds ?? [])],
+    customToolIds: [...new Set(settings.customToolIds ?? [])],
   };
 });
 
@@ -75,6 +77,7 @@ export class AgentService extends Context.Service<
       const repo = yield* AgentRepo;
       const knowledge = yield* KnowledgeRepo;
       const skillRepo = yield* SkillRepo;
+      const customToolRepo = yield* CustomToolRepo;
       const providers = yield* ProviderRepo;
       const bus = yield* SyncBus;
       const changed = () =>
@@ -94,7 +97,7 @@ export class AgentService extends Context.Service<
         agentId: string,
         ownerOnly: boolean,
       ) {
-        const { row, ownerName, collectionIds, skillIds } = yield* available(
+        const { row, ownerName, collectionIds, skillIds, customToolIds } = yield* available(
           userId,
           agentId,
           ownerOnly,
@@ -129,6 +132,13 @@ export class AgentService extends Context.Service<
             ),
           { concurrency: 3 },
         );
+        // "available" answers for the reader: a module shared with someone
+        // else shows as unavailable here, exactly as it will at send time.
+        const customToolRows = yield* customToolRepo.listUsableBy(userId);
+        const customTools = customToolIds.map((id) => {
+          const stored = customToolRows.find((row) => row.id === id);
+          return { id, name: stored?.name ?? null, available: stored !== undefined };
+        });
         yield* available(userId, agentId, ownerOnly);
         return {
           row,
@@ -141,6 +151,7 @@ export class AgentService extends Context.Service<
             model,
             collections,
             skills,
+            customTools,
           } satisfies AgentSelectionDetail,
         };
       });

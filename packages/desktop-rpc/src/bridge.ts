@@ -1,7 +1,13 @@
 import { Effect, Schema } from "effect";
 import type { RpcGroup } from "effect/unstable/rpc";
 import { DesktopRpcs } from "./group.ts";
-import { DesktopError } from "./schema.ts";
+import {
+  DesktopError,
+  DroppedFileStageInput,
+  StagedFileReceipt,
+  type DroppedFileStageInput as DroppedFileStageInputType,
+  type StagedFileReceipt as StagedFileReceiptType,
+} from "./schema.ts";
 import type { DesktopChrome } from "./chrome.ts";
 
 /**
@@ -23,6 +29,8 @@ export interface DesktopChannel {
   /** Short git sha and build time of the shell, for the reader and for bug reports. */
   readonly build?: string;
   readonly chrome?: DesktopChrome;
+  /** Stages a real dropped File without exposing its host path to the page. */
+  stageDroppedFile(file: File, payload: unknown): Promise<BridgeReply | null>;
   request(tag: string, payload: unknown): Promise<BridgeReply>;
 }
 
@@ -30,10 +38,12 @@ export type BridgeReply =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: unknown };
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 9;
 
 /** The key `contextBridge` exposes on `window` inside the desktop shell. */
 export const BRIDGE_KEY = "__chatDesktop" as const;
+/** Private Electron channel used only after preload resolves a real File path. */
+export const DROPPED_FILE_CHANNEL = "chat-desktop:stage-dropped-file" as const;
 
 type Rpcs = typeof DesktopRpcs extends RpcGroup.RpcGroup<infer R> ? R : never;
 type RpcNamed<Tag extends string> = Extract<Rpcs, { readonly _tag: Tag }>;
@@ -152,12 +162,58 @@ export const makeDesktopResponder =
       return { ok: true, value: encoded } as const;
     });
 
+/**
+ * Stages a real dropped File while its host path remains inside preload/main.
+ * Null means the File has no host path, so the caller may use bounded base64.
+ */
+export const stageDroppedFile = (
+  file: File,
+  input: DroppedFileStageInputType,
+): Effect.Effect<StagedFileReceiptType | null, DesktopError> =>
+  Effect.gen(function* () {
+    const channel = readDesktopChannel();
+    if (!channel) return null;
+    const payload = yield* Schema.encodeEffect(DroppedFileStageInput)(input).pipe(
+      Effect.mapError(
+        () => new DesktopError({ reason: "failed", message: "Could not stage that file." }),
+      ),
+    );
+    const reply = yield* Effect.tryPromise({
+      try: () => channel.stageDroppedFile(file, payload),
+      catch: asDesktopError,
+    });
+    if (reply === null) return null;
+    if (!reply.ok) {
+      const failure = yield* Schema.decodeUnknownEffect(DesktopError)(reply.error).pipe(
+        Effect.catch(() =>
+          Effect.succeed(
+            new DesktopError({
+              reason: "failed",
+              message: "The desktop app sent an unreadable reply.",
+            }),
+          ),
+        ),
+      );
+      return yield* Effect.fail(failure);
+    }
+    return yield* Schema.decodeUnknownEffect(StagedFileReceipt)(reply.value).pipe(
+      Effect.mapError(
+        () =>
+          new DesktopError({
+            reason: "failed",
+            message: "The desktop app sent an unreadable reply.",
+          }),
+      ),
+    );
+  });
+
 /** True inside the desktop shell, on the origin the shell was pointed at. */
 export const readDesktopChannel = (): DesktopChannel | null => {
   const candidate = (globalThis as Record<string, unknown>)[BRIDGE_KEY];
   if (!candidate || typeof candidate !== "object") return null;
   const channel = candidate as Partial<DesktopChannel>;
   if (typeof channel.request !== "function") return null;
+  if (typeof channel.stageDroppedFile !== "function") return null;
   if (channel.protocolVersion !== PROTOCOL_VERSION) return null;
   return channel as DesktopChannel;
 };
