@@ -19,6 +19,8 @@ import {
 } from "~/modules/schedules/tool-schema.ts";
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
 import { AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
+import { SteerChunkEnvelope } from "../schema.ts";
+import type { AssistantSteer } from "../ui/assistant-body.ts";
 import {
   KnowledgeToolEnvelope,
   type KnowledgeActivitySummary,
@@ -194,6 +196,8 @@ export interface StreamState {
   tools: ToolActivity[];
   /** Usually empty; one response may compact at several turn boundaries. */
   compactions: CompactionActivity[];
+  /** Queued messages this answer took in, in the order it took them. */
+  steers: AssistantSteer[];
   lastSeq: number;
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
 }
@@ -207,12 +211,13 @@ type Action =
       reasoningSeen: boolean;
       tools: ToolActivity[];
       compactions: CompactionActivity[];
+      steers?: AssistantSteer[];
       lastSeq: number;
     }
   | {
       kind: "chunk";
       seq: number;
-      chunkKind: "text" | "reasoning" | "tool" | "compaction" | "file";
+      chunkKind: ChunkKind;
       delta: string;
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
@@ -766,6 +771,25 @@ export function applyCompactionChunk(
   );
 }
 
+/** Every chunk kind the server writes; see `ChunkKind` in the chat repo. */
+type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer";
+
+/** Adds a steer from its envelope; a replayed or malformed one changes nothing. */
+export const applySteerChunk = (
+  steers: ReadonlyArray<AssistantSteer>,
+  delta: string,
+): AssistantSteer[] => {
+  try {
+    const { v: _version, ...steer } = Schema.decodeUnknownSync(SteerChunkEnvelope)(
+      JSON.parse(delta),
+    );
+    if (steers.some((item) => item.id === steer.id)) return [...steers];
+    return [...steers, steer];
+  } catch {
+    return [...steers];
+  }
+};
+
 export const applyFileChunk = (
   files: ReadonlyArray<AssistantFile>,
   delta: string,
@@ -793,6 +817,7 @@ function reducer(state: StreamState, action: Action): StreamState {
         reasoningSeen: action.reasoningSeen,
         tools: action.tools,
         compactions: action.compactions,
+        steers: action.steers ?? [],
         lastSeq: action.lastSeq,
         status: "streaming",
       };
@@ -816,6 +841,13 @@ function reducer(state: StreamState, action: Action): StreamState {
         return {
           ...state,
           compactions: applyCompactionChunk(state.compactions, action.delta),
+          lastSeq: action.seq,
+        };
+      }
+      if (action.chunkKind === "steer") {
+        return {
+          ...state,
+          steers: applySteerChunk(state.steers, action.delta),
           lastSeq: action.seq,
         };
       }
@@ -844,6 +876,7 @@ export interface InitialStream {
   reasoningSeen: boolean;
   tools: ToolActivity[];
   compactions: CompactionActivity[];
+  steers?: AssistantSteer[];
   lastSeq: number;
 }
 
@@ -871,6 +904,7 @@ export function useMessageStream(
     reasoningSeen: initial?.reasoningSeen ?? false,
     tools: initial?.tools ?? [],
     compactions: initial?.compactions ?? [],
+    steers: initial?.steers ?? [],
     lastSeq: initial?.lastSeq ?? 0,
     status: messageId ? "streaming" : "idle",
   });
@@ -889,6 +923,7 @@ export function useMessageStream(
       reasoningSeen: initial?.reasoningSeen ?? false,
       tools: initial?.tools ?? [],
       compactions: initial?.compactions ?? [],
+      steers: initial?.steers ?? [],
       lastSeq: initial?.lastSeq ?? 0,
     });
   }
@@ -919,7 +954,7 @@ export function useMessageStream(
     source.addEventListener("chunk", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         seq: number;
-        kind?: "text" | "reasoning" | "tool" | "compaction" | "file";
+        kind?: ChunkKind;
         delta: string;
         runId?: string;
       };

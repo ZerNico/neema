@@ -162,6 +162,12 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
             void queryClient.invalidateQueries({ queryKey: ["memory"] });
           }
           break;
+        case "conversation.queue.changed":
+          // The work snapshot lists Work chats with a queued message ready, so
+          // a desktop app learns of one queued behind an answer that just ended.
+          refreshWork();
+          void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
+          break;
         case "message.created":
         case "message.status":
           refreshWork();

@@ -52,6 +52,20 @@ export class InvalidMessage extends Schema.TaggedError<InvalidMessage>()("Invali
  * this case explicitly; sending must too, or a second tab can start a
  * concurrent generation whose history misses the in-flight answer.
  */
+export class QueueFull extends Schema.TaggedError<QueueFull>()("QueueFull", {
+  conversationId: Schema.String,
+}) {}
+
+export class QueueEntryNotFound extends Schema.TaggedError<QueueEntryNotFound>()(
+  "QueueEntryNotFound",
+  { entryId: Schema.String },
+) {}
+
+export class NoActiveGeneration extends Schema.TaggedError<NoActiveGeneration>()(
+  "NoActiveGeneration",
+  { conversationId: Schema.String },
+) {}
+
 export class ConversationBusy extends Schema.TaggedError<ConversationBusy>()("ConversationBusy", {
   conversationId: Schema.String,
 }) {}

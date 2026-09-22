@@ -29,6 +29,18 @@ export interface HistoryMessage {
 }
 
 /**
+ * A user message delivered into a running answer. It is rendered inside that
+ * answer where it arrived, so the model reads the answer so far, the steer,
+ * then the rest; never a steer above an answer that started without it.
+ */
+export interface HistorySteer extends HistoryMessage {
+  /** Raw content offset in the answer where the steer arrived. */
+  readonly textOffset: number;
+  /** The model round it followed; places it between replayed turns. */
+  readonly turnIndex: number;
+}
+
+/**
  * Only the three methods the builder needs, so unit tests can hand it plain
  * objects instead of standing up the whole layer graph.
  */
@@ -78,6 +90,8 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     deferAssistantBytes?: boolean;
     loadedBytes?: Map<string, Uint8Array>;
     expandAssistantTurns?: boolean;
+    /** Steers by the answer they were delivered into; see `HistorySteer`. */
+    steers?: ReadonlyMap<string, ReadonlyArray<HistorySteer>>;
   },
 ) {
   // Citation markers stay in history whether or not this attempt has web
@@ -91,23 +105,38 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
 
   // A workspace import is named ahead of the text, like an attachment part,
   // so a question that is only a drop still reads as "about these files".
-  const withWorkspaceFiles = (message: HistoryMessage): Prompt.MessageEncoded => {
+  const workspaceLine = (message: HistoryMessage) => {
     const files = message.workspaceFiles ?? [];
-    if (message.role !== "user" || files.length === 0) return plain(message);
-    const line = `[The user added ${files.length === 1 ? "this file" : "these files"} to the workspace: ${files.join(", ")}]`;
+    return message.role === "user" && files.length > 0
+      ? `[The user added ${files.length === 1 ? "this file" : "these files"} to the workspace: ${files.join(", ")}]`
+      : null;
+  };
+  const withWorkspaceFiles = (message: HistoryMessage): Prompt.MessageEncoded => {
+    const line = workspaceLine(message);
+    if (line === null) return plain(message);
     return {
       role: "user" as const,
       content: line + "\n" + messageTimestamp(message) + message.content,
     };
   };
 
-  const rows = yield* deps.attachments.listWithBlobsForMessages(
-    input.messages
+  const steersOf = (message: HistoryMessage): HistorySteer[] => {
+    if (message.role !== "assistant") return [];
+    const list = [...(input.steers?.get(message.id) ?? [])];
+    // oxlint-disable-next-line no-array-sort -- fresh array
+    list.sort((a, b) => a.textOffset - b.textOffset);
+    return list;
+  };
+  const steered = input.messages.flatMap(steersOf);
+  const rows = yield* deps.attachments.listWithBlobsForMessages([
+    ...input.messages
       .filter((message) => message.role === "user" || message.role === "assistant")
       .map((message) => message.id),
-  );
+    ...steered.map((steer) => steer.id),
+  ]);
   if (
     rows.length === 0 &&
+    steered.length === 0 &&
     !input.messages.some(
       (message) => message.assistantOutput?.files.length || message.providerReplay?.turns.length,
     )
@@ -151,9 +180,43 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     return parsed.text;
   });
 
+  const userMessage = Effect.fn("chat.historyUserMessage")(function* (message: HistoryMessage) {
+    const attached = byMessage.get(message.id);
+    if (!attached || attached.length === 0) return withWorkspaceFiles(message);
+    const parts: Array<Prompt.UserMessagePartEncoded> = [];
+    const line = workspaceLine(message);
+    if (line !== null) parts.push({ type: "text", text: line });
+    for (const row of attached) {
+      const kind = attachmentKind(row.mediaType);
+      if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
+        parts.push({
+          type: "file",
+          mediaType: row.mediaType,
+          fileName: row.fileName,
+          data: yield* loadBytes(row),
+        });
+        continue;
+      }
+      const text = kind === "pdf" ? yield* pdfText(row) : decoder.decode(yield* loadBytes(row));
+      parts.push({
+        type: "text",
+        text: buildTextFence({
+          fileName: row.fileName,
+          text,
+          ...(kind === "pdf" ? { label: PDF_TEXT_LABEL } : {}),
+        }),
+      });
+    }
+    // The user's own words come last: attachments read as context for them.
+    const text = messageTimestamp(message) + message.content;
+    if (text.trim() !== "") parts.push({ type: "text", text });
+    return { role: "user", content: parts } satisfies Prompt.MessageEncoded;
+  });
+
   const messages: Array<Prompt.MessageEncoded> = [];
   for (const message of input.messages) {
     const attached = byMessage.get(message.id);
+    const steers = steersOf(message);
     if (
       message.role === "assistant" &&
       (message.assistantOutput?.files.length || message.providerReplay?.turns.length)
@@ -301,48 +364,39 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
               result: call.result ?? { error: "The earlier tool did not complete." },
             })),
           });
+        // A steer is claimed only after a round's results are terminal, so it
+        // sits between this turn's results and the next turn.
+        for (const steer of steers.filter((item) => item.turnIndex === turn.turnIndex))
+          messages.push(yield* userMessage(steer));
       }
+      // Unexpanded, there are no turns to sit between; keep them after.
+      const placed = new Set(turns.map((turn) => turn.turnIndex));
+      for (const steer of steers.filter((item) => !placed.has(item.turnIndex)))
+        messages.push(yield* userMessage(steer));
+      continue;
+    }
+    if (steers.length > 0) {
+      // Plain text splits at each steer's offset: the answer so far, the
+      // steer, then what the answer went on to say.
+      let timestamp = messageTimestamp(message);
+      let cursor = 0;
+      for (const steer of steers) {
+        const end = Math.min(Math.max(steer.textOffset, cursor), message.content.length);
+        const text = message.content.slice(cursor, end);
+        if (timestamp || text) messages.push({ role: "assistant", content: timestamp + text });
+        timestamp = "";
+        messages.push(yield* userMessage(steer));
+        cursor = end;
+      }
+      const rest = message.content.slice(cursor);
+      if (rest) messages.push({ role: "assistant", content: rest });
       continue;
     }
     if (message.role !== "user" || !attached || attached.length === 0) {
       messages.push(withWorkspaceFiles(message));
       continue;
     }
-
-    const parts: Array<Prompt.UserMessagePartEncoded> = [];
-    const workspaceFiles = message.workspaceFiles ?? [];
-    if (workspaceFiles.length > 0) {
-      parts.push({
-        type: "text",
-        text: `[The user added ${workspaceFiles.length === 1 ? "this file" : "these files"} to the workspace: ${workspaceFiles.join(", ")}]`,
-      });
-    }
-    for (const row of attached) {
-      const kind = attachmentKind(row.mediaType);
-      if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
-        parts.push({
-          type: "file",
-          mediaType: row.mediaType,
-          fileName: row.fileName,
-          data: yield* loadBytes(row),
-        });
-        continue;
-      }
-      const text = kind === "pdf" ? yield* pdfText(row) : decoder.decode(yield* loadBytes(row));
-      parts.push({
-        type: "text",
-        text: buildTextFence({
-          fileName: row.fileName,
-          text,
-          ...(kind === "pdf" ? { label: PDF_TEXT_LABEL } : {}),
-        }),
-      });
-    }
-    // The user's own words come last: attachments read as context for them.
-    const text = messageTimestamp(message) + message.content;
-    if (text.trim() !== "") parts.push({ type: "text", text });
-
-    messages.push({ role: "user", content: parts });
+    messages.push(yield* userMessage(message));
   }
   return messages;
 });

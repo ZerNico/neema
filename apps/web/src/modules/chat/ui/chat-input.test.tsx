@@ -1,3 +1,4 @@
+import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense, useImperativeHandle, useState, type Ref } from "react";
@@ -880,5 +881,112 @@ describe("ChatInput model compatibility", () => {
     });
     pick(withoutParsing, pdf);
     expect(await screen.findByText(/cannot read PDFs/)).toBeInTheDocument();
+  });
+});
+
+describe("queueing behind a live response", () => {
+  const client = () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    queryClient.setQueryData(["chat-models"], MODELS);
+    queryClient.setQueryData(["tools", "web-search", "availability"], {
+      configured: false,
+      enabled: false,
+    });
+    return queryClient;
+  };
+  const input = (queryClient: QueryClient, value: string, onSubmit = vi.fn(), onStop = vi.fn()) => (
+    <AppMotionProvider>
+      <QueryClientProvider client={queryClient}>
+        <ChatInput
+          value={value}
+          onValueChange={() => {}}
+          onSubmit={onSubmit}
+          onStop={onStop}
+          queueing
+          disabled={false}
+          modelId="text-only"
+          onModelChange={() => {}}
+          searchEnabled={false}
+          onSearchEnabledChange={() => {}}
+        />
+      </QueryClientProvider>
+    </AppMotionProvider>
+  );
+
+  it("submits a typed draft to the queue while Stop stays available", () => {
+    const onSubmit = vi.fn();
+    const onStop = vi.fn();
+    render(input(client(), "Next question", onSubmit, onStop));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onStop).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop generating" }));
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a single Stop control when nothing is typed", () => {
+    render(input(client(), ""));
+    expect(screen.getAllByRole("button", { name: "Stop generating" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull();
+  });
+
+  it("never queues a Work draft holding files dropped into the workspace", () => {
+    const onSubmit = vi.fn();
+    const imports: WorkspaceImports = {
+      items: [
+        {
+          localId: "i1",
+          fileName: "notes.md",
+          size: 10,
+          kind: "text",
+          status: "complete",
+          storedName: "notes.md",
+          error: null,
+        },
+      ],
+      fileNames: ["notes.md"],
+      importing: false,
+      hasError: false,
+      isFull: false,
+      notice: null,
+      queued: false,
+      submissionId: "s1",
+      addFiles: vi.fn(),
+      remove: vi.fn(),
+      submit: vi.fn(),
+      cancelQueue: vi.fn(),
+      promote: vi.fn(),
+      commit: vi.fn(),
+      rollback: vi.fn(),
+      markClaimed: vi.fn(),
+      reset: vi.fn(),
+      dismissNotice: vi.fn(),
+    };
+    render(
+      <AppMotionProvider>
+        <QueryClientProvider client={client()}>
+          <ChatInput
+            value="Use these"
+            onValueChange={() => {}}
+            onSubmit={onSubmit}
+            onStop={vi.fn()}
+            queueing
+            workspaceImports={imports}
+            disabled={false}
+            modelId="text-only"
+            onModelChange={() => {}}
+            searchEnabled={false}
+            onSearchEnabledChange={() => {}}
+          />
+        </QueryClientProvider>
+      </AppMotionProvider>,
+    );
+    // Their send reserves the turn, which a running answer refuses.
+    expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Stop generating" })).toHaveLength(1);
   });
 });

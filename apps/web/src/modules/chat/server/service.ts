@@ -1,6 +1,7 @@
 import type { DesktopSubmission } from "../schema.ts";
+import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Duration, Effect, Layer, Option } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   BranchNotAllowed,
@@ -12,6 +13,9 @@ import {
   ModelNotFound,
   RetryNotAllowed,
   QuestionUnavailable,
+  QueueEntryNotFound,
+  QueueFull,
+  NoActiveGeneration,
   WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -42,8 +46,10 @@ import {
   type ResolveGeneration,
   type TurnContent,
   type TurnFields,
+  type ResolveError,
 } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
+import { QueueSweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 
 /**
@@ -85,6 +91,51 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     agentId?: string | null | undefined;
   };
 
+/** A text-and-files submission held for later, with the settings it was made under. */
+type QueueSubmission = {
+  userId: string;
+  conversationId: string;
+  content: string;
+  attachmentIds: ReadonlyArray<string>;
+  input: QueuedTurnInput;
+  /** Present when queued from the desktop app; a Work chat requires it. */
+  desktop?: DesktopDispatch | undefined;
+};
+
+type QueueSubmissionError =
+  | ModelNotFound
+  | ToolUnavailable
+  | InvalidMessage
+  | WorkDesktopRequired
+  | AttachmentUnsupported
+  | AttachmentNotAvailable;
+
+/**
+ * What the desktop app reports when it queues or starts Work: which folders it
+ * has attached, whether it can sandbox, and which running app it is. The
+ * device session comes from the authenticated request, never the body.
+ */
+export type DesktopDispatch = {
+  fromDesktop: boolean;
+  desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
+  desktopCommands?: boolean | undefined;
+  desktopExecutorId: string;
+  deviceSessionId?: string | undefined;
+};
+
+/** What the queue strip says when a queued message could not start. */
+const queueFailure = (error: { readonly _tag: string }) => {
+  switch (error._tag) {
+    case "AttachmentUnsupported":
+    case "AttachmentNotAvailable":
+      return "A file in this message can’t be read by its model anymore. Edit it or remove it.";
+    case "ModelNotFound":
+      return "This message’s model is no longer available. Edit it to pick another.";
+    default:
+      return "This message could not be started. Its model or collections may no longer be available.";
+  }
+};
+
 /** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
 export class ChatService extends Context.Service<
   ChatService,
@@ -125,6 +176,69 @@ export class ChatService extends Context.Service<
       | SkillRejected
       | KnowledgeNotAvailable
       | KnowledgeRejected
+    >;
+    queueMessage(
+      input: QueueSubmission,
+    ): Effect.Effect<{ entryId: string }, QueueSubmissionError | ConversationNotFound | QueueFull>;
+    /** Rewrites a queued message in place; see `ChatRepo.replaceQueueEntry`. */
+    replaceQueuedMessage(
+      input: QueueSubmission & { entryId: string },
+    ): Effect.Effect<void, QueueSubmissionError | ConversationNotFound | QueueEntryNotFound>;
+    removeQueuedMessage(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+    }): Effect.Effect<void, ConversationNotFound>;
+    steerQueuedMessage(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      messageId: string;
+      generationId: string;
+    }): Effect.Effect<
+      void,
+      ConversationNotFound | QueueEntryNotFound | NoActiveGeneration | AttachmentUnsupported
+    >;
+    /**
+     * Starts the next queued message. A Work chat's entry needs `desktop`: the
+     * fresh fields of the app dispatching it. Without them it waits, since the
+     * server cannot name a live machine on its own.
+     */
+    dispatchQueuedMessage(input: {
+      userId: string;
+      conversationId: string;
+      force?: boolean | undefined;
+      /** Start this entry rather than the head; see `sendQueuedNow`. */
+      entryId?: string | undefined;
+      desktop?: DesktopDispatch | undefined;
+    }): Effect.Effect<
+      { started: boolean },
+      | ConversationNotFound
+      | ModelNotFound
+      | ToolUnavailable
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
+      | ResolveError
+    >;
+    /**
+     * Sends one queued message now, whatever its place. A running answer is
+     * stopped first, keeping what it wrote, and the entry starts once that
+     * answer has settled; a paused queue just starts it.
+     */
+    sendQueuedNow(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      desktop?: DesktopDispatch | undefined;
+    }): Effect.Effect<
+      { started: boolean },
+      | ConversationNotFound
+      | MessageNotFound
+      | ModelNotFound
+      | ToolUnavailable
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
+      | ResolveError
     >;
     /**
      * Regenerates an assistant message in place (same id, fresh stream),
@@ -281,6 +395,27 @@ function makeChatService() {
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
     const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
+
+    // Recovers queues a restart or a reaped generation left waiting: the
+    // in-process completion hook is gone with the fiber that owned it, and the
+    // promotion transaction refuses anything the hook would have refused. Work
+    // chats are not swept; only a desktop app can start them.
+    const startQueueSweeper = (
+      drain: (userId: string, conversationId: string) => Effect.Effect<void>,
+      interval: Duration.Duration,
+    ) =>
+      Effect.forkScoped(
+        Effect.gen(function* () {
+          const pending = yield* repo.listQueuedConversations({ limit: 20, mode: "chat" });
+          yield* Effect.forEach(pending, (row) => drain(row.userId, row.conversationId), {
+            discard: true,
+          });
+        }).pipe(
+          Effect.catchCause((cause) => Effect.logError("queue sweep failed", cause)),
+          Effect.delay(interval),
+          Effect.forever,
+        ),
+      );
 
     // The composer's toggle gates web_search only; read_url is gated by user URLs.
     const searchToolEnabled = Effect.gen(function* () {
@@ -547,6 +682,248 @@ function makeChatService() {
       yield* repo.abortWorkTurn(input.userId, input.reservationId);
     });
 
+    /**
+     * Everything a send would check, run now while the person is still looking
+     * at the composer. Dispatch checks again, since a model or a collection can
+     * go away while the message waits.
+     */
+    const validateQueueSubmission = Effect.fn("ChatService.validateQueueSubmission")(function* (
+      input: QueueSubmission,
+    ) {
+      if (input.content.trim() === "" && input.attachmentIds.length === 0)
+        return yield* new InvalidMessage({ reason: "message is empty" });
+      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
+      // Queued Work runs on a machine, so it can only be handed over from one.
+      if (conversation.mode === "work" && !input.desktop?.fromDesktop)
+        return yield* new WorkDesktopRequired();
+      yield* validateGenerationOptions({
+        userId: input.userId,
+        modelId: input.input.modelId,
+        searchEnabled: input.input.searchEnabled,
+        researchEnabled: input.input.researchEnabled,
+        attachmentIds: input.attachmentIds,
+      });
+    });
+
+    const queueChanged = (userId: string, conversationId: string) =>
+      sync.publish(userId, { type: "conversation.queue.changed", conversationId });
+
+    const queueMessage = Effect.fn("ChatService.queueMessage")(function* (input: QueueSubmission) {
+      yield* validateQueueSubmission(input);
+      const entry = yield* repo.enqueue({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        content: input.content.trim(),
+        attachmentIds: input.attachmentIds,
+        input: input.input,
+      });
+      yield* queueChanged(input.userId, input.conversationId);
+      // The answer it was queued behind may have finished while this request
+      // was in flight; waiting for the sweep would stall it for no reason.
+      yield* drainQueue(input.userId, input.conversationId);
+      return { entryId: entry.id };
+    });
+
+    const replaceQueuedMessage = Effect.fn("ChatService.replaceQueuedMessage")(function* (
+      input: QueueSubmission & { entryId: string },
+    ) {
+      yield* validateQueueSubmission(input);
+      const orphaned = yield* repo.replaceQueueEntry({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        entryId: input.entryId,
+        content: input.content.trim(),
+        attachmentIds: input.attachmentIds,
+        input: input.input,
+      });
+      yield* attachmentService.deleteBlobs(orphaned);
+      yield* queueChanged(input.userId, input.conversationId);
+      // Editing is how a person fixes an entry that could not start; with its
+      // error cleared it may start now rather than at the next sweep.
+      yield* drainQueue(input.userId, input.conversationId);
+    });
+
+    const removeQueuedMessage = Effect.fn("ChatService.removeQueuedMessage")(function* (input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+    }) {
+      const orphaned = yield* repo.removeQueueEntry(input);
+      yield* attachmentService.deleteBlobs(orphaned);
+      yield* queueChanged(input.userId, input.conversationId);
+    });
+
+    const steerQueuedMessage = Effect.fn("ChatService.steerQueuedMessage")(function* (input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      messageId: string;
+      generationId: string;
+    }) {
+      yield* repo.getConversation(input.userId, input.conversationId);
+      // A steer joins an answer already running on its own model, which may
+      // not be the one the entry was queued with. Its files have to be
+      // readable by that model, or the continuation would fail mid-answer.
+      const running = yield* repo.getMessage(input.messageId);
+      const entry = (yield* repo.listQueue(input.conversationId)).find(
+        (item) => item.id === input.entryId,
+      );
+      if (!entry) return yield* new QueueEntryNotFound({ entryId: input.entryId });
+      const model = running?.modelId ? yield* providers.getModel(running.modelId) : null;
+      if (model && entry.attachments.length > 0)
+        yield* validateAttachments(
+          input.userId,
+          model.capabilities,
+          entry.attachments.map((file) => file.id),
+        ).pipe(
+          Effect.catchTag("AttachmentNotAvailable", () =>
+            Effect.fail(new QueueEntryNotFound({ entryId: input.entryId })),
+          ),
+        );
+      yield* repo.steerQueueEntry(input);
+      yield* queueChanged(input.userId, input.conversationId);
+    });
+
+    const startNextQueued = Effect.fn("ChatService.startNextQueued")(function* (input: {
+      userId: string;
+      conversationId: string;
+      force?: boolean | undefined;
+      entryId?: string | undefined;
+      desktop?: DesktopDispatch | undefined;
+    }): Effect.fn.Return<
+      { started: boolean },
+      | ConversationNotFound
+      | ModelNotFound
+      | ToolUnavailable
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
+      | ResolveError
+    > {
+      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
+      // Not an error: the entry simply waits for a desktop app to pick it up.
+      if (conversation.mode === "work" && !input.desktop) return { started: false };
+      const queue = yield* repo.listQueue(input.conversationId);
+      const head = input.entryId ? queue.find((entry) => entry.id === input.entryId) : queue[0];
+      if (!head) return { started: false };
+      const { model, researchEnabled } = yield* validateGenerationOptions({
+        userId: input.userId,
+        modelId: head.input.modelId,
+        searchEnabled: head.input.searchEnabled,
+        researchEnabled: head.input.researchEnabled,
+        attachmentIds: head.attachments.map((file) => file.id),
+      });
+      const searchAvailable = yield* searchToolEnabled;
+      const outcome = yield* repo.promoteNextQueuedTurn({
+        conversationId: input.conversationId,
+        expectedEntryId: head.id,
+        ...(input.entryId ? { jumpQueue: true } : {}),
+        ...(input.force ? { force: true } : {}),
+        resolve: () =>
+          resolver({
+            attempt: "send",
+            userId: input.userId,
+            model,
+            searchAvailable,
+            searchEnabled: head.input.searchEnabled,
+            researchEnabled,
+            collectionIds: head.input.collectionIds,
+            skillIds: head.input.skillIds,
+            // Taken from the dispatching app now, never from queue time.
+            desktopFolders: input.desktop?.desktopFolders,
+            desktopCommands: input.desktop?.desktopCommands,
+            fromDesktop: input.desktop?.fromDesktop,
+            desktopExecutorId: input.desktop?.desktopExecutorId,
+          }),
+      });
+      // The head moved between validation and the lock; check the new one.
+      // A chosen entry that went away is simply not started.
+      if (!outcome.promoted && outcome.reason === "changed" && !input.entryId)
+        return yield* startNextQueued(input);
+      if (!outcome.promoted) return { started: false };
+      yield* sync.publish(input.userId, {
+        type: "message.created",
+        conversationId: input.conversationId,
+        messageId: outcome.assistant.id,
+      });
+      yield* queueChanged(input.userId, input.conversationId);
+      yield* engine.startGeneration({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        messageId: outcome.assistant.id,
+        generationId: outcome.assistant.generationId ?? undefined,
+        modelId: outcome.entry.input.modelId,
+        searchEnabled: outcome.config.searchEnabled,
+        timeZone: outcome.entry.input.timeZone,
+        openDocumentId: outcome.entry.input.openDocumentId,
+        desktopExecutorId: input.desktop?.desktopExecutorId,
+        ...(input.desktop?.desktopFolders !== undefined
+          ? { desktopFolders: input.desktop.desktopFolders }
+          : {}),
+        deviceSessionId: input.desktop?.deviceSessionId,
+        onSettled: ({ status }) =>
+          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
+      });
+      return { started: true };
+    });
+
+    /**
+     * Every path that starts a queued message goes through here, so a head
+     * whose model, files or collections went away is annotated whoever tried:
+     * the server's own drain, a desktop app, or a person pressing the button.
+     * The entry is kept, never dropped.
+     */
+    const dispatchQueuedMessage = (input: Parameters<typeof startNextQueued>[0]) =>
+      startNextQueued(input).pipe(
+        Effect.tapError((error) =>
+          Effect.gen(function* () {
+            if (error._tag === "ConversationNotFound") return;
+            const head = (yield* repo.listQueue(input.conversationId))[0];
+            if (head) yield* repo.setQueueEntryError(head.id, queueFailure(error));
+            yield* queueChanged(input.userId, input.conversationId);
+          }),
+        ),
+      );
+
+    const sendQueuedNow = Effect.fn("ChatService.sendQueuedNow")(function* (input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      desktop?: DesktopDispatch | undefined;
+    }) {
+      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
+      // Only a desktop app can start Work. Without one, stopping the answer
+      // would leave nothing running and the message still waiting.
+      if (conversation.mode === "work" && !input.desktop) return { started: false };
+      const live = (yield* repo.listMessages(input.conversationId)).find(
+        (message) => message.status === "streaming",
+      );
+      if (live) {
+        const generationId = live.generationId ?? undefined;
+        yield* stopGeneration({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: live.id,
+          generationId,
+        });
+        // Finalize is quick, but the promotion must see the stopped row. A
+        // stall leaves the entry queued for Send next rather than hanging.
+        yield* engine
+          .awaitSettled(live.id, generationId)
+          .pipe(Effect.timeout(Duration.seconds(10)), Effect.ignore);
+      }
+      // A person asked for this one, so it may start after the stop.
+      return yield* dispatchQueuedMessage({ ...input, force: true });
+    });
+
+    /** Dispatch that never fails its caller; the reason is already on the entry. */
+    const drainQueue = (userId: string, conversationId: string): Effect.Effect<void> =>
+      Effect.suspend(() => dispatchQueuedMessage({ userId, conversationId })).pipe(
+        Effect.asVoid,
+        Effect.catch((error) =>
+          Effect.logError("queued message dispatch failed", { conversationId, error }),
+        ),
+      );
+
     const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
       // Dropped files count as content on their own: an import-only send is a
       // question with chips and no bubble. Both names and text, since the
@@ -675,6 +1052,10 @@ function makeChatService() {
           searchEnabled: turn.config.searchEnabled,
           timeZone: input.timeZone,
           openDocumentId: input.openDocumentId,
+          // Queued messages start only after an answer ends cleanly, so a stop
+          // or a failure leaves the rest of the queue for the person to decide on.
+          onSettled: ({ status }) =>
+            status === "complete" ? drainQueue(input.userId, turn.conversation.id) : Effect.void,
         });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -900,6 +1281,8 @@ function makeChatService() {
         searchEnabled: searchEnabled!,
         timeZone: input.timeZone,
         openDocumentId: input.openDocumentId,
+        onSettled: ({ status }) =>
+          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
 
       return { assistantMessageId: input.assistantMessageId };
@@ -1130,6 +1513,14 @@ function makeChatService() {
           reason: "only completed user messages can be edited",
         });
       }
+      // A steer is part of the answer it went into; editing it would restart
+      // that answer from a message it never started with.
+      if (message.steeredIntoMessageId) {
+        return yield* new EditNotAllowed({
+          messageId: input.messageId,
+          reason: "a message sent into a response cannot be edited",
+        });
+      }
 
       const all = yield* repo.listMessages(input.conversationId);
       const index = all.findIndex((candidate) => candidate.id === input.messageId);
@@ -1256,6 +1647,8 @@ function makeChatService() {
         searchEnabled: created.config.searchEnabled,
         timeZone: input.timeZone,
         openDocumentId: input.openDocumentId,
+        onSettled: ({ status }) =>
+          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
 
       return { assistantMessageId: created.message.id };
@@ -1337,11 +1730,20 @@ function makeChatService() {
       });
     });
 
+    const sweepInterval = yield* QueueSweepInterval;
+    if (sweepInterval) yield* startQueueSweeper(drainQueue, sweepInterval);
+
     return ChatService.of({
       reserveWorkTurn,
       getWorkTurnReservation,
       abortWorkTurn,
       sendMessage,
+      queueMessage,
+      replaceQueuedMessage,
+      removeQueuedMessage,
+      steerQueuedMessage,
+      dispatchQueuedMessage,
+      sendQueuedNow,
       retryMessage,
       branchConversation,
       editMessage,

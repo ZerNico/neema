@@ -1,4 +1,5 @@
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -6,12 +7,14 @@ import {
   attachmentBlobs,
   attachments,
   blobCleanupIntents,
+  conversationQueueEntries,
+  conversationQueueEntryAttachments,
   conversations,
   messageAttachments,
   messages,
 } from "~/db/schema/index.ts";
 import { attachmentKind } from "../constants.ts";
-import type { Attachment, MessageAttachment } from "../schema.ts";
+import type { Attachment, MessageAttachment, QueuedAttachment } from "../schema.ts";
 import { AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
@@ -70,6 +73,66 @@ const withBlobColumns = {
 // chain. Anything else raised during the claim insert is a real fault and
 // must not be dressed up as a user-level conflict.
 
+/**
+ * No owner of either kind: not a transcript message's file and not a queued
+ * message's. Every "is this upload still free" question reads this, so a
+ * queued file is never swept, deleted as abandoned, or claimed a second time.
+ */
+const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id})`;
+
+/** Whose files these are: a transcript message, or a queued message. */
+type AttachmentOwner = { kind: "message"; id: string } | { kind: "queue"; id: string };
+
+const linksOf = (tx: DbTx, owner: AttachmentOwner) =>
+  owner.kind === "message"
+    ? tx
+        .select({ attachmentId: messageAttachments.attachmentId })
+        .from(messageAttachments)
+        .where(eq(messageAttachments.messageId, owner.id))
+        .orderBy(asc(messageAttachments.position))
+    : tx
+        .select({ attachmentId: conversationQueueEntryAttachments.attachmentId })
+        .from(conversationQueueEntryAttachments)
+        .where(eq(conversationQueueEntryAttachments.queueEntryId, owner.id))
+        .orderBy(asc(conversationQueueEntryAttachments.position));
+
+const dropLinks = (tx: DbTx, owner: AttachmentOwner) =>
+  owner.kind === "message"
+    ? tx.delete(messageAttachments).where(eq(messageAttachments.messageId, owner.id))
+    : tx
+        .delete(conversationQueueEntryAttachments)
+        .where(eq(conversationQueueEntryAttachments.queueEntryId, owner.id));
+
+const insertLinks = (tx: DbTx, owner: AttachmentOwner, attachmentIds: ReadonlyArray<string>) =>
+  owner.kind === "message"
+    ? tx.insert(messageAttachments).values(
+        attachmentIds.map((attachmentId, position) => ({
+          messageId: owner.id,
+          attachmentId,
+          position,
+        })),
+      )
+    : tx.insert(conversationQueueEntryAttachments).values(
+        attachmentIds.map((attachmentId, position) => ({
+          queueEntryId: owner.id,
+          attachmentId,
+          position,
+        })),
+      );
+
+const lockAttachmentBlobs = (tx: DbTx, attachmentIds: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    if (attachmentIds.length === 0) return;
+    const rows = yield* tx
+      .select({ blobId: attachments.blobId })
+      .from(attachments)
+      .where(inArray(attachments.id, [...attachmentIds]));
+    yield* lockBlobs(
+      tx,
+      rows.map((row) => row.blobId),
+    );
+  });
+
 const deleteAttachmentRows = (
   tx: DbTx,
   attachmentIds: ReadonlyArray<string>,
@@ -86,12 +149,7 @@ const deleteAttachmentRows = (
     yield* tx
       .delete(attachments)
       .where(
-        and(
-          inArray(attachments.id, [...attachmentIds]),
-          onlyUnclaimed
-            ? sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id})`
-            : undefined,
-        ),
+        and(inArray(attachments.id, [...attachmentIds]), onlyUnclaimed ? unclaimed : undefined),
       );
     return yield* collectOrphanedBlobs(tx, blobIds);
   });
@@ -139,6 +197,28 @@ export class AttachmentRepo extends Context.Service<
       tx: DbTx,
       input: { userId: string; messageId: string; attachmentIds: ReadonlyArray<string> },
     ): Effect.Effect<ReadonlyArray<string>, AttachmentNotAvailable>;
+    /** `reconcile` for a queued message, which holds files until it becomes one. */
+    reconcileQueueEntry(
+      tx: DbTx,
+      input: { userId: string; queueEntryId: string; attachmentIds: ReadonlyArray<string> },
+    ): Effect.Effect<ReadonlyArray<string>, AttachmentNotAvailable>;
+    /**
+     * Moves a queued message's files onto the message it just became, keeping
+     * their order. The rows and bytes stay; only the owner changes, so this
+     * never produces cleanup work.
+     */
+    transferQueueEntry(
+      tx: DbTx,
+      input: { queueEntryId: string; messageId: string },
+    ): Effect.Effect<void>;
+    /** Releases every file held by these queued messages (removal, deletion). */
+    releaseForQueueEntries(
+      tx: DbTx,
+      queueEntryIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>>;
+    listForQueueEntries(
+      queueEntryIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<QueuedAttachment>>;
     /**
      * Copies the attachments of each source message onto its target message,
      * inside the caller's transaction (branching). Blobs are shared, not
@@ -285,23 +365,44 @@ export class AttachmentRepo extends Context.Service<
       const findForAccess = Effect.fn("AttachmentRepo.findForAccess")(function* (
         attachmentId: string,
       ) {
+        const queuedConversations = alias(conversations, "queued_conversations");
         const rows = yield* db
           .select({
             ...withBlobColumns,
             claimedByMessageId: messageAttachments.messageId,
             conversationUserId: conversations.userId,
+            // A queued file is shown in the queue strip before it is a
+            // message's, so its conversation's owner may read it too.
+            queuedConversationUserId: queuedConversations.userId,
           })
           .from(attachments)
           .innerJoin(attachmentBlobs, eq(attachments.blobId, attachmentBlobs.id))
           .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))
           .leftJoin(messages, eq(messages.id, messageAttachments.messageId))
           .leftJoin(conversations, eq(conversations.id, messages.conversationId))
+          .leftJoin(
+            conversationQueueEntryAttachments,
+            eq(conversationQueueEntryAttachments.attachmentId, attachments.id),
+          )
+          .leftJoin(
+            conversationQueueEntries,
+            eq(conversationQueueEntries.id, conversationQueueEntryAttachments.queueEntryId),
+          )
+          .leftJoin(
+            queuedConversations,
+            eq(queuedConversations.id, conversationQueueEntries.conversationId),
+          )
           .where(eq(attachments.id, attachmentId))
           .pipe(Effect.orDie);
         const row = rows[0];
         if (!row) return null;
-        const { claimedByMessageId, conversationUserId, ...attachment } = row;
-        return { attachment, claimedByMessageId, conversationUserId };
+        const { claimedByMessageId, conversationUserId, queuedConversationUserId, ...attachment } =
+          row;
+        return {
+          attachment,
+          claimedByMessageId,
+          conversationUserId: conversationUserId ?? queuedConversationUserId,
+        };
       });
 
       const deleteUnclaimed = Effect.fn("AttachmentRepo.deleteUnclaimed")(function* (
@@ -316,13 +417,8 @@ export class AttachmentRepo extends Context.Service<
               const rows = yield* tx
                 .select({ id: attachments.id })
                 .from(attachments)
-                .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))
                 .where(
-                  and(
-                    eq(attachments.id, attachmentId),
-                    eq(attachments.userId, userId),
-                    isNull(messageAttachments.attachmentId),
-                  ),
+                  and(eq(attachments.id, attachmentId), eq(attachments.userId, userId), unclaimed),
                 );
               if (rows.length === 0) return null;
               return yield* deleteAttachmentRows(tx, [attachmentId], true);
@@ -333,21 +429,24 @@ export class AttachmentRepo extends Context.Service<
         return keys;
       });
 
-      const reconcile = Effect.fn("AttachmentRepo.reconcile")(function* (
+      /**
+       * Points one owner at exactly `attachmentIds`, in order. Blob rows are
+       * locked before any claim is checked: two owner tables share no unique
+       * index, so that lock is what stops one upload being claimed by a message
+       * and a queued message at once. Returns cleanup keys for dropped files.
+       */
+      const claimAttachments = Effect.fn("AttachmentRepo.claimAttachments")(function* (
         tx: DbTx,
-        input: { userId: string; messageId: string; attachmentIds: ReadonlyArray<string> },
+        input: { userId: string; owner: AttachmentOwner; attachmentIds: ReadonlyArray<string> },
       ) {
         const requested = input.attachmentIds;
         if (new Set(requested).size !== requested.length) {
           return yield* new AttachmentNotAvailable({ attachmentId: requested[0] ?? "" });
         }
 
-        const linked = yield* tx
-          .select({ attachmentId: messageAttachments.attachmentId })
-          .from(messageAttachments)
-          .where(eq(messageAttachments.messageId, input.messageId))
-          .pipe(Effect.orDie);
-        const previous = linked.map((row) => row.attachmentId);
+        const previous = (yield* linksOf(tx, input.owner).pipe(Effect.orDie)).map(
+          (row) => row.attachmentId,
+        );
         const affected = [...new Set([...previous, ...requested])];
         if (affected.length > 0) {
           const rows = yield* tx
@@ -361,26 +460,20 @@ export class AttachmentRepo extends Context.Service<
           ).pipe(Effect.orDie);
         }
 
-        // Drop every link first so a reorder cannot trip the (message,
+        // Drop every link first so a reorder cannot trip the (owner,
         // position) or (attachment) unique indexes mid-flight.
-        if (previous.length > 0) {
-          yield* tx
-            .delete(messageAttachments)
-            .where(eq(messageAttachments.messageId, input.messageId))
-            .pipe(Effect.orDie);
-        }
+        if (previous.length > 0) yield* dropLinks(tx, input.owner).pipe(Effect.orDie);
 
         if (requested.length > 0) {
-          // Anything still linked at this point belongs to another message.
+          // Anything still linked at this point belongs to another owner.
           const usable = yield* tx
             .select({ id: attachments.id })
             .from(attachments)
-            .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))
             .where(
               and(
                 inArray(attachments.id, [...requested]),
                 eq(attachments.userId, input.userId),
-                isNull(messageAttachments.attachmentId),
+                unclaimed,
               ),
             )
             .pipe(Effect.orDie);
@@ -390,30 +483,102 @@ export class AttachmentRepo extends Context.Service<
             return yield* new AttachmentNotAvailable({ attachmentId: missing });
           }
 
-          yield* tx
-            .insert(messageAttachments)
-            .values(
-              requested.map((attachmentId, position) => ({
-                messageId: input.messageId,
-                attachmentId,
-                position,
-              })),
-            )
-            .pipe(
-              // The unique index on attachment_id is the real race guard: a
-              // concurrent claim of the same upload loses here and rolls the
-              // whole transaction back. Only that specific violation is a
-              // user-level conflict; any other query error stays a defect.
-              Effect.catchTag("EffectDrizzleQueryError", (error) =>
-                isUniqueViolation(error)
-                  ? Effect.fail(new AttachmentNotAvailable({ attachmentId: requested[0]! }))
-                  : Effect.die(error),
-              ),
-            );
+          yield* insertLinks(tx, input.owner, requested).pipe(
+            // Within one owner table the unique index still backs the lock up.
+            // Only that violation is a user-level conflict; anything else
+            // stays a defect.
+            Effect.catchTag("EffectDrizzleQueryError", (error) =>
+              isUniqueViolation(error)
+                ? Effect.fail(new AttachmentNotAvailable({ attachmentId: requested[0]! }))
+                : Effect.die(error),
+            ),
+          );
         }
 
         const dropped = previous.filter((id) => !requested.includes(id));
         return yield* deleteAttachmentRows(tx, dropped).pipe(Effect.orDie);
+      });
+
+      const reconcile = (
+        tx: DbTx,
+        input: { userId: string; messageId: string; attachmentIds: ReadonlyArray<string> },
+      ) =>
+        claimAttachments(tx, {
+          userId: input.userId,
+          owner: { kind: "message", id: input.messageId },
+          attachmentIds: input.attachmentIds,
+        });
+
+      const reconcileQueueEntry = (
+        tx: DbTx,
+        input: { userId: string; queueEntryId: string; attachmentIds: ReadonlyArray<string> },
+      ) =>
+        claimAttachments(tx, {
+          userId: input.userId,
+          owner: { kind: "queue", id: input.queueEntryId },
+          attachmentIds: input.attachmentIds,
+        });
+
+      const transferQueueEntry = Effect.fn("AttachmentRepo.transferQueueEntry")(function* (
+        tx: DbTx,
+        input: { queueEntryId: string; messageId: string },
+      ) {
+        const owner: AttachmentOwner = { kind: "queue", id: input.queueEntryId };
+        const held = (yield* linksOf(tx, owner).pipe(Effect.orDie)).map((row) => row.attachmentId);
+        if (held.length === 0) return;
+        // Same lock as every claim, so no claim can observe the moment between
+        // leaving the queue table and arriving on the message.
+        yield* lockAttachmentBlobs(tx, held).pipe(Effect.orDie);
+        yield* dropLinks(tx, owner).pipe(Effect.orDie);
+        yield* insertLinks(tx, { kind: "message", id: input.messageId }, held).pipe(Effect.orDie);
+      });
+
+      const releaseForQueueEntries = Effect.fn("AttachmentRepo.releaseForQueueEntries")(function* (
+        tx: DbTx,
+        queueEntryIds: ReadonlyArray<string>,
+      ) {
+        if (queueEntryIds.length === 0) return [] as ReadonlyArray<string>;
+        const linked = yield* tx
+          .select({ attachmentId: conversationQueueEntryAttachments.attachmentId })
+          .from(conversationQueueEntryAttachments)
+          .where(inArray(conversationQueueEntryAttachments.queueEntryId, [...queueEntryIds]))
+          .pipe(Effect.orDie);
+        return yield* deleteAttachmentRows(
+          tx,
+          linked.map((row) => row.attachmentId),
+        ).pipe(Effect.orDie);
+      });
+
+      const listForQueueEntries = Effect.fn("AttachmentRepo.listForQueueEntries")(function* (
+        queueEntryIds: ReadonlyArray<string>,
+      ) {
+        if (queueEntryIds.length === 0) return [] as ReadonlyArray<QueuedAttachment>;
+        const rows = yield* db
+          .select({
+            id: attachments.id,
+            fileName: attachments.fileName,
+            size: attachmentBlobs.size,
+            mediaType: attachmentBlobs.mediaType,
+            queueEntryId: conversationQueueEntryAttachments.queueEntryId,
+            position: conversationQueueEntryAttachments.position,
+          })
+          .from(conversationQueueEntryAttachments)
+          .innerJoin(
+            attachments,
+            eq(attachments.id, conversationQueueEntryAttachments.attachmentId),
+          )
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(inArray(conversationQueueEntryAttachments.queueEntryId, [...queueEntryIds]))
+          .orderBy(
+            asc(conversationQueueEntryAttachments.queueEntryId),
+            asc(conversationQueueEntryAttachments.position),
+          )
+          .pipe(Effect.orDie);
+        return rows.map((row) => ({
+          ...toAttachmentDto(row),
+          queueEntryId: row.queueEntryId,
+          position: row.position,
+        }));
       });
 
       const cloneForMessages = Effect.fn("AttachmentRepo.cloneForMessages")(function* (
@@ -671,13 +836,7 @@ export class AttachmentRepo extends Context.Service<
               const stale = yield* tx
                 .select({ id: attachments.id })
                 .from(attachments)
-                .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))
-                .where(
-                  and(
-                    isNull(messageAttachments.attachmentId),
-                    lt(attachments.createdAt, olderThan),
-                  ),
-                );
+                .where(and(unclaimed, lt(attachments.createdAt, olderThan)));
               return yield* deleteAttachmentRows(
                 tx,
                 stale.map((row) => row.id),
@@ -697,6 +856,10 @@ export class AttachmentRepo extends Context.Service<
         clearBlobIntents,
         claimBlobCleanup,
         reconcile,
+        reconcileQueueEntry,
+        transferQueueEntry,
+        releaseForQueueEntries,
+        listForQueueEntries,
         cloneForMessages,
         releaseForMessages,
         listForMessages,

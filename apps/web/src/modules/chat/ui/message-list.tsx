@@ -12,7 +12,7 @@ import {
 } from "../client/use-message-stream.ts";
 import { AssistantMarkdown, type MarkdownComponents } from "./assistant-markdown.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
-import { projectAssistantBody } from "./assistant-body.ts";
+import { projectAssistantBody, type AssistantSteer } from "./assistant-body.ts";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
@@ -135,6 +135,8 @@ export interface DisplayMessage {
   dayLabel?: string | null;
   /** Durable and live compaction occurrences inside this assistant response. */
   compactionActivities?: CompactionActivity[];
+  /** Messages steered into this answer while it ran, drawn where they arrived. */
+  steers?: ReadonlyArray<AssistantSteer>;
   /** Local send time for the action row; absent if its date will not parse. */
   time?: MessageTime | null;
   /** The agent this answer ran with, when one was installed. */
@@ -457,6 +459,42 @@ function AssistantFileAttachment({ file }: { file: AssistantFile }) {
   );
 }
 
+const EMPTY_STEERS: ReadonlyArray<AssistantSteer> = [];
+
+/**
+ * A message the person sent into this answer while it ran, drawn where the
+ * answer took it in: the text above was written before it, the text below
+ * after. Read-only; it goes when the answer is retried or its question edited.
+ */
+function SteerBubble({ steer }: { steer: AssistantSteer }) {
+  return (
+    <div className="my-3 flex w-full flex-col items-end">
+      {steer.attachments.length > 0 ? (
+        <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
+          {steer.attachments.map((attachment) => (
+            <AttachmentChip
+              key={attachment.id}
+              item={{
+                fileName: attachment.fileName,
+                size: attachment.size,
+                kind: attachment.kind,
+                previewUrl: attachment.kind === "image" ? attachmentUrl(attachment.id) : null,
+              }}
+              href={attachmentUrl(attachment.id)}
+              preview={attachmentUrl(attachment.id)}
+            />
+          ))}
+        </AttachmentChipRow>
+      ) : null}
+      {steer.content ? (
+        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+          {steer.content}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const AssistantBody = memo(function AssistantBody({
   message,
   sources,
@@ -475,9 +513,11 @@ const AssistantBody = memo(function AssistantBody({
     files: message.files ?? [],
     tools: message.toolActivities,
     compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
+    steers: message.steers ?? EMPTY_STEERS,
   });
   return parts.map((part) => {
     if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
+    if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">

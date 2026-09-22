@@ -18,10 +18,16 @@ import {
   UpdateWorkSettingsInput,
   RetryMessageInput,
   SendMessageInput,
+  QueueMessageInput,
+  QueueEntryIdInput,
+  ReplaceQueueEntryInput,
+  DispatchQueueInput,
+  SendQueuedNowInput,
+  SteerQueueEntryInput,
 } from "../schema.ts";
 import { loadConversationDetail } from "./conversation-detail.ts";
 import { ChatRepo } from "./repo.ts";
-import { ChatService } from "./service.ts";
+import { ChatService, type DesktopFolderRef } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -235,6 +241,191 @@ export const abortWorkTurn = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           reservationId: data.reservationId,
         }),
+      ),
+    ),
+  );
+
+/** The fields a queued submission carries, shared by queueing and editing. */
+const queueSubmission = (
+  data: typeof QueueMessageInput.Type,
+  session: { user: { id: string }; session: { id: string } },
+) => ({
+  userId: session.user.id,
+  conversationId: data.conversationId,
+  content: data.content,
+  attachmentIds: data.attachmentIds,
+  input: {
+    modelId: data.modelId,
+    searchEnabled: data.searchEnabled,
+    researchEnabled: data.researchEnabled,
+    skillIds: data.skillIds,
+    collectionIds: data.collectionIds,
+    timeZone: data.timeZone,
+    openDocumentId: data.openDocumentId,
+  },
+  desktop: desktopDispatch(data, session.session.id),
+});
+
+/** Only a request from the desktop app names a machine; anything else is none. */
+const desktopDispatch = (
+  data: {
+    fromDesktop?: boolean;
+    desktopFolders?: ReadonlyArray<DesktopFolderRef>;
+    desktopCommands?: boolean;
+    desktopExecutorId?: string;
+  },
+  deviceSessionId: string,
+) =>
+  data.fromDesktop && data.desktopExecutorId
+    ? {
+        fromDesktop: true,
+        desktopFolders: data.desktopFolders,
+        desktopCommands: data.desktopCommands,
+        desktopExecutorId: data.desktopExecutorId,
+        deviceSessionId,
+      }
+    : undefined;
+
+const queueSubmissionErrors = {
+  ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+  ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+  WorkDesktopRequired: () =>
+    Effect.die(
+      new Response("This is a work chat; continue it from the desktop app", { status: 409 }),
+    ),
+  ToolUnavailable: (error: { reason: string }) =>
+    Effect.die(new Response(`Web search unavailable: ${error.reason}`, { status: 400 })),
+  InvalidMessage: (error: { reason: string }) =>
+    Effect.die(new Response(error.reason, { status: 400 })),
+  AttachmentUnsupported: (error: { fileName: string; reason: string }) =>
+    Effect.die(new Response(`${error.fileName}: ${error.reason}`, { status: 400 })),
+  AttachmentNotAvailable: () =>
+    Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+} as const;
+
+export const queueMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(QueueMessageInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) => chat.queueMessage(queueSubmission(data, context.session))).pipe(
+        Effect.catchTags({
+          ...queueSubmissionErrors,
+          QueueFull: () =>
+            Effect.die(new Response("Too many messages are queued", { status: 409 })),
+        }),
+      ),
+    ),
+  );
+
+export const replaceQueuedMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ReplaceQueueEntryInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.replaceQueuedMessage({
+          ...queueSubmission(data, context.session),
+          entryId: data.entryId,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ...queueSubmissionErrors,
+          QueueEntryNotFound: () =>
+            Effect.die(
+              new Response("This queued message already started or was removed", { status: 409 }),
+            ),
+        }),
+      ),
+    ),
+  );
+
+export const removeQueuedMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(QueueEntryIdInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.removeQueuedMessage({ userId: context.session.user.id, ...data }),
+      ).pipe(
+        Effect.catchTag("ConversationNotFound", () =>
+          Effect.die(new Response("Not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
+export const steerQueuedMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SteerQueueEntryInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.steerQueuedMessage({ userId: context.session.user.id, ...data }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          QueueEntryNotFound: () =>
+            Effect.die(new Response("Queued message no longer exists", { status: 409 })),
+          NoActiveGeneration: () =>
+            Effect.die(new Response("That response already finished", { status: 409 })),
+          AttachmentUnsupported: (error) =>
+            Effect.die(
+              new Response(`The running answer can’t read ${error.fileName}: ${error.reason}`, {
+                status: 400,
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
+
+export const dispatchQueuedMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(DispatchQueueInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.dispatchQueuedMessage({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          force: data.force,
+          desktop: desktopDispatch(data, context.session.session.id),
+        }),
+      ).pipe(
+        Effect.catchTag("ConversationNotFound", () =>
+          Effect.die(new Response("Not found", { status: 404 })),
+        ),
+        // Every resolution failure reads the same to a person: the queued
+        // message cannot start right now and is kept for them to decide on.
+        Effect.catch(() =>
+          Effect.die(new Response("This message could not be started", { status: 409 })),
+        ),
+      ),
+    ),
+  );
+
+export const sendQueuedNow = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SendQueuedNowInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.sendQueuedNow({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          entryId: data.entryId,
+          desktop: desktopDispatch(data, context.session.session.id),
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+        }),
+        // The reason is already on the entry; the person sees it in the strip.
+        Effect.catch(() =>
+          Effect.die(new Response("This message could not be started", { status: 409 })),
+        ),
       ),
     ),
   );

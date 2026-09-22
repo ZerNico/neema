@@ -1,7 +1,7 @@
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
-import { AttachmentIds } from "~/modules/attachments/schema.ts";
+import { Attachment, AttachmentIds } from "~/modules/attachments/schema.ts";
 import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
 
 // Blank content is allowed when the turn carries attachments; the service
@@ -144,6 +144,61 @@ export const ListConversationsInput = Schema.Struct({
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 });
 
+/**
+ * Queueing snapshots an ordinary submission, files included. Desktop fields
+ * are checked at queue time but never stored: a Work entry takes fresh ones
+ * from the app that dispatches it.
+ */
+export const QueueMessageInput = Schema.Struct({
+  conversationId: Schema.String,
+  modelId: Schema.String,
+  content: MessageContent,
+  searchEnabled: Schema.Boolean,
+  researchEnabled: Schema.Boolean,
+  ...desktopSubmissionFields,
+  attachmentIds: AttachmentIds,
+  timeZone: TimeZone,
+  openDocumentId: OpenDocumentId,
+  skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),
+  collectionIds: Schema.optionalKey(
+    Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
+  ),
+});
+
+export const ReplaceQueueEntryInput = Schema.Struct({
+  ...QueueMessageInput.fields,
+  entryId: Schema.String,
+});
+
+/**
+ * Starts the next queued message. `force` is a person asking, which may start
+ * after a stop; the desktop fields are how a Work chat's entry gets a machine.
+ */
+export const DispatchQueueInput = Schema.Struct({
+  conversationId: Schema.String,
+  force: Schema.optionalKey(Schema.Boolean),
+  ...desktopSubmissionFields,
+});
+
+export const QueueEntryIdInput = Schema.Struct({
+  conversationId: Schema.String,
+  entryId: Schema.String,
+});
+
+/** Sends one queued message now; the desktop fields give a Work entry its machine. */
+export const SendQueuedNowInput = Schema.Struct({
+  conversationId: Schema.String,
+  entryId: Schema.String,
+  ...desktopSubmissionFields,
+});
+
+export const SteerQueueEntryInput = Schema.Struct({
+  conversationId: Schema.String,
+  entryId: Schema.String,
+  messageId: Schema.String,
+  generationId: Schema.String,
+});
+
 export const MessageIdInput = Schema.Struct({
   generationId: Schema.optionalKey(Schema.String),
   conversationId: Schema.String,
@@ -218,6 +273,25 @@ const compactionPositionFields = {
   textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   scope: Schema.Literals(["history", "active_rounds"]),
 };
+
+/**
+ * Envelope persisted in message_chunks.delta for kind:"steer": a queued
+ * message the running answer took in at a tool boundary. The row is the
+ * record; this puts it in the stream at the moment it happened, so the answer
+ * shows it in order and a resume replays it there.
+ */
+export const SteerChunkEnvelope = Schema.Struct({
+  v: Schema.Literals([1]),
+  /** The user message the steer became. */
+  id: Schema.String,
+  /** The queue entry it came from, so the strip can drop it at once. */
+  queueEntryId: Schema.String,
+  content: Schema.String,
+  textOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  turnIndex: Schema.Int,
+  attachments: Schema.Array(Attachment),
+});
+export type SteerChunkEnvelope = typeof SteerChunkEnvelope.Type;
 
 export const CompactionChunkEnvelope = Schema.Union([
   Schema.Struct({

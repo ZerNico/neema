@@ -33,6 +33,19 @@ const user = (response: QuestionResponse = answers) => ({
 });
 
 describe("associateQuestionResponses", () => {
+  it("folds a reply to a steered answer's questions past the steer between them", () => {
+    const steer = {
+      id: "steer",
+      role: "user",
+      status: "complete",
+      content: "shorter please",
+      steeredIntoMessageId: assistant.id,
+    };
+    const result = associateQuestionResponses([assistant, steer, user()], [call], []);
+    expect(result.byAssistant.get(assistant.id)?.messageId).toBe("user");
+    expect([...result.hiddenMessageIds]).toEqual(["user"]);
+  });
+
   it.each([
     answers,
     { kind: "skip" } as const,

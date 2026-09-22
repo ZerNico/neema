@@ -74,6 +74,14 @@ export const ChatInput = forwardRef<
     onCancel?: (() => void) | undefined;
     /** Replaces the send button while a response is generating. */
     onStop?: (() => void) | undefined;
+    /**
+     * A live response does not block the composer: submitting adds the draft to
+     * the conversation's queue instead. Stop moves beside the primary button so
+     * both remain reachable while typing.
+     */
+    queueing?: boolean | undefined;
+    /** What submitting while queueing does; editing a queued message saves it. */
+    queueLabel?: string | undefined;
     disabled: boolean;
     textareaDisabled?: boolean;
     controlsDisabled?: boolean;
@@ -129,6 +137,8 @@ export const ChatInput = forwardRef<
     onCancel,
     onStop,
     disabled,
+    queueing = false,
+    queueLabel = "Add to queue",
     textareaDisabled = disabled,
     controlsDisabled = disabled,
     modelId,
@@ -164,13 +174,24 @@ export const ChatInput = forwardRef<
   const target = workspaceImports ?? attachments;
   const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
-  const action = onStop ? "stop" : target?.queued ? "upload" : "send";
-  const actionLabel = onStop
+  // Queueing owns the primary button only while there is something to queue,
+  // so an empty composer still offers Stop where people expect it. Files
+  // dropped into a Work chat's workspace never queue: their send reserves the
+  // turn, which a running answer refuses, so that draft keeps Stop instead.
+  const queueDraft =
+    queueing &&
+    !workspaceImports?.items.length &&
+    (value.trim() !== "" || (attachments?.items.length ?? 0) > 0);
+  const stopping = !!onStop && !queueDraft;
+  const action = stopping ? "stop" : target?.queued ? "upload" : "send";
+  const actionLabel = stopping
     ? "Stop generating"
     : workspaceImports?.queued
       ? "Sending after the files land in the workspace"
       : attachments?.queued
         ? "Sending after uploads finish"
+        : queueDraft
+          ? queueLabel
         : submitLabel;
   // Everything the "+" menu can offer besides attaching files. Three things key
   // off this: the trigger's label, whether it's enabled, and the menu width.
@@ -637,6 +658,23 @@ export const ChatInput = forwardRef<
           <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
         </ModelPicker>
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {onStop && queueDraft ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={onStop}
+                    aria-label="Stop generating"
+                  />
+                }
+              >
+                <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent>Stop generating</TooltipContent>
+            </Tooltip>
+          ) : null}
           {onCancel ? (
             <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>
               Cancel
@@ -647,16 +685,16 @@ export const ChatInput = forwardRef<
               render={
                 <Button
                   size="icon-sm"
-                  onClick={onStop ?? submit}
+                  onClick={stopping ? onStop : submit}
                   // Stop is available precisely while sending is disabled.
-                  disabled={!onStop && !canSubmit}
+                  disabled={!stopping && !canSubmit}
                   aria-label={actionLabel}
                   aria-busy={(!onStop && target?.queued) || undefined}
                 />
               }
             >
               <MotionSwap value={action} kind="icon" className="size-4">
-                {onStop ? (
+                {stopping ? (
                   <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
                 ) : target?.queued ? (
                   <Spinner aria-hidden className="size-4" />
@@ -672,7 +710,7 @@ export const ChatInput = forwardRef<
             </TooltipTrigger>
             <TooltipContent>
               {actionLabel}
-              {!onStop ? <Kbd>Enter</Kbd> : null}
+              {!stopping ? <Kbd>Enter</Kbd> : null}
             </TooltipContent>
           </Tooltip>
         </div>

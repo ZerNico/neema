@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { Composer } from "./composer.tsx";
 import type { Attachment } from "~/modules/attachments/schema.ts";
-import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
+import { deleteAttachment, uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 
 vi.mock("../server/functions.ts", () => ({
@@ -201,5 +201,142 @@ describe("upload-queued composer requests", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(textbox).toHaveValue("Updated draft");
     expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+  });
+});
+
+const openEdit = async () => {
+  fireEvent.click(
+    screen.getByRole("button", { name: "More actions: Summarise the attached notes" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+};
+
+describe("editing a queued message", () => {
+  const queued = {
+    id: "entry-1",
+    content: "Summarise the attached notes",
+    lastError: null,
+    attachments: [attachment],
+    input: { researchEnabled: true, skillIds: ["rewrite"] },
+  };
+
+  function renderEditing() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(
+      ["chat-models"],
+      [
+        {
+          id: "model-1",
+          providerId: "provider-1",
+          providerName: "Provider",
+          modelKey: "model",
+          displayName: "Model",
+          type: "chat",
+          enabled: true,
+          contextLength: 128_000,
+          capabilities: { tools: true, reasoning: false, files: false, vision: false },
+        },
+      ],
+    );
+    client.setQueryData(["skills"], skills);
+    client.setQueryData(["tools", "web-search", "availability"], {
+      configured: true,
+      enabled: true,
+    });
+    client.setQueryData(["tools", "research", "availability"], { configured: true, enabled: true });
+    client.setQueryData(["tools", "document-parsing", "availability"], {
+      configured: false,
+      enabled: false,
+    });
+    const queue = {
+      entries: [queued],
+      steeringIds: new Set<string>(),
+      paused: null,
+      onSteer: vi.fn(),
+      onRemove: vi.fn(),
+      onDispatch: vi.fn(),
+      onSendNow: vi.fn(),
+      sendNowBlocked: null,
+      onReplace: vi.fn().mockResolvedValue(undefined),
+      onEditStart: vi.fn(),
+      onEditEnd: vi.fn(),
+    };
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onQueue = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QueryClientProvider client={client}>
+        <Composer
+          onSend={onSend}
+          onQueue={onQueue}
+          onStop={vi.fn()}
+          queue={queue}
+          disabled={false}
+          modelId="model-1"
+          onModelChange={vi.fn()}
+          searchEnabled={false}
+          onSearchEnabledChange={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    return { queue, onSend, onQueue, textbox: screen.getByRole("textbox") };
+  }
+
+  it("reopens the entry with its files and settings, and saves it in place", async () => {
+    const { queue, onSend, onQueue, textbox } = renderEditing();
+    await openEdit();
+
+    expect(textbox).toHaveValue("Summarise the attached notes");
+    // Its file is back in the composer as a chip, beside the row's own in the strip.
+    expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+    expect(queue.onEditStart).toHaveBeenCalledExactlyOnceWith(queued);
+
+    fireEvent.change(textbox, { target: { value: "Summarise it in three bullets" } });
+    // A response is running, and saving is still the primary action, not Stop.
+    fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+
+    await waitFor(() =>
+      expect(queue.onReplace).toHaveBeenCalledExactlyOnceWith(
+        "entry-1",
+        "Summarise it in three bullets",
+        [attachment.id],
+        true,
+        ["rewrite"],
+      ),
+    );
+    expect(onQueue).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textbox).toHaveValue(""));
+    expect(queue.onEditEnd).toHaveBeenCalledOnce();
+    // The queued message still owns its file; clearing the chip deletes nothing.
+    expect(deleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it("cancels without touching the queued message's files", async () => {
+    const { queue, textbox } = renderEditing();
+    await openEdit();
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(textbox).toHaveValue("");
+    expect(queue.onReplace).not.toHaveBeenCalled();
+    expect(queue.onEditEnd).toHaveBeenCalledOnce();
+    expect(deleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it("will not discard a draft to open a queued message", async () => {
+    const { queue, textbox } = renderEditing();
+    fireEvent.change(textbox, { target: { value: "Half-written thought" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "More actions: Summarise the attached notes" }),
+    );
+    expect(await screen.findByRole("menuitem", { name: "Edit" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(queue.onEditStart).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue("Half-written thought");
   });
 });

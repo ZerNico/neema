@@ -43,6 +43,10 @@ export const SyncEvent = Schema.Union([
     conversationId: Schema.String,
   }),
   Schema.Struct({
+    type: Schema.Literal("conversation.queue.changed"),
+    conversationId: Schema.String,
+  }),
+  Schema.Struct({
     type: Schema.Literal("conversation.deleted"),
     conversationId: Schema.String,
   }),

@@ -27,6 +27,7 @@ import {
   readStoredQuestionPresentation,
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
+import type { QueuedTurnInput } from "../queued-turn.ts";
 import { projectResearchProgress } from "../research-schema.ts";
 import { createResearchStore, type ResearchStore } from "./research/repo.ts";
 import { researchRuns, researchTasks } from "~/db/schema/research.ts";
@@ -38,6 +39,7 @@ import {
   conversationDrafts,
   conversationDocuments,
   conversations,
+  conversationQueueEntries,
   messageChunks,
   messageAttachments,
   messageCompactionEvents,
@@ -56,12 +58,16 @@ import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowled
 import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
+import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { escapeLike } from "~/server/sql.ts";
 import {
   BranchNotAllowed,
   ConversationBusy,
   ConversationNotFound,
+  NoActiveGeneration,
+  QueueEntryNotFound,
+  QueueFull,
   MessageNotFound,
   InvalidMessage,
   QuestionUnavailable,
@@ -188,6 +194,12 @@ export type TurnFields = {
 export type CreateTurnInput = TurnFields & TurnContent;
 export type WorkTurnReservationRow = typeof workTurnReservations.$inferSelect;
 
+export type QueueEntry = typeof conversationQueueEntries.$inferSelect;
+/** A queue row with its files, as the queue strip and dispatch read it. */
+export type QueuedMessage = QueueEntry & { attachments: ReadonlyArray<Attachment> };
+/** How many messages may wait behind one answer. */
+export const QUEUE_LIMIT = 10;
+
 export type ConversationRow = typeof conversations.$inferSelect;
 /** A list row plus the live state the list surfaces (sidebar spinner). */
 export type ConversationListRow = ConversationRow & {
@@ -246,7 +258,7 @@ const GENERATION_LEASE = sql`interval '45 seconds'`;
 const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
 export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
 
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -260,8 +272,70 @@ export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
 
 // Callers hold the conversation lock. Only one successful immutable batch can
 // own the immediately following structured user response.
+/**
+ * A conversation's turns without the steers inside them. A steer sorts just
+ * after the answer it went into, so anything asking "what came last" (the
+ * question a reply answers, whether the queue may start) reads through this.
+ */
+const turnMessagesOf = (conversationId: string) =>
+  and(eq(messages.conversationId, conversationId), isNull(messages.steeredIntoMessageId));
+
+/**
+ * Whether a conversation's queue may move, read the one way promotion and the
+ * queue strip both use, so what the strip says is what promotion will do.
+ */
+const readQueueGate = Effect.fn("ChatRepo.readQueueGate")(function* (
+  tx: Pick<DbTx, "select">,
+  conversationId: string,
+) {
+  const streaming = yield* tx
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.status, "streaming")))
+    .pipe(Effect.orDie);
+  if (streaming.length > 0) return "busy" as const;
+  const [tail] = yield* tx
+    .select()
+    .from(messages)
+    .where(turnMessagesOf(conversationId))
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1)
+    .pipe(Effect.orDie);
+  // A stopped or failed answer ends automatic progress: the person stopped
+  // this conversation, not just one response.
+  if (tail?.role !== "assistant" || tail.status !== "complete") return "unsettled" as const;
+  // An unanswered clarification owns the next turn; a queued message must
+  // never race the structured answer.
+  if (yield* questionForMessage(tx, tail)) return "question" as const;
+  return "open" as const;
+});
+export type QueueGate = Effect.Success<ReturnType<typeof readQueueGate>>;
+
+/**
+ * The order entries start in. A steered entry comes first: it was asked to go
+ * now, and one whose answer ended before a boundary goes as the next turn
+ * instead, ahead of older queued messages. Its steer fields keep naming that
+ * attempt; the claim matches the live generation, so no later one takes it.
+ */
+const queueOrder = [
+  sql`${conversationQueueEntries.steerMessageId} is null`,
+  asc(conversationQueueEntries.id),
+] as const;
+
+/** The queue's one lock: every queue write serializes on its conversation. */
+const lockOwnedConversation = (tx: DbTx, userId: string, conversationId: string) =>
+  Effect.gen(function* () {
+    const owned = yield* tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .for("update")
+      .pipe(Effect.orDie);
+    if (owned.length === 0) return yield* new ConversationNotFound({ conversationId });
+  });
+
 const questionForMessage = Effect.fn("ChatRepo.questionForMessage")(function* (
-  tx: DbTx,
+  tx: Pick<DbTx, "select">,
   owner: MessageRow | undefined,
 ) {
   if (owner?.role !== "assistant" || owner.status !== "complete") return null;
@@ -315,7 +389,10 @@ const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
   if (target?.role !== "user" || target.status !== "complete")
     return yield* new InvalidMessage({ reason: "Only completed user messages can be edited." });
   const previousResponse = readQuestionResponse(target.questionResponse);
-  const batch = previousResponse ? yield* questionForMessage(tx, current[index - 1]) : null;
+  // The answer it replied to, past any steers that answer took in.
+  let before = index - 1;
+  while (current[before]?.steeredIntoMessageId) before -= 1;
+  const batch = previousResponse ? yield* questionForMessage(tx, current[before]) : null;
   const attached = previousResponse
     ? yield* tx
         .select({ id: messageAttachments.attachmentId })
@@ -579,6 +656,103 @@ export class ChatRepo extends Context.Service<
       | QuestionUnavailable
     >;
     /** The fixed agent association; absent for an ordinary chat. */
+    /**
+     * Starts the oldest queued entry, consuming it in the same transaction that
+     * opens the turn. Promotion and an ordinary send therefore contend for one
+     * conversation lock: whichever commits first wins, and a duplicate attempt
+     * finds the entry gone rather than writing a second turn.
+     */
+    promoteNextQueuedTurn(input: {
+      conversationId: string;
+      /**
+       * The head the caller validated. A removal or edit can change it before
+       * the lock is taken; the promotion then reports `changed` rather than
+       * starting an entry nobody checked.
+       */
+      expectedEntryId: string;
+      /**
+       * Start that entry even if it is not first: a person pressed Send now
+       * on it. Otherwise only the head starts.
+       */
+      jumpQueue?: boolean | undefined;
+      resolve: (entry: QueueEntry) => ResolveGeneration;
+      /** A person asking explicitly may start after a stop or a failure. */
+      force?: boolean | undefined;
+    }): Effect.Effect<
+      | { promoted: false; reason: "busy" | "unsettled" | "question" | "empty" | "changed" }
+      | {
+          promoted: true;
+          entry: QueueEntry;
+          conversation: ConversationRow;
+          userMessage: MessageRow;
+          assistant: MessageRow;
+          config: GenerationConfig;
+        },
+      ResolveError
+    >;
+    /**
+     * Conversations holding queued work, no live generation, and a tail that
+     * finished cleanly: the ones a dispatch could start. A pre-filter only;
+     * the promotion transaction still decides.
+     */
+    listQueuedConversations(input: {
+      limit: number;
+      mode: "chat" | "work";
+      userId?: string | undefined;
+    }): Effect.Effect<Array<{ userId: string; conversationId: string }>>;
+    setQueueEntryError(entryId: string, message: string | null): Effect.Effect<void>;
+    listQueue(conversationId: string): Effect.Effect<QueuedMessage[]>;
+    /** See `readQueueGate`: whether the queue may move right now, and if not, why. */
+    queueGate(conversationId: string): Effect.Effect<QueueGate>;
+    enqueue(input: {
+      userId: string;
+      conversationId: string;
+      content: string;
+      input: QueuedTurnInput;
+      attachmentIds: ReadonlyArray<string>;
+    }): Effect.Effect<QueueEntry, ConversationNotFound | QueueFull | AttachmentNotAvailable>;
+    /**
+     * Rewrites a queued message in place, keeping its id and so its position.
+     * Its files are reconciled like an edited message's; a pending steer is
+     * dropped, since it was aimed at the words being replaced. Returns cleanup
+     * keys for files the edit let go.
+     */
+    replaceQueueEntry(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      content: string;
+      input: QueuedTurnInput;
+      attachmentIds: ReadonlyArray<string>;
+    }): Effect.Effect<
+      ReadonlyArray<string>,
+      ConversationNotFound | QueueEntryNotFound | AttachmentNotAvailable
+    >;
+    /** Returns cleanup keys: removing a queued message deletes its files. */
+    removeQueueEntry(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+    }): Effect.Effect<ReadonlyArray<string>, ConversationNotFound>;
+    steerQueueEntry(input: {
+      userId: string;
+      conversationId: string;
+      entryId: string;
+      messageId: string;
+      generationId: string;
+    }): Effect.Effect<void, ConversationNotFound | QueueEntryNotFound | NoActiveGeneration>;
+    /**
+     * Inside the running generation, under its fence: turns every entry aimed
+     * at it into a user message, in queue order, moving its files along.
+     */
+    claimSteeredEntries(input: {
+      conversationId: string;
+      messageId: string;
+      /** The answer's text length at the boundary, where the steer renders. */
+      textOffset: number;
+      /** The model round the steer followed. */
+      turnIndex: number;
+    }): Effect.Effect<Array<MessageRow & { queueEntryId: string }>>;
     getConversationDefaults(conversationId: string): Effect.Effect<ConversationDefaults>;
     /**
      * Private attempt execution record. Missing rows are an invariant violation;
@@ -1225,7 +1399,7 @@ export class ChatRepo extends Context.Service<
                   const tail = (yield* tx
                     .select()
                     .from(messages)
-                    .where(eq(messages.conversationId, conversation.id))
+                    .where(turnMessagesOf(conversation.id))
                     .orderBy(desc(messages.createdAt), desc(messages.id))
                     .limit(1)
                     .pipe(Effect.orDie))[0];
@@ -1320,6 +1494,350 @@ export class ChatRepo extends Context.Service<
               Effect.catchTag("SqlError", Effect.die),
               Effect.catchTag("EffectDrizzleQueryError", Effect.die),
             );
+        }),
+
+        setQueueEntryError: Effect.fn("ChatRepo.setQueueEntryError")(function* (entryId, message) {
+          yield* db
+            .update(conversationQueueEntries)
+            .set({ lastError: message })
+            .where(eq(conversationQueueEntries.id, entryId))
+            .pipe(Effect.orDie);
+        }),
+
+        listQueuedConversations: Effect.fn("ChatRepo.listQueuedConversations")(function* (input) {
+          // Only conversations a dispatch could start. Question-held queues
+          // and failed heads would otherwise fill the batch limit forever, and
+          // a failed head would be retried and re-announced every sweep. A
+          // person clears both, by answering or by editing.
+          const tail = sql`(select tail.id from messages tail where tail.conversation_id = ${conversations.id} and tail.steered_into_message_id is null order by tail.created_at desc, tail.id desc limit 1)`;
+          const head = sql`(select head.last_error from conversation_queue_entries head where head.conversation_id = ${conversations.id} order by head.steer_message_id is null, head.id limit 1)`;
+          return yield* db
+            .select({ userId: conversations.userId, conversationId: conversations.id })
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.mode, input.mode),
+                input.userId ? eq(conversations.userId, input.userId) : undefined,
+                sql`exists (select 1 from conversation_queue_entries queued where queued.conversation_id = ${conversations.id})`,
+                sql`exists (select 1 from messages settled where settled.id = ${tail} and settled.role = 'assistant' and settled.status = 'complete')`,
+                sql`not exists (select 1 from message_tool_calls asked where asked.message_id = ${tail} and asked.tool_name = 'ask_user' and asked.status = 'complete')`,
+                sql`${head} is null`,
+              ),
+            )
+            .limit(input.limit)
+            .pipe(Effect.orDie);
+        }),
+
+        promoteNextQueuedTurn: Effect.fn("ChatRepo.promoteNextQueuedTurn")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const [conversation] = yield* tx
+                  .select()
+                  .from(conversations)
+                  .where(eq(conversations.id, input.conversationId))
+                  .for("update")
+                  .pipe(Effect.orDie);
+                if (!conversation) return { promoted: false, reason: "empty" } as const;
+                const gate = yield* readQueueGate(tx, conversation.id);
+                // A person asking may start after a stop, never ahead of an
+                // answer still running or a question still open.
+                if (gate !== "open" && !(gate === "unsettled" && input.force))
+                  return { promoted: false, reason: gate } as const;
+                const [entry] = yield* tx
+                  .select()
+                  .from(conversationQueueEntries)
+                  .where(
+                    and(
+                      eq(conversationQueueEntries.conversationId, conversation.id),
+                      input.jumpQueue
+                        ? eq(conversationQueueEntries.id, input.expectedEntryId)
+                        : undefined,
+                    ),
+                  )
+                  .orderBy(...queueOrder)
+                  .limit(1)
+                  .pipe(Effect.orDie);
+                if (!entry)
+                  return {
+                    promoted: false,
+                    reason: input.jumpQueue ? "changed" : "empty",
+                  } as const;
+                if (entry.id !== input.expectedEntryId)
+                  return { promoted: false, reason: "changed" } as const;
+
+                const [userMessage] = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: conversation.id,
+                    role: "user",
+                    status: "complete",
+                    content: entry.content,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                // The files change owner in the transaction that creates their
+                // message, so no reader ever sees a turn without them.
+                yield* attachments.transferQueueEntry(tx, {
+                  queueEntryId: entry.id,
+                  messageId: userMessage!.id,
+                });
+                yield* tx
+                  .delete(conversationQueueEntries)
+                  .where(eq(conversationQueueEntries.id, entry.id))
+                  .pipe(Effect.orDie);
+                const config = yield* resolveAttempt(
+                  tx,
+                  yield* readDefaults(tx, conversation.id),
+                  input.resolve(entry),
+                );
+                const [assistant] = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: conversation.id,
+                    role: "assistant",
+                    status: "streaming",
+                    generationLeaseUntil: freshLease(),
+                    modelId: entry.input.modelId,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                yield* writeConfig(tx, assistant!.id, config);
+                yield* tx
+                  .update(conversations)
+                  .set({
+                    modelId: entry.input.modelId,
+                    lastMessageAt: new Date(),
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(conversations.id, conversation.id))
+                  .pipe(Effect.orDie);
+                return {
+                  promoted: true,
+                  entry,
+                  conversation,
+                  userMessage: userMessage!,
+                  assistant: assistant!,
+                  config,
+                } as const;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        queueGate: (conversationId) => readQueueGate(db, conversationId),
+
+        listQueue: Effect.fn("ChatRepo.listQueue")(function* (conversationId) {
+          const rows = yield* db
+            .select()
+            .from(conversationQueueEntries)
+            .where(eq(conversationQueueEntries.conversationId, conversationId))
+            .orderBy(...queueOrder)
+            .pipe(Effect.orDie);
+          const files = yield* attachments.listForQueueEntries(rows.map((row) => row.id));
+          return rows.map((row) => ({
+            ...row,
+            attachments: files
+              .filter((file) => file.queueEntryId === row.id)
+              .map(({ queueEntryId: _entry, position: _position, ...file }) => file),
+          }));
+        }),
+
+        enqueue: Effect.fn("ChatRepo.enqueue")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* lockOwnedConversation(tx, input.userId, input.conversationId);
+                const existing = yield* tx
+                  .select({ id: conversationQueueEntries.id })
+                  .from(conversationQueueEntries)
+                  .where(eq(conversationQueueEntries.conversationId, input.conversationId))
+                  .pipe(Effect.orDie);
+                if (existing.length >= QUEUE_LIMIT)
+                  return yield* new QueueFull({ conversationId: input.conversationId });
+                const [entry] = yield* tx
+                  .insert(conversationQueueEntries)
+                  .values({
+                    conversationId: input.conversationId,
+                    userId: input.userId,
+                    content: input.content,
+                    input: input.input,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                // A fresh entry held nothing, so no files can be dropped here.
+                yield* attachments.reconcileQueueEntry(tx, {
+                  userId: input.userId,
+                  queueEntryId: entry!.id,
+                  attachmentIds: input.attachmentIds,
+                });
+                return entry!;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        replaceQueueEntry: Effect.fn("ChatRepo.replaceQueueEntry")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* lockOwnedConversation(tx, input.userId, input.conversationId);
+                const [entry] = yield* tx
+                  .update(conversationQueueEntries)
+                  .set({
+                    content: input.content,
+                    input: input.input,
+                    steerMessageId: null,
+                    steerGenerationId: null,
+                    lastError: null,
+                  })
+                  .where(
+                    and(
+                      eq(conversationQueueEntries.id, input.entryId),
+                      eq(conversationQueueEntries.conversationId, input.conversationId),
+                    ),
+                  )
+                  .returning({ id: conversationQueueEntries.id })
+                  .pipe(Effect.orDie);
+                // Promoted or removed meanwhile: the edit has nothing to land on.
+                if (!entry) return yield* new QueueEntryNotFound({ entryId: input.entryId });
+                return yield* attachments.reconcileQueueEntry(tx, {
+                  userId: input.userId,
+                  queueEntryId: entry.id,
+                  attachmentIds: input.attachmentIds,
+                });
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        removeQueueEntry: Effect.fn("ChatRepo.removeQueueEntry")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* lockOwnedConversation(tx, input.userId, input.conversationId);
+                const [entry] = yield* tx
+                  .select({ id: conversationQueueEntries.id })
+                  .from(conversationQueueEntries)
+                  .where(
+                    and(
+                      eq(conversationQueueEntries.id, input.entryId),
+                      eq(conversationQueueEntries.conversationId, input.conversationId),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                if (!entry) return [] as ReadonlyArray<string>;
+                const keys = yield* attachments.releaseForQueueEntries(tx, [entry.id]);
+                yield* tx
+                  .delete(conversationQueueEntries)
+                  .where(eq(conversationQueueEntries.id, entry.id))
+                  .pipe(Effect.orDie);
+                return keys;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        steerQueueEntry: Effect.fn("ChatRepo.steerQueueEntry")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* lockOwnedConversation(tx, input.userId, input.conversationId);
+                const [entry] = yield* tx
+                  .select({ id: conversationQueueEntries.id })
+                  .from(conversationQueueEntries)
+                  .where(
+                    and(
+                      eq(conversationQueueEntries.id, input.entryId),
+                      eq(conversationQueueEntries.conversationId, input.conversationId),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                if (!entry) return yield* new QueueEntryNotFound({ entryId: input.entryId });
+                const [message] = yield* tx
+                  .select({ id: messages.id })
+                  .from(messages)
+                  .where(
+                    and(
+                      eq(messages.id, input.messageId),
+                      eq(messages.conversationId, input.conversationId),
+                      eq(messages.generationId, input.generationId),
+                      eq(messages.status, "streaming"),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                if (!message)
+                  return yield* new NoActiveGeneration({ conversationId: input.conversationId });
+                yield* tx
+                  .update(conversationQueueEntries)
+                  .set({ steerMessageId: input.messageId, steerGenerationId: input.generationId })
+                  .where(eq(conversationQueueEntries.id, input.entryId))
+                  .pipe(Effect.orDie);
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        claimSteeredEntries: Effect.fn("ChatRepo.claimSteeredEntries")(function* (input) {
+          const fence = yield* GenerationFence;
+          if (!fence) return [] as Array<MessageRow & { queueEntryId: string }>;
+          // Under the generation's own fence: a stopped or superseded attempt
+          // is interrupted here, leaving every entry queued with its files.
+          return yield* generationWrite((tx) =>
+            Effect.gen(function* () {
+              const entries = yield* tx
+                .select()
+                .from(conversationQueueEntries)
+                .where(
+                  and(
+                    eq(conversationQueueEntries.conversationId, input.conversationId),
+                    eq(conversationQueueEntries.steerMessageId, input.messageId),
+                    eq(conversationQueueEntries.steerGenerationId, fence.generationId),
+                  ),
+                )
+                .orderBy(asc(conversationQueueEntries.id))
+                .pipe(Effect.orDie);
+              const steered: Array<MessageRow & { queueEntryId: string }> = [];
+              if (entries.length === 0) return steered;
+              // One at a time, in queue order: uuidv7 ids break the createdAt
+              // tie between steers claimed together. They sort after their
+              // answer, which began before them, and before anything later,
+              // since nothing else can join the conversation while it runs.
+              for (const entry of entries) {
+                const [message] = yield* tx
+                  .insert(messages)
+                  .values({
+                    id: uuidv7(),
+                    conversationId: input.conversationId,
+                    role: "user",
+                    status: "complete",
+                    content: entry.content,
+                    steeredIntoMessageId: input.messageId,
+                    steerTextOffset: input.textOffset,
+                    steerTurnIndex: input.turnIndex,
+                  })
+                  .returning()
+                  .pipe(Effect.orDie);
+                yield* attachments.transferQueueEntry(tx, {
+                  queueEntryId: entry.id,
+                  messageId: message!.id,
+                });
+                steered.push({ ...message!, queueEntryId: entry.id });
+              }
+              yield* tx
+                .delete(conversationQueueEntries)
+                .where(
+                  inArray(
+                    conversationQueueEntries.id,
+                    entries.map((entry) => entry.id),
+                  ),
+                )
+                .pipe(Effect.orDie);
+              return steered;
+            }),
+          );
         }),
 
         getConversationDefaults: (conversationId) => readDefaults(db, conversationId),
@@ -1437,14 +1955,24 @@ export class ChatRepo extends Context.Service<
                     .select({ id: messages.id })
                     .from(messages)
                     .where(eq(messages.conversationId, conversationId));
-                  // message_attachments cascades, but the attachment rows it
-                  // points at do not, so release them explicitly.
+                  // Both link tables cascade, but the attachment rows they
+                  // point at do not, so release them explicitly. Queued
+                  // messages hold files too, and nothing else would free them
+                  // before the 24-hour sweep.
                   const keys = yield* attachments.releaseForMessages(
                     tx,
                     rows.map((row) => row.id),
                   );
+                  const queued = yield* tx
+                    .select({ id: conversationQueueEntries.id })
+                    .from(conversationQueueEntries)
+                    .where(eq(conversationQueueEntries.conversationId, conversationId));
+                  const queuedKeys = yield* attachments.releaseForQueueEntries(
+                    tx,
+                    queued.map((row) => row.id),
+                  );
                   yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
-                  return keys;
+                  return [...keys, ...queuedKeys];
                 }),
               )
               .pipe(Effect.orDie);
@@ -1498,7 +2026,11 @@ export class ChatRepo extends Context.Service<
                     reason: "only assistant messages can be branched from",
                   });
                 }
-                const prefix = all.slice(0, index + 1);
+                // A steer sorts just after the answer it went into, so the
+                // target's own steers follow it; they belong to that answer.
+                let end = index + 1;
+                while (all[end]?.steeredIntoMessageId === target.id) end += 1;
+                const prefix = all.slice(0, end);
                 // A cloned streaming row would have no fiber to finish it.
                 if (prefix.some((m) => m.status === "streaming")) {
                   return yield* new BranchNotAllowed({
@@ -1540,6 +2072,11 @@ export class ChatRepo extends Context.Service<
                       conversationId: branch.id,
                       generationId: null,
                       generationLeaseUntil: null,
+                      // A steer sorts just before its answer, so the answer is
+                      // always in the same prefix; point at the copy.
+                      steeredIntoMessageId: m.steeredIntoMessageId
+                        ? (clonedIds.get(m.steeredIntoMessageId) ?? null)
+                        : null,
                       // createdAt/completedAt/editedAt stay as they were: the
                       // branch shows the same history, day dividers included.
                     })),

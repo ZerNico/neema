@@ -12,7 +12,9 @@ import {
   messageChunks,
   attachmentBlobs,
   attachments,
+  conversationQueueEntryAttachments,
   conversations,
+  messageAttachments,
   models,
   tools,
   user,
@@ -30,7 +32,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
-import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -1029,5 +1031,311 @@ describe("generated assistant image transactions", () => {
         ).toBe("Failure");
       }),
     );
+  });
+});
+
+const plain = () => () => Effect.succeed(PLAIN_GENERATION);
+
+describe("queued message files", () => {
+  const queued = () => ({ modelId, searchEnabled: false, researchEnabled: false });
+
+  it("holds a queued file against the sweep, deletion and any second claim", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const userId = yield* makeUser();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        const file = yield* upload(userId, "held.txt", "held by the queue");
+        yield* repo.enqueue({
+          userId,
+          conversationId: conversation.id,
+          content: "later",
+          attachmentIds: [file.id],
+          input: queued(),
+        });
+        // Old enough that an unclaimed upload would be swept.
+        yield* db
+          .update(attachments)
+          .set({ createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000) })
+          .where(eq(attachments.id, file.id));
+
+        const swept = yield* attachmentRepo.sweepUnclaimed(new Date(Date.now() - 60 * 60 * 1000));
+        const deleted = yield* attachmentRepo.deleteUnclaimed(userId, file.id).pipe(Effect.flip);
+        const sent = yield* repo
+          .createTurn({
+            userId,
+            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+            modelId,
+            content: "x",
+            attachmentIds: [file.id],
+          })
+          .pipe(Effect.flip);
+        const requeued = yield* repo
+          .enqueue({
+            userId,
+            conversationId: conversation.id,
+            content: "again",
+            attachmentIds: [file.id],
+            input: queued(),
+          })
+          .pipe(Effect.flip);
+        const access = yield* attachmentRepo.findForAccess(file.id);
+        return {
+          swept: [...swept],
+          deleted: deleted._tag,
+          sent: sent._tag,
+          requeued: requeued._tag,
+          queueLength: (yield* repo.listQueue(conversation.id)).length,
+          conversationOwner: access?.conversationUserId === userId,
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      swept: [],
+      deleted: "AttachmentNotAvailable",
+      sent: "AttachmentNotAvailable",
+      requeued: "AttachmentNotAvailable",
+      // The failed second entry rolled back with its claim.
+      queueLength: 1,
+      // A queued file is shown in the strip, so its conversation's owner may read it.
+      conversationOwner: true,
+    });
+  });
+
+  it("gives one upload to exactly one owner when a send and a queue race for it", async () => {
+    const outcomes = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const results: Array<{ sent: boolean; queued: boolean; links: number }> = [];
+        for (let round = 0; round < 5; round++) {
+          const conversation = yield* repo.createConversation({ userId, modelId });
+          const file = yield* upload(userId, `race-${round}.txt`, `race ${round}`);
+          // Two tables claim uploads and share no unique index; only the blob
+          // lock taken before the check keeps both from winning.
+          const [sent, queuedResult] = yield* Effect.all(
+            [
+              Effect.result(
+                repo.createTurn({
+                  userId,
+                  conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+                  modelId,
+                  content: "now",
+                  attachmentIds: [file.id],
+                }),
+              ),
+              Effect.result(
+                repo.enqueue({
+                  userId,
+                  conversationId: conversation.id,
+                  content: "later",
+                  attachmentIds: [file.id],
+                  input: queued(),
+                }),
+              ),
+            ],
+            { concurrency: "unbounded" },
+          );
+          const messageLinks = yield* db
+            .select()
+            .from(messageAttachments)
+            .where(eq(messageAttachments.attachmentId, file.id));
+          const queueLinks = yield* db
+            .select()
+            .from(conversationQueueEntryAttachments)
+            .where(eq(conversationQueueEntryAttachments.attachmentId, file.id));
+          results.push({
+            sent: sent._tag === "Success",
+            queued: queuedResult._tag === "Success",
+            links: messageLinks.length + queueLinks.length,
+          });
+        }
+        return results;
+      }),
+    );
+
+    for (const outcome of outcomes) {
+      expect(Number(outcome.sent) + Number(outcome.queued)).toBe(1);
+      expect(outcome.links).toBe(1);
+    }
+  });
+
+  it("moves queued files onto the promoted message in order, keeping the same rows", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const userId = yield* makeUser();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        const first = yield* upload(userId, "first.txt", "first");
+        const second = yield* upload(userId, "second.txt", "second");
+        const entry = yield* repo.enqueue({
+          userId,
+          conversationId: conversation.id,
+          content: "with files",
+          attachmentIds: [second.id, first.id],
+          input: queued(),
+        });
+        const outcome = yield* repo.promoteNextQueuedTurn({
+          conversationId: conversation.id,
+          expectedEntryId: entry.id,
+          // A new conversation has no finished answer to follow; a person asked.
+          force: true,
+          resolve: plain,
+        });
+        if (!outcome.promoted) return yield* Effect.die("expected a promotion");
+        return {
+          onMessage: (yield* attachmentRepo.listForMessages([outcome.userMessage.id])).map(
+            (file) => file.id,
+          ),
+          stillQueued: (yield* attachmentRepo.listForQueueEntries([entry.id])).length,
+          ids: [second.id, first.id],
+        };
+      }),
+    );
+
+    expect(result.onMessage).toEqual(result.ids);
+    expect(result.stillQueued).toBe(0);
+  });
+
+  it("reconciles an edited entry's files and releases the one it dropped", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const store = yield* BlobStore;
+        const service = yield* AttachmentService;
+        const userId = yield* makeUser();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        const kept = yield* upload(userId, "kept.txt", "kept");
+        const dropped = yield* upload(userId, "dropped.txt", "dropped");
+        const added = yield* upload(userId, "added.txt", "added");
+        const droppedKey = (yield* attachmentRepo.listWithBlobsByIds(userId, [dropped.id]))[0]!
+          .storageKey;
+        const entry = yield* repo.enqueue({
+          userId,
+          conversationId: conversation.id,
+          content: "before",
+          attachmentIds: [kept.id, dropped.id],
+          input: queued(),
+        });
+        const orphaned = yield* repo.replaceQueueEntry({
+          userId,
+          conversationId: conversation.id,
+          entryId: entry.id,
+          content: "after",
+          attachmentIds: [added.id, kept.id],
+          input: queued(),
+        });
+        yield* service.deleteBlobs(orphaned);
+        const missing = yield* repo
+          .replaceQueueEntry({
+            userId,
+            conversationId: conversation.id,
+            entryId: uuidv7(),
+            content: "nowhere",
+            attachmentIds: [],
+            input: queued(),
+          })
+          .pipe(Effect.flip);
+        const [edited] = yield* repo.listQueue(conversation.id);
+        return {
+          orphaned: [...orphaned],
+          droppedKey,
+          bytesGone: !(yield* store.exists(droppedKey)),
+          content: edited!.content,
+          // Same row, so the edit kept its place in the queue.
+          sameEntry: edited!.id === entry.id,
+          files: edited!.attachments.map((file) => file.fileName),
+          missing: missing._tag,
+        };
+      }),
+    );
+
+    expect(result.orphaned).toEqual([result.droppedKey]);
+    expect(result.bytesGone).toBe(true);
+    expect(result.content).toBe("after");
+    expect(result.sameEntry).toBe(true);
+    expect(result.files).toEqual(["added.txt", "kept.txt"]);
+    expect(result.missing).toBe("QueueEntryNotFound");
+  });
+
+  it("deletes a removed entry's files, but keeps bytes another upload still shares", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const store = yield* BlobStore;
+        const service = yield* AttachmentService;
+        const userId = yield* makeUser();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        // Same bytes twice: two attachment rows on one blob.
+        const queuedFile = yield* upload(userId, "a.txt", "shared bytes");
+        const twin = yield* upload(userId, "b.txt", "shared bytes");
+        const sole = yield* upload(userId, "c.txt", "only here");
+        const [sharedKey, soleKey] = (yield* attachmentRepo.listWithBlobsByIds(userId, [
+          queuedFile.id,
+          sole.id,
+        ])).map((row) => row.storageKey);
+        const entry = yield* repo.enqueue({
+          userId,
+          conversationId: conversation.id,
+          content: "drop me",
+          attachmentIds: [queuedFile.id, sole.id],
+          input: queued(),
+        });
+        const orphaned = yield* repo.removeQueueEntry({
+          userId,
+          conversationId: conversation.id,
+          entryId: entry.id,
+        });
+        yield* service.deleteBlobs(orphaned);
+        return {
+          orphaned: [...orphaned],
+          soleKey,
+          soleGone: !(yield* store.exists(soleKey!)),
+          sharedKept: yield* store.exists(sharedKey!),
+          remaining: (yield* attachmentRepo.listWithBlobsByIds(userId, [
+            queuedFile.id,
+            twin.id,
+            sole.id,
+          ])).map((row) => row.fileName),
+        };
+      }),
+    );
+
+    expect(result.orphaned).toEqual([result.soleKey]);
+    expect(result.soleGone).toBe(true);
+    expect(result.sharedKept).toBe(true);
+    expect(result.remaining).toEqual(["b.txt"]);
+  });
+
+  it("releases queued files when their conversation is deleted", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const userId = yield* makeUser();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        const file = yield* upload(userId, "gone.txt", "gone with the chat");
+        const key = (yield* attachmentRepo.listWithBlobsByIds(userId, [file.id]))[0]!.storageKey;
+        yield* repo.enqueue({
+          userId,
+          conversationId: conversation.id,
+          content: "never sent",
+          attachmentIds: [file.id],
+          input: queued(),
+        });
+        const keys = yield* repo.deleteConversation(userId, conversation.id);
+        return { keys: [...keys], key, left: yield* attachmentCount(userId) };
+      }),
+    );
+
+    expect(result.keys).toEqual([result.key]);
+    expect(result.left).toBe(0);
   });
 });

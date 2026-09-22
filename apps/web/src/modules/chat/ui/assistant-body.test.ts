@@ -236,3 +236,53 @@ describe("generated image body ordering", () => {
     ).toEqual(["text", "file"]);
   });
 });
+
+const steer = (textOffset: number, turnIndex = 0) => ({
+  id: "steer-1",
+  content: "make it about dogs",
+  textOffset,
+  turnIndex,
+  attachments: [],
+});
+
+describe("projectAssistantBody steers", () => {
+  const content = "Here is a cat poem. Here is a dog poem.";
+  const offset = "Here is a cat poem. ".length;
+
+  it("draws a steer between the text written before it and after it", () => {
+    const { parts } = projectAssistantBody({
+      content,
+      streaming: false,
+      tools: [],
+      compactions: [],
+      steers: [steer(offset)],
+    });
+    expect(parts.map((part) => (part.kind === "text" ? part.content : part.kind))).toEqual([
+      "Here is a cat poem. ",
+      "steer",
+      "Here is a dog poem.",
+    ]);
+  });
+
+  it("follows every activity of the round it came after", () => {
+    const { parts } = projectAssistantBody({
+      content,
+      streaming: false,
+      tools: [web("search", offset, 3)],
+      compactions: [],
+      steers: [steer(offset)],
+    });
+    expect(parts.map((part) => part.kind)).toEqual(["text", "web", "steer", "text"]);
+  });
+
+  it("waits for the smoothed text to reach it while streaming", () => {
+    const { parts } = projectAssistantBody({
+      content: "Here is a",
+      streaming: true,
+      tools: [],
+      compactions: [],
+      steers: [steer(offset)],
+    });
+    expect(parts.map((part) => part.kind)).toEqual(["text"]);
+  });
+});

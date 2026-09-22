@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySteerChunk,
   applyCompactionChunk,
   applyToolChunk,
   type CompactionActivity,
@@ -467,5 +468,32 @@ describe("applyCompactionChunk", () => {
     expect(applyCompactionChunk(seed, "not json")).toBe(seed);
     expect(applyCompactionChunk(seed, JSON.stringify({ v: 99, phase: "result" }))).toBe(seed);
     expect(applyCompactionChunk(seed, env({ phase: "who-knows" }))).toBe(seed);
+  });
+});
+
+const steerEnvelope = (id: string) =>
+  JSON.stringify({
+    v: 1,
+    id,
+    queueEntryId: `entry-${id}`,
+    content: "make it shorter",
+    textOffset: 12,
+    turnIndex: 0,
+    attachments: [],
+  });
+
+describe("applySteerChunk", () => {
+  it("adds a steer once, keeping the order the answer took them in", () => {
+    const once = applySteerChunk([], steerEnvelope("a"));
+    const twice = applySteerChunk(applySteerChunk(once, steerEnvelope("b")), steerEnvelope("a"));
+    expect(twice.map((steer) => [steer.id, steer.queueEntryId, steer.textOffset])).toEqual([
+      ["a", "entry-a", 12],
+      ["b", "entry-b", 12],
+    ]);
+  });
+
+  it("ignores an envelope it cannot read", () => {
+    expect(applySteerChunk([], "{not json")).toEqual([]);
+    expect(applySteerChunk([], JSON.stringify({ v: 2, id: "x" }))).toEqual([]);
   });
 });

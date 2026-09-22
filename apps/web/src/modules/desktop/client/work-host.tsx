@@ -26,10 +26,14 @@ import {
   desktopWorkSnapshot,
   submitDesktopToolResult,
 } from "../server/functions.ts";
-import { abortWorkTurn, getWorkTurnReservation } from "~/modules/chat/server/functions.ts";
+import {
+  abortWorkTurn,
+  dispatchQueuedMessage,
+  getWorkTurnReservation,
+} from "~/modules/chat/server/functions.ts";
 import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
 import { type ApprovalChoice, type PendingKind } from "./approvals.ts";
-import { useDesktop } from "./bridge.ts";
+import { sendFieldsFor, useDesktop } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
 import { WorkController } from "./work-controller.ts";
 
@@ -224,6 +228,27 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
         })),
       });
   }, [host.controller, work.data, work.dataUpdatedAt, userId, boundary]);
+
+  // Queued Work waits for a machine, and this app is one. Each start reads the
+  // folders now and names this app's executor; the server's lock decides. Like
+  // tool work it waits for pending file promotions, so a reserved turn's
+  // activation never loses its chat to a queued message.
+  const starting = useRef(new Set<string>());
+  useEffect(() => {
+    if (!client || !executorId || !reconciled || !work.data) return;
+    for (const conversationId of work.data.queued) {
+      if (starting.current.has(conversationId)) continue;
+      starting.current.add(conversationId);
+      void Effect.runPromise(client.folderStatus({ conversationId }))
+        .then((status) =>
+          dispatchQueuedMessage({
+            data: { conversationId, ...sendFieldsFor(status), desktopExecutorId: executorId },
+          }),
+        )
+        .catch((error: unknown) => console.error("Could not start queued work", error))
+        .finally(() => starting.current.delete(conversationId));
+    }
+  }, [client, executorId, reconciled, work.data]);
 
   useEffect(() => {
     if (!client) return;

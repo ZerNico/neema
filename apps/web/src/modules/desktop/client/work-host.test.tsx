@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import {
   DesktopWorkProvider,
   useWorkApprovals,
@@ -38,18 +39,22 @@ const api = vi.hoisted(() => ({
   discardSubmission: vi.fn(),
   reservationStatus: vi.fn(),
   abortReservation: vi.fn(),
+  dispatch: vi.fn(),
 }));
 vi.mock("../server/functions.ts", () => ({
   desktopWorkSnapshot: api.snapshot,
   claimDesktopTool: api.claim,
   submitDesktopToolResult: api.complete,
 }));
-vi.mock("./bridge.ts", () => ({
+vi.mock("./bridge.ts", async (importOriginal) => ({
+  // The real derivation, so this proves what a queued Work start reports.
+  sendFieldsFor: (await importOriginal<typeof import("./bridge.ts")>()).sendFieldsFor,
   useDesktop: () => client,
 }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({
   abortWorkTurn: api.abortReservation,
   getWorkTurnReservation: api.reservationStatus,
+  dispatchQueuedMessage: api.dispatch,
 }));
 vi.mock("~/modules/auth/identity-boundary.tsx", () => ({ useIdentityBoundary: () => null }));
 const shell = {
@@ -68,6 +73,15 @@ const shell = {
       api.state(input);
     }),
   writeFile: (input: unknown) => Effect.promise(() => api.write(input)),
+  folderStatus: () =>
+    Effect.succeed({
+      workspace: { path: "/work/q1" },
+      folders: [
+        { name: "site", path: "/code/site", alive: true },
+        { name: "moved", path: "/code/moved", alive: false },
+      ],
+      sandbox: { kind: "ready" as const },
+    }),
 };
 // A browser has no bridge at all, which the provider must survive.
 let client: typeof shell | null = shell;
@@ -129,7 +143,12 @@ it.each([false, true])(
   "continues through chat/settings navigation without redispatching (lost result: %s)",
   async (loseResult) => {
     let calls = [call("one")];
-    api.snapshot.mockImplementation(async () => ({ attempts: [owner], calls, settings }));
+    api.snapshot.mockImplementation(async () => ({
+      attempts: [owner],
+      calls,
+      settings,
+      queued: [],
+    }));
     api.claim.mockResolvedValue({ token: "claimed" });
     api.complete.mockImplementation(async ({ data }: { data: { callId: string } }) => {
       calls = calls.filter((c) => c.callId !== data.callId);
@@ -183,7 +202,7 @@ it.each([false, true])(
 
 it("keeps dismissed approvals discoverable without repeating notifications on refresh", async () => {
   let calls = [call("one")];
-  api.snapshot.mockImplementation(async () => ({ attempts: [owner], calls, settings }));
+  api.snapshot.mockImplementation(async () => ({ attempts: [owner], calls, settings, queued: [] }));
   const { queryClient, router } = renderHost("/settings");
   await screen.findByText("Work needs your approval");
   expect(screen.getByText("First work")).toBeInTheDocument();
@@ -221,6 +240,7 @@ it("notifies for separate chats and clears notifications when the host goes away
     attempts: [owner, otherOwner],
     calls: [call("one"), { ...call("two"), ...otherOwner }],
     settings: [...settings, { ...settings[0]!, conversationId: "b", title: "Second work" }],
+    queued: [],
   });
   const { view } = renderHost("/settings");
   await waitFor(() => expect(screen.getAllByText("Work needs your approval")).toHaveLength(2));
@@ -239,7 +259,7 @@ it("notifies for separate chats and clears notifications when the host goes away
 });
 
 it("stays quiet when the last known snapshot held no work", async () => {
-  api.snapshot.mockResolvedValueOnce({ attempts: [], calls: [], settings: [] });
+  api.snapshot.mockResolvedValueOnce({ attempts: [], calls: [], settings: [], queued: [] });
   api.snapshot.mockRejectedValue(new Error("Server unreachable"));
   const { queryClient } = renderHost("/settings");
   await waitFor(() => expect(api.snapshot).toHaveBeenCalled());
@@ -257,7 +277,7 @@ it("says nothing when no snapshot ever arrived", async () => {
 });
 
 it("explains a paused computer and clears it on a successful retry", async () => {
-  const working = { attempts: [owner], calls: [], settings };
+  const working = { attempts: [owner], calls: [], settings, queued: [] };
   api.snapshot.mockResolvedValueOnce(working);
   api.snapshot.mockRejectedValue(new Error("Server unreachable"));
   const { queryClient } = renderHost("/settings");
@@ -414,6 +434,28 @@ function Chat() {
     </div>
   );
 }
+
+it("starts queued Work with this app's executor and the folders attached now", async () => {
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [], queued: ["q1"] });
+  api.dispatch.mockResolvedValue({ started: true });
+  renderHost("/settings");
+  await waitFor(() =>
+    expect(api.dispatch).toHaveBeenCalledWith({
+      data: {
+        conversationId: "q1",
+        fromDesktop: true,
+        // The workspace first, as for any send; a folder that has gone missing
+        // is left out.
+        desktopFolders: [
+          { name: WORKSPACE_FOLDER_NAME, path: "/work/q1" },
+          { name: "site", path: "/code/site" },
+        ],
+        desktopCommands: true,
+        desktopExecutorId: "executor",
+      },
+    }),
+  );
+});
 
 function renderHost(path: string) {
   const queryClient = new QueryClient({

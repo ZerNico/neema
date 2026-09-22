@@ -265,21 +265,24 @@ export const folderUsable = (
  * same state, or a send right after attaching goes out without the folder.
  * A folder that has gone missing is left out, since the model could not reach it.
  */
-export const desktopSendFields = (folder: FolderState | null): DesktopSendFields | null => {
-  if (!folderUsable(folder)) return null;
-  const attached = folder.status.folders
+export const desktopSendFields = (folder: FolderState | null): DesktopSendFields | null =>
+  folderUsable(folder) ? sendFieldsFor(folder.status) : null;
+
+/**
+ * The same report from a bare status, for a chat that is not on screen: the
+ * work host starts queued Work in conversations nobody has open.
+ */
+export const sendFieldsFor = (status: FolderStatus): DesktopSendFields => {
+  const attached = status.folders
     .filter((item) => item.alive)
     .map((item) => ({ name: item.name, path: item.path }));
   // The workspace travels with its real path: it is the model's cwd and the
   // root every absolute path in the workspace falls under.
-  const folders = [
-    { name: WORKSPACE_FOLDER_NAME, path: folder.status.workspace.path },
-    ...attached,
-  ];
+  const folders = [{ name: WORKSPACE_FOLDER_NAME, path: status.workspace.path }, ...attached];
   return {
     fromDesktop: true,
     desktopFolders: folders,
-    desktopCommands: folder.status.sandbox.kind === "ready",
+    desktopCommands: status.sandbox.kind === "ready",
   };
 };
 

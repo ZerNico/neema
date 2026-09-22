@@ -1,6 +1,7 @@
 import { uuidv7 } from "uuidv7";
 import type { AssistantOutput } from "~/modules/chat/assistant-output.ts";
 import type { ProviderReplay } from "~/modules/chat/server/provider-replay.ts";
+import type { QueuedTurnInput } from "~/modules/chat/queued-turn.ts";
 import { desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
@@ -129,6 +130,18 @@ export const messages = pgTable(
     assistantOutput: jsonb("assistant_output").$type<AssistantOutput>(),
     providerReplay: jsonb("provider_replay").$type<ProviderReplay>(),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
+    // Set on a user message delivered into a generation that was already
+    // running. A steer belongs to that attempt, like its tool rows: it renders
+    // inside the answer where it arrived, and goes when the attempt is
+    // replaced or the answer deleted.
+    steeredIntoMessageId: text("steered_into_message_id").references(
+      (): AnyPgColumn => messages.id,
+      { onDelete: "cascade" },
+    ),
+    // Where it arrived: the answer's text length and the model round it
+    // followed. Offsets address the raw content, like tool rows'.
+    steerTextOffset: integer("steer_text_offset"),
+    steerTurnIndex: integer("steer_turn_index"),
     // final assembled reasoning/thinking text; empty for non-reasoning models
     reasoning: text().notNull().default(""),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
@@ -157,9 +170,45 @@ export const messages = pgTable(
     // collide within a turn; uuidv7 ids break the tie in insertion order, and
     // compaction boundaries are positions in exactly this sequence.
     index("messages_conversation_order_idx").on(t.conversationId, t.createdAt, t.id),
+    index("messages_steered_into_idx").on(t.steeredIntoMessageId),
     index("messages_streaming_lease_idx")
       .on(t.generationLeaseUntil)
       .where(sql`${t.status} = 'streaming'`),
+  ],
+);
+
+/**
+ * Messages held behind the one live assistant generation. Queue entries are
+ * not transcript rows: a branch copies history, never future work. Their files
+ * are claimed through `conversation_queue_entry_attachments` and move to the
+ * user message the entry becomes; the input holds configuration only.
+ */
+export const conversationQueueEntries = pgTable(
+  "conversation_queue_entries",
+  {
+    id: text().primaryKey().$defaultFn(uuidv7),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    content: text().notNull(),
+    /** Frozen at queue time; attempt resolution still checks live access when promoted. */
+    input: jsonb().$type<QueuedTurnInput>().notNull(),
+    /** A steer is delivered at a safe model boundary only while this fence is live. */
+    steerMessageId: text("steer_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    steerGenerationId: text("steer_generation_id"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("conversation_queue_entries_order_idx").on(t.conversationId, t.id),
+    index("conversation_queue_entries_steer_idx")
+      .on(t.steerMessageId, t.steerGenerationId)
+      .where(sql`${t.steerMessageId} is not null`),
   ],
 );
 
@@ -177,7 +226,7 @@ export const messageChunks = pgTable(
     // what the delta belongs to: the visible answer, the reasoning trace, or a
     // tool/compaction activity marker (JSON envelope in delta). Plain text
     // column, so a new marker kind is a TypeScript change only.
-    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "file"] })
+    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "file", "steer"] })
       .notNull()
       .default("text"),
     delta: text().notNull(),

@@ -38,6 +38,7 @@ import { conversationQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import {
   applyCompactionChunk,
+  applySteerChunk,
   applyToolChunk,
   toMemoryActivityOutcome,
   toMemoryActivityReason,
@@ -74,6 +75,8 @@ import {
   ForeignMachineBanner,
   foreignMachineStamp,
 } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
+import { useConversationQueue } from "./use-conversation-queue.ts";
+import type { AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
@@ -609,6 +612,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         durableCompactions,
       );
     return {
+      steers: data.pendingChunks
+        .filter((chunk) => chunk.kind === "steer")
+        .reduce<AssistantSteer[]>((steers, chunk) => applySteerChunk(steers, chunk.delta), []),
       files: data.pendingChunks
         .filter((chunk) => chunk.kind === "file")
         .reduce<AssistantFile[]>(
@@ -1144,7 +1150,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     [actionsDisabled, effectiveModelId],
   );
   // oxlint-enable react-hooks/exhaustive-deps
-  const tailMessageId = data.messages.at(-1)?.id;
+  // Steers sit just after the answer they went into; "what came last" means
+  // the last turn message, so questions on a steered answer stay answerable.
+  const turnMessages = useMemo(
+    () => data.messages.filter((message) => !message.steeredIntoMessageId),
+    [data.messages],
+  );
+  const tailMessageId = turnMessages.at(-1)?.id;
 
   // A rewind takes the documents and drafts those answers created with it, so
   // the dialog names them: a checklist someone has been ticking, or settings
@@ -1173,14 +1185,30 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts],
   );
 
+  // A steer goes with the answer it was sent into, and it is the person's own
+  // text, so a rewind that replaces that answer says so first.
+  const steerLoss = useCallback(
+    (answerId: string | undefined) => {
+      const count = data.messages.filter(
+        (message) => answerId && message.steeredIntoMessageId === answerId,
+      ).length;
+      if (count === 0) return "";
+      return count === 1
+        ? " The message you steered into it will be removed too."
+        : ` The ${count} messages you steered into it will be removed too.`;
+    },
+    [data.messages],
+  );
+
   const retry = useCallback(
     async (messageId: string, pickedModelId?: string) => {
-      const losing = documentLoss(messageId, true);
+      const later = messageId !== lastAssistantId;
+      const losing = documentLoss(messageId, true) + steerLoss(messageId);
       if (
-        (messageId !== lastAssistantId || losing) &&
+        (later || losing) &&
         !(await confirm({
           title: "Retry this response?",
-          description: `All messages after it will be removed.${losing}`,
+          description: `${later ? "All messages after it will be removed." : ""}${losing}`.trim(),
           confirmLabel: "Retry",
         }))
       ) {
@@ -1190,12 +1218,43 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         pickedModelId === undefined ? { messageId } : { messageId, modelId: pickedModelId },
       );
     },
-    [confirm, documentLoss, lastAssistantId, mutateRetry],
+    [confirm, documentLoss, lastAssistantId, mutateRetry, steerLoss],
   );
   const branchAt = useCallback((messageId: string) => mutateBranch(messageId), [mutateBranch]);
 
   // Only offered for a generation this client can actually see running.
   const stoppableId = stream.status === "streaming" ? streamingMessage?.id : undefined;
+
+  const conversationQueue = useConversationQueue({
+    conversationId,
+    mode: data.conversation.mode,
+    rows: data.queue,
+    state: data.queueState,
+    running:
+      streamingMessage?.generationId != null
+        ? { messageId: streamingMessage.id, generationId: streamingMessage.generationId }
+        : null,
+    arrived: stream.steers,
+    // What a send carries now; a queued message freezes it.
+    submission: async () => ({
+      modelId: effectiveModelId!,
+      searchEnabled,
+      ...(await work.attemptFields()),
+      timeZone: browserTimeZone(),
+      ...documentFocus(),
+      ...context.sendFields,
+    }),
+    attemptFields: () => work.attemptFields(),
+    checkWork: checkWorkReady,
+    settings: {
+      modelId,
+      setModelId,
+      setSearchEnabled,
+      resetSearchEnabled,
+      seedCollections: context.seed,
+      settleCollections: context.settle,
+    },
+  });
 
   const attachmentsByMessage = useMemo(() => {
     const grouped = new Map<string, MessageAttachment[]>();
@@ -1206,6 +1265,26 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     }
     return grouped;
   }, [data.attachments]);
+
+  // A steer belongs to the answer it was delivered into and is drawn inside
+  // it, so it never becomes a transcript row of its own.
+  const steersByAnswer = useMemo(() => {
+    const grouped = new Map<string, AssistantSteer[]>();
+    for (const message of data.messages) {
+      if (!message.steeredIntoMessageId) continue;
+      const list = grouped.get(message.steeredIntoMessageId) ?? [];
+      list.push({
+        id: message.id,
+        content: message.content,
+        // Rows from before positions were recorded read as arriving first.
+        textOffset: message.steerTextOffset ?? 0,
+        turnIndex: message.steerTurnIndex ?? -1,
+        attachments: attachmentsByMessage.get(message.id) ?? [],
+      });
+      grouped.set(message.steeredIntoMessageId, list);
+    }
+    return grouped;
+  }, [attachmentsByMessage, data.messages]);
 
   // Grouped once per query result, since the display map below runs on every
   // stream chunk and must not rescan the flat list per message.
@@ -1226,7 +1305,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     () =>
       data.messages.filter(
         (message) =>
-          message.role !== "system" && !questionResponses.hiddenMessageIds.has(message.id),
+          message.role !== "system" &&
+          !message.steeredIntoMessageId &&
+          !questionResponses.hiddenMessageIds.has(message.id),
       ),
     [data.messages, questionResponses],
   );
@@ -1272,22 +1353,24 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   const confirmEdit = useCallback(
     async (messageId: string) => {
-      const messageIndex = data.messages.findIndex((message) => message.id === messageId);
-      const after = data.messages.slice(messageIndex + 1);
+      // Steers of the response go with it and are named on their own below.
+      const messageIndex = turnMessages.findIndex((message) => message.id === messageId);
+      const after = turnMessages.slice(messageIndex + 1);
       const responseIndex = after.findIndex((message) => message.role === "assistant");
       const removesLaterTurns =
         responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
-      const losing = documentLoss(messageId, false);
+      const losing = documentLoss(messageId, false) + steerLoss(after[responseIndex]?.id);
       return (
         (!removesLaterTurns && !losing) ||
         (await confirm({
           title: "Edit this message?",
-          description: `All messages after its response will be removed.${losing}`,
+          description:
+            `${removesLaterTurns ? "All messages after its response will be removed." : ""}${losing}`.trim(),
           confirmLabel: "Save and regenerate",
         }))
       );
     },
-    [confirm, data.messages, documentLoss],
+    [confirm, documentLoss, steerLoss, turnMessages],
   );
 
   const saveQuestionEdit = useCallback(
@@ -1524,6 +1607,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         toolActivities,
         inheritedSources,
         compactionActivities,
+        ...(steersByAnswer.has(message.id) ? { steers: steersByAnswer.get(message.id)! } : {}),
         ...(canRespond || resolution
           ? {
               questionActions: {
@@ -1605,6 +1689,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     openEdit,
     retry,
     stamps,
+    steersByAnswer,
     toolCallsByMessage,
     visibleMessages,
   ]);
@@ -1669,6 +1754,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
           toolActivities: stream.tools.length > 0 ? stream.tools : base.toolActivities,
           compactionActivities: stream.compactions,
+          // The stream has them the moment they are taken in; the rows arrive
+          // with the next refetch. Same ids, so each is drawn once.
+          steers: [
+            ...(projected.steers ?? []),
+            ...stream.steers.filter(
+              (steer) => !projected.steers?.some((known) => known.id === steer.id),
+            ),
+          ],
         };
         // Status comes from the stream, not the row: the refetched row says
         // complete while the last words are still landing.
@@ -1703,6 +1796,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       stream.reasoning,
       stream.reasoningSeen,
       stream.status,
+      stream.steers,
       stream.text,
       stream.tools,
     ],
@@ -1904,6 +1998,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                     ...(workspaceImports ? { workspaceImports } : {}),
                   })
                 }
+                {...(generating ? { onQueue: conversationQueue.submit } : {})}
+                queue={conversationQueue.queue}
                 {...(stoppableId
                   ? {
                       onStop: () =>
@@ -1915,7 +2011,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                         }),
                     }
                   : {})}
-                disabled={actionsDisabled}
+                // A live answer locks destructive transcript actions, not the
+                // next draft. The composer submits that draft to the queue.
+                disabled={
+                  questionNeedsRefresh ||
+                  retryMutation.isPending ||
+                  editMutation.isPending ||
+                  branchMutation.isPending
+                }
                 textareaDisabled={editPending}
                 controlsDisabled={mutationPending}
                 modelId={effectiveModelId}

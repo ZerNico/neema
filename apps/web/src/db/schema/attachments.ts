@@ -8,7 +8,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
-import { messages } from "./chat.ts";
+import { conversationQueueEntries, messages } from "./chat.ts";
 
 /**
  * Stored bytes, content-addressed. Dedup is scoped to one user: a global
@@ -116,5 +116,31 @@ export const messageAttachments = pgTable(
     // is what makes two concurrent sends racing for the same upload safe.
     uniqueIndex("message_attachments_attachment_id_idx").on(t.attachmentId),
     uniqueIndex("message_attachments_message_position_idx").on(t.messageId, t.position),
+  ],
+);
+
+/**
+ * Uploads held by a queued message that is not a transcript row yet. A second
+ * owner kind beside `message_attachments`: promotion and steering move the link
+ * there in the transaction that creates the message. The unique index covers
+ * this table only; exclusivity across both tables comes from every claim
+ * locking the blob rows first (`claimAttachments`), since Postgres cannot index
+ * across two tables.
+ */
+export const conversationQueueEntryAttachments = pgTable(
+  "conversation_queue_entry_attachments",
+  {
+    queueEntryId: text("queue_entry_id")
+      .notNull()
+      .references(() => conversationQueueEntries.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    position: integer().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.queueEntryId, t.attachmentId] }),
+    uniqueIndex("queue_entry_attachments_attachment_id_idx").on(t.attachmentId),
+    uniqueIndex("queue_entry_attachments_entry_position_idx").on(t.queueEntryId, t.position),
   ],
 );

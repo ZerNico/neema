@@ -7,6 +7,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Fiber,
   Layer,
   ManagedRuntime,
@@ -50,9 +51,11 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
-import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
+import { EditNotAllowed } from "~/modules/chat/errors.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { GenerationFence, QueueSweepInterval } from "~/modules/chat/server/generation-fence.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -300,7 +303,12 @@ beforeAll(async () => {
   const EngineLayer = StreamEngine.layer.pipe(
     Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
   );
-  const AppLayer = ChatService.layer.pipe(Layer.provideMerge(EngineLayer));
+  // No background sweep: tests that assert queue state would otherwise race a
+  // start nobody asked for. Settled hooks and explicit dispatch still run.
+  const AppLayer = ChatService.layer.pipe(
+    Layer.provideMerge(EngineLayer),
+    Layer.provide(Layer.succeed(QueueSweepInterval, null)),
+  );
   runtime = ManagedRuntime.make(AppLayer);
 
   imageModelId = uuidv7();
@@ -376,6 +384,23 @@ const setupConversation = Effect.gen(function* () {
   });
   return { userId, conversation, userMessage, assistant };
 });
+
+/**
+ * The same seed as a Work chat, which only a desktop app starts: a finished
+ * answer does not start its next queued entry by itself.
+ */
+const setupWorkConversation = <A extends { conversation: { id: string } }, E, R>(
+  setup: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const seed = yield* setup;
+    const db = yield* Db;
+    yield* db
+      .update(conversations)
+      .set({ mode: "work" })
+      .where(eq(conversations.id, seed.conversation.id));
+    return seed;
+  });
 
 const questionParams = {
   questions: [
@@ -2149,6 +2174,848 @@ const seedAnswered = (originalModelId: string) =>
     });
     return { userId, conversation, userMessage, assistant };
   });
+
+const plain = () => () => Effect.succeed(PLAIN_GENERATION);
+const uploadText = (userId: string, fileName: string, text: string) =>
+  Effect.gen(function* () {
+    const service = yield* AttachmentService;
+    return yield* service.upload({
+      userId,
+      fileName,
+      declaredMediaType: "text/plain",
+      bytes: new TextEncoder().encode(text),
+    });
+  });
+
+const waitForAnswer = (messageId: string) =>
+  Effect.gen(function* () {
+    const engine = yield* StreamEngine;
+    return yield* engine.subscribe(messageId, 0).pipe(Stream.runCollect);
+  });
+
+/** A prompt reduced to who spoke and which part of the steered answer it was. */
+const promptShape = (prompt: ReadonlyArray<Prompt.MessageEncoded>) =>
+  prompt
+    .filter((message) => message.role !== "system")
+    .map((message) =>
+      message.role === "tool"
+        ? "tool"
+        : `${message.role}:${JSON.stringify(message.content).includes("make it a dog") ? "steer" : JSON.stringify(message.content).includes("Drawing a cat") ? "turn0" : JSON.stringify(message.content).includes("Here is the dog") ? "turn1" : "other"}`,
+    );
+
+/** What the queue strip is told about a conversation's queue. */
+const queueStateOf = (seed: { userId: string; conversation: { id: string } }) =>
+  loadConversationDetail(seed.userId, seed.conversation.id).pipe(
+    Effect.map((detail) => detail.queueState),
+  );
+
+describe("queued turns", () => {
+  const queuedInput = () => ({
+    modelId: textModelId,
+    searchEnabled: false,
+    researchEnabled: false,
+  });
+  it("promotes exactly the first queued turn, and only the head the caller checked", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const first = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "first",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const second = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "second",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        yield* repo.finalizeMessage({
+          messageId: seed.assistant.id,
+          status: "complete",
+          content: "done",
+        });
+        // Validated against the wrong head: nothing may start, nothing is consumed.
+        const stale = yield* repo.promoteNextQueuedTurn({
+          conversationId: seed.conversation.id,
+          expectedEntryId: second.id,
+          resolve: plain,
+        });
+        const promoted = yield* repo.promoteNextQueuedTurn({
+          conversationId: seed.conversation.id,
+          expectedEntryId: first.id,
+          resolve: plain,
+        });
+        return { stale, promoted, queue: yield* repo.listQueue(seed.conversation.id) };
+      }),
+    );
+
+    expect(result.stale).toEqual({ promoted: false, reason: "changed" });
+    expect(result.promoted).toMatchObject({ promoted: true, entry: { content: "first" } });
+    expect(result.queue.map((entry) => entry.content)).toEqual(["second"]);
+  });
+
+  it("lists only the conversations a dispatch could start", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const queue = (seed: { userId: string; conversation: { id: string } }) =>
+          repo.enqueue({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "next",
+            attachmentIds: [],
+            input: queuedInput(),
+          });
+        const finished = (seed: { assistant: { id: string } }, status: "complete" | "aborted") =>
+          repo.finalizeMessage({ messageId: seed.assistant.id, status, content: "done" });
+
+        const ready = yield* setupConversation;
+        yield* finished(ready, "complete");
+        yield* queue(ready);
+
+        const asking = yield* setupQuestion;
+        yield* queue(asking);
+
+        const failed = yield* setupConversation;
+        yield* finished(failed, "complete");
+        const failedEntry = yield* queue(failed);
+        yield* repo.setQueueEntryError(failedEntry.id, "model gone");
+
+        const stopped = yield* setupConversation;
+        yield* finished(stopped, "aborted");
+        yield* queue(stopped);
+
+        const work = yield* setupWorkConversation(setupConversation);
+        yield* finished(work, "complete");
+        yield* queue(work);
+
+        const listed = (mode: "chat" | "work", userId?: string) =>
+          repo
+            .listQueuedConversations({ limit: 1000, mode, userId })
+            .pipe(Effect.map((rows) => new Set(rows.map((row) => row.conversationId))));
+        const chat = yield* listed("chat");
+        return {
+          ready: chat.has(ready.conversation.id),
+          asking: chat.has(asking.conversation.id),
+          failed: chat.has(failed.conversation.id),
+          stopped: chat.has(stopped.conversation.id),
+          workInChat: chat.has(work.conversation.id),
+          workForItsOwner: (yield* listed("work", work.userId)).has(work.conversation.id),
+          workForAnotherUser: (yield* listed("work", ready.userId)).has(work.conversation.id),
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      ready: true,
+      asking: false,
+      failed: false,
+      stopped: false,
+      workInChat: false,
+      workForItsOwner: true,
+      workForAnotherUser: false,
+    });
+  });
+
+  it("reads past a steer to the question its answer asked", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupQuestion;
+        // Taken in at a tool boundary, before the answer went on to ask.
+        const steerId = uuidv7();
+        yield* db.insert(messages).values({
+          id: steerId,
+          conversationId: seed.conversation.id,
+          role: "user",
+          status: "complete",
+          content: "keep it short",
+          steeredIntoMessageId: seed.assistant.id,
+          steerTextOffset: 0,
+          steerTurnIndex: 0,
+        });
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "later",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const held = yield* repo.promoteNextQueuedTurn({
+          conversationId: seed.conversation.id,
+          expectedEntryId: entry.id,
+          resolve: plain,
+        });
+        const edit = yield* chat
+          .editMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: steerId,
+            content: "rewritten",
+            modelId: textModelId,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          })
+          .pipe(Effect.flip);
+        const reply = yield* repo.createTurn(answerInput(seed));
+        return { held, edit, reply: reply.userMessage.questionResponse };
+      }),
+    );
+
+    // The steer is not the last turn; the answer and its question are.
+    expect(result.held).toEqual({ promoted: false, reason: "question" });
+    expect(result.edit).toBeInstanceOf(EditNotAllowed);
+    expect(result.reply).not.toBeNull();
+  });
+
+  it("tells the strip why a queue waits, from the gate promotion reads", async () => {
+    const states = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const queue = (seed: { userId: string; conversation: { id: string } }) =>
+          repo.enqueue({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "next",
+            attachmentIds: [],
+            input: queuedInput(),
+          });
+
+        const running = yield* setupConversation;
+        const empty = yield* queueStateOf(running);
+        yield* queue(running);
+
+        const ready = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: ready.assistant.id,
+          status: "complete",
+          content: "ok",
+        });
+        const failed = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: failed.assistant.id,
+          status: "complete",
+          content: "ok",
+        });
+        yield* repo.setQueueEntryError((yield* queue(failed)).id, "model gone");
+        const stopped = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: stopped.assistant.id,
+          status: "aborted",
+          content: "",
+        });
+        const asking = yield* setupQuestion;
+        yield* queue(ready);
+        yield* queue(stopped);
+        yield* queue(asking);
+
+        return {
+          empty,
+          running: yield* queueStateOf(running),
+          ready: yield* queueStateOf(ready),
+          failed: yield* queueStateOf(failed),
+          stopped: yield* queueStateOf(stopped),
+          asking: yield* queueStateOf(asking),
+        };
+      }),
+    );
+
+    expect(states).toEqual({
+      empty: null,
+      running: "running",
+      ready: "ready",
+      failed: "failed",
+      stopped: "stopped",
+      asking: "question",
+    });
+  });
+
+  it("holds queued turns behind an unanswered clarification", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupQuestion;
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "later",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        return yield* repo.promoteNextQueuedTurn({
+          conversationId: seed.conversation.id,
+          expectedEntryId: entry.id,
+          resolve: plain,
+        });
+      }),
+    );
+
+    expect(result).toEqual({ promoted: false, reason: "question" });
+  });
+
+  const firstRound = "Checking the models. ";
+  const secondRound = "Here is the ending.";
+  /** What the fake model writes in one plain call. */
+  const oneRound = "alpha beta gamma delta epsilon";
+  /**
+   * A finished answer that took a queued message with a file at a tool
+   * boundary: the first model call writes a sentence and calls a read-only
+   * tool, the steer is claimed once that result is in, and the second call
+   * continues the same answer with it.
+   */
+  const steeredConversation = Effect.gen(function* () {
+    const engine = yield* StreamEngine;
+    const repo = yield* ChatRepo;
+    const seed = yield* setupConversation;
+    const file = yield* uploadText(seed.userId, "steer.txt", "Steer file body 42");
+    const entry = yield* repo.enqueue({
+      userId: seed.userId,
+      conversationId: seed.conversation.id,
+      content: "use a different ending",
+      attachmentIds: [file.id],
+      input: queuedInput(),
+    });
+    yield* repo.steerQueueEntry({
+      userId: seed.userId,
+      conversationId: seed.conversation.id,
+      entryId: entry.id,
+      messageId: seed.assistant.id,
+      generationId: seed.assistant.generationId!,
+    });
+    const promptsBefore = streamPrompts.length;
+    let calls = 0;
+    authoringScript = (input) => {
+      calls += 1;
+      if (calls === 1)
+        return Stream.make(AiResponse.makePart("text-delta", { id: "t1", delta: firstRound })).pipe(
+          Stream.concat(authoringTool(input, "list_agent_options", { kind: "models" })),
+        ) as Stream.Stream<ChatStreamPart>;
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t2", delta: secondRound }),
+        authoringFinish(),
+      ) as Stream.Stream<ChatStreamPart>;
+    };
+    yield* engine.startGeneration({
+      userId: seed.userId,
+      conversationId: seed.conversation.id,
+      messageId: seed.assistant.id,
+      generationId: seed.assistant.generationId ?? undefined,
+      modelId: textModelId,
+      searchEnabled: false,
+    });
+    yield* waitForAnswer(seed.assistant.id);
+    authoringScript = null;
+    const steer = (yield* repo.listMessages(seed.conversation.id)).find(
+      (message) => message.steeredIntoMessageId,
+    )!;
+    return { seed, file, steer, promptsBefore };
+  });
+
+  it("steers a queued message with a file into the running answer at a model boundary", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const { seed, steer, promptsBefore } = yield* steeredConversation;
+        return {
+          final: yield* repo.getMessage(seed.assistant.id),
+          order: (yield* repo.listMessages(seed.conversation.id)).map((message) => message.role),
+          steer,
+          continuation: JSON.stringify(streamPrompts[promptsBefore + 1]?.content),
+          calls: streamPrompts.length - promptsBefore,
+          steeredFiles: (yield* attachmentRepo.listForMessages([steer.id])).map(
+            (row) => row.fileName,
+          ),
+          queue: yield* repo.listQueue(seed.conversation.id),
+          chunks: yield* repo.chunksAfter(seed.assistant.id, 0),
+        };
+      }),
+    );
+
+    // In the stream where it was taken in: after the first round's text and
+    // tool, before the second round's text, so live and replay agree.
+    const kinds = result.chunks.map((chunk) => chunk.kind);
+    const steerAt = kinds.indexOf("steer");
+    expect(kinds.lastIndexOf("tool")).toBeLessThan(steerAt);
+    expect(result.chunks[steerAt + 1]).toMatchObject({ kind: "text", delta: secondRound });
+    expect(JSON.parse(result.chunks[steerAt]!.delta)).toMatchObject({
+      id: result.steer.id,
+      content: "use a different ending",
+      textOffset: firstRound.length,
+      attachments: [{ fileName: "steer.txt" }],
+    });
+
+    expect(result.final?.status).toBe("complete");
+    // One answer, continued rather than restarted: both calls stream into it.
+    expect(result.calls).toBe(2);
+    expect(result.final?.content).toBe(firstRound + secondRound);
+    // The continuation read the steered file, not just its words.
+    expect(result.continuation).toContain("Steer file body 42");
+    expect(result.continuation).toContain("use a different ending");
+    // It arrived after the first round's text and tool, which is where it is drawn.
+    expect(result.steer).toMatchObject({
+      content: "use a different ending",
+      steeredIntoMessageId: result.final?.id,
+      steerTextOffset: firstRound.length,
+      steerTurnIndex: 0,
+    });
+    // Its real time, just after the answer it went into; readers of the last
+    // turn skip it, and a rewind of that answer takes it by position.
+    expect(result.order).toEqual(["user", "assistant", "user"]);
+    expect(result.steeredFiles).toEqual(["steer.txt"]);
+    expect(result.queue).toEqual([]);
+  }, 60_000);
+
+  it("places a steer between replayed turns for an image-output model", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "make it a dog",
+          attachmentIds: [],
+          input: { ...queuedInput(), modelId: imageModelId },
+        });
+        yield* repo.steerQueueEntry({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        });
+        let calls = 0;
+        authoringScript = (input) => {
+          calls += 1;
+          if (calls === 1)
+            return Stream.make(
+              AiResponse.makePart("text-delta", { id: "t1", delta: "Drawing a cat. " }),
+            ).pipe(
+              Stream.concat(authoringTool(input, "list_agent_options", { kind: "models" })),
+            ) as Stream.Stream<ChatStreamPart>;
+          return Stream.make(
+            AiResponse.makePart("text-delta", {
+              id: "t2",
+              delta: calls === 2 ? "Here is the dog." : "Another one.",
+            }),
+            authoringFinish(),
+          ) as Stream.Stream<ChatStreamPart>;
+        };
+        yield* engine.startGeneration({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId ?? undefined,
+          modelId: imageModelId,
+          searchEnabled: false,
+        });
+        yield* waitForAnswer(seed.assistant.id);
+        const continuation = streamPrompts.at(-1)!.content;
+        const sent = yield* chat.sendMessage({
+          userId: seed.userId,
+          conversation: { kind: "existing", id: seed.conversation.id },
+          modelId: imageModelId,
+          content: "and another",
+          attachmentIds: [],
+          searchEnabled: false,
+          researchEnabled: false,
+        });
+        yield* waitForAnswer(sent.assistantMessageId);
+        authoringScript = null;
+        return {
+          replay: (yield* repo.getMessage(seed.assistant.id))?.providerReplay?.turns.map(
+            (turn) => turn.turnIndex,
+          ),
+          continuation,
+          history: streamPrompts.at(-1)!.content,
+        };
+      }),
+    );
+
+    // One replay turn per model call, so later history is rebuilt from them.
+    expect(result.replay).toEqual([0, 1]);
+    // Live: the round's call and results, then the steer, then the next call.
+    expect(promptShape(result.continuation).slice(-3)).toEqual([
+      "assistant:turn0",
+      "tool",
+      "user:steer",
+    ]);
+    // Next turn: the same order rebuilt from the replay turns.
+    const history = promptShape(result.history);
+    const at = history.indexOf("assistant:turn0");
+    expect(history.slice(at, at + 4)).toEqual([
+      "assistant:turn0",
+      "tool",
+      "user:steer",
+      "assistant:turn1",
+    ]);
+  }, 60_000);
+
+  it("gives later turns the steer inside the answer it changed", async () => {
+    const prompt = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const { seed } = yield* steeredConversation;
+        const sent = yield* chat.sendMessage({
+          userId: seed.userId,
+          conversation: { kind: "existing", id: seed.conversation.id },
+          modelId: textModelId,
+          content: "and now a haiku",
+          attachmentIds: [],
+          searchEnabled: false,
+          researchEnabled: false,
+        });
+        yield* waitForAnswer(sent.assistantMessageId);
+        return streamPrompts.at(-1)!.content;
+      }),
+    );
+
+    const turns = prompt
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .map((message) => `${message.role}:${JSON.stringify(message.content)}`);
+    const at = (text: string) => turns.findIndex((turn) => turn.includes(text));
+    const steerAt = at("use a different ending");
+    // The answer so far, the steer with its file, then the rest of the answer.
+    expect(turns[steerAt]).toContain("Steer file body 42");
+    expect(turns[steerAt - 1]).toMatch(/^assistant:.*Checking the models/);
+    expect(turns[steerAt + 1]).toMatch(/^assistant:.*Here is the ending/);
+    expect(turns[steerAt + 2]).toMatch(/^user:.*and now a haiku/);
+    expect(turns.filter((turn) => turn.includes("use a different ending"))).toHaveLength(1);
+  }, 60_000);
+
+  it("takes the steer and its file with the answer when the question is edited", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const { seed, file } = yield* steeredConversation;
+        yield* chat.editMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.userMessage.id,
+          content: "hi, but shorter",
+          modelId: textModelId,
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        });
+        yield* waitForAnswer(seed.assistant.id);
+        return {
+          transcript: (yield* repo.listMessages(seed.conversation.id)).map(
+            (message) => `${message.role}:${message.content}`,
+          ),
+          fileLeft: (yield* attachmentRepo.listWithBlobsByIds(seed.userId, [file.id])).length,
+        };
+      }),
+    );
+
+    // The steer was part of the attempt the edit replaced.
+    expect(result.transcript).toEqual(["user:hi, but shorter", `assistant:${oneRound}`]);
+    expect(result.fileLeft).toBe(0);
+  }, 60_000);
+
+  it("points a branch's copied steer at the copied answer", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const { seed } = yield* steeredConversation;
+        const branch = yield* repo.cloneConversationPrefix({
+          userId: seed.userId,
+          sourceConversationId: seed.conversation.id,
+          throughMessageId: seed.assistant.id,
+        });
+        const copied = yield* repo.listMessages(branch.id);
+        return {
+          // The steer sorts after the answer, so a branch through the answer
+          // has to reach past it to keep the steer.
+          answerId: copied.find((message) => message.role === "assistant")!.id,
+          steer: copied.find((message) => message.steeredIntoMessageId),
+        };
+      }),
+    );
+
+    expect(result.steer).toMatchObject({
+      content: "use a different ending",
+      steeredIntoMessageId: result.answerId,
+      steerTextOffset: firstRound.length,
+    });
+  }, 60_000);
+
+  it("never bolts a steer onto an answer that ends without another step", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const older = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "queued first",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const steered = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "steered later",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        yield* repo.steerQueueEntry({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: steered.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        });
+        // The fake model answers in one call with no tools: no boundary comes.
+        yield* engine.startGeneration({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId ?? undefined,
+          modelId: textModelId,
+          searchEnabled: false,
+        });
+        yield* waitForAnswer(seed.assistant.id);
+        const queue = yield* repo.listQueue(seed.conversation.id);
+        const promoted = yield* repo.promoteNextQueuedTurn({
+          conversationId: seed.conversation.id,
+          expectedEntryId: queue[0]!.id,
+          resolve: () => () => Effect.succeed(PLAIN_GENERATION),
+        });
+        return {
+          content: (yield* repo.getMessage(seed.assistant.id))?.content,
+          steerRows: (yield* repo.listMessages(seed.conversation.id)).filter(
+            (message) => message.steeredIntoMessageId,
+          ).length,
+          order: queue.map((entry) => entry.id),
+          ids: { older: older.id, steered: steered.id },
+          promoted: promoted.promoted ? promoted.userMessage.content : null,
+        };
+      }),
+    );
+
+    expect(result.content).toBe(oneRound);
+    expect(result.steerRows).toBe(0);
+    // Asked to go now, so it goes next, ahead of the message queued before it.
+    expect(result.order).toEqual([result.ids.steered, result.ids.older]);
+    expect(result.promoted).toBe("steered later");
+  }, 60_000);
+
+  it("stops the running answer and starts the chosen entry when sent now", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        // Work, so the answer it starts does not go on to start the other
+        // entry when it finishes; the desktop fields below name its machine.
+        const seed = yield* setupWorkConversation(setupConversation);
+        yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "queued first",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const chosen = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "send this one now",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        hold = { after: 2, reached, release };
+        yield* engine.startGeneration({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId ?? undefined,
+          modelId: textModelId,
+          searchEnabled: false,
+        });
+        yield* Deferred.await(reached);
+        // The parked answer stays parked; only Stop may end it.
+        hold = null;
+        const sent = yield* chat.sendQueuedNow({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: chosen.id,
+          desktop: { fromDesktop: true, desktopExecutorId: "executor-now" },
+        });
+        const next = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
+        yield* waitForAnswer(next.id);
+        return {
+          sent,
+          stopped: yield* repo.getMessage(seed.assistant.id),
+          transcript: (yield* repo.listMessages(seed.conversation.id)).map(
+            (message) => `${message.role}:${message.status}:${message.content.slice(0, 17)}`,
+          ),
+          queue: (yield* repo.listQueue(seed.conversation.id)).map((entry) => entry.content),
+        };
+      }),
+    );
+
+    expect(result.sent).toEqual({ started: true });
+    // Stopped, keeping what it had written.
+    expect(result.stopped?.status).toBe("aborted");
+    // The gate holds the second word, so only the first was written.
+    expect(result.stopped?.content).toBe("alpha ");
+    expect(result.transcript).toEqual([
+      "user:complete:hi",
+      "assistant:aborted:alpha ",
+      "user:complete:send this one now",
+      "assistant:complete:alpha beta gamma ",
+    ]);
+    expect(result.queue).toEqual(["queued first"]);
+  }, 60_000);
+
+  it("lets only the live generation claim a steer, leaving it queued otherwise", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "change course",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        yield* repo.steerQueueEntry({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        });
+        const fence = {
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        };
+        const claim = repo.claimSteeredEntries({
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          textOffset: 0,
+          turnIndex: 0,
+        });
+        // A retried attempt holds a different generation id: its fence fails.
+        const stale = yield* Effect.exit(
+          claim.pipe(Effect.provideService(GenerationFence, { ...fence, generationId: uuidv7() })),
+        );
+        const afterStale = (yield* repo.listQueue(seed.conversation.id)).length;
+        const claimed = yield* claim.pipe(Effect.provideService(GenerationFence, fence));
+        return {
+          staleInterrupted: Exit.hasInterrupts(stale),
+          afterStale,
+          claimed,
+          queue: yield* repo.listQueue(seed.conversation.id),
+        };
+      }),
+    );
+
+    expect(result.staleInterrupted).toBe(true);
+    expect(result.afterStale).toBe(1);
+    expect(result.claimed).toHaveLength(1);
+    expect(result.claimed[0]).toMatchObject({
+      content: "change course",
+      steeredIntoMessageId: expect.any(String),
+    });
+    expect(result.queue).toEqual([]);
+  });
+
+  it("waits for a desktop app to start queued Work, then runs on that app's executor", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const external = yield* ExternalCompletion;
+        const db = yield* Db;
+        const seed = yield* setupConversation;
+        yield* db
+          .update(conversations)
+          .set({ mode: "work" })
+          .where(eq(conversations.id, seed.conversation.id));
+        yield* repo.finalizeMessage({
+          messageId: seed.assistant.id,
+          status: "complete",
+          content: "done",
+        });
+        yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "run the tests",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        // The server cannot name a live machine, so without one nothing starts.
+        const withoutDesktop = yield* chat.dispatchQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+        });
+        const stillQueued = (yield* repo.listQueue(seed.conversation.id)).length;
+
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        hold = { after: 1, reached, release };
+        const withDesktop = yield* chat.dispatchQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          desktop: {
+            fromDesktop: true,
+            desktopExecutorId: "executor-now",
+            deviceSessionId: "device-1",
+          },
+        });
+        yield* Deferred.await(reached);
+        const owners = yield* external.owners();
+        const assistant = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
+        const events = yield* Effect.forkChild(
+          engine.subscribe(assistant.id, 0).pipe(Stream.runCollect),
+        );
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(events);
+        hold = null;
+        return {
+          withoutDesktop,
+          stillQueued,
+          withDesktop,
+          owner: owners.find((owner) => owner.messageId === assistant.id),
+          final: yield* repo.getMessage(assistant.id),
+          queue: yield* repo.listQueue(seed.conversation.id),
+        };
+      }),
+    );
+
+    expect(result.withoutDesktop).toEqual({ started: false });
+    expect(result.stillQueued).toBe(1);
+    expect(result.withDesktop).toEqual({ started: true });
+    expect(result.owner).toMatchObject({
+      executorId: "executor-now",
+      deviceSessionId: "device-1",
+    });
+    expect(result.final?.status).toBe("complete");
+    expect(result.queue).toEqual([]);
+  }, 60_000);
+});
 
 describe("resumable streaming pipeline", () => {
   it("loads the generation model once for capabilities and accounting", async () => {

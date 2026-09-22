@@ -73,6 +73,8 @@ it.each(["stream first", "detail first"])(
       pendingChunks: [],
       compactionEvents: [],
       attachments: [],
+      queue: [],
+      queueState: null,
       branchedFrom: null,
       agentDrafts: [],
     };

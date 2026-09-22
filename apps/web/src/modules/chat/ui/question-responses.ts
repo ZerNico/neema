@@ -20,6 +20,7 @@ export function associateQuestionResponses(
     status: string;
     content: string;
     questionResponse?: unknown;
+    steeredIntoMessageId?: string | null;
   }>,
   toolCalls: ReadonlyArray<{
     id: string;
@@ -46,9 +47,12 @@ export function associateQuestionResponses(
     list.push(row);
     presentations.set(row.messageId, list);
   }
-  for (let i = 1; i < messages.length; i++) {
-    const answer = messages[i]!;
-    const assistant = messages[i - 1]!;
+  // A steer sits just after the answer it went into, so it stands between that
+  // answer and a reply to its questions; adjacency is judged without steers.
+  const turns = messages.filter((message) => !message.steeredIntoMessageId);
+  for (let i = 1; i < turns.length; i++) {
+    const answer = turns[i]!;
+    const assistant = turns[i - 1]!;
     if (
       answer.role !== "user" ||
       answer.status !== "complete" ||

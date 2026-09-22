@@ -2,7 +2,7 @@ import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ChatRepo } from "./repo.ts";
+import { ChatRepo, type QueueGate } from "./repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 
 const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
@@ -23,6 +23,20 @@ const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
       { discard: true },
     );
   }).pipe(Effect.catchCause((cause) => Effect.logError("generation reconciliation failed", cause)));
+
+/**
+ * Why the queue is or is not moving, from the same gate promotion reads. Only
+ * the browser knows whether it is the desktop app a Work entry needs, so that
+ * one reason is added there.
+ */
+const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: QueueGate) => {
+  if (queue.length === 0) return null;
+  if (gate === "busy") return "running" as const;
+  if (gate === "unsettled") return "stopped" as const;
+  if (gate === "question") return "question" as const;
+  // Promotion would try it, but it already failed once; a person decides.
+  return queue[0]?.lastError ? ("failed" as const) : ("ready" as const);
+};
 
 /**
  * Everything the chat view needs for one conversation, in three dependency
@@ -75,33 +89,43 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   const streaming = messages.find((m) => m.status === "streaming");
   const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
   const userIds = messages.filter((m) => m.role === "user").map((m) => m.id);
-  // All four hang off the same message-id snapshot and nothing else, so they go
+  // These hang off the same message-id snapshot and nothing else, so they go
   // out together rather than one after the other.
-  const { pendingChunks, toolCalls, compactionEvents, attachments, defaults, generations } =
-    yield* Effect.all(
-      {
-        // For streaming messages the client resumes via SSE using the chunks
-        // persisted so far; ship them inline so the first paint is complete.
-        pendingChunks: !streaming
-          ? Effect.succeed([])
-          : repo.chunksAfter(streaming.id, 0),
-        // Durable generation activity for all assistant messages. Research
-        // compaction bodies stay private; ordinary chat summaries are displayable.
-        toolCalls: repo.listToolCalls(assistantIds),
-        compactionEvents: repo.listCompactionEvents(assistantIds),
-        // Flat, like tool calls. The view groups by messageId.
-        attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
-        // Only the installed agent persists between turns. Standalone knowledge
-        // is message input, not a conversation default.
-        defaults: repo.getConversationDefaults(conversation.id),
-        // What each answer ran with: the agent (for the answer's label) and the
-        // collections (shown on the *question* that added them, like attached
-        // files). Snapshot text and document manifests stay server-side; only
-        // names travel, resolved client-side against what the viewer may read.
-        generations: repo.listGenerationDisplay(assistantIds),
-      },
-      { concurrency: "unbounded" },
-    );
+  const {
+    pendingChunks,
+    toolCalls,
+    compactionEvents,
+    attachments,
+    defaults,
+    generations,
+    queue,
+    queueGate,
+  } = yield* Effect.all(
+    {
+      // For streaming messages the client resumes via SSE using the chunks
+      // persisted so far; ship them inline so the first paint is complete.
+      pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
+      // Durable generation activity for all assistant messages. Research
+      // compaction bodies stay private; ordinary chat summaries are displayable.
+      toolCalls: repo.listToolCalls(assistantIds),
+      compactionEvents: repo.listCompactionEvents(assistantIds),
+      // Flat, like tool calls. The view groups by messageId.
+      attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
+      // Only the installed agent persists between turns. Standalone knowledge
+      // is message input, not a conversation default.
+      defaults: repo.getConversationDefaults(conversation.id),
+      // What each answer ran with: the agent (for the answer's label) and the
+      // collections (shown on the *question* that added them, like attached
+      // files). Snapshot text and document manifests stay server-side; only
+      // names travel, resolved client-side against what the viewer may read.
+      generations: repo.listGenerationDisplay(assistantIds),
+      // Messages waiting behind the live answer. They are conversation state,
+      // not transcript rows, so every tab and device sees the same queue.
+      queue: repo.listQueue(conversation.id),
+      queueGate: repo.queueGate(conversation.id),
+    },
+    { concurrency: "unbounded" },
+  );
   const agentRepo = yield* AgentRepo;
   const liveAgent = defaults.agent?.agentId
     ? yield* agentRepo.get(userId, defaults.agent.agentId)
@@ -133,5 +157,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
         }
       : null,
     generations,
+    queue,
+    queueState: queueStateOf(queue, queueGate),
   };
 });

@@ -45,7 +45,12 @@ import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-sch
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
 import { fileForModel } from "./file-for-model.ts";
-import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
+import {
+  GenerationFence,
+  GenerationSettled,
+  lockGeneration,
+  type GenerationIdentity,
+} from "./generation-fence.ts";
 import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
 import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
 import { prepareConversationContext } from "./conversation-context.ts";
@@ -78,7 +83,7 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
-import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachments/server/repo.ts";
 import {
   AiGateway,
   ProviderContextOverflow,
@@ -121,7 +126,7 @@ import {
   desktopToolsSystemHint,
   forTranscript,
 } from "~/modules/desktop/tool-schema.ts";
-import type { CompactionChunkEnvelope } from "../schema.ts";
+import type { CompactionChunkEnvelope, SteerChunkEnvelope } from "../schema.ts";
 import {
   calibrationFactor,
   compileActivePrompt,
@@ -137,7 +142,11 @@ import {
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
 } from "./compaction.ts";
-import { buildHistoryMessages, type PromptDeps } from "./prompt.ts";
+import {
+  buildHistoryMessages,
+  type HistorySteer,
+  type PromptDeps,
+} from "./prompt.ts";
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -245,6 +254,17 @@ export class StreamEngine extends Context.Service<
       timeZone?: string | undefined;
       /** The document open in the panel, so it is the one the model reads first. */
       openDocumentId?: string | undefined;
+      /**
+       * Invoked inside the generation fiber once it reaches a terminal status.
+       * The engine cannot reach the chat service, so queue dispatch arrives
+       * this way rather than through a layer cycle.
+       */
+      onSettled?: (input: {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        status: "complete" | "error" | "aborted";
+      }) => Effect.Effect<void>;
     }): Effect.Effect<void>;
     /**
      * Winds a running generation down early, keeping whatever it has already
@@ -253,6 +273,11 @@ export class StreamEngine extends Context.Service<
      * the in-flight fiber is not).
      */
     stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
+    /**
+     * Waits until this instance's attempt has finalized: persisted, announced
+     * and settled. Returns at once when it is not running here.
+     */
+    awaitSettled(messageId: string, expectedRunId?: string): Effect.Effect<void>;
     /**
      * Settles ordinary generations whose lease lapsed (their process is gone)
      * and notifies subscribers. Runs on a timer; callers may run it on demand.
@@ -317,7 +342,13 @@ export class StreamEngine extends Context.Service<
       // gets a `done`. Interrupting the fiber from outside would skip both.
       const inFlight = new Map<
         string,
-        { abort: Deferred.Deferred<void>; runId?: string | undefined; owner: ExternalOwner | null }
+        {
+          abort: Deferred.Deferred<void>;
+          /** Completed once finalize has run, for a caller that must wait it out. */
+          settled: Deferred.Deferred<void>;
+          runId?: string | undefined;
+          owner: ExternalOwner | null;
+        }
       >();
       const runtimeScope = yield* Effect.scope;
       // A generation whose process died stays "streaming" forever unless
@@ -400,12 +431,29 @@ export class StreamEngine extends Context.Service<
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
-        const rawCompleted = history.filter(
+        const settled = history.filter(
           (m) =>
             m.id !== input.messageId &&
             (m.status === "complete" ||
               (m.status !== "streaming" && !!m.assistantOutput?.files.length)),
         );
+        // A steer is part of the answer it was delivered into, so it leaves
+        // the history list and is rendered inside that answer. One whose
+        // answer is not in history went with that attempt.
+        const answers = new Set(settled.filter((m) => m.role === "assistant").map((m) => m.id));
+        const steersByAnswer = new Map<string, HistorySteer[]>();
+        for (const m of settled) {
+          if (!m.steeredIntoMessageId || !answers.has(m.steeredIntoMessageId)) continue;
+          const list = steersByAnswer.get(m.steeredIntoMessageId) ?? [];
+          // Rows from before positions were recorded read as arriving first.
+          list.push({
+            ...m,
+            textOffset: m.steerTextOffset ?? 0,
+            turnIndex: m.steerTurnIndex ?? -1,
+          });
+          steersByAnswer.set(m.steeredIntoMessageId, list);
+        }
+        const rawCompleted = settled.filter((m) => !m.steeredIntoMessageId);
         // Desktop sends carry their drops on the assistant attempt's config,
         // not the user message text. Key each prior attempt's names back to its
         // preceding user message, then add this attempt's own names to the last
@@ -438,7 +486,12 @@ export class StreamEngine extends Context.Service<
           const files = workspaceFilesBySend.get(message.id);
           return files ? Object.assign({}, message, { workspaceFiles: files }) : message;
         });
-        const readerUrls = extractUserMessageUrls(completed);
+        // Steers are the person's own words, so their links grant the reader
+        // authority exactly as any other user message's do.
+        const readerUrls = extractUserMessageUrls([
+          ...completed,
+          ...[...steersByAnswer.values()].flat(),
+        ]);
 
         // Conversation-scoped citations (Onyx-style): gather every source from
         // earlier messages' persisted tool calls. They seed the numbering (so
@@ -600,6 +653,12 @@ export class StreamEngine extends Context.Service<
             });
             yield* sync.publish(input.userId, {
               type: "message.status",
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              status,
+            });
+            yield* (yield* GenerationSettled)({
+              userId: input.userId,
               conversationId: input.conversationId,
               messageId: input.messageId,
               status,
@@ -902,11 +961,14 @@ export class StreamEngine extends Context.Service<
             const message = historySuffix[index]!;
             historyGroups.push([
               ...skillReplay(message),
-              ...(message.assistantOutput?.files.length || message.providerReplay?.turns.length
+              ...(message.assistantOutput?.files.length ||
+              message.providerReplay?.turns.length ||
+              steersByAnswer.has(message.id)
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
                       messages: [message],
+                      steers: steersByAnswer,
                       deferAssistantBytes: true,
                       expandAssistantTurns: true,
                       modelSupportsFiles: model?.capabilities.files ?? false,
@@ -1201,11 +1263,14 @@ export class StreamEngine extends Context.Service<
             const message = historySuffix[index]!;
             retainedHistory.set(index, [
               ...skillReplay(message),
-              ...(message.assistantOutput?.files.length || message.providerReplay?.turns.length
+              ...(message.assistantOutput?.files.length ||
+              message.providerReplay?.turns.length ||
+              steersByAnswer.has(message.id)
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
                       messages: [message],
+                      steers: steersByAnswer,
                       loadedBytes,
                       modelSupportsFiles: model?.capabilities.files ?? false,
                       modelSupportsVision: model?.capabilities.vision ?? false,
@@ -2479,7 +2544,25 @@ export class StreamEngine extends Context.Service<
             if (finishReason === "content-filter")
               return yield* Effect.fail(new Error("[ResponseFiltered]"));
             if (finishReason === "error") return yield* Effect.fail(new Error("[ResponseError]"));
-            if (questionPresented || finishReason !== "tool-calls") break;
+            // Presenting questions ends the response: entries aimed at this
+            // generation stay queued so the answer owns the next turn.
+            if (questionPresented) break;
+            // The answer is done: a steer that did not reach a boundary stays
+            // queued, first in line, and goes out as the next turn. It is never
+            // bolted onto an answer that already finished.
+            if (finishReason !== "tool-calls") break;
+            // The only safe point: every tool result of this round is terminal
+            // and the model is about to be called again anyway, so nothing in
+            // flight is cut short. The last round has no call after it.
+            const steered =
+              fence && turn < maxToolRounds
+                ? yield* repo.claimSteeredEntries({
+                    conversationId: input.conversationId,
+                    messageId: input.messageId,
+                    textOffset: assembled.length,
+                    turnIndex: turn,
+                  })
+                : [];
             // A completed response/tool batch is one atomic unit. It becomes
             // eligible for compaction only now, after every tool result is
             // terminal; no call can ever be separated from its result.
@@ -2499,6 +2582,56 @@ export class StreamEngine extends Context.Service<
                       ),
               },
             ];
+            if (steered.length > 0) {
+              // Built exactly as history builds a user message, so a steered
+              // file reaches the model the way an attached one does: native
+              // when it can read it, extracted text when it cannot.
+              const steeredPrompt = yield* buildHistoryMessages(promptDeps, {
+                messages: steered,
+                loadedBytes,
+                modelSupportsFiles: model?.capabilities.files ?? false,
+                modelSupportsVision: model?.capabilities.vision ?? false,
+              });
+              activeRounds = [
+                ...activeRounds,
+                { turnIndex: turn, prompt: Prompt.make(steeredPrompt) },
+              ];
+              // In the stream at the moment it was taken in, persisted before
+              // it is published, so the answer shows it in order live and a
+              // resume replays it in the same place.
+              const files = yield* attachments.listWithBlobsForMessages(
+                steered.map((message) => message.id),
+              );
+              for (const message of steered) {
+                const envelope: SteerChunkEnvelope = {
+                  v: 1,
+                  id: message.id,
+                  queueEntryId: message.queueEntryId,
+                  content: message.content,
+                  textOffset: message.steerTextOffset ?? assembled.length,
+                  turnIndex: message.steerTurnIndex ?? turn,
+                  attachments: files
+                    .filter((file) => file.messageId === message.id)
+                    .map(toAttachmentDto),
+                };
+                pushChunk("steer", JSON.stringify(envelope));
+              }
+              yield* flush;
+              yield* Effect.forEach(
+                steered,
+                (message) =>
+                  sync.publish(input.userId, {
+                    type: "message.created",
+                    conversationId: input.conversationId,
+                    messageId: message.id,
+                  }),
+                { discard: true },
+              );
+              yield* sync.publish(input.userId, {
+                type: "conversation.queue.changed",
+                conversationId: input.conversationId,
+              });
+            }
             transcript = buildTranscript();
           }
           // Internal tool rounds need no prose. A validated question is itself the
@@ -2534,6 +2667,12 @@ export class StreamEngine extends Context.Service<
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
+        onSettled?: (input: {
+          userId: string;
+          conversationId: string;
+          messageId: string;
+          status: "complete" | "error" | "aborted";
+        }) => Effect.Effect<void>;
       }) {
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
@@ -2557,7 +2696,12 @@ export class StreamEngine extends Context.Service<
                 deviceSessionId: input.deviceSessionId,
               }
             : null;
-        const registration = { abort, runId: fence?.generationId, owner };
+        const registration = {
+          abort,
+          settled: yield* Deferred.make<void>(),
+          runId: fence?.generationId,
+          owner,
+        };
         inFlight.set(input.messageId, registration);
         // Detached from the request fiber: survives the HTTP response ending.
         yield* Effect.forkIn(
@@ -2571,13 +2715,18 @@ export class StreamEngine extends Context.Service<
           }).pipe(
             Effect.scoped,
             Effect.provideService(GenerationFence, fence),
+            Effect.provideService(GenerationSettled, input.onSettled ?? (() => Effect.void)),
             Effect.ensuring(
-              Effect.sync(() => {
-                // Identity-checked: a retry reuses the message id, so this run
-                // must not evict the registration a newer one just made.
-                if (inFlight.get(input.messageId) === registration)
-                  inFlight.delete(input.messageId);
-              }),
+              Deferred.succeed(registration.settled, undefined).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    // Identity-checked: a retry reuses the message id, so this
+                    // run must not evict the registration a newer one made.
+                    if (inFlight.get(input.messageId) === registration)
+                      inFlight.delete(input.messageId);
+                  }),
+                ),
+              ),
             ),
           ),
           runtimeScope,
@@ -2593,6 +2742,13 @@ export class StreamEngine extends Context.Service<
               registration.owner ? external.cancelAttempt(registration.owner) : Effect.void,
             ),
           );
+        });
+
+      const awaitSettled = (messageId: string, expectedRunId?: string): Effect.Effect<void> =>
+        Effect.suspend(() => {
+          const registration = inFlight.get(messageId);
+          if (!registration || registration.runId !== expectedRunId) return Effect.void;
+          return Deferred.await(registration.settled);
         });
 
       const subscribe = (
@@ -2677,6 +2833,7 @@ export class StreamEngine extends Context.Service<
       return StreamEngine.of({
         startGeneration,
         stopGeneration,
+        awaitSettled,
         reapOrphans: reapGenerations,
         subscribe,
       });

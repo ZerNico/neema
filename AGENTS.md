@@ -62,6 +62,11 @@ edit the wrong thing.
 - **branch**: a copy of a conversation prefix into a new conversation. Copies
   messages, tool rows and display snapshots with fresh ids; never copies chunks,
   calls or ledger rows.
+- **queue entry / steer**: a message held behind the live generation, with its
+  own claimed files; it becomes a user message when promoted. A steer hands one
+  to the running generation at its next safe boundary instead, and from then on
+  belongs to that attempt like its tool rows. A queue entry is never a
+  transcript row, and never copied by a branch.
 
 ## The ways to hurt yourself
 
@@ -94,7 +99,7 @@ Before finishing, decide for each of these whether it applies, and say so if you
 skipped one on purpose.
 
 - **How the message got there**: send, retry, edit, structured answer to a
-  clarification, branch. Retry and edit re-resolve the agent, collections and
+  clarification, branch, queue promotion, steer. Retry and edit re-resolve the agent, collections and
   skills inside the attempt transaction, before any reset.
 - **Tool offer**: the composer's search and research toggles only decide what the
   attempt is _offered_; the model chooses. A `deep_research` call runs an
@@ -197,6 +202,9 @@ skipped one on purpose.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
   model, the `custom_` prefix contract, current module bundles and worker
   containment.
+- `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
+  boundary, queued files as a second owner kind, and why only a desktop app can
+  start queued Work.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,

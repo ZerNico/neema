@@ -613,3 +613,62 @@ describe("assistant image replay", () => {
     }),
   );
 });
+
+const steer = (content: string, textOffset: number) => ({
+  id: "steer-1",
+  role: "user" as const,
+  content,
+  textOffset,
+  turnIndex: 0,
+});
+
+describe("buildHistoryMessages with steers", () => {
+  const answer = "Here is a cat poem. Here is a dog poem.";
+  const offset = "Here is a cat poem. ".length;
+  const buildSteered = (deps: PromptDeps, steers: ReadonlyArray<ReturnType<typeof steer>>) =>
+    Effect.runPromise(
+      buildHistoryMessages(deps, {
+        messages: [user("q", "write a poem"), { id: "a", role: "assistant", content: answer }],
+        steers: new Map([["a", steers]]),
+        modelSupportsFiles: false,
+      }),
+    );
+
+  it("places a steer inside the answer where it arrived, not above it", async () => {
+    const { deps } = harness({ rows: [] });
+    expect(await buildSteered(deps, [steer("make it about dogs", offset)])).toEqual([
+      { role: "user", content: "write a poem" },
+      { role: "assistant", content: "Here is a cat poem. " },
+      { role: "user", content: "make it about dogs" },
+      { role: "assistant", content: "Here is a dog poem." },
+    ]);
+  });
+
+  it("reads a steer that arrived before any text ahead of the whole answer", async () => {
+    const { deps } = harness({ rows: [] });
+    expect(await buildSteered(deps, [steer("dogs, please", 0)])).toEqual([
+      { role: "user", content: "write a poem" },
+      { role: "user", content: "dogs, please" },
+      { role: "assistant", content: answer },
+    ]);
+  });
+
+  it("gives a steered file to the model the way an attached one is given", async () => {
+    const { deps } = harness({
+      rows: [
+        row({
+          messageId: "steer-1",
+          mediaType: "text/plain",
+          fileName: "breeds.txt",
+          storageKey: "blobs/user-1/aa/bb/breeds",
+        }),
+      ],
+      blobs: { "blobs/user-1/aa/bb/breeds": "beagle, collie" },
+    });
+    const messages = await buildSteered(deps, [steer("use these breeds", offset)]);
+    const steered = messages[2] as Prompt.UserMessageEncoded;
+    expect(steered.role).toBe("user");
+    expect(JSON.stringify(steered.content)).toContain("beagle, collie");
+    expect(JSON.stringify(steered.content)).toContain("use these breeds");
+  });
+});

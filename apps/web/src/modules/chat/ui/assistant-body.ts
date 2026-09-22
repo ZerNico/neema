@@ -1,4 +1,5 @@
 import type { AssistantFile } from "../assistant-output.ts";
+import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
   ToolActivity,
@@ -7,10 +8,28 @@ import type {
   SkillToolActivity,
 } from "../client/use-message-stream.ts";
 
+/**
+ * A message the person steered into this answer while it ran. It belongs to
+ * the answer, so it is drawn inside it where it arrived rather than as a
+ * transcript row of its own.
+ */
+export interface AssistantSteer {
+  id: string;
+  content: string;
+  /** Raw content offset where it arrived. */
+  textOffset: number;
+  /** The model round it followed; it sorts after that round's activity. */
+  turnIndex: number;
+  attachments: ReadonlyArray<Attachment>;
+  /** The queue entry it came from; set only while it arrives live. */
+  queueEntryId?: string;
+}
+
 type PositionedActivity =
   | { kind: "file"; activity: AssistantFile }
   | { kind: "tool"; activity: ToolActivity }
-  | { kind: "compaction"; activity: CompactionActivity };
+  | { kind: "compaction"; activity: CompactionActivity }
+  | { kind: "steer"; activity: AssistantSteer };
 
 export type AssistantBodyPart =
   | { kind: "file"; key: string; file: AssistantFile }
@@ -19,12 +38,18 @@ export type AssistantBodyPart =
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
   | { kind: "tool"; key: string; activity: Exclude<ToolActivity, WebToolActivity> }
-  | { kind: "compaction"; key: string; activity: CompactionActivity };
+  | { kind: "compaction"; key: string; activity: CompactionActivity }
+  | { kind: "steer"; key: string; steer: AssistantSteer };
 
 const turnOf = (item: PositionedActivity) =>
   item.kind !== "compaction" ? (item.activity.turnIndex ?? 0) : item.activity.beforeTurnIndex;
 const orderOf = (item: PositionedActivity) =>
-  item.kind !== "compaction" ? (item.activity.callIndex ?? 0) : item.activity.passIndex;
+  item.kind === "compaction"
+    ? item.activity.passIndex
+    : // Claimed only once its round's results are terminal: after all of them.
+      item.kind === "steer"
+      ? Number.MAX_SAFE_INTEGER
+      : (item.activity.callIndex ?? 0);
 
 /** Original UTF-16 offsets, never rendered markdown lengths or clamped anchors. */
 export function projectAssistantBody({
@@ -34,6 +59,7 @@ export function projectAssistantBody({
   tools,
   compactions,
   files = [],
+  steers = [],
 }: {
   content: string;
   rawTextLength?: number;
@@ -41,6 +67,7 @@ export function projectAssistantBody({
   tools: ToolActivity[];
   compactions: CompactionActivity[];
   files?: ReadonlyArray<AssistantFile>;
+  steers?: ReadonlyArray<AssistantSteer>;
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
   const researchRuns = new Set(
     tools.flatMap((activity) =>
@@ -64,6 +91,7 @@ export function projectAssistantBody({
     ...compactions
       .filter((activity) => !(activity.runId && researchRuns.has(activity.runId)))
       .map((activity): PositionedActivity => ({ kind: "compaction", activity })),
+    ...steers.map((activity): PositionedActivity => ({ kind: "steer", activity })),
   ];
   // Logical ordering is authoritative for equal offsets and legacy messages.
   // oxlint-disable-next-line no-array-sort -- fresh array
@@ -100,6 +128,8 @@ export function projectAssistantBody({
         key: `file-${item.activity.attachment.id}`,
         file: item.activity,
       });
+    } else if (item.kind === "steer") {
+      parts.push({ kind: "steer", key: `steer-${item.activity.id}`, steer: item.activity });
     } else if (item.kind === "compaction") {
       parts.push({ ...item, key: `compaction-${item.activity.eventId}` });
     } else if (item.activity.family === "web") {

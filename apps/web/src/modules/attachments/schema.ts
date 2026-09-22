@@ -25,6 +25,14 @@ export const MessageAttachment = Schema.Struct({
 });
 export type MessageAttachment = typeof MessageAttachment.Type;
 
+/** A queued message's file, shipped with the queue the same flat way. */
+export const QueuedAttachment = Schema.Struct({
+  ...Attachment.fields,
+  queueEntryId: Schema.String,
+  position: Schema.Int,
+});
+export type QueuedAttachment = typeof QueuedAttachment.Type;
+
 /**
  * Ordered id set sent with a message; order is the attachment position.
  */

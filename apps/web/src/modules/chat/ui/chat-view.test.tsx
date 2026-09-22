@@ -144,6 +144,11 @@ vi.mock("./virtual-message-list.tsx", () => ({
           data-collection-ids={
             Array.isArray(message.collectionIds) ? message.collectionIds.join(",") : undefined
           }
+          data-steers={
+            Array.isArray(message.steers)
+              ? JSON.stringify(message.steers.map((steer: { content: string }) => steer.content))
+              : undefined
+          }
         >
           <span>{String(message.content)}</span>
           {(message.toolActivities as DisplayMessage["toolActivities"]).map((activity) =>
@@ -332,6 +337,7 @@ vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
       reasoningSeen: false,
       tools: liveDraft.tools,
       compactions: [],
+      steers: [],
       lastSeq: 0,
       status: liveDraft.status,
     };
@@ -382,6 +388,9 @@ const message = (id: string, role: "user" | "assistant" | "system", content: str
   completedAt: BASE,
   editedAt: null,
   questionResponse: null as unknown,
+  steeredIntoMessageId: null as string | null,
+  steerTextOffset: null as number | null,
+  steerTurnIndex: null as number | null,
 });
 
 type Payload = ReturnType<typeof basePayload>;
@@ -425,6 +434,8 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
   }>,
   toolCalls: [] as Array<Parameters<typeof toActivity>[0] & { messageId: string }>,
   attachments: [],
+  queue: [],
+  queueState: null,
   branchedFrom,
   compactionEvents: [] as Array<{
     id: string;
@@ -842,6 +853,36 @@ it("guards Work initiation while folder IPC is unresolved, then enables ready-em
   );
   await waitFor(() => expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeEnabled());
   expect(screen.getByRole("button", { name: "Edit m-user" })).toBeEnabled();
+});
+
+it("draws a steer inside the answer it changed, and names it before a retry removes it", async () => {
+  renderView(null, {
+    messages: [
+      message("m-user", "user", "u1"),
+      {
+        ...message("m-steer", "user", "make it about dogs"),
+        steeredIntoMessageId: "m-answer",
+        steerTextOffset: 1,
+        steerTurnIndex: 0,
+      },
+      message("m-answer", "assistant", "a1"),
+    ],
+  });
+  // Never a transcript row of its own: it belongs to the answer.
+  expect(document.querySelector('[data-message-id="m-steer"]')).toBeNull();
+  expect(document.querySelector('[data-message-id="m-answer"]')).toHaveAttribute(
+    "data-steers",
+    JSON.stringify(["make it about dogs"]),
+  );
+  // Retrying the last answer normally asks nothing; a steer is the person's
+  // own words, so losing it is named first.
+  fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    within(dialog).getByText("The message you steered into it will be removed too."),
+  ).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(retryMock).not.toHaveBeenCalled();
 });
 
 const answerMock = vi.mocked(answerQuestion);
