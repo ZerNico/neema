@@ -27,6 +27,9 @@ import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import {
@@ -104,6 +107,7 @@ beforeAll(async () => {
     ChatRepo.layer,
     KnowledgeRepo.layer,
     ProviderRepo.layer,
+    ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
@@ -120,6 +124,9 @@ beforeAll(async () => {
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,
+        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+          Layer.provideMerge(SyncBus.layer),
+        ),
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),
   );
@@ -350,6 +357,7 @@ describe("branching a conversation", () => {
           mode: "chat",
           agent: { agentId: null },
           agentDrafts: [],
+          scheduleDrafts: [],
           documents: [],
         });
         expect(forked.messages.map((message) => message.content)).toEqual(["u", "a"]);
@@ -360,6 +368,7 @@ describe("branching a conversation", () => {
           mode: "chat",
           agent: { agentId: null },
           agentDrafts: [],
+          scheduleDrafts: [],
           documents: [],
         });
       }),

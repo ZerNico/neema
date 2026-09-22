@@ -11,9 +11,19 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("account.approval.changed") }),
   Schema.Struct({ type: Schema.Literal("desktop.work.changed") }),
   Schema.Struct({
-    type: Schema.Literal("agent.draft.changed"),
+    type: Schema.Literal("draft.changed"),
+    kind: Schema.Literals(["agent", "schedule"]),
     conversationId: Schema.String,
     draftId: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("schedule.changed"),
+    scheduleId: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("schedule.run.changed"),
+    scheduleId: Schema.String,
+    runId: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("document.changed"),

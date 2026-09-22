@@ -1,4 +1,5 @@
 import { Layer, ManagedRuntime } from "effect";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -25,6 +26,10 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillService } from "~/modules/skills/server/service.ts";
+import { DraftService } from "~/modules/drafts/server/service.ts";
+import { ScheduleFire } from "~/modules/schedules/server/fire.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleService } from "~/modules/schedules/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
@@ -55,18 +60,24 @@ const ReposLayer = Layer.mergeAll(
   GroupRepo.layer,
   KnowledgeRepo.layer,
   SkillRepo.layer,
+  ScheduleRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
 );
+// CoreLayer feeds both sides of the top merge. StreamEngine.provideMerge'd
+// draft services (AgentDraftService, ScheduleDraftService) each resolve their
+// own DraftService + repo layers with Db, SyncBus, and the provider/agent
+// repos taken from CoreLayer's services, so the bus and the database stay
+// single instances.
 const CoreLayer = Layer.mergeAll(
   AiGateway.layer,
-  SyncBus.layer,
   ExternalCompletion.layer,
   ToolsLayer,
   AttachmentService.layer,
   DocumentParser.layer,
-).pipe(Layer.provideMerge(ReposLayer));
+  DraftService.layer,
+).pipe(Layer.provideMerge(SyncBus.layer), Layer.provideMerge(ReposLayer));
 // Knowledge indexing sits above the gateway and the parser: it embeds through
 // one and extracts through the other.
 const KnowledgeLayer = Layer.mergeAll(
@@ -74,12 +85,21 @@ const KnowledgeLayer = Layer.mergeAll(
   KnowledgeSearch.layer,
   KnowledgeService.layer,
   AgentService.layer,
+  AgentDraftService.layer,
   SharingService.layer,
   SkillService.layer,
 ).pipe(Layer.provideMerge(EmbeddingSpace.layer), Layer.provideMerge(CoreLayer));
 const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(KnowledgeLayer));
-const AppLayer = ChatService.layer.pipe(
-  Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(CoreWithMemoryLayer))),
+const StreamedLayer = StreamEngine.layer.pipe(Layer.provideMerge(CoreWithMemoryLayer));
+// The scheduler fires through chat; ScheduleFire is that one coupling. Its
+// layer is provided ChatService from the merge below rather than wiring the
+// whole ScheduleService layer behind it. ScheduleDraftService is provideMerge'd
+// by StreamEngine's layer itself, like AgentDraftService.
+const ScheduleLayer = ScheduleService.layer.pipe(
+  Layer.provideMerge(ScheduleFire.layer.pipe(Layer.provide(ChatService.layer))),
+);
+const AppLayer = Layer.mergeAll(ChatService.layer, ScheduleLayer).pipe(
+  Layer.provideMerge(StreamedLayer),
 );
 
 const memoMap = Layer.makeMemoMapUnsafe();

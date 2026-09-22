@@ -1,7 +1,12 @@
 import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
+import {
+  ScheduleDraftOwner,
+  type ScheduleDraftHandle,
+} from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 import { AgentDraftWidget } from "./agent-draft-activity-block.tsx";
+import { ScheduleDraftWidget } from "./schedule-draft-activity-block.tsx";
 import {
   DocumentToolName,
   documentResultOk,
@@ -12,13 +17,18 @@ import {
   projectAgentDraftResult,
   agentDraftResultOk,
 } from "~/modules/agents/tool-schema.ts";
+import {
+  ScheduleDraftToolName,
+  projectScheduleDraftResult,
+  scheduleDraftResultOk,
+} from "~/modules/schedules/tool-schema.ts";
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { applyImageChunk } from "../client/use-message-stream.ts";
 import type { AssistantImage } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
-import { GitBranchIcon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -110,6 +120,25 @@ export function toActivity(row: {
       callIndex: row.callIndex,
       status:
         row.status === "running" ? "running" : agentDraftResultOk(result) ? "complete" : "error",
+      ...(row.status === "running" ? {} : { result }),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+  if (Schema.is(ScheduleDraftToolName)(row.toolName)) {
+    const result = projectScheduleDraftResult(row.result);
+    return {
+      family: "schedule-draft",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status:
+        row.status === "running"
+          ? "running"
+          : scheduleDraftResultOk(result)
+            ? "complete"
+            : "error",
       ...(row.status === "running" ? {} : { result }),
       ...(row.error ? { error: row.error.message } : {}),
     };
@@ -365,6 +394,7 @@ function placeStrandedDocuments({
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const agentDraft = useRef<AgentDraftHandle>(null);
+  const scheduleDraft = useRef<ScheduleDraftHandle>(null);
   const documents = useRef<DocumentOwnerHandle>(null);
   const selectedPanelId = useDetailPanelSelectedId();
   const composer = useRef<ComposerHandle>(null);
@@ -492,6 +522,18 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (activity.family === "agent-draft" && activity.result) mine(activity.result);
     return ids;
   }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
+  const discoveredScheduleDrafts = useMemo(() => {
+    const ids = new Set((data.scheduleDrafts ?? []).map((draft) => draft.id));
+    const mine = (result: { draftId?: string; draftConversationId?: string }) => {
+      if (result.draftId && result.draftConversationId === conversationId) ids.add(result.draftId);
+    };
+    for (const row of data.toolCalls)
+      if (Schema.is(ScheduleDraftToolName)(row.toolName))
+        mine(projectScheduleDraftResult(row.result));
+    for (const activity of stream.tools)
+      if (activity.family === "schedule-draft" && activity.result) mine(activity.result);
+    return ids;
+  }, [conversationId, data.scheduleDrafts, data.toolCalls, stream.tools]);
   const discoveredDocuments = useMemo(() => {
     const ids = new Set((data.documents ?? []).map((document) => document.id));
     const mine = (result: { documentId?: string; documentConversationId?: string }) => {
@@ -529,14 +571,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const [remembered, setRemembered] = useState<{
     conversationId: string;
     ids: ReadonlySet<string>;
-  }>({ conversationId, ids: new Set() });
+    scheduleIds: ReadonlySet<string>;
+  }>({ conversationId, ids: new Set(), scheduleIds: new Set() });
   const scoped = remembered.conversationId === conversationId ? remembered.ids : new Set<string>();
+  const scopedSchedule =
+    remembered.conversationId === conversationId ? remembered.scheduleIds : new Set<string>();
   const draftIds = useMemo(
     () => [...new Set([...scoped, ...discoveredDrafts])].sort(),
     [discoveredDrafts, scoped],
   );
-  if (draftIds.length !== scoped.size || remembered.conversationId !== conversationId)
-    setRemembered({ conversationId, ids: new Set(draftIds) });
+  const scheduleDraftIds = useMemo(
+    () => [...new Set([...scopedSchedule, ...discoveredScheduleDrafts])].sort(),
+    [discoveredScheduleDrafts, scopedSchedule],
+  );
+  if (
+    draftIds.length !== scoped.size ||
+    scheduleDraftIds.length !== scopedSchedule.size ||
+    remembered.conversationId !== conversationId
+  )
+    setRemembered({
+      conversationId,
+      ids: new Set(draftIds),
+      scheduleIds: new Set(scheduleDraftIds),
+    });
   const forgetDraft = useCallback(
     (draftId: string) =>
       setRemembered((current) => {
@@ -545,7 +602,16 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       }),
     [],
   );
+  const forgetScheduleDraft = useCallback(
+    (draftId: string) =>
+      setRemembered((current) => {
+        const ids = new Set(current.scheduleIds);
+        return ids.delete(draftId) ? { ...current, scheduleIds: ids } : current;
+      }),
+    [],
+  );
   const hasAgentDraft = draftIds.length > 0;
+  const hasScheduleDraft = scheduleDraftIds.length > 0;
   // Unlike a draft, a document does not outlive the answer that created it: a
   // rewind deletes it, so the loader summary plus live results are the whole
   // truth and there is nothing to retain across a retry.
@@ -627,6 +693,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       throw new Error("agent draft has unresolved changes");
     }
   };
+  const flushScheduleDraft = async () => {
+    if (hasScheduleDraft && !(await scheduleDraft.current?.flush())) {
+      toast.error("Resolve the changes in your schedule draft before continuing.");
+      throw new Error("schedule draft has unresolved changes");
+    }
+  };
   const flushDocuments = async () => {
     if (hasDocument && !(await documents.current?.flush())) {
       toast.error("Resolve the changes in your document before continuing.");
@@ -637,6 +709,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const beforeGeneration = async () => {
     checkWorkReady();
     await flushAgentDraft();
+    await flushScheduleDraft();
     await flushDocuments();
     closeEdit();
   };
@@ -1412,6 +1485,20 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     ),
   );
   const orphaned = draftIds.filter((draftId) => !shown.has(draftId));
+  const shownScheduleDrafts = new Set(
+    display.flatMap((message) =>
+      message.toolActivities.flatMap((activity) =>
+        activity.family === "schedule-draft" &&
+        activity.result?.draftId &&
+        activity.result.draftConversationId === conversationId
+          ? [activity.result.draftId]
+          : [],
+      ),
+    ),
+  );
+  const orphanedScheduleDrafts = scheduleDraftIds.filter(
+    (draftId) => !shownScheduleDrafts.has(draftId),
+  );
   // A document card lives on the create_document call that made it, at that
   // call's place in the answer. Only a document whose creating row a rewind
   // removed needs placing, and its own answer is where it belongs.
@@ -1444,7 +1531,29 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ref={documents}
     >
       <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
+      <ScheduleDraftOwner
+        draftIds={scheduleDraftIds}
+        onGone={forgetScheduleDraft}
+        ref={scheduleDraft}
+      >
         <div className="flex h-full flex-col">
+          {data.schedule ? (
+            // Same geometry as the branch banner: provenance of the whole
+            // conversation, not of any one message.
+            <div className="[scrollbar-gutter:stable_both-edges]">
+              <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
+                <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-3.5 shrink-0" />
+                <span className="shrink-0">Scheduled run of</span>
+                <Link
+                  to="/schedules/$scheduleId"
+                  params={{ scheduleId: data.schedule.scheduleId }}
+                  className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
+                >
+                  {data.schedule.name}
+                </Link>
+              </div>
+            </div>
+          ) : null}
           {data.branchedFrom ? (
             // Outside the scroller, on the message column's geometry: lineage is a
             // property of the conversation, not of its first message.
@@ -1472,10 +1581,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 messages={withDocuments}
                 followKey={stream.lastSeq}
                 footer={
-                  orphaned.length ? (
+                  orphaned.length || orphanedScheduleDrafts.length ? (
                     <div className="flex flex-col">
                       {orphaned.map((draftId) => (
                         <AgentDraftWidget key={draftId} draftId={draftId} />
+                      ))}
+                      {orphanedScheduleDrafts.map((draftId) => (
+                        <ScheduleDraftWidget key={draftId} draftId={draftId} />
                       ))}
                     </div>
                   ) : null
@@ -1541,6 +1653,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             </div>
           </div>
         </div>
+      </ScheduleDraftOwner>
       </AgentDraftOwner>
     </DocumentOwner>
   );

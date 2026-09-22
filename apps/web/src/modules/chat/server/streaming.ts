@@ -28,6 +28,15 @@ import {
   agentDraftResultOk,
   redactAgentDraftPart,
 } from "~/modules/agents/tool-schema.ts";
+import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import {
+  ScheduleDraftToolName,
+  projectScheduleDraftResult,
+  redactScheduleDraftPart,
+  scheduleDraftFailureReason,
+  scheduleDraftResultOk,
+} from "~/modules/schedules/tool-schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
@@ -263,6 +272,10 @@ export class StreamEngine extends Context.Service<
         drafts: yield* AgentDraftService,
         skills: yield* SkillRepo,
         knowledge: yield* KnowledgeRepo,
+      };
+      const scheduleAuthoringServices = {
+        providers,
+        drafts: yield* ScheduleDraftService,
       };
       const documentService = yield* DocumentService;
       const analytics = yield* AnalyticsRepo;
@@ -558,6 +571,13 @@ export class StreamEngine extends Context.Service<
             currentModelId: input.modelId,
             writeGuard,
           });
+          const scheduleAuthoring = yield* prepareScheduleDraftTools({
+            services: scheduleAuthoringServices,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            currentModelId: input.modelId,
+            writeGuard,
+          });
           const documents = yield* prepareDocumentTools({
             service: documentService,
             userId: input.userId,
@@ -691,6 +711,7 @@ export class StreamEngine extends Context.Service<
               : null;
           const commonGroups = [
             authoring.group,
+            scheduleAuthoring.group,
             documents.group,
             ...(researchTool ? [researchTool.group] : []),
             ...(desktopTools ? [desktopTools] : []),
@@ -825,6 +846,7 @@ export class StreamEngine extends Context.Service<
           // intact when they do.
           const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
             ...authoring.messages(),
+            ...scheduleAuthoring.messages(),
             ...documents.messages(),
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
@@ -1144,6 +1166,7 @@ export class StreamEngine extends Context.Service<
           let questionPresented = false;
           for (let turn = 0; turn <= maxToolRounds; turn++) {
             yield* authoring.refresh();
+            yield* scheduleAuthoring.refresh();
             yield* documents.refresh();
             // Direct edits can land between calls. Rebuild before budgeting, not
             // just after the previous batch, so the next call sees current data.
@@ -1291,7 +1314,9 @@ export class StreamEngine extends Context.Service<
                                           }
                                         : part.encodedResult,
                                   }
-                                : redactDocumentPart(redactAgentDraftPart(part)),
+                                : redactDocumentPart(
+                                    redactAgentDraftPart(redactScheduleDraftPart(part)),
+                                  ),
                         );
                       }
                       switch (part.type) {
@@ -1353,7 +1378,9 @@ export class StreamEngine extends Context.Service<
                           const args = part.params as Record<string, unknown>;
                           const family = Schema.is(AgentDraftToolName)(part.name)
                             ? "agent-draft"
-                            : Schema.is(DocumentToolName)(part.name)
+                            : Schema.is(ScheduleDraftToolName)(part.name)
+                              ? "schedule-draft"
+                              : Schema.is(DocumentToolName)(part.name)
                               ? "document"
                               : Schema.is(DesktopToolName)(part.name)
                                 ? "desktop"
@@ -1395,6 +1422,7 @@ export class StreamEngine extends Context.Service<
                               family === "memory" ||
                               family === "skill" ||
                               family === "agent-draft" ||
+                              family === "schedule-draft" ||
                               family === "document" ||
                               family === "research"
                                 ? {}
@@ -1488,6 +1516,19 @@ export class StreamEngine extends Context.Service<
                               phase: "start",
                               callId: rowId,
                               name: part.name as AgentDraftToolName,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "schedule-draft") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as ScheduleDraftToolName,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -1643,6 +1684,33 @@ export class StreamEngine extends Context.Service<
                             yield* pushToolChunk({
                               v: 1,
                               family: "agent-draft",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                              ...(reason ? { reason } : {}),
+                            });
+                            return;
+                          }
+                          if (Schema.is(ScheduleDraftToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = projectScheduleDraftResult(
+                              part.isFailure ? null : part.result,
+                            );
+                            const reason = part.isFailure
+                              ? "The draft tool failed before it could respond."
+                              : scheduleDraftFailureReason(part.result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: scheduleDraftResultOk(activity) ? "complete" : "error",
+                              ...(reason
+                                ? { error: { code: "ScheduleDraftNotUpdated", message: reason } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "schedule-draft",
                               phase: "result",
                               callId: rowId,
                               name: part.name,
@@ -2365,6 +2433,7 @@ export class StreamEngine extends Context.Service<
       });
     }),
   ).pipe(
+    Layer.provideMerge(ScheduleDraftService.layer),
     Layer.provideMerge(AgentDraftService.layer),
     Layer.provideMerge(DocumentService.layer),
     Layer.provideMerge(AgentRepo.layer),

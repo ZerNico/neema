@@ -70,9 +70,10 @@ export type PatchAgentDraftInput = typeof PatchAgentDraftInput.Type;
 export interface AgentDraft {
   id: string;
   conversationId: string;
+  kind: "agent";
   settings: DraftSettings;
   revision: number;
-  targetAgentId: string | null;
+  targetId: string | null;
   targetRevision: number | null;
   savedDraftRevision: number | null;
   createdAt: string;
@@ -91,15 +92,4 @@ export interface ReloadAgentDraftResult {
   draft: AgentDraft;
 }
 
-export class AgentDraftNotAvailable extends Schema.TaggedError<AgentDraftNotAvailable>()(
-  // Whichever identity the caller had: creation knows only the conversation.
-  "AgentDraftNotAvailable",
-  {
-    draftId: Schema.optionalKey(Schema.String),
-    conversationId: Schema.optionalKey(Schema.String),
-  },
-) {}
-export class AgentDraftRejected extends Schema.TaggedError<AgentDraftRejected>()(
-  "AgentDraftRejected",
-  { reason: Schema.String },
-) {}
+export { DraftNotAvailable, DraftRejected } from "~/modules/drafts/draft-schema.ts";

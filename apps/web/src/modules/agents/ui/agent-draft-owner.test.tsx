@@ -99,9 +99,10 @@ function Probe() {
 const fresh = (): AgentDraft => ({
   id: "draft-1",
   conversationId: "conversation",
+  kind: "agent",
   settings: { ...EMPTY_AGENT_DRAFT, name: "Writer", instructions: "Original instructions" },
   revision: 1,
-  targetAgentId: null,
+  targetId: null,
   targetRevision: null,
   savedDraftRevision: null,
   createdAt: "2026-09-10T00:00:00Z",
@@ -164,7 +165,7 @@ const remote = (client: QueryClient, changes: Partial<AgentDraft["settings"]>) =
     settings: { ...server!.settings, ...changes },
     revision: server!.revision + 1,
   };
-  act(() => client.setQueryData(["agents", "draft", "draft-1"], server));
+  act(() => client.setQueryData(["drafts", "agent", "draft-1"], server));
 };
 const gate = () => {
   let release!: () => void;
@@ -210,14 +211,14 @@ beforeEach(() => {
     if (data.expectedRevision !== server!.revision) return { outcome: "conflict", draft: server! };
     server = {
       ...server!,
-      targetAgentId: server!.targetAgentId ?? "saved-agent",
+      targetId: server!.targetId ?? "saved-agent",
       targetRevision: (server!.targetRevision ?? 0) + 1,
       savedDraftRevision: server!.revision,
     };
     return {
       outcome: "saved",
       draft: server,
-      agentId: server.targetAgentId!,
+      agentId: server.targetId!,
       configRevision: server.targetRevision!,
     };
   });
@@ -339,7 +340,7 @@ describe("conversation-owned agent draft", () => {
     });
     await waitFor(() => expect(patchAgentDraft).toHaveBeenCalledTimes(1));
     fireEvent.change(name, { target: { value: "Later keystrokes" } });
-    act(() => client.setQueryData(["agents", "draft", "draft-1"], server));
+    act(() => client.setQueryData(["drafts", "agent", "draft-1"], server));
     expect(name).toHaveValue("Later keystrokes");
     await act(async () => {
       blocked.release();
@@ -347,7 +348,7 @@ describe("conversation-owned agent draft", () => {
     });
     expect(server!.settings.name).toBe("Later keystrokes");
     expect(screen.queryByRole("region", { name: "Name conflict" })).not.toBeInTheDocument();
-    act(() => client.setQueryData(["agents", "draft", "draft-1"], old));
+    act(() => client.setQueryData(["drafts", "agent", "draft-1"], old));
     expect(name).toHaveValue("Later keystrokes");
     expect(patchAgentDraft).toHaveBeenCalledTimes(2);
   });
@@ -362,7 +363,7 @@ describe("conversation-owned agent draft", () => {
       server = {
         ...server!,
         settings: reordered(server!.settings),
-        targetAgentId: "saved-agent",
+        targetId: "saved-agent",
         targetRevision: 1,
         savedDraftRevision: server!.revision,
       };
@@ -478,7 +479,7 @@ describe("conversation-owned agent draft", () => {
   });
 
   it("offers no discard once the draft is saved, there being nothing to throw away", async () => {
-    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    server = { ...fresh(), targetId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
     await fixture();
 
     expect(await screen.findByRole("textbox", { name: "Name" })).toBeInTheDocument();
@@ -486,7 +487,7 @@ describe("conversation-owned agent draft", () => {
   });
 
   it("offers the editor behind a button rather than a sentence of link text", async () => {
-    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    server = { ...fresh(), targetId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
     await fixture();
 
     const editor = await screen.findByRole("link", { name: "Open in editor" });
@@ -544,7 +545,7 @@ describe("conversation-owned agent draft", () => {
   });
 
   it("explicitly reloads a changed agent while preserving the draft until that choice", async () => {
-    server = { ...server!, targetAgentId: "existing", targetRevision: 1 };
+    server = { ...server!, targetId: "existing", targetRevision: 1 };
     await fixture();
     const name = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(name, { target: { value: "Working copy" } });
@@ -576,7 +577,7 @@ describe("conversation-owned agent draft", () => {
   });
 
   it("reloads a saved draft without asking, there being no edits to lose", async () => {
-    server = { ...fresh(), targetAgentId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
+    server = { ...fresh(), targetId: "saved-agent", targetRevision: 1, savedDraftRevision: 1 };
     await fixture();
     vi.mocked(reloadAgentDraft).mockImplementationOnce(async () => ({
       outcome: "reloaded",

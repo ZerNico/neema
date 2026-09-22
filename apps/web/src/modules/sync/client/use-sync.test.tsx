@@ -64,9 +64,9 @@ describe("useSync", () => {
 
   it("discovers late drafts by refreshing both settings and the conversation summary", () => {
     const { invalidate, source } = renderSync();
-    source.emit("sync", { type: "agent.draft.changed", conversationId: "c1", draftId: "d1" });
+    source.emit("sync", { type: "draft.changed", kind: "agent", conversationId: "c1", draftId: "d1" });
     expect(invalidate.mock.calls).toEqual([
-      [{ queryKey: ["agents", "draft", "d1"] }],
+      [{ queryKey: ["drafts", "agent", "d1"] }],
       [{ queryKey: ["conversation", "c1"] }],
     ]);
   });

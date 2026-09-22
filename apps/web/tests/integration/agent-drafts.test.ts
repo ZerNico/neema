@@ -1,6 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Cause, Deferred, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { execSync } from "node:child_process";
 import { Client } from "pg";
@@ -8,7 +8,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   agents,
-  conversationAgentDrafts,
+  conversationDrafts,
   conversations,
   knowledgeCollections,
   messages,
@@ -21,9 +21,11 @@ import {
   type AgentDraft,
   type AgentDraftPatch,
 } from "~/modules/agents/draft-schema.ts";
-import { AgentDraftRepo } from "~/modules/agents/server/draft-repo.ts";
+import { DraftRepo } from "~/modules/drafts/server/repo.ts";
+import { DraftService } from "~/modules/drafts/server/service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { storedAgentToDraftSettings } from "~/modules/agents/server/draft-map.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { initialResearchProgress, lockResearchFence } from "~/modules/chat/server/research/repo.ts";
@@ -37,7 +39,7 @@ import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
 let container: StartedPostgreSqlContainer;
-type Services = Db | AgentDraftRepo | AgentDraftService | AgentRepo | AgentService;
+type Services = Db | DraftRepo | AgentDraftService | AgentRepo | AgentService;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const events: Array<{ userId: string | null; event: SyncEvent }> = [];
@@ -70,13 +72,15 @@ beforeAll(async () => {
   );
   const core = Layer.mergeAll(
     AgentRepo.layer,
-    AgentDraftRepo.layer,
+    DraftRepo.layer,
     KnowledgeRepo.layer,
     ProviderRepo.layer,
     TestBus,
   ).pipe(Layer.provideMerge(infrastructure));
   runtime = ManagedRuntime.make(
-    Layer.mergeAll(AgentDraftService.layer, AgentService.layer).pipe(Layer.provideMerge(core)),
+    Layer.mergeAll(AgentDraftService.layer, AgentService.layer).pipe(
+      Layer.provideMerge(Layer.mergeAll(core, DraftService.layer.pipe(Layer.provideMerge(core)))),
+    ),
   );
 }, 180_000);
 afterAll(async () => {
@@ -96,16 +100,49 @@ const createUser = () =>
       return id;
     }),
   );
-const initialize = (userId: string, targetAgentId: string | null = null) =>
+// A raw row from the generic store as this suite sees it: always kind 'agent'
+// with agent-shaped settings.
+const asAgentDraft = (draft: {
+  id: string;
+  conversationId: string;
+  kind: string;
+  settings: unknown;
+  revision: number;
+  targetId: string | null;
+  targetRevision: number | null;
+  savedDraftRevision: number | null;
+  createdAt: string;
+  updatedAt: string;
+}): AgentDraft => ({ ...draft, kind: "agent", settings: draft.settings as AgentDraft["settings"] });
+const initialize = (userId: string, targetId: string | null = null) =>
   run(
     Effect.gen(function* () {
       const db = yield* Db;
-      const drafts = yield* AgentDraftRepo;
+      const drafts = yield* DraftRepo;
       return yield* db.transaction((tx) =>
         Effect.gen(function* () {
           const conversationId = uuidv7();
           yield* tx.insert(conversations).values({ id: conversationId, userId });
-          return yield* drafts.initialize(tx, userId, conversationId, targetAgentId);
+          const revision =
+            targetId === null
+              ? null
+              : ((yield* tx
+                  .select({ configRevision: agents.configRevision })
+                  .from(agents)
+                  .where(and(eq(agents.id, targetId), eq(agents.userId, userId)))
+                  .pipe(Effect.orDie))[0]?.configRevision ?? null);
+          // Raw store writes carry no kind semantics, but this helper stands in
+          // for "open a draft on my agent": another user's agent is not a target.
+          if (targetId !== null && revision === null) return yield* Effect.fail("not owned");
+          const settings =
+            targetId === null
+              ? EMPTY_AGENT_DRAFT
+              : storedAgentToDraftSettings(
+                  (yield* Effect.flatMap(AgentRepo, (repo) => repo.get(userId, targetId, tx)))!,
+                );
+          return asAgentDraft(
+            yield* drafts.initialize(tx, userId, conversationId, "agent", settings, targetId, revision),
+          );
         }),
       );
     }),
@@ -243,7 +280,7 @@ describe("tool-created agent drafts", () => {
     expect(results[0]!.draft).toEqual(results[1]!.draft);
     expect(results[0]!.draft.revision).toBe(1);
     expect(await countAgents(owner)).toBe(0);
-    expect(events.filter(({ event }) => event.type === "agent.draft.changed")).toHaveLength(1);
+    expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(1);
   });
 
   it("starts a second draft once the first carries anything at all", async () => {
@@ -277,7 +314,7 @@ describe("tool-created agent drafts", () => {
     // Saving one draft must not move the other's target or revision.
     expect(await get(owner, second)).toMatchObject({
       settings: { name: "Second agent" },
-      targetAgentId: null,
+      targetId: null,
       savedDraftRevision: null,
       revision: second.revision,
     });
@@ -306,7 +343,7 @@ describe("tool-created agent drafts", () => {
       outcome: "drafted",
       draft: {
         revision: 1,
-        targetAgentId: agentId,
+        targetId: agentId,
         targetRevision: 1,
         settings: { name: "Working name", instructions: "Original instructions", starters: [] },
       },
@@ -325,7 +362,7 @@ describe("tool-created agent drafts", () => {
     // Different target: its own draft, snapshotting that agent.
     const other = await open(owner, fence, { agentId: otherId });
     expect(other.outcome).toBe("drafted");
-    expect(other.draft.targetAgentId).toBe(otherId);
+    expect(other.draft.targetId).toBe(otherId);
     expect(other.draft.id).not.toBe(opened.draft.id);
   });
 
@@ -413,7 +450,7 @@ describe("persistent agent drafts", () => {
     expect(draft).toMatchObject({
       settings: EMPTY_AGENT_DRAFT,
       revision: 1,
-      targetAgentId: null,
+      targetId: null,
       targetRevision: null,
       savedDraftRevision: null,
     });
@@ -422,12 +459,12 @@ describe("persistent agent drafts", () => {
     const rolledBack = uuidv7();
     await run(
       Effect.gen(function* () {
-        const repo = yield* AgentDraftRepo;
+        const repo = yield* DraftRepo;
         return yield* (yield* Db)
           .transaction((tx) =>
             Effect.gen(function* () {
               yield* tx.insert(conversations).values({ id: rolledBack, userId: owner });
-              yield* repo.initialize(tx, owner, rolledBack, null);
+              yield* repo.initialize(tx, owner, rolledBack, "agent", EMPTY_AGENT_DRAFT, null);
               return yield* Effect.fail("rollback");
             }),
           )
@@ -585,7 +622,7 @@ describe("persistent agent drafts", () => {
     expect(saved.draft).toMatchObject({
       settings: draft.settings,
       revision: draft.revision,
-      targetAgentId: saved.agentId,
+      targetId: saved.agentId,
       targetRevision: 1,
       savedDraftRevision: draft.revision,
     });
@@ -598,7 +635,7 @@ describe("persistent agent drafts", () => {
     });
     expect(await countAgents(owner)).toBe(1);
     expect(events.filter(({ event }) => event.type === "resources.changed")).toHaveLength(1);
-    expect(events.filter(({ event }) => event.type === "agent.draft.changed")).toHaveLength(2);
+    expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(2);
   });
 
   it("keeps saving later revisions to the same created agent and rejects superseded receipts", async () => {
@@ -680,7 +717,7 @@ describe("persistent agent drafts", () => {
     const edited = (await patch(owner, saved.draft, { name: "Still working" })).draft;
     expect(await save(owner, edited)).toEqual({ outcome: "agent_unavailable", draft: edited });
     expect(await reload(owner, edited)).toEqual({ outcome: "agent_unavailable", draft: edited });
-    expect((await get(owner, draft))!.targetAgentId).toBe(saved.agentId);
+    expect((await get(owner, draft))!.targetId).toBe(saved.agentId);
     expect(await countAgents(owner)).toBe(0);
   });
 
@@ -736,7 +773,7 @@ describe("persistent agent drafts", () => {
       draft: fixed,
     });
     expect(await countAgents(owner)).toBe(100);
-    expect((await get(owner, fixed))!.targetAgentId).toBeNull();
+    expect((await get(owner, fixed))!.targetId).toBeNull();
   });
 
   it("does not turn postcommit invalidation failure into a failed save or discard a patch", async () => {
@@ -765,8 +802,8 @@ describe("persistent agent drafts", () => {
         Effect.flatMap(Db, (db) =>
           db
             .select()
-            .from(conversationAgentDrafts)
-            .where(eq(conversationAgentDrafts.conversationId, draft.conversationId)),
+            .from(conversationDrafts)
+            .where(eq(conversationDrafts.conversationId, draft.conversationId)),
         ),
       ),
     ).toEqual([]);
@@ -848,7 +885,7 @@ describe("draft transaction write fences", () => {
       await waitForBlocked(client, pid);
       // If the waiting model had locked the draft first this statement would deadlock.
       await client.query(
-        "select conversation_id from conversation_agent_drafts where conversation_id = $1 for update",
+        "select conversation_id from conversation_drafts where conversation_id = $1 for update",
         [draft.conversationId],
       );
       await client.query("update messages set status = 'aborted' where id = $1", [fence.messageId]);

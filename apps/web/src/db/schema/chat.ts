@@ -51,6 +51,14 @@ export const conversations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    /**
+     * Set when a schedule fired this conversation into existence. Such chats
+     * are hidden from the sidebar list and reached from the schedule's page;
+     * deleting the schedule takes its run conversations with it. Declared
+     * without a reference to avoid a schema import cycle (chat -> schedules ->
+     * chat); the FK constraint lives in the migration.
+     */
+    scheduleId: text("schedule_id"),
   },
   (t) => [
     index("conversations_user_id_idx").on(t.userId),
@@ -58,6 +66,9 @@ export const conversations = pgTable(
     // `on delete set null` scans it for every deleted conversation.
     index("conversations_branched_from_idx").on(t.branchedFrom),
     index("conversations_last_message_at_idx").on(t.lastMessageAt),
+    // Postgres does not index the referencing side of a foreign key, and
+    // `on delete cascade` from schedules scans it for every deleted schedule.
+    index("conversations_schedule_id_idx").on(t.scheduleId),
     // Serves the sidebar's keyset paging, which orders by exactly this
     // expression pair (see ChatRepo.listConversations).
     index("conversations_user_activity_idx").on(

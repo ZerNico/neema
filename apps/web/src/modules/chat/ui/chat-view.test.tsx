@@ -1414,9 +1414,10 @@ describe("ChatView agent drafts", () => {
     current = {
       id: "d1",
       conversationId: "c1",
+      kind: "agent",
       settings: { ...EMPTY_AGENT_DRAFT, name: "Writer" },
       revision: 1,
-      targetAgentId: null,
+      targetId: null,
       targetRevision: null,
       savedDraftRevision: null,
       createdAt: BASE.toISOString(),
@@ -1478,7 +1479,7 @@ describe("ChatView agent drafts", () => {
     act(() =>
       FakeEventSource.instances
         .at(-1)!
-        .emit("sync", { type: "agent.draft.changed", conversationId: "c1" }),
+        .emit("sync", { type: "draft.changed", kind: "agent", conversationId: "c1", draftId: "d1" }),
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(screen.getByTestId("message-footer")).toContainElement(widget);
@@ -1501,7 +1502,7 @@ describe("ChatView agent drafts", () => {
     ).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Name" })).toBe(name);
     expect(name).toHaveValue("My writer");
-    expect(client.getQueryData(["agents", "draft", "d1"])).toMatchObject({
+    expect(client.getQueryData(["drafts", "agent", "d1"])).toMatchObject({
       settings: { name: "My writer" },
     });
   });

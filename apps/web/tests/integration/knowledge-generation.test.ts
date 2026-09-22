@@ -8,6 +8,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SkillService } from "~/modules/skills/server/service.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -283,10 +286,14 @@ beforeAll(async () => {
     KnowledgeRepo.layer,
     ProviderRepo.layer,
     ToolsRepo.layer,
+    ScheduleRepo.layer,
   ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
   const CoreLayer = Layer.mergeAll(
     FakeGateway,
     ExternalCompletion.layer,
+    Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+      Layer.provideMerge(SyncBus.layer),
+    ),
     SyncBus.layer,
     WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
     FakeReader,

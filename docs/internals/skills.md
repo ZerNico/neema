@@ -2,6 +2,22 @@
 
 A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a tool. Nothing in a package ever executes.
 
+## Built-in skills
+
+- The two authoring skills (`builtin:agent-authoring`, `builtin:schedule-authoring`) are
+  hardcoded constants in `src/modules/skills/bundled/`, single-file, with no DB rows, blobs,
+  or revisions. They exist so the model loads authoring depth on demand instead of carrying
+  an always-on policy in the prompt prefix; the fixed prefix keeps a one-line pointer.
+- `SkillRepo.catalogue` prepends them as ambient entries with `revisionId: "builtin"`;
+  `SkillReader.readPinned` returns the bundled root for a builtin id and never touches the
+  database or blob store. Nothing pins them in `message_skills`: builtin content is versioned
+  with the app, and a replayed old message reads today's text, which is acceptable because
+  instructions are app behaviour, not user data.
+- They need no guards against editing, deletion, or id collision because they exist in no
+  table. The composer skill picker reads `SkillService.list`, which is DB-only, so a
+  `builtin:` id can never be pinned into a generation config that a retry would then fail to
+  resolve.
+
 ## Storage and lifecycle
 
 - The raw document is the ONLY metadata source: name/description are parsed from its frontmatter, so there is no competing metadata form state. Unsupported directives (hooks, `context: fork`, shell substitutions) are flagged once on SKILL.md; script files are kept as ordinary text without a per-file warning, since the editor already says scripts are never run.

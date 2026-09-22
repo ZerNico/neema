@@ -276,7 +276,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
     draftId: draft.id,
     name: draft.settings.name,
     revision: draft.revision,
-    agentSaved: draft.targetAgentId !== null,
+    agentSaved: draft.targetId !== null,
     hasUnsavedChanges: draft.savedDraftRevision !== draft.revision,
   });
   const state = (draft: AgentDraft): typeof DraftState.Type => ({
@@ -367,8 +367,8 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
       )
       .pipe(
         Effect.catchTag("AgentNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("AgentDraftNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("AgentDraftRejected", () => Effect.succeed(null)),
+        Effect.catchTag("DraftNotAvailable", () => Effect.succeed(null)),
+        Effect.catchTag("DraftRejected", () => Effect.succeed(null)),
       );
     if (!result) return { outcome: "unavailable", message: "That agent is not available to edit." };
     remember(result.draft);
@@ -423,8 +423,8 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
         input.writeGuard,
       )
       .pipe(
-        Effect.catchTag("AgentDraftNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("AgentDraftRejected", () => Effect.succeed(null)),
+        Effect.catchTag("DraftNotAvailable", () => Effect.succeed(null)),
+        Effect.catchTag("DraftRejected", () => Effect.succeed(null)),
       );
     if (!result) return unavailable;
     remember(result.draft);

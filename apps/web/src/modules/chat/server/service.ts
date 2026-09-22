@@ -190,6 +190,40 @@ export class ChatService extends Context.Service<
       conversationId: string;
       title: string;
     }): Effect.Effect<void, ConversationNotFound>;
+    /**
+     * Fires one schedule into a fresh conversation. Internal: no composer
+     * concerns (attachments, desktop, clarifications) apply. A missing or
+     * inaccessible model falls back to the user's default; a deleted agent
+     * degrades the fire to a plain chat with the schedule's own selections.
+     */
+    runScheduledTurn(input: {
+      userId: string;
+      scheduleId: string;
+      prompt: string;
+      modelId: string | null;
+      agentId: string | null;
+      searchEnabled: boolean;
+      researchEnabled: boolean;
+      collectionIds: ReadonlyArray<string>;
+      skillIds: ReadonlyArray<string>;
+      timeZone: string;
+    }): Effect.Effect<
+      { conversationId: string; assistantMessageId: string },
+      | ModelNotFound
+      | ConversationNotFound
+      | ConversationBusy
+      | ToolUnavailable
+      | InvalidMessage
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
+      | AgentNotAvailable
+      | WorkDesktopRequired
+      | SkillNotAvailable
+      | SkillRejected
+      | KnowledgeNotAvailable
+      | KnowledgeRejected
+      | QuestionUnavailable
+    >;
   }
 >()("chat/chat/ChatService") {
   static readonly layer = Layer.effect(ChatService, makeChatService());
@@ -469,6 +503,34 @@ function makeChatService() {
         }),
       });
 
+      return yield* startTurn({
+        userId: input.userId,
+        modelId: input.modelId,
+        turn,
+        attachmentFileNames,
+        timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
+        ...(input.desktopExecutorId !== undefined
+          ? { desktopExecutorId: input.desktopExecutorId }
+          : {}),
+        ...(input.deviceSessionId !== undefined ? { deviceSessionId: input.deviceSessionId } : {}),
+      });
+    });
+
+    // The tail every accepted turn shares: publish, start the generation, and
+    // set a title on a brand-new conversation. sendMessage reaches it through
+    // the composer; runScheduledTurn reaches it with none of that.
+    const startTurn = Effect.fn("ChatService.startTurn")(function* (input: {
+      userId: string;
+      modelId: string;
+      turn: Effect.Success<ReturnType<typeof repo.createTurn>>;
+      attachmentFileNames: ReadonlyArray<string>;
+      timeZone?: string | undefined;
+      openDocumentId?: string | undefined;
+      desktopExecutorId?: string | undefined;
+      deviceSessionId?: string | undefined;
+    }) {
+      const { turn } = input;
       if (turn.conversationCreated) {
         yield* sync.publish(input.userId, {
           type: "conversation.created",
@@ -483,16 +545,20 @@ function makeChatService() {
       });
 
       yield* engine.startGeneration({
-        desktopExecutorId: input.desktopExecutorId,
-        deviceSessionId: input.deviceSessionId,
+        ...(input.desktopExecutorId !== undefined
+          ? { desktopExecutorId: input.desktopExecutorId }
+          : {}),
+        ...(input.deviceSessionId !== undefined
+          ? { deviceSessionId: input.deviceSessionId }
+          : {}),
         userId: input.userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
         generationId: turn.assistant.generationId ?? undefined,
         modelId: input.modelId,
         searchEnabled: turn.config.searchEnabled,
-        timeZone: input.timeZone,
-        openDocumentId: input.openDocumentId,
+        ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
+        ...(input.openDocumentId !== undefined ? { openDocumentId: input.openDocumentId } : {}),
       });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -505,12 +571,92 @@ function makeChatService() {
             conversationId: turn.conversation.id,
             modelId: input.modelId,
             content: turn.userMessage.content,
-            attachmentFileNames,
+            attachmentFileNames: input.attachmentFileNames,
           }),
         );
       }
 
       return { conversationId: turn.conversation.id, assistantMessageId: turn.assistant.id };
+    });
+
+    const runScheduledTurn = Effect.fn("ChatService.runScheduledTurn")(function* (input: {
+      userId: string;
+      scheduleId: string;
+      prompt: string;
+      modelId: string | null;
+      agentId: string | null;
+      searchEnabled: boolean;
+      researchEnabled: boolean;
+      collectionIds: ReadonlyArray<string>;
+      skillIds: ReadonlyArray<string>;
+      timeZone: string;
+    }) {
+      if (input.prompt.trim() === "")
+        return yield* new InvalidMessage({ reason: "message is empty" });
+      // A saved model that vanished is not a reason to skip the fire: fall back
+      // to the user's default chat model, the same one the composer preselects.
+      const modelId = yield* resolveScheduleModel(input.userId, input.modelId);
+      if (!modelId)
+        return yield* new ModelNotFound({ modelId: input.modelId ?? "schedule default" });
+      const { model, attachmentFileNames, researchEnabled } = yield* validateGenerationOptions({
+        userId: input.userId,
+        modelId,
+        searchEnabled: input.searchEnabled,
+        attachmentIds: [],
+        researchEnabled: input.researchEnabled,
+      });
+      const searchAvailable = yield* searchToolEnabled;
+      const fire = (agentId: string | undefined) =>
+        repo.createTurn({
+          userId: input.userId,
+          conversationId: null,
+          modelId,
+          content: input.prompt,
+          attachmentIds: [],
+          ...(agentId !== undefined ? { associateAgentId: agentId } : {}),
+          scheduleId: input.scheduleId,
+          resolve: resolver({
+            attempt: "send",
+            userId: input.userId,
+            searchEnabled: input.searchEnabled,
+            researchEnabled,
+            model,
+            searchAvailable,
+            collectionIds: input.collectionIds,
+            skillIds: input.skillIds,
+          }),
+        });
+      const turn = yield* fire(input.agentId ?? undefined).pipe(
+        // The agent association is a preference snapshot from when the schedule
+        // was saved; a deleted agent degrades the fire to a plain chat rather
+        // than erroring an unattended schedule.
+        Effect.catchTag("AgentNotAvailable", () => fire(undefined)),
+      );
+      return yield* startTurn({
+        userId: input.userId,
+        modelId,
+        turn,
+        attachmentFileNames,
+        timeZone: input.timeZone,
+      });
+    });
+
+    const resolveScheduleModel = Effect.fn("ChatService.resolveScheduleModel")(function* (
+      userId: string,
+      saved: string | null,
+    ) {
+      if (saved) {
+        const model = yield* providers.getModel(saved);
+        if (
+          model &&
+          model.enabled &&
+          model.type === "chat" &&
+          (yield* providers.isModelAccessible(userId, saved))
+        )
+          return saved;
+      }
+      const models = yield* providers.listChatModelsFor(userId);
+      return (models.find((model) => model.isDefault) ?? models[0])?.id ?? null;
     });
 
     const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (
@@ -1049,6 +1195,7 @@ function makeChatService() {
       deleteConversation,
       updateWorkSettings,
       renameConversation,
+      runScheduledTurn,
     });
   });
 }

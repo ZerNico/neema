@@ -16,6 +16,8 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -40,6 +42,8 @@ import {
 } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
@@ -253,7 +257,13 @@ beforeAll(async () => {
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
-  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    AgentRepo.layer,
+    ChatRepo.layer,
+    ProviderRepo.layer,
+    ScheduleRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
@@ -269,6 +279,9 @@ beforeAll(async () => {
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,
+        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+          Layer.provideMerge(SyncBus.layer),
+        ),
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),
   );
@@ -293,7 +306,7 @@ beforeAll(async () => {
           modelKey: "small",
           displayName: "Small Window",
           type: "chat",
-          contextLength: TINY_CONTEXT,
+          contextLength: SMALL_ENGINE_CONTEXT,
           capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
         {
@@ -302,7 +315,10 @@ beforeAll(async () => {
           modelKey: "tool-small",
           displayName: "Small Tool Window",
           type: "chat",
-          contextLength: 8_000,
+          // Sized so the full offered toolkit's measured schema reserve still
+          // leaves a workable input budget; adding a tool family must not make
+          // this window useless.
+          contextLength: 12_000,
           capabilities: { reasoning: false, tools: true, vision: false, files: false },
         },
       ]);
@@ -410,6 +426,12 @@ const historyOf = Effect.fn("test.historyOf")(function* (conversationId: string)
 
 /** Small enough that half a dozen 400-character turns cannot fit. */
 const TINY_CONTEXT = 4_000;
+/**
+ * The engine subtracts the measured schema of every always-offered tool
+ * (drafts, documents, skills) before the history budget; this keeps a summary
+ * plus the newest turn fitting after that reserve.
+ */
+const SMALL_ENGINE_CONTEXT = 6_000;
 
 const prepare = Effect.fn("test.prepare")(function* (input: {
   userId: string;
@@ -1297,7 +1319,16 @@ describe("compaction inside a generation", () => {
     expect(prompt).toContain("question latest");
     const clock = runtimeBlock(prompt);
     expect(clock.index).toBe(clock.content.length - 1);
-    expect(JSON.stringify(clock.content[clock.index - 1])).toContain("question latest");
+    // The newest question is the last history message; trailing context (the
+    // ambient skill catalogue, then the clock) follows it, never precedes it.
+    const latest = clock.content.findIndex((entry) =>
+      JSON.stringify(entry).includes("question latest"),
+    );
+    expect(latest).toBeGreaterThan(-1);
+    expect(latest).toBeLessThan(clock.index);
+    expect(
+      clock.content.slice(latest + 1, clock.index).every((entry) => entry.role !== "assistant"),
+    ).toBe(true);
     expect(JSON.stringify(clock.message)).toContain("Time zone: UTC");
     expect(gateway.summaryPrompts[0]).not.toContain("<runtime-context>");
     expect(JSON.stringify(result.checkpoints)).not.toContain("<runtime-context>");

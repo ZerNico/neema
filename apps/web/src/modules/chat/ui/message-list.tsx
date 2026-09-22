@@ -29,6 +29,7 @@ import { agentIcon, CollectionChip, ContextChip, type ComposerContext } from "./
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
+import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
@@ -503,6 +504,8 @@ const AssistantBody = memo(function AssistantBody({
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "agent-draft")
       return <AgentDraftActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "schedule-draft")
+      return <ScheduleDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "document")
       return <DocumentActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {

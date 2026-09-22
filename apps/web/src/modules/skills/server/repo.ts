@@ -13,6 +13,7 @@ import type { SkillSource } from "~/db/schema/skills.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, type ValidatedSkillPackage } from "../package.ts";
 import type { SkillManifestEntry, SkillSummary } from "../schema.ts";
@@ -186,18 +187,31 @@ export class SkillRepo extends Context.Service<
             .orderBy(asc(skills.name), asc(skills.id))
             .limit(SKILL_LIMITS.catalogue + exclude.length)
             .pipe(Effect.orDie);
-          return rows
-            .filter((row) => !exclude.includes(row.skill.id))
-            .slice(0, SKILL_LIMITS.catalogue)
-            .map((row) => ({
-              skillId: row.skill.id,
-              revisionId: row.revision.id,
-              name: row.revision.name,
-              description: row.revision.description,
+          // Builtins first: they cost the catalogue nothing and the authoring
+          // flows should be discoverable even beside a full library.
+          return [
+            ...BUILTIN_SKILLS.filter((skill) => !exclude.includes(skill.id)).map((skill) => ({
+              skillId: skill.id,
+              revisionId: "builtin",
+              name: skill.name,
+              description: skill.description,
               manualOnly: false,
               explicit: false,
-              ambient: true,
-            }));
+              ambient: true as const,
+            })),
+            ...rows
+              .filter((row) => !exclude.includes(row.skill.id))
+              .slice(0, SKILL_LIMITS.catalogue)
+              .map((row) => ({
+                skillId: row.skill.id,
+                revisionId: row.revision.id,
+                name: row.revision.name,
+                description: row.revision.description,
+                manualOnly: false,
+                explicit: false,
+                ambient: true,
+              })),
+          ];
         }),
         list: Effect.fn("SkillRepo.list")(function* (userId) {
           const rows = yield* db

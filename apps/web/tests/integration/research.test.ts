@@ -29,6 +29,7 @@ import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -45,6 +46,7 @@ import {
   type ChatStreamPart,
 } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend, SearchBackendError } from "~/modules/tools/server/search.ts";
@@ -76,7 +78,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | MemoryService
   | AgentRepo
   | AgentDraftService
-  | AttachmentRepo,
+  | AttachmentRepo
+  | ScheduleRepo,
   unknown
 >;
 let remote: typeof runtime;
@@ -434,6 +437,7 @@ beforeAll(async () => {
   const repos = Layer.mergeAll(
     AnalyticsRepo.layer,
     AgentRepo.layer,
+    ScheduleRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
     MemoryRepo.layer,
@@ -455,6 +459,9 @@ beforeAll(async () => {
         MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
         ExternalCompletion.layer,
         SyncBus.layer,
+        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+          Layer.provideMerge(SyncBus.layer),
+        ),
       ).pipe(Layer.provideMerge(repos)),
     ),
   );
@@ -709,9 +716,13 @@ describe("deep research as a tool call", () => {
     const host = requests.find((request) => phaseOf(request) === "host")!;
     expect(promptText(host)).toContain("Prefer deep_research over searching");
     const workers = requests.filter((request) => phaseOf(request) === "worker");
+    // Web tools plus the skill loaders: the bundled authoring skills sit in
+    // every ambient catalogue, so a worker always carries load_skill.
     expect(
       workers.every(
-        (request) => Object.keys(request.toolkit!.tools).sort().join(",") === "read_url,web_search",
+        (request) =>
+          Object.keys(request.toolkit!.tools).sort().join(",") ===
+          "load_skill,read_skill_file,read_url,web_search",
       ),
     ).toBe(true);
     expect(workers.every((request) => !promptText(request).includes("turned on deep research"))).toBe(
@@ -1643,7 +1654,7 @@ describe("what the investigation may see", () => {
     );
     expect(draft).toMatchObject({
       revision: 2,
-      targetAgentId: null,
+      targetId: null,
       settings: { instructions: "PRIVATE_RESEARCH_DRAFT" },
     });
     const detail = await runtime.runPromise(

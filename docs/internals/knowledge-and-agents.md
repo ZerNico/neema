@@ -27,21 +27,34 @@ whatever agent the conversation is associated with.
 
 ## Conversational drafts
 
-- A draft is an ordinary conversation’s working resource, not an installed agent or a special
-  chat mode. `draft_agent` lazily creates one, or snapshots an owned target, under the current
-  generation fence. A conversation holds as many drafts as agents being prepared, each
-  with its own id: opening the same target twice returns the draft already holding it, and an
-  untargeted call reuses an empty unedited draft, so a repeated call cannot litter the chat.
-  Anything else is a second agent and gets its own draft — reusing one draft for a second agent
-  is how a save silently overwrote the first. Only the user discards a draft, from the panel.
-  The shortcut only seeds an unsent request; see [UI ownership](ui.md#chat-specific-pieces).
-- `draftId` is optional on `update_agent_draft` and `read_agent_draft` while a chat has one
-  draft, and required once it has several; omitting it then returns `invalid` naming each draft.
-  The draft a tool last wrote rides in the trailing data in full, the rest as id, name, revision
-  and saved state, so long instructions in several drafts cannot inflate every later request.
-- The short app policy (what an agent is, call `draft_agent`) sits in every fixed prefix; the
-  long authoring policy rides in the trailing draft data and appears only once a draft or
-  inspected options exist, so ordinary chats on small models do not pay for it every turn.
+- A draft is an ordinary conversation’s working resource, not an installed resource or a
+  special chat mode. One store serves both kinds: `conversation_drafts` holds `kind`
+  ('agent' or 'schedule') plus an opaque `settings` jsonb the per-kind service decodes; the
+  generic `DraftService` (`src/modules/drafts`) owns idempotent open, CAS patch, discard and
+  the `draft.changed` sync event, parameterized by a small per-kind config (`kind`, `empty`,
+  blank-reuse baseline, optional target snapshot/check). `save` and `reload` stay per-kind,
+  because validating and writing the live resource is exactly what differs. The client is
+  generic the same way: `useDraft` (form, 450 ms debounced CAS queue, field reconciliation)
+  and `DraftOwner` (conversation-level sessions, the panel, one context per kind) take a
+  `DraftClient`/`DraftKindUi` describing the shape, the server functions with their outcomes
+  folded to `target_changed`/`target_unavailable`, the field labels and the copy; the agent
+  and schedule modules are thin registrations of those. Draft tools
+  (`draft_agent`/`draft_schedule` and kin) lazily create a draft, or snapshot an owned
+  target, under the current generation fence. A conversation holds as many drafts as
+  resources being prepared, each with its own id: opening the same target twice returns the
+  draft already holding it, and an untargeted call reuses an empty unedited draft, so a
+  repeated call cannot litter the chat. Anything else is a second resource and gets its own
+  draft — reusing one draft for a second target is how a save silently overwrote the first.
+  Only the user discards a draft, from the panel. The shortcut only seeds an unsent request;
+  see [UI ownership](ui.md#chat-specific-pieces).
+- `draftId` is optional on the update/read tools while a chat has one draft of that kind,
+  and required once it has several; omitting it then returns `invalid` naming each draft.
+  The draft a tool last wrote rides in the trailing data in full, the rest as id, name,
+  revision and saved state, so long instructions in several drafts cannot inflate every later
+  request.
+- The fixed prefix carries only a one-line pointer at the authoring skills; each kind's long
+  authoring policy rides in its trailing draft data and appears only once a draft of that
+  kind exists, so ordinary chats on small models do not pay for it every turn.
 - Target instructions and selected-resource descriptions are lower-authority editing data,
   never the conversation’s persona, installed dependencies or automatic user-memory facts.
   Option discovery uses accessible metadata (including manual-only skills), not resource
@@ -51,24 +64,24 @@ whatever agent the conversation is associated with.
   budgets the actual trailing context, and measures its advertised tool schemas: that
   measurement replaces the flat overhead guess only when it is larger, never on top of it.
   Compaction cannot replace the current draft with an older transcript copy.
-- The draft revision and saved-agent `configRevision` answer different questions. Patches use
+- The draft revision and the saved resource's revision answer different questions. Patches use
   draft compare-and-swap; omitted fields survive and arrays/instructions are whole conflict
-  units. Only explicit Create/Save validates and writes the live agent, atomically with the
+  units. Only explicit Create/Save validates and writes the live resource, atomically with the
   accepted draft revision’s receipt. Repeating that save returns its receipt; later draft
-  revisions need new approval and keep the same target. Normalization affects the saved agent,
+  revisions need new approval and keep the same target. Normalization affects the saved resource,
   never unseen settings under an already-reviewed draft revision.
 - Only Save or explicit Reload advances the target baseline. A manual edit or another draft
   saving first produces a recoverable conflict. Target identity survives deletion: neither a
   deleted target nor a stale receipt can silently create a replacement. Postcommit sync failure
   cannot turn a committed write into a reported failure.
-- Public tool rows, SSE, continuation and branch snapshots share the explicit `agent-draft`
-  projector: status, originating conversation, revision and changed field names only. Arguments,
-  settings, options and driver errors never enter those projections; authorized private queries
-  supply the editor/widget. A reference carries both the draft id and its owning conversation:
-  the id addresses the controller, the conversation is what keeps a branch-copied row inert.
-  A call that did not update the draft stores the handler's own
-  sentence (schema paths, fixed messages) as `AgentDraftNotUpdated` on the tool row for
-  debugging; the transcript shows only the label. Branches copy historical references, not draft state or save
+- Public tool rows, SSE, continuation and branch snapshots share the explicit per-kind
+  projector (`agent-draft`, `schedule-draft`): status, originating conversation, revision and
+  changed field names only. Arguments, settings, options and driver errors never enter those
+  projections; authorized private queries supply the editor/widget. A reference carries both
+  the draft id and its owning conversation: the id addresses the controller, the conversation
+  is what keeps a branch-copied row inert. A call that did not update the draft stores the
+  handler's own sentence (schema paths, fixed messages) on the tool row for debugging; the
+  transcript shows only the label. Branches copy historical references, not draft state or save
   authority. Retry/edit can erase tool rows without deleting the canonical draft.
 
 ## Sharing and access

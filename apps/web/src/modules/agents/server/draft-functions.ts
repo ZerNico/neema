@@ -5,14 +5,14 @@ import { runtime } from "~/server/runtime.ts";
 import {
   AgentDraftIdInput,
   AgentDraftRevisionInput,
+  DraftNotAvailable,
+  DraftRejected,
   PatchAgentDraftInput,
-  type AgentDraftNotAvailable,
-  type AgentDraftRejected,
 } from "../draft-schema.ts";
 import { AgentDraftService } from "./draft-service.ts";
 
 const publicResult = <A, R>(
-  effect: Effect.Effect<A, AgentDraftNotAvailable | AgentDraftRejected, R>,
+  effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>,
 ) =>
   effect.pipe(
     // Driver defects can contain SQL and the private settings being written.
@@ -24,10 +24,10 @@ const publicResult = <A, R>(
         ),
       ),
     ),
-    Effect.catchTag("AgentDraftNotAvailable", () =>
+    Effect.catchTag("DraftNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),
     ),
-    Effect.catchTag("AgentDraftRejected", (error) =>
+    Effect.catchTag("DraftRejected", (error) =>
       Effect.die(new Response(error.reason, { status: 400 })),
     ),
   );

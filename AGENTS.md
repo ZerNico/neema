@@ -25,6 +25,11 @@ edit the wrong thing.
   started it and fenced by that call's generation — never a kind of message, and
   one turn may start several. Ending one must not touch anything else on the
   message.
+- **schedule / scheduled run**: a `schedules` row firing one prompt on a cron
+  cadence; each fire is a fresh conversation hidden from the sidebar, recorded
+  as a `schedule_runs` row. Prose says "scheduled run" — bare "run" still means
+  a research run. Catch-up-once: downtime collapses to a single fire, never a
+  replayed backlog.
 - **task / worker / coordinator**: inside a run, the coordinator dispatches tasks;
   each task is investigated by a worker with web tools. Neither sees the
   conversation or memory; they get a brief.
@@ -89,7 +94,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  document, desktop.
+  schedule-draft, document, desktop.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -173,7 +178,9 @@ skipped one on purpose.
 - `docs/internals/knowledge-and-agents.md`: agents, sharing, collections, retrieval
   versus direct context, embedding widths, indexing and repair.
 - `docs/internals/skills.md`: skill packages, revisions, ambient versus pinned,
-  import safety.
+  hardcoded builtins, import safety.
+- `docs/internals/schedules.md`: cron cadences, claim semantics, catch-up-once,
+  run conversations, model fallback, delete-mid-run.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
 - `docs/internals/documents.md`: editable conversation Markdown, transcript boundaries,

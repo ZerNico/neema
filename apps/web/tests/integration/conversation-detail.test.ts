@@ -9,12 +9,13 @@ import { conversationDocuments, conversations, models } from "~/db/schema/index.
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
-type Services = ChatRepo | AttachmentRepo | AgentRepo | Db;
+type Services = ChatRepo | AttachmentRepo | AgentRepo | ScheduleRepo | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** conversations.model_id / messages.model_id are real FKs. */
 let modelId: string;
@@ -37,6 +38,7 @@ beforeAll(async () => {
     Layer.mergeAll(
       ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer)),
       AgentRepo.layer,
+ScheduleRepo.layer,
     ).pipe(Layer.provideMerge(InfraLayer)),
   );
 

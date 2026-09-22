@@ -34,8 +34,8 @@ import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
   conversationAgents,
-  conversationAgentDrafts,
   conversationCompactionCheckpoints,
+  conversationDrafts,
   conversationDocuments,
   conversations,
   messageChunks,
@@ -104,6 +104,8 @@ export interface ConversationDefaults {
   readonly mode?: "chat" | "work";
   /** Every draft this conversation owns, oldest first. Names are already public. */
   readonly agentDrafts?: ReadonlyArray<{ id: string; name: string }>;
+  /** Schedule drafts the conversation owns, discovered the same way. */
+  readonly scheduleDrafts?: ReadonlyArray<{ id: string; name: string }>;
   /** Mutable chat documents stay out of history; the loader carries summaries only. */
   readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
 }
@@ -143,6 +145,11 @@ export type TurnFields = {
   attachmentIds: ReadonlyArray<string>;
   /** Installs only the association on a new conversation, after live resolution. */
   associateAgentId?: string | undefined;
+  /**
+   * Set only when a schedule fires this turn into a brand-new conversation;
+   * marks the chat as a scheduled run so the sidebar list omits it.
+   */
+  scheduleId?: string | undefined;
   /** Standalone collections selected for this message only. */
   collectionIds?: ReadonlyArray<string> | undefined;
   skillIds?: ReadonlyArray<string> | undefined;
@@ -341,10 +348,10 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationAgents.conversationId, conversationId))
     .pipe(Effect.orDie);
   const drafts = yield* tx
-    .select({ id: conversationAgentDrafts.id, settings: conversationAgentDrafts.settings })
-    .from(conversationAgentDrafts)
-    .where(eq(conversationAgentDrafts.conversationId, conversationId))
-    .orderBy(asc(conversationAgentDrafts.id))
+    .select({ id: conversationDrafts.id, kind: conversationDrafts.kind, settings: conversationDrafts.settings })
+    .from(conversationDrafts)
+    .where(eq(conversationDrafts.conversationId, conversationId))
+    .orderBy(asc(conversationDrafts.id))
     .pipe(Effect.orDie);
   const documents = yield* tx
     .select({
@@ -365,7 +372,12 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .pipe(Effect.orDie);
   return {
     agent: agent ? { agentId: agent.agentId } : null,
-    agentDrafts: drafts.map((draft) => ({ id: draft.id, name: draft.settings.name })),
+    agentDrafts: drafts
+      .filter((draft) => draft.kind === "agent")
+      .map((draft) => ({ id: draft.id, name: (draft.settings as { name?: string }).name ?? "" })),
+    scheduleDrafts: drafts
+      .filter((draft) => draft.kind === "schedule")
+      .map((draft) => ({ id: draft.id, name: (draft.settings as { name?: string }).name ?? "" })),
     documents,
     mode: conversation?.mode ?? "chat",
   } satisfies ConversationDefaults;
@@ -773,6 +785,9 @@ export class ChatRepo extends Context.Service<
             .where(
               and(
                 eq(conversations.userId, input.userId),
+                // Scheduled-run chats live under their schedule's page, not in
+                // the sidebar list. Deep links still resolve via getConversation.
+                isNull(conversations.scheduleId),
                 // Keyset, not OFFSET: the list reorders whenever a message
                 // lands, and an offset would then skip or repeat rows.
                 input.cursor
@@ -875,6 +890,9 @@ export class ChatRepo extends Context.Service<
                       modelId: input.modelId,
                       title: null,
                       mode: input.mode ?? "chat",
+                      ...(input.scheduleId !== undefined
+                        ? { scheduleId: input.scheduleId }
+                        : {}),
                     })
                     .returning()
                     .pipe(Effect.orDie);

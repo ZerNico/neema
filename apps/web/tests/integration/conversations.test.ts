@@ -2,9 +2,10 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
+import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, messages } from "~/db/schema/index.ts";
+import { conversations, messages, schedules } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type ConversationCursor } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -224,6 +225,70 @@ describe("listConversations generating flag", () => {
       }),
     );
     expect(rows).toEqual([false, false]);
+  });
+});
+
+describe("listConversations scheduled runs", () => {
+  it("keeps schedule-owned run chats out of the sidebar list", async () => {
+    const ids = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const scheduleId = uuidv7();
+        yield* db.insert(schedules).values({
+          id: scheduleId,
+          userId,
+          name: "Digest",
+          prompt: "Summarize.",
+          scheduleText: "every weekday at 7am",
+          cron: "0 7 * * 1-5",
+          timezone: "UTC",
+        });
+        yield* seed(userId, [
+          { id: "ordinary", title: "Ordinary", created: 0 },
+          { id: "scheduled-run", title: "Scheduled run", created: 1000 },
+        ]);
+        // A run chat is an ordinary row with scheduleId set; the list filter,
+        // not the row shape, is what hides it.
+        yield* db
+          .update(conversations)
+          .set({ scheduleId })
+          .where(eq(conversations.id, "scheduled-run"));
+        return (yield* page(userId, { limit: 10 })).ids;
+      }),
+    );
+    expect(ids).toEqual(["ordinary"]);
+  });
+
+  it("cascades a run chat when its schedule is deleted", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const scheduleId = uuidv7();
+        yield* db.insert(schedules).values({
+          id: scheduleId,
+          userId,
+          name: "Digest",
+          prompt: "Summarize.",
+          scheduleText: "every weekday at 7am",
+          cron: "0 7 * * 1-5",
+          timezone: "UTC",
+        });
+        yield* seed(userId, [
+          { id: "kept", title: "Kept", created: 0 },
+          { id: "run-chat", title: "Run", created: 1000 },
+        ]);
+        yield* db
+          .update(conversations)
+          .set({ scheduleId })
+          .where(eq(conversations.id, "run-chat"));
+        yield* db.delete(schedules).where(eq(schedules.id, scheduleId));
+        // The schedule's run chats go with it; unrelated chats are untouched.
+        return (yield* page(userId, { limit: 10 })).ids;
+      }),
+    );
+    expect(result).toEqual(["kept"]);
   });
 });
 

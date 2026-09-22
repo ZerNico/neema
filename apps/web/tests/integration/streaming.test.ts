@@ -20,6 +20,7 @@ import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unsta
 import { eq, sql } from "drizzle-orm";
 import {
   conversations,
+  schedules,
   attachmentBlobs,
   attachments,
   messageAttachments,
@@ -48,6 +49,8 @@ import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
 import { askUserTool } from "~/modules/tools/server/ask-user.ts";
@@ -85,7 +88,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | Db
   | AttachmentRepo
   | AttachmentService
-  | ExternalCompletion,
+  | ExternalCompletion
+  | ScheduleRepo,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */
@@ -256,6 +260,7 @@ beforeAll(async () => {
     ChatRepo.layer,
     KnowledgeRepo.layer,
     ProviderRepo.layer,
+    ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
@@ -270,6 +275,9 @@ beforeAll(async () => {
     FakeMemoryService,
     ExternalCompletion.layer,
     SyncBus.layer,
+    Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+      Layer.provideMerge(SyncBus.layer),
+    ),
   ).pipe(Layer.provideMerge(ReposLayer));
   const EngineLayer = StreamEngine.layer.pipe(
     Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
@@ -1054,10 +1062,10 @@ describe("conversational agent authoring", () => {
       const both = await runtime.runPromise(drafts);
       expect(both).toHaveLength(2);
       // The saved agent keeps the first draft's settings; the second is separate.
-      expect(both.find((draft) => draft.targetAgentId === saved.agentId)).toMatchObject({
+      expect(both.find((draft) => draft.targetId === saved.agentId)).toMatchObject({
         settings: { name: "Tickets", instructions: "PRIVATE_FIRST" },
       });
-      expect(both.find((draft) => draft.targetAgentId === null)).toMatchObject({
+      expect(both.find((draft) => draft.targetId === null)).toMatchObject({
         settings: { name: "Release notes", instructions: "" },
       });
       expect(
@@ -2650,6 +2658,73 @@ describe("resumable streaming pipeline", () => {
   }, 30_000);
 });
 
+describe("scheduled turns", () => {
+  it("fires into a fresh hidden conversation, records the run, and degrades a missing agent", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const db = yield* Db;
+        const scheduleId = uuidv7();
+        // The fallback is the user's default chat model, so make that
+        // explicit rather than relying on the fixture's display-name order.
+        yield* db.update(models).set({ defaultPriority: 1 }).where(eq(models.id, textModelId));
+        yield* db.insert(schedules).values({
+          id: scheduleId,
+          userId: seed.userId,
+          name: "Digest",
+          prompt: "Summarize yesterday.",
+          scheduleText: "every weekday at 7am",
+          cron: "0 7 * * 1-5",
+          timezone: "Europe/Berlin",
+        });
+        const turn = yield* chat.runScheduledTurn({
+          userId: seed.userId,
+          scheduleId,
+          prompt: "Summarize yesterday.",
+          // A saved model that no longer exists: the fire falls back rather
+          // than failing an unattended schedule.
+          modelId: "deleted-model",
+          // Likewise an agent that was deleted after the schedule was saved.
+          agentId: "deleted-agent",
+          searchEnabled: false,
+          researchEnabled: false,
+          collectionIds: [],
+          skillIds: [],
+          timeZone: "Europe/Berlin",
+        });
+        yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runDrain);
+        const [conversation] = yield* db
+          .select()
+          .from(conversations)
+          .where(eq(conversations.id, turn.conversationId));
+        const listed = yield* repo.listConversations({ userId: seed.userId, limit: 50 });
+        const answer = yield* repo.getMessage(turn.assistantMessageId);
+        const defaults = yield* repo.getConversationDefaults(turn.conversationId);
+        yield* db.update(models).set({ defaultPriority: null }).where(eq(models.id, textModelId));
+        return {
+          conversation,
+          listed,
+          answer,
+          agent: defaults.agent,
+          prompt: streamPrompts.at(-1)!,
+        };
+      }),
+    );
+    expect(result.conversation?.scheduleId).toBeTypeOf("string");
+    expect(result.listed.conversations.map((c) => c.id)).not.toContain(result.conversation!.id);
+    expect(result.answer).toMatchObject({
+      status: "complete",
+      content: "alpha beta gamma delta epsilon",
+      modelId: textModelId,
+    });
+    expect(result.agent).toBeNull();
+    expect(JSON.stringify(result.prompt)).toContain("Time zone: Europe/Berlin");
+  }, 60_000);
+});
+
 describe("retry with a different model", () => {
   // Rows only: the guard under test runs before any blob is read, so the
   // stubbed store never has to hold bytes.
@@ -2735,9 +2810,17 @@ describe("retry with a different model", () => {
     expect(new Set(snapshots).size).toBe(3);
     // Retrying in a different zone changes only the final runtime block.
     expect(streamPrompts[1]!.content.slice(0, -1)).toEqual(streamPrompts[0]!.content.slice(0, -1));
-    // Editing changes the latest user turn, not the earlier UTC-annotated history.
-    expect(streamPrompts[2]!.content.slice(0, -2)).toEqual(streamPrompts[0]!.content.slice(0, -2));
-    expect(JSON.stringify(streamPrompts[2]!.content.at(-2))).toContain("; edited:");
+    // Editing changes the latest user turn, not the earlier UTC-annotated
+    // history. Trailing context (skill catalogue, clock) follows that turn, so
+    // find it rather than assume it sits right before the clock.
+    const editedAt = streamPrompts[2]!.content.findIndex((message) =>
+      JSON.stringify(message).includes("; edited:"),
+    );
+    expect(editedAt).toBeGreaterThan(-1);
+    expect(streamPrompts[2]!.content.slice(0, editedAt)).toEqual(
+      streamPrompts[0]!.content.slice(0, editedAt),
+    );
+    expect(JSON.stringify(streamPrompts[2]!.content[editedAt])).toContain("What time is it?");
     expect(stored.map((message) => message.content)).toEqual([
       "hi",
       "first answer",

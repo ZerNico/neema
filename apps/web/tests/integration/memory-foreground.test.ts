@@ -37,6 +37,9 @@ import { MemoryService } from "~/modules/memory/server/service.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -240,13 +243,18 @@ const FakeGateway = Layer.succeed(AiGateway, {
     Stream.suspend(() => {
       gatewayState.calls.push({
         prompt: JSON.stringify(input.prompt),
-        // Draft tools are always advertised now; these suites assert the
-        // memory and question toolkit, so filter the constant family out.
+        // Draft tools are always advertised now, and the bundled authoring
+        // skills always appear in the ambient catalogue; these suites assert
+        // the memory and question toolkit, so filter both constant families out.
         tools: Object.keys(input.toolkit?.tools ?? {}).filter(
           (name) =>
             !name.endsWith("agent_draft") &&
+            !name.endsWith("schedule_draft") &&
             name !== "draft_agent" &&
-            name !== "list_agent_options",
+            name !== "draft_schedule" &&
+            name !== "list_agent_options" &&
+            name !== "load_skill" &&
+            name !== "read_skill_file",
         ),
       });
       if (gatewayState.calls.length === 1) {
@@ -404,6 +412,7 @@ beforeAll(async () => {
     ChatRepo.layer,
     KnowledgeRepo.layer,
     ProviderRepo.layer,
+    ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
@@ -420,6 +429,9 @@ beforeAll(async () => {
         FakeDocumentParser,
         ExternalCompletion.layer,
         SyncBus.layer,
+        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
+          Layer.provideMerge(SyncBus.layer),
+        ),
       ).pipe(Layer.provideMerge(ReposLayer)),
     ),
   );

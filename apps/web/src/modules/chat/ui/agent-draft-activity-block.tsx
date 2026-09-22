@@ -1,14 +1,9 @@
-import { ArrowRight01Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
+import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useAgentDraftPanel } from "~/modules/agents/ui/agent-draft-owner.tsx";
 import type { AgentDraftToolActivity } from "../client/use-message-stream.ts";
-import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import {
-  activityCardClassName,
-  activityCardInteractiveClassName,
-  activityRowClassName,
-} from "./activity-row.ts";
+import { activityRowClassName } from "./activity-row.ts";
+import { DraftWidget } from "./draft-widget.tsx";
 
 /**
  * Only rows without a draft reference reach this: anything naming a draft
@@ -27,62 +22,8 @@ export function agentDraftActivityLabel(activity: AgentDraftToolActivity) {
     : "Agent draft not updated";
 }
 
-/** Also used as an inline recovery entry if a retry removes the original tool row. */
 export function AgentDraftWidget({ draftId }: { draftId: string }) {
-  // A branch keeps the originating reference. Its draft belongs to the other
-  // conversation, so it is absent from this owner and stays inert.
-  const { owned, entry } = useAgentDraftPanel(draftId);
-  const current = entry;
-  const contents = (
-    <>
-      <HugeiconsIcon
-        icon={PencilEdit02Icon}
-        strokeWidth={2}
-        className="size-4 shrink-0"
-        aria-hidden
-      />
-      <span className="min-w-0 flex-1 text-left">
-        <span className="block text-sm font-medium">Agent draft</span>
-        <span className="text-muted-foreground block truncate text-xs">
-          {current
-            ? [current.name, current.status].filter(Boolean).join(" · ")
-            : owned
-              ? "Loading draft…"
-              : "From another chat"}
-        </span>
-      </span>
-      {current?.open ? (
-        <HugeiconsIcon
-          icon={ArrowRight01Icon}
-          strokeWidth={2}
-          className="size-4 shrink-0"
-          aria-hidden
-        />
-      ) : null}
-    </>
-  );
-  if (current?.open)
-    return (
-      <button
-        type="button"
-        className={cn(activityCardClassName, activityCardInteractiveClassName)}
-        aria-label={`Open agent draft: ${current.name}`}
-        aria-expanded={current.expanded}
-        onClick={current.open}
-      >
-        {contents}
-      </button>
-    );
-  return (
-    <div className={activityCardClassName}>
-      {contents}
-      {current?.retry ? (
-        <Button size="sm" variant="ghost" onClick={current.retry}>
-          Retry loading draft
-        </Button>
-      ) : null}
-    </div>
-  );
+  return <DraftWidget kind="agent" draftId={draftId} icon={PencilEdit02Icon} title="Agent draft" />;
 }
 
 export function AgentDraftActivityBlock({ activity }: { activity: AgentDraftToolActivity }) {

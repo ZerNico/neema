@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { findBuiltinSkill } from "../bundled/index.ts";
 import { SkillNotAvailable } from "../errors.ts";
 
 import type { SkillManifestEntry } from "../schema.ts";
@@ -29,6 +30,10 @@ export class SkillReader extends Context.Service<
         authorize: repo.authorize,
         catalogue: repo.catalogue,
         readPinned: Effect.fn("SkillReader.readPinned")(function* (userId, entry, path) {
+          // Builtins are single-file: only the root exists and nothing hits
+          // the database or blob store.
+          const builtin = findBuiltinSkill(entry.skillId);
+          if (builtin) return path === "SKILL.md" ? builtin.root : null;
           const files = yield* repo.files(userId, entry);
           const file = files.find((file) => file.path === path);
           if (!file) return null;

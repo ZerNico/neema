@@ -125,10 +125,18 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         case "desktop.work.changed":
           refreshWork();
           break;
-        case "agent.draft.changed":
-          void queryClient.invalidateQueries({ queryKey: ["agents", "draft", event.draftId] });
+        case "draft.changed":
+          void queryClient.invalidateQueries({ queryKey: ["drafts", event.kind, event.draftId] });
           // A tool can create the draft after this chat’s loader snapshot.
           void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
+          break;
+        case "schedule.changed":
+          void queryClient.invalidateQueries({ queryKey: ["schedules"] });
+          void queryClient.invalidateQueries({ queryKey: ["schedule", event.scheduleId] });
+          break;
+        case "schedule.run.changed":
+          void queryClient.invalidateQueries({ queryKey: ["schedule-runs", event.scheduleId] });
+          void queryClient.invalidateQueries({ queryKey: ["schedule", event.scheduleId] });
           break;
         case "document.changed":
           void queryClient.invalidateQueries({ queryKey: ["documents", event.documentId] });

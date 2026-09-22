@@ -1,0 +1,97 @@
+import { and, inArray } from "drizzle-orm";
+import { Effect, Schema } from "effect";
+import { knowledgeCollections, skills } from "~/db/schema/index.ts";
+import type { AgentRepo } from "~/modules/agents/server/repo.ts";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import { collectionReadable } from "~/modules/knowledge/server/access.ts";
+import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { skillReadable } from "~/modules/skills/server/access.ts";
+import { ScheduleRejected, ScheduleSettings } from "../schema.ts";
+import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
+
+export type ValidatedSchedule = Omit<ScheduleSettings, "endAt" | "collectionIds" | "skillIds"> & {
+  endAt: Date | null;
+  collectionIds: string[];
+  skillIds: string[];
+};
+
+/**
+ * What the detail page and the draft's Save both apply before a schedule row
+ * is written: shape, cadence, and the model/agent selections. Collections and
+ * skills are checked separately on the writing transaction.
+ */
+export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(function* (
+  deps: { providers: ProviderRepo["Service"]; agents: AgentRepo["Service"] },
+  userId: string,
+  raw: unknown,
+) {
+  const settings = yield* Schema.decodeUnknownEffect(ScheduleSettings)(raw).pipe(
+    Effect.mapError(() => new ScheduleRejected({ reason: "invalid schedule settings" })),
+  );
+  if (!settings.name.trim()) return yield* new ScheduleRejected({ reason: "name must not be blank" });
+  if (!settings.prompt.trim())
+    return yield* new ScheduleRejected({ reason: "prompt must not be blank" });
+  const cronIssue = validateCron(settings.cron, settings.timezone);
+  if (cronIssue) return yield* new ScheduleRejected({ reason: `invalid schedule: ${cronIssue}` });
+  if (!isValidTimezone(settings.timezone))
+    return yield* new ScheduleRejected({ reason: "unknown timezone" });
+  const endAt = settings.endAt ? new Date(settings.endAt) : null;
+  if (endAt && Number.isNaN(endAt.getTime()))
+    return yield* new ScheduleRejected({ reason: "invalid end time" });
+  if (settings.modelId && !(yield* deps.providers.isModelAccessible(userId, settings.modelId)))
+    return yield* new ScheduleRejected({ reason: "selected model is unavailable" });
+  if (settings.agentId) {
+    const agent = yield* deps.agents.get(userId, settings.agentId);
+    if (!agent || agent.row.userId !== userId)
+      return yield* new ScheduleRejected({ reason: "selected agent is unavailable" });
+  }
+  const validated: ValidatedSchedule = {
+    ...settings,
+    name: settings.name.trim(),
+    endAt,
+    collectionIds: [...new Set(settings.collectionIds)],
+    skillIds: [...new Set(settings.skillIds)],
+  };
+  return validated;
+});
+
+/** Runs on the writing transaction so a revoked resource rolls the write back. */
+export const checkScheduleResources = (
+  tx: DbTx,
+  userId: string,
+  settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds">,
+) =>
+  Effect.gen(function* () {
+    if (settings.skillIds.length) {
+      const available = yield* tx
+        .select({ id: skills.id })
+        .from(skills)
+        .where(and(inArray(skills.id, settings.skillIds), skillReadable(userId)));
+      if (available.length !== settings.skillIds.length)
+        return yield* new ScheduleRejected({ reason: "a selected skill is unavailable" });
+    }
+    if (settings.collectionIds.length) {
+      const available = yield* tx
+        .select({ id: knowledgeCollections.id })
+        .from(knowledgeCollections)
+        .where(
+          and(
+            inArray(knowledgeCollections.id, settings.collectionIds),
+            collectionReadable(userId),
+          ),
+        );
+      if (available.length !== settings.collectionIds.length)
+        return yield* new ScheduleRejected({ reason: "a selected collection is unavailable" });
+    }
+  });
+
+/** First fire after now, or null once the cadence is past `endAt`. */
+export const firstFireAt = (settings: {
+  cron: string;
+  timezone: string;
+  endAt: Date | null;
+}): Date | null => {
+  const next = nextFireAt(settings.cron, settings.timezone, new Date());
+  if (!next || (settings.endAt && next > settings.endAt)) return null;
+  return next;
+};

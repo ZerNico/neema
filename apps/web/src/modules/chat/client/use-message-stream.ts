@@ -11,6 +11,12 @@ import {
   type DocumentActivityResult,
 } from "~/modules/documents/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
+import {
+  ScheduleDraftToolEnvelope,
+  projectScheduleDraftResult,
+  scheduleDraftResultOk,
+  type ScheduleDraftActivityResult,
+} from "~/modules/schedules/tool-schema.ts";
 import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
 import {
   KnowledgeToolEnvelope,
@@ -109,6 +115,11 @@ export interface AgentDraftToolActivity extends ToolActivityBase {
   result?: AgentDraftActivityResult;
 }
 
+export interface ScheduleDraftToolActivity extends ToolActivityBase {
+  family: "schedule-draft";
+  result?: ScheduleDraftActivityResult;
+}
+
 export interface DocumentToolActivity extends ToolActivityBase {
   family: "document";
   result?: DocumentActivityResult;
@@ -125,6 +136,7 @@ export interface DesktopToolActivity extends ToolActivityBase {
 
 export type ToolActivity =
   | AgentDraftToolActivity
+  | ScheduleDraftToolActivity
   | DocumentToolActivity
   | DesktopToolActivity
   | WebToolActivity
@@ -268,6 +280,7 @@ export function applyToolChunk(
   if (e.v !== 1 || !e.callId || !e.name) return tools;
   if (
     e.family !== "agent-draft" &&
+    e.family !== "schedule-draft" &&
     e.family !== "document" &&
     e.family !== "web" &&
     e.family !== "memory" &&
@@ -305,6 +318,28 @@ export function applyToolChunk(
       callIndex:
         existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
       status: result ? (agentDraftResultOk(result) ? "complete" : "error") : "running",
+      ...(result ? { result } : {}),
+      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "schedule-draft") {
+    const parsed = Option.getOrNull(
+      Schema.decodeUnknownOption(ScheduleDraftToolEnvelope)(envelope),
+    );
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const result = parsed.phase === "result" ? projectScheduleDraftResult(parsed) : undefined;
+    const next: ScheduleDraftToolActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: result ? (scheduleDraftResultOk(result) ? "complete" : "error") : "running",
       ...(result ? { result } : {}),
       ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
     };

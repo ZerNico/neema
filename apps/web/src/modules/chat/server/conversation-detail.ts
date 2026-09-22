@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "./repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 
@@ -37,6 +38,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
 ) {
   const repo = yield* ChatRepo;
   const attachmentRepo = yield* AttachmentRepo;
+  const schedules = yield* ScheduleRepo;
   // Ownership first and alone: an unauthorized id must fail before any of its
   // children are read.
   const conversation = yield* repo.getConversation(userId, conversationId);
@@ -47,7 +49,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   // The source of a branch, for the "branched from" link. Read through the
   // same ownership check, and null when it has been deleted since. It depends
   // on the conversation only, so it rides with the messages.
-  const { messages, branchedFrom } = yield* Effect.all(
+  const { messages, branchedFrom, schedule } = yield* Effect.all(
     {
       messages: repo.listMessages(conversation.id),
       branchedFrom: conversation.branchedFrom
@@ -55,6 +57,13 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
             Effect.map((source) => ({ conversationId: source.id, title: source.title })),
             Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
           )
+        : Effect.succeed(null),
+      // The schedule a run conversation belongs to, for the banner link back.
+      // Read optionally like branchedFrom: the row may have been deleted since.
+      schedule: conversation.scheduleId
+        ? schedules
+            .get(userId, conversation.scheduleId)
+            .pipe(Effect.map((row) => (row ? { scheduleId: row.id, name: row.name } : null)))
         : Effect.succeed(null),
     },
     { concurrency: "unbounded" },
@@ -96,6 +105,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   return {
     conversation,
     agentDrafts: defaults.agentDrafts ?? [],
+    scheduleDrafts: defaults.scheduleDrafts ?? [],
     documents: defaults.documents ?? [],
     messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
     pendingChunks,
@@ -105,6 +115,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     ),
     attachments,
     branchedFrom,
+    schedule,
     agent: defaults.agent
       ? {
           id: defaults.agent.agentId,
