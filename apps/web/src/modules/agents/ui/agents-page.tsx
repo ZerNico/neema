@@ -3,7 +3,6 @@ import {
   Delete02Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
-  PlusSignIcon,
   Robot01Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -11,18 +10,17 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import {
-  AgentAuthoringLaunchButton,
-  AgentAuthoringLaunchMenuItem,
-} from "./agent-authoring-launch.tsx";
+import { AgentAuthoringLaunchMenuItem } from "./agent-authoring-launch.tsx";
 import { toast } from "sonner";
 import { agentsQuery } from "../client/queries.ts";
 import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
+import { agentAuthoringRequest } from "../authoring.ts";
 import { deleteAgent } from "../server/functions.ts";
 import { agentIcon } from "~/modules/chat/ui/context-picker.tsx";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { CreateSplitButton } from "~/ui/create-split-button.tsx";
 import {
   EmptyState,
   ErrorState,
@@ -139,31 +137,17 @@ export function AgentsPage() {
     </ListCard>
   );
   // At the limit the control stays put and disabled, the way Knowledge does it:
-  // a button that vanishes reads as a missing feature, not a ceiling. A Link
-  // cannot be disabled, so the limit renders the Button form instead.
-  const newAgent = atLimit ? (
-    <Button size="sm" disabled>
-      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      New agent
-    </Button>
-  ) : (
-    <Link to="/agents/new" className={buttonVariants({ size: "sm" })}>
-      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      New agent
-    </Link>
+  // a button that vanishes reads as a missing feature, not a ceiling.
+  const newAgent = (
+    <CreateSplitButton
+      label="New agent"
+      disabled={atLimit}
+      chat={<Link to="/" search={{}} state={{ chatPrefill: agentAuthoringRequest() }} />}
+      manual={<Link to="/agents/new" />}
+    />
   );
   return (
-    <Page
-      title="Agents"
-      rootPath="/"
-      rootLabel="Chat"
-      actions={
-        <>
-          {newAgent}
-          <AgentAuthoringLaunchButton disabled={atLimit} />
-        </>
-      }
-    >
+    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={newAgent}>
       {agents.isError ? (
         <ErrorState
           title="Could not load agents"
