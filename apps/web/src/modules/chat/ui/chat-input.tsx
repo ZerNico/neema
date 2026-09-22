@@ -43,6 +43,7 @@ import {
   shouldPasteAsFile,
 } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -90,6 +91,12 @@ export const ChatInput = forwardRef<
     blockedReason?: string | null | undefined;
     /** Owner-held upload state; research remains available without uploads. */
     attachments?: AttachmentUploads | undefined;
+    /**
+     * Work chat inside the desktop app: drops and pastes become local
+     * workspace files instead of server uploads. Present only there; the
+     * browser keeps the upload path.
+     */
+    workspaceImports?: WorkspaceImports | undefined;
     /** Agent and collections for the next turn; absent hides the controls (edits). */
     context?: ComposerContext | undefined;
     skills?:
@@ -124,6 +131,7 @@ export const ChatInput = forwardRef<
     mode,
     blockedReason = null,
     attachments,
+    workspaceImports,
     context,
     skills,
     placeholder = "Message…",
@@ -141,14 +149,19 @@ export const ChatInput = forwardRef<
     enabled: onResearchEnabledChange !== undefined || researchEnabled,
   });
   const researchHintId = useId();
-  const modeDisabled = controlsDisabled || !!attachments?.queued || !onResearchEnabledChange;
+  // Where a dropped file goes: the chat's local workspace inside the desktop
+  // app, a server upload everywhere else.
+  const target = workspaceImports ?? attachments;
+  const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
-  const action = onStop ? "stop" : attachments?.queued ? "upload" : "send";
+  const action = onStop ? "stop" : target?.queued ? "upload" : "send";
   const actionLabel = onStop
     ? "Stop generating"
-    : attachments?.queued
-      ? "Sending after uploads finish"
-      : submitLabel;
+    : workspaceImports?.queued
+      ? "Sending after the files land in the workspace"
+      : attachments?.queued
+        ? "Sending after uploads finish"
+        : submitLabel;
   // Everything the "+" menu can offer besides attaching files. Three things key
   // off this: the trigger's label, whether it's enabled, and the menu width.
   // They drifted apart when Skills was added to the menu without being added
@@ -187,7 +200,7 @@ export const ChatInput = forwardRef<
   const [picker, setPicker] = useState<ContextPickerKind | "skills" | null>(null);
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
-    enabled: attachments !== undefined,
+    enabled: attachments !== undefined && workspaceImports === undefined,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   // dragenter/dragleave fire for every child; a depth counter keeps the
@@ -242,10 +255,13 @@ export const ChatInput = forwardRef<
   };
 
   const items = attachments?.items ?? [];
+  const importItems = workspaceImports?.items ?? [];
   const blocked =
     items.some((item) => item.status === "error") ||
-    items.some((item) => warningFor(item) !== null);
+    items.some((item) => warningFor(item) !== null) ||
+    importItems.some((item) => item.status === "error");
   const usable = items.filter((item) => item.status !== "error").length;
+  const usableImports = importItems.filter((item) => item.status !== "error").length;
   const canSubmit =
     !disabled &&
     !!selectedModel &&
@@ -253,8 +269,8 @@ export const ChatInput = forwardRef<
     !blocked &&
     !(researchEnabled && researchUnavailableReason) &&
     !blockedReason &&
-    !attachments?.queued &&
-    (value.trim() !== "" || usable > 0);
+    !target?.queued &&
+    (value.trim() !== "" || usable > 0 || usableImports > 0);
 
   const submit = () => {
     if (canSubmit) onSubmit();
@@ -263,7 +279,7 @@ export const ChatInput = forwardRef<
   const pickFiles = () => fileInputRef.current?.click();
 
   const acceptDrop = (event: React.DragEvent) =>
-    attachments !== undefined && !controlsDisabled && event.dataTransfer.types.includes("Files");
+    target !== undefined && !controlsDisabled && event.dataTransfer.types.includes("Files");
 
   return (
     <div
@@ -291,14 +307,14 @@ export const ChatInput = forwardRef<
         event.preventDefault();
         dragDepth.current = 0;
         setDragging(false);
-        attachments?.addFiles(event.dataTransfer.files);
+        target?.addFiles(event.dataTransfer.files);
       }}
       onPaste={(event) => {
-        if (!attachments || controlsDisabled) return;
+        if (!target || controlsDisabled) return;
         const files = Array.from(event.clipboardData.files);
         if (files.length > 0) {
           event.preventDefault();
-          attachments.addFiles(files);
+          target.addFiles(files);
           return;
         }
         // A pasted wall of text reads far better as an attachment than as a
@@ -306,7 +322,7 @@ export const ChatInput = forwardRef<
         const text = event.clipboardData.getData("text/plain");
         if (text && shouldPasteAsFile(text)) {
           event.preventDefault();
-          attachments.addFiles([createPastedTextFile(text)]);
+          target.addFiles([createPastedTextFile(text)]);
         }
       }}
     >
@@ -316,6 +332,7 @@ export const ChatInput = forwardRef<
       {(context?.agentSkillIds && context.agentSkillIds.size > 0) ||
       (skills && skills.selectedIds.length > 0) ||
       (attachments && items.length > 0) ||
+      (workspaceImports && importItems.length > 0) ||
       (context &&
         ((context.selection.agent && !context.agentLocked) ||
           context.selection.collectionIds.length > 0)) ? (
@@ -360,6 +377,17 @@ export const ChatInput = forwardRef<
               disabled={controlsDisabled}
             />
           ) : null}
+          {workspaceImports
+            ? importItems.map((item) => (
+                <AttachmentChip
+                  key={item.localId}
+                  item={{ ...item, location: "workspace" }}
+                  onRemove={
+                    controlsDisabled ? undefined : () => workspaceImports.remove(item.localId)
+                  }
+                />
+              ))
+            : null}
           {attachments
             ? items.map((item) => (
                 <AttachmentChip
@@ -373,8 +401,8 @@ export const ChatInput = forwardRef<
             : null}
         </AttachmentChipRow>
       ) : null}
-      {attachments?.notice ? (
-        <p className="text-muted-foreground px-4 pt-2 text-xs">{attachments.notice}</p>
+      {target?.notice ? (
+        <p className="text-muted-foreground px-4 pt-2 text-xs">{target.notice}</p>
       ) : null}
 
       <ChatTextarea
@@ -410,17 +438,19 @@ export const ChatInput = forwardRef<
       {/* The textarea's own bottom padding is inside its scroll box, so the gap
           above the controls lives here: it stays constant once the text scrolls. */}
       <div className="flex flex-wrap items-center gap-1 p-2 pt-2">
-        {attachments ? (
+        {target ? (
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept={ATTACHMENT_ACCEPT}
+            // Any type lands in a workspace; the server upload path keeps its
+            // allowlist, since the model only reads what the server accepts.
+            {...(workspaceImports ? {} : { accept: ATTACHMENT_ACCEPT })}
             className="sr-only"
             aria-label="Attach files"
             // Selecting the same file twice in a row must re-fire `change`.
             onChange={(event) => {
-              attachments.addFiles(event.target.files ?? []);
+              target.addFiles(event.target.files ?? []);
               event.target.value = "";
             }}
           />
@@ -443,7 +473,7 @@ export const ChatInput = forwardRef<
                       aria-label={menuLabel}
                       ref={setMenuAnchor}
                       disabled={
-                        controlsDisabled || (!hasTools && (!attachments || attachments.isFull))
+                        controlsDisabled || (!hasTools && (!target || target.isFull))
                       }
                       className="text-muted-foreground"
                     />
@@ -456,9 +486,9 @@ export const ChatInput = forwardRef<
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start" className={cn(hasTools && "w-64")}>
-            <DropdownMenuItem onClick={pickFiles} disabled={!attachments || attachments.isFull}>
+            <DropdownMenuItem onClick={pickFiles} disabled={!target || target.isFull}>
               <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-              Attach files
+              {workspaceImports ? "Add files to the workspace" : "Attach files"}
             </DropdownMenuItem>
             {context ? (
               <ContextMenuItems
@@ -602,14 +632,14 @@ export const ChatInput = forwardRef<
                   // Stop is available precisely while sending is disabled.
                   disabled={!onStop && !canSubmit}
                   aria-label={actionLabel}
-                  aria-busy={(!onStop && attachments?.queued) || undefined}
+                  aria-busy={(!onStop && target?.queued) || undefined}
                 />
               }
             >
               <MotionSwap value={action} kind="icon" className="size-4">
                 {onStop ? (
                   <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
-                ) : attachments?.queued ? (
+                ) : target?.queued ? (
                   <Spinner aria-hidden className="size-4" />
                 ) : (
                   <HugeiconsIcon
@@ -646,7 +676,7 @@ export const ChatInput = forwardRef<
       >
         <span className="text-foreground flex items-center gap-2 text-sm font-medium">
           <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
-          Drop files to attach
+          {workspaceImports ? "Drop files to add them to the workspace" : "Drop files to attach"}
         </span>
       </m.div>
     </div>

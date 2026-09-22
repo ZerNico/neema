@@ -68,6 +68,32 @@ export const conversations = pgTable(
   ],
 );
 
+export const workTurnReservations = pgTable(
+  "work_turn_reservations",
+  {
+    id: text().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    intent: text({ enum: ["new", "existing"] }).notNull(),
+    status: text({ enum: ["reserved", "activated", "aborted", "expired"] })
+      .notNull()
+      .default("reserved"),
+    assistantMessageId: text("assistant_message_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("work_turn_reservations_user_id_idx").on(t.userId),
+    index("work_turn_reservations_expiry_idx").on(t.expiresAt),
+    uniqueIndex("work_turn_reservations_live_conversation_idx")
+      .on(t.conversationId)
+      .where(sql`${t.status} = 'reserved'`),
+  ],
+);
+
 export const messages = pgTable(
   "messages",
   {

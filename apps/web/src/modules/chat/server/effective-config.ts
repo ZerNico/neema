@@ -116,9 +116,14 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     searchEnabled: boolean;
     /** Whether `deep_research` is offered to this attempt. */
     researchEnabled: boolean;
-    /** Folder names the sending machine reported; absent when it had none. */
-    desktopFolders?: ReadonlyArray<string> | null | undefined;
+    /** Folders the sending machine reported; absent when it had none. */
+    desktopFolders?: ReadonlyArray<{ name: string; path: string }> | null | undefined;
     desktopCommands?: boolean | undefined;
+    /** Which machine sent it; stamped for the foreign-chat banner. */
+    desktopMachineId?: string | null | undefined;
+    desktopMachineName?: string | null | undefined;
+    /** Workspace files this turn's send claimed; the resolver threads them through. */
+    workspaceFiles?: ReadonlyArray<string> | undefined;
     model: { contextLength: number | null | undefined };
     /** Whether web search could run at all; an agent preference cannot force it. */
     searchAvailable: boolean;
@@ -166,8 +171,13 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       searchEnabled,
       researchEnabled: input.researchEnabled,
       planEnabled,
-      desktopFolders: input.desktopFolders ?? null,
+      // The column holds names alone: paths stay on the machine that granted
+      // them, so a conversation continued elsewhere resolves its own folders.
+      desktopFolders: input.desktopFolders?.map((folder) => folder.name) ?? null,
       desktopCommands: input.desktopCommands ?? false,
+      desktopMachineId: input.desktopMachineId ?? null,
+      desktopMachineName: input.desktopMachineName ?? null,
+      workspaceFiles: [...(input.workspaceFiles ?? [])],
     } satisfies GenerationConfig;
   },
 );

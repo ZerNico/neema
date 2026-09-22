@@ -32,6 +32,12 @@ const api = vi.hoisted(() => ({
   cancel: vi.fn(),
   state: vi.fn(),
   write: vi.fn(),
+  pendingPromotions: vi.fn(),
+  commitPromotion: vi.fn(),
+  rollbackPromotion: vi.fn(),
+  discardSubmission: vi.fn(),
+  reservationStatus: vi.fn(),
+  abortReservation: vi.fn(),
 }));
 vi.mock("../server/functions.ts", () => ({
   desktopWorkSnapshot: api.snapshot,
@@ -40,11 +46,18 @@ vi.mock("../server/functions.ts", () => ({
 }));
 vi.mock("./bridge.ts", () => ({
   useDesktop: () => client,
-  waitForDraftBinding: async () => {},
+}));
+vi.mock("~/modules/chat/server/functions.ts", () => ({
+  abortWorkTurn: api.abortReservation,
+  getWorkTurnReservation: api.reservationStatus,
 }));
 vi.mock("~/modules/auth/identity-boundary.tsx", () => ({ useIdentityBoundary: () => null }));
 const shell = {
   executionSession: () => Effect.succeed({ id: "executor" }),
+  listPendingPromotions: () => Effect.promise(() => api.pendingPromotions()),
+  commitPromotion: (input: unknown) => Effect.promise(() => api.commitPromotion(input)),
+  rollbackPromotion: (input: unknown) => Effect.promise(() => api.rollbackPromotion(input)),
+  discardSubmission: (input: unknown) => Effect.promise(() => api.discardSubmission(input)),
   cancelCall: (input: unknown) =>
     Effect.sync(() => {
       api.cancel(input);
@@ -73,12 +86,16 @@ const call = (callId: string) => ({
   claimed: false,
   expiresAt: Date.now() + 60000,
 });
-const settings = [
-  { conversationId: "a", title: "First work", approval: "auto" as const },
-];
+const settings = [{ conversationId: "a", title: "First work", approval: "auto" as const }];
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
   client = shell;
+  api.pendingPromotions.mockReset().mockResolvedValue([]);
+  api.commitPromotion.mockReset().mockResolvedValue(undefined);
+  api.rollbackPromotion.mockReset().mockResolvedValue(undefined);
+  api.discardSubmission.mockReset().mockResolvedValue(undefined);
+  api.reservationStatus.mockReset();
+  api.abortReservation.mockReset().mockResolvedValue(undefined);
   render(<DesktopChromeFrame />);
   vi.stubGlobal("__chatDesktop", {
     chrome: {
@@ -254,6 +271,123 @@ it("explains a paused computer and clears it on a successful retry", async () =>
     await Promise.resolve();
   });
   await waitFor(() => expect(screen.queryByText(PAUSED)).not.toBeInTheDocument());
+});
+
+it("commits a pending promotion whose turn activated", async () => {
+  const pending = {
+    conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+    reservationId: "550e8400-e29b-41d4-a716-446655440001",
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  api.pendingPromotions.mockResolvedValue([pending]);
+  api.reservationStatus.mockResolvedValue({
+    ...pending,
+    status: "activated",
+    assistantMessageId: "assistant",
+  });
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+  renderHost("/settings");
+
+  await waitFor(() =>
+    expect(api.commitPromotion).toHaveBeenCalledWith({
+      conversationId: pending.conversationId,
+      reservationId: pending.reservationId,
+    }),
+  );
+  expect(api.abortReservation).not.toHaveBeenCalled();
+  expect(api.rollbackPromotion).not.toHaveBeenCalled();
+  expect(api.discardSubmission).not.toHaveBeenCalled();
+});
+
+it("aborts and rolls back an orphaned reserved promotion", async () => {
+  const pending = {
+    conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+    reservationId: "550e8400-e29b-41d4-a716-446655440001",
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  api.pendingPromotions.mockResolvedValue([pending]);
+  api.reservationStatus.mockResolvedValue({ ...pending, status: "reserved" });
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+  renderHost("/settings");
+
+  await waitFor(() =>
+    expect(api.discardSubmission).toHaveBeenCalledWith({
+      conversationId: pending.conversationId,
+      submissionId: pending.submissionId,
+    }),
+  );
+  expect(api.abortReservation).toHaveBeenCalledWith({
+    data: { reservationId: pending.reservationId },
+  });
+  expect(api.rollbackPromotion).toHaveBeenCalledWith({
+    conversationId: pending.conversationId,
+    reservationId: pending.reservationId,
+  });
+  expect(api.commitPromotion).not.toHaveBeenCalled();
+});
+
+it("retains an orphaned reserved promotion when abort is ambiguous", async () => {
+  const pending = {
+    conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+    reservationId: "550e8400-e29b-41d4-a716-446655440001",
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  api.pendingPromotions.mockResolvedValue([pending]);
+  api.reservationStatus.mockResolvedValue({ ...pending, status: "reserved" });
+  api.abortReservation.mockRejectedValue(new Error("Server unreachable"));
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+  renderHost("/settings");
+
+  await waitFor(() => expect(api.snapshot).toHaveBeenCalled());
+  expect(api.abortReservation).toHaveBeenCalledWith({
+    data: { reservationId: pending.reservationId },
+  });
+  expect(api.commitPromotion).not.toHaveBeenCalled();
+  expect(api.rollbackPromotion).not.toHaveBeenCalled();
+  expect(api.discardSubmission).not.toHaveBeenCalled();
+});
+
+it.each(["aborted", "expired"] as const)(
+  "rolls back a pending promotion whose reservation is %s",
+  async (status) => {
+    const pending = {
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+      reservationId: "550e8400-e29b-41d4-a716-446655440001",
+      submissionId: "550e8400-e29b-41d4-a716-446655440000",
+    };
+    api.pendingPromotions.mockResolvedValue([pending]);
+    api.reservationStatus.mockResolvedValue({ ...pending, status });
+    api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+    renderHost("/settings");
+
+    await waitFor(() => expect(api.rollbackPromotion).toHaveBeenCalled());
+    expect(api.discardSubmission).toHaveBeenCalled();
+    expect(api.abortReservation).not.toHaveBeenCalled();
+    expect(api.commitPromotion).not.toHaveBeenCalled();
+  },
+);
+
+it("retains a pending promotion when reservation status is unreachable", async () => {
+  const pending = {
+    conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+    reservationId: "550e8400-e29b-41d4-a716-446655440001",
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  api.pendingPromotions.mockResolvedValue([pending]);
+  api.reservationStatus.mockRejectedValue(new Error("Server unreachable"));
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+  renderHost("/settings");
+
+  await waitFor(() => expect(api.reservationStatus).toHaveBeenCalled());
+  expect(api.commitPromotion).not.toHaveBeenCalled();
+  expect(api.rollbackPromotion).not.toHaveBeenCalled();
+  expect(api.discardSubmission).not.toHaveBeenCalled();
+  expect(api.abortReservation).not.toHaveBeenCalled();
 });
 
 it("renders children unchanged in a browser", async () => {

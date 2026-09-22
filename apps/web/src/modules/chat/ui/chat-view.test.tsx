@@ -9,12 +9,15 @@ import { AskUserBlock } from "./ask-user-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
-import { ChatView, toActivity } from "./chat-view.tsx";
+import { ChatView, sendReservedWorkspaceTurn, toActivity } from "./chat-view.tsx";
 import {
+  abortWorkTurn,
   answerQuestion,
   branchConversation,
   getConversationWithMessages,
   editMessage,
+  getWorkTurnReservation,
+  reserveWorkTurn,
   retryMessage,
   sendMessage,
   stopGeneration,
@@ -38,6 +41,7 @@ import {
   toggleDocumentTask,
 } from "~/modules/documents/server/document-functions.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 
 const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -80,8 +84,12 @@ vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("../server/functions.ts", () => ({
+  abortWorkTurn: vi.fn(),
+  activateWorkTurn: vi.fn(),
   getConversationWithMessages: vi.fn(),
+  getWorkTurnReservation: vi.fn(),
   listConversations: vi.fn(),
+  reserveWorkTurn: vi.fn(),
   listChatModels: vi.fn(),
   branchConversation: vi.fn(),
   sendMessage: vi.fn(),
@@ -357,8 +365,11 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
   }),
 }));
 
+const abortReservationMock = vi.mocked(abortWorkTurn);
 const branchMock = vi.mocked(branchConversation);
 const conversationMock = vi.mocked(getConversationWithMessages);
+const reservationStatusMock = vi.mocked(getWorkTurnReservation);
+const reserveMock = vi.mocked(reserveWorkTurn);
 const sendMock = vi.mocked(sendMessage);
 const retryMock = vi.mocked(retryMessage);
 
@@ -366,7 +377,7 @@ const BASE = new Date("2026-03-01T12:00:00Z");
 
 const message = (id: string, role: "user" | "assistant" | "system", content: string) => ({
   id,
-  conversationId: "c1",
+  conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
   role,
   status: "complete" as "complete" | "streaming",
   content,
@@ -384,7 +395,7 @@ type Payload = ReturnType<typeof basePayload>;
 
 const basePayload = (branchedFrom: { conversationId: string; title: string | null } | null) => ({
   conversation: {
-    id: "c1",
+    id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
     userId: "u1",
     title: "Current chat",
     mode: "chat" as ConversationMode,
@@ -456,7 +467,10 @@ const renderView = (
     // The payload is seeded, not fetched. The server functions are mocks.
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  client.setQueryData(["conversation", "c1"], payload(branchedFrom, overrides));
+  client.setQueryData(
+    ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
+    payload(branchedFrom, overrides),
+  );
   client.setQueryData(
     ["chat-models"],
     [
@@ -516,7 +530,7 @@ const renderView = (
           <ConfirmProvider>
             <DetailPanelProvider>
               <Suspense fallback={null}>
-                <ChatView conversationId="c1" />
+                <ChatView conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7" />
               </Suspense>
               <DetailPanelRail />
             </DetailPanelProvider>
@@ -531,11 +545,26 @@ const desktopRequest = vi.fn<(tag: string, payload: unknown) => Promise<BridgeRe
 beforeEach(() => {
   vi.clearAllMocks();
   desktopRequest.mockReset();
-  desktopRequest.mockResolvedValue({
-    ok: true,
-    value: { folders: [], sandbox: { kind: "ready" } },
+  desktopRequest.mockImplementation(async (tag) =>
+    tag === "executionSession"
+      ? {
+          ok: true,
+          value: { id: "executor", machineId: "machine", machineName: "Test Mac" },
+        }
+      : {
+          ok: true,
+          value: {
+            folders: [],
+            workspace: { path: "/workspaces/01990f4e-6650-7a33-a768-611e2e4bf4c7" },
+            sandbox: { kind: "ready" },
+          },
+        },
+  );
+  vi.stubGlobal("__chatDesktop", {
+    protocolVersion: PROTOCOL_VERSION,
+    request: desktopRequest,
+    stageDroppedFile: async () => null,
   });
-  vi.stubGlobal("__chatDesktop", { protocolVersion: PROTOCOL_VERSION, request: desktopRequest });
   liveDraft.tools = [];
   liveDraft.status = "complete";
   FakeEventSource.instances = [];
@@ -543,6 +572,92 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+const stagedImports = () => {
+  const promote = vi.fn(async (reservationId: string) => ({
+    reservationId,
+    files: [{ stagedName: "report.pdf", finalName: "report.pdf", bytes: 12 }],
+  }));
+  const commit = vi.fn(async () => {});
+  const rollback = vi.fn(async () => {});
+  const imports: WorkspaceImports = {
+    items: [],
+    fileNames: ["report.pdf"],
+    importing: false,
+    hasError: false,
+    isFull: false,
+    notice: null,
+    queued: false,
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+    addFiles: vi.fn(),
+    remove: vi.fn(),
+    submit: vi.fn(),
+    cancelQueue: vi.fn(),
+    promote,
+    commit,
+    rollback,
+    markClaimed: vi.fn(),
+    reset: vi.fn(),
+    dismissNotice: vi.fn(),
+  };
+  return { imports, commit, rollback };
+};
+
+describe("reserved workspace sends", () => {
+  it("aborts and rolls back after a confirmed failed activation retry", async () => {
+    reserveMock.mockResolvedValue({} as never);
+    reservationStatusMock.mockResolvedValue({
+      conversationId: "conversation",
+      status: "reserved",
+      assistantMessageId: null,
+    } as never);
+    abortReservationMock.mockResolvedValue(undefined as never);
+    const activationError = new Error("Activation rejected");
+    const activate = vi.fn().mockRejectedValue(activationError);
+    const staged = stagedImports();
+
+    await expect(
+      sendReservedWorkspaceTurn({
+        conversation: { kind: "existing", id: "conversation" },
+        imports: staged.imports,
+        activate,
+      }),
+    ).rejects.toBe(activationError);
+
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(reservationStatusMock).toHaveBeenCalledTimes(2);
+    expect(abortReservationMock).toHaveBeenCalledTimes(1);
+    expect(staged.rollback).toHaveBeenCalledTimes(1);
+    expect(staged.commit).not.toHaveBeenCalled();
+  });
+
+  it("retains promotion evidence when the activation retry is ambiguous", async () => {
+    reserveMock.mockResolvedValue({} as never);
+    reservationStatusMock
+      .mockResolvedValueOnce({
+        conversationId: "conversation",
+        status: "reserved",
+        assistantMessageId: null,
+      } as never)
+      .mockRejectedValueOnce(new Error("Server unreachable"));
+    const activationError = new Error("Connection lost");
+    const activate = vi.fn().mockRejectedValue(activationError);
+    const staged = stagedImports();
+
+    await expect(
+      sendReservedWorkspaceTurn({
+        conversation: { kind: "existing", id: "conversation" },
+        imports: staged.imports,
+        activate,
+      }),
+    ).rejects.toBe(activationError);
+
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(abortReservationMock).not.toHaveBeenCalled();
+    expect(staged.rollback).not.toHaveBeenCalled();
+    expect(staged.commit).not.toHaveBeenCalled();
+  });
+});
 
 describe("toActivity", () => {
   const row = {
@@ -722,7 +837,16 @@ it("guards Work initiation while folder IPC is unresolved, then enables ready-em
   expect(editMessage).not.toHaveBeenCalled();
   expect(answerQuestion).not.toHaveBeenCalled();
   expect(desktopRequest).not.toHaveBeenCalledWith("executionSession", expect.anything());
-  await act(async () => resolve({ ok: true, value: { folders: [], sandbox: { kind: "ready" } } }));
+  await act(async () =>
+    resolve({
+      ok: true,
+      value: {
+        folders: [],
+        workspace: { path: "/workspaces/01990f4e-6650-7a33-a768-611e2e4bf4c7" },
+        sandbox: { kind: "ready" },
+      },
+    }),
+  );
   await waitFor(() => expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeEnabled());
   expect(screen.getByRole("button", { name: "Edit m-user" })).toBeEnabled();
 });
@@ -768,7 +892,7 @@ describe("ChatView inline question answers", () => {
     await act(async () =>
       FakeEventSource.instances.at(-1)!.emit("sync", {
         type: "message.created",
-        conversationId: "c1",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         messageId: "structured-user",
       }),
     );
@@ -781,7 +905,7 @@ describe("ChatView inline question answers", () => {
     const revised: QuestionResponse = { kind: "answers", answers: [{ selected: [1], custom: "" }] };
     conversationMock.mockResolvedValueOnce(resolvedPayload(revised) as never);
     editMock.mockResolvedValueOnce({
-      conversationId: "c1",
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       assistantMessageId: "next-answer",
     } as never);
     renderView(null, resolvedPayload());
@@ -795,7 +919,7 @@ describe("ChatView inline question answers", () => {
     await waitFor(() =>
       expect(editMock).toHaveBeenCalledWith({
         data: {
-          conversationId: "c1",
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           messageId: "structured-user",
           modelId: "m1",
           searchEnabled: false,
@@ -1079,7 +1203,7 @@ describe("ChatView question handoff", () => {
           },
         ],
       }),
-      "c1",
+      "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       0,
       null,
     );
@@ -1112,7 +1236,7 @@ describe("ChatView question handoff", () => {
     await waitFor(() =>
       expect(answerMock).toHaveBeenCalledWith({
         data: {
-          conversationId: "c1",
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           callId: "ask-1",
           response: { kind: "answers", answers: [{ selected: [0], custom: "" }] },
           modelId: "m2",
@@ -1126,9 +1250,20 @@ describe("ChatView question handoff", () => {
     );
     expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeDisabled();
-    await act(async () => resolve({ conversationId: "c1", assistantMessageId: "next" }));
+    await act(async () =>
+      resolve({
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        assistantMessageId: "next",
+      }),
+    );
     await waitFor(() =>
-      expect(streamProbe).toHaveBeenLastCalledWith("next", expect.any(Object), "c1", 0, null),
+      expect(streamProbe).toHaveBeenLastCalledWith(
+        "next",
+        expect.any(Object),
+        "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        0,
+        null,
+      ),
     );
     expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toHaveValue(
       "Keep my separate draft",
@@ -1201,9 +1336,12 @@ describe("ChatView question handoff", () => {
         }) as never,
       );
       await act(async () =>
-        FakeEventSource.instances
-          .at(-1)!
-          .emit("sync", { type, conversationId: "c1", messageId: "reply", status: "complete" }),
+        FakeEventSource.instances.at(-1)!.emit("sync", {
+          type,
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          messageId: "reply",
+          status: "complete",
+        }),
       );
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: "Skip and continue" })).not.toBeInTheDocument(),
@@ -1274,7 +1412,10 @@ describe("ChatView search mode", () => {
     await waitFor(() =>
       expect(sendMock).toHaveBeenCalledWith({
         data: {
-          conversationId: "c1",
+          conversation: {
+            kind: "existing",
+            id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          },
           modelId: "m1",
           content: "hello",
           searchEnabled: false,
@@ -1307,7 +1448,7 @@ describe("ChatView retry", () => {
     await waitFor(() =>
       expect(retryMock).toHaveBeenCalledWith({
         data: {
-          conversationId: "c1",
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           messageId: "m-answer",
           modelId: "m2",
           timeZone: "Europe/Berlin",
@@ -1325,7 +1466,10 @@ describe("ChatView retry", () => {
     await waitFor(() =>
       expect(sendMock).toHaveBeenCalledWith({
         data: {
-          conversationId: "c1",
+          conversation: {
+            kind: "existing",
+            id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          },
           modelId: "m2",
           content: "hello",
           searchEnabled: true,
@@ -1351,7 +1495,11 @@ describe("ChatView retry", () => {
     await waitFor(() => expect(conversationMock).toHaveBeenCalled());
 
     expect(retryMock).toHaveBeenCalledWith({
-      data: { conversationId: "c1", messageId: "m-answer", timeZone: "Europe/Berlin" },
+      data: {
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        messageId: "m-answer",
+        timeZone: "Europe/Berlin",
+      },
     });
     expect(screen.getByTestId("composer-model")).toHaveTextContent("m2");
   });
@@ -1387,7 +1535,10 @@ describe("ChatView retry", () => {
   });
 });
 
-const draftReference = (conversationId = "c1", draftId = "d1"): Payload["toolCalls"][number] => ({
+const draftReference = (
+  conversationId = "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+  draftId = "d1",
+): Payload["toolCalls"][number] => ({
   id: "draft-call",
   messageId: "m-answer",
   toolName: "draft_agent",
@@ -1413,7 +1564,7 @@ describe("ChatView agent drafts", () => {
       rpc.mockReset();
     current = {
       id: "d1",
-      conversationId: "c1",
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       settings: { ...EMPTY_AGENT_DRAFT, name: "Writer" },
       revision: 1,
       targetAgentId: null,
@@ -1451,7 +1602,7 @@ describe("ChatView agent drafts", () => {
     liveDraft.tools = [toActivity(draftReference())];
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           messages: [
             message("m-user", "user", "u1"),
@@ -1476,9 +1627,10 @@ describe("ChatView agent drafts", () => {
       payload(null, { agentDrafts: [{ id: "d1", name: "Writer" }] }) as never,
     );
     act(() =>
-      FakeEventSource.instances
-        .at(-1)!
-        .emit("sync", { type: "agent.draft.changed", conversationId: "c1" }),
+      FakeEventSource.instances.at(-1)!.emit("sync", {
+        type: "agent.draft.changed",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+      }),
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(screen.getByTestId("message-footer")).toContainElement(widget);
@@ -1515,7 +1667,7 @@ describe("ChatView agent drafts", () => {
     expect(getAgentDraft).not.toHaveBeenCalled();
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           toolCalls: [draftReference("original", "other-draft")],
           agentDrafts: [{ id: "d1", name: "Writer" }],
@@ -1628,7 +1780,7 @@ describe("ChatView agent drafts", () => {
 });
 
 const documentReference = (
-  conversationId = "c1",
+  conversationId = "01990f4e-6650-7a33-a768-611e2e4bf4c7",
   documentId = "document-1",
 ): Payload["toolCalls"][number] => ({
   id: "document-call",
@@ -1655,7 +1807,7 @@ describe("ChatView documents", () => {
       rpc.mockReset();
     current = {
       id: "document-1",
-      conversationId: "c1",
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       title: "Trip plan",
       content: "Original source",
       revision: 1,
@@ -1704,7 +1856,7 @@ describe("ChatView documents", () => {
     liveDraft.tools = [toActivity(documentReference())];
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           messages: [
             message("m-user", "user", "u1"),
@@ -1749,7 +1901,7 @@ describe("ChatView documents", () => {
       result: {
         outcome: "updated",
         documentId: "document-1",
-        documentConversationId: "c1",
+        documentConversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         title: "Trip plan",
         revision: 2,
       },
@@ -1797,7 +1949,7 @@ describe("ChatView documents", () => {
     // Only a read that shows no streaming row releases it.
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           toolCalls: [documentReference()],
           messages: [
@@ -1810,7 +1962,7 @@ describe("ChatView documents", () => {
     expect(screen.getByText("Read-only while the assistant is answering.")).toBeInTheDocument();
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, { toolCalls: [documentReference()] }),
       ),
     );
@@ -1849,7 +2001,7 @@ describe("ChatView documents", () => {
     expect(getDocument).not.toHaveBeenCalled();
     act(() =>
       client.setQueryData(
-        ["conversation", "c1"],
+        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           toolCalls: [documentReference("original", "other-document")],
           documents: [{ id: "document-1", title: "Trip plan" }],
@@ -1945,7 +2097,10 @@ describe("ChatView edit offers", () => {
   });
 
   it("sends the research offer the edit asked for, and forgets it on the next edit", async () => {
-    editMock.mockResolvedValue({ conversationId: "c1", assistantMessageId: "next" } as never);
+    editMock.mockResolvedValue({
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+      assistantMessageId: "next",
+    } as never);
     renderView();
     fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
     fireEvent.click(screen.getByRole("button", { name: "Offer research in edit m-user" }));
@@ -2000,7 +2155,7 @@ describe("ChatView branching", () => {
 
     await waitFor(() =>
       expect(branchMock).toHaveBeenCalledWith({
-        data: { conversationId: "c1", messageId: "m-answer" },
+        data: { conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7", messageId: "m-answer" },
       }),
     );
     await waitFor(() =>

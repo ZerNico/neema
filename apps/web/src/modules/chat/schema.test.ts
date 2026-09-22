@@ -27,7 +27,18 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
 });
 
 for (const [name, schema, input] of [
-  ["send", SendMessageInput, { conversationId: null, ...generation }],
+  [
+    "send",
+    SendMessageInput,
+    {
+      conversation: {
+        kind: "new",
+        id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        mode: "chat",
+      },
+      ...generation,
+    },
+  ],
   ["retry", RetryMessageInput, { conversationId: "c1", messageId: "m1" }],
   ["edit", EditMessageInput, { conversationId: "c1", messageId: "m1", ...generation }],
 ] as const) {

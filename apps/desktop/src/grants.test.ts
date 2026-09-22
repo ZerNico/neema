@@ -3,21 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { DRAFT_CONVERSATION } from "@chat/desktop-rpc";
 import { GrantStore } from "./grants.ts";
 
 const at = (origin: string, conversationId: string) => ({ origin, conversationId });
 const here = (conversationId: string) => at("https://chat.test", conversationId);
 
 describe("GrantStore", () => {
-  it("forgets the draft key without touching other conversations", async () => {
+  it("forgets one conversation without touching another", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const grants = yield* GrantStore;
-        yield* grants.remember(here(DRAFT_CONVERSATION), "/tmp/draft");
+        yield* grants.remember(here("removed"), "/tmp/removed");
         yield* grants.remember(here("kept"), "/tmp/kept");
-        yield* grants.forgetAll(here(DRAFT_CONVERSATION));
-        expect(yield* grants.lookup(here(DRAFT_CONVERSATION))).toEqual([]);
+        yield* grants.forgetAll(here("removed"));
+        expect(yield* grants.lookup(here("removed"))).toEqual([]);
         expect(yield* grants.lookup(here("kept"))).toEqual(["/tmp/kept"]);
       }).pipe(Effect.provide(GrantStore.layerEphemeral)),
     );

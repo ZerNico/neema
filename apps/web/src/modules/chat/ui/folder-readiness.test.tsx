@@ -4,29 +4,16 @@ import {
   focusManager,
   isCancelledError,
 } from "@tanstack/react-query";
-import {
-  createRootRouteWithContext,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  RouterProvider,
-} from "@tanstack/react-router";
-import { useLayoutEffect, useRef } from "react";
-import { Route as ChatRoute } from "~/routes/_app.chat.$conversationId.tsx";
-import { Route as NewChatRoute } from "~/routes/_app.index.tsx";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION, type BridgeReply, type FolderStatus } from "@chat/desktop-rpc";
 import {
-  DRAFT_CONVERSATION,
   desktopAttemptFields,
   folderQueryKey,
   prepareWorkFolder,
   requireWorkFolder,
   useFolder,
-  waitForDraftBinding,
-  withDraftFolderBinding,
 } from "~/modules/desktop/client/bridge.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { Composer } from "./composer.tsx";
@@ -34,7 +21,7 @@ import { Composer } from "./composer.tsx";
 vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
   getConversationWithMessages: async () => ({
-    conversation: { id: "a", mode: "work" },
+    conversation: { id: "01990f4e-6650-7a33-a768-611e2e4bf4c7", mode: "work" },
     messages: [],
   }),
 }));
@@ -52,11 +39,18 @@ vi.mock("~/modules/attachments/server/functions.ts", () => ({
   deleteAttachment: vi.fn(),
 }));
 
+const CONVERSATION_A = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
+const CONVERSATION_B = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
 const request = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
-const empty: FolderStatus = { folders: [], sandbox: { kind: "ready" } };
-const attached: FolderStatus = {
-  folders: [{ name: "site", alive: true }],
+const empty: FolderStatus = {
+  folders: [],
   sandbox: { kind: "ready" },
+  workspace: { path: "/data/workspaces/a" },
+};
+const attached: FolderStatus = {
+  folders: [{ name: "site", path: "/home/user/site", alive: true }],
+  sandbox: { kind: "ready" },
+  workspace: { path: "/data/workspaces/a" },
 };
 const reply = (value: unknown): BridgeReply => ({ ok: true, value });
 function deferred<A>() {
@@ -96,7 +90,11 @@ function setup() {
 beforeEach(() => {
   request.mockReset();
   request.mockResolvedValue(reply(empty));
-  vi.stubGlobal("__chatDesktop", { protocolVersion: PROTOCOL_VERSION, request });
+  vi.stubGlobal("__chatDesktop", {
+    protocolVersion: PROTOCOL_VERSION,
+    request,
+    stageDroppedFile: async () => null,
+  });
 });
 afterEach(() => {
   cleanup();
@@ -113,7 +111,7 @@ function WorkComposer({
   onSend: () => Promise<unknown>;
   working?: boolean;
 }) {
-  const work = useWorkGate("a", working);
+  const work = useWorkGate(CONVERSATION_A, working);
   return (
     <Composer
       folder={work.folder}
@@ -160,15 +158,16 @@ it("blocks Work while IPC is unresolved, offers retry on failure, then permits r
 
 it("blocks submission during a picker and uses its result for the next Work attempt", async () => {
   const chosen = deferred<BridgeReply>();
+  const machine = { id: "executor", machineId: "machine-a", machineName: "Test Mac" };
   request.mockImplementation((tag) => {
     if (tag === "chooseFolder") return chosen.promise;
-    if (tag === "executionSession") return Promise.resolve(reply({ id: "executor" }));
+    if (tag === "executionSession") return Promise.resolve(reply(machine));
     return Promise.resolve(reply(empty));
   });
   const { wrapper } = setup();
   const sent = vi.fn();
   function SharedFolder() {
-    const work = useWorkGate("a", true);
+    const work = useWorkGate(CONVERSATION_A, true);
     return (
       <Composer
         folder={work.folder}
@@ -198,9 +197,14 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await waitFor(() =>
     expect(sent).toHaveBeenCalledWith({
       fromDesktop: true,
-      desktopFolders: ["site"],
+      desktopFolders: [
+        { name: "workspace", path: "/data/workspaces/a" },
+        { name: "site", path: "/home/user/site" },
+      ],
       desktopCommands: true,
       desktopExecutorId: "executor",
+      desktopMachineId: "machine-a",
+      desktopMachineName: "Test Mac",
     }),
   );
   await userEvent.click(screen.getByRole("button", { name: "site" }));
@@ -210,8 +214,11 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await waitFor(() =>
     expect(sent).toHaveBeenLastCalledWith({
       fromDesktop: true,
-      desktopCommands: false,
+      desktopFolders: [{ name: "workspace", path: "/data/workspaces/a" }],
+      desktopCommands: true,
       desktopExecutorId: "executor",
+      desktopMachineId: "machine-a",
+      desktopMachineName: "Test Mac",
     }),
   );
 });
@@ -230,27 +237,29 @@ it("never projects conversation A's delayed reply into conversation B", async ()
   const a = deferred<BridgeReply>();
   const b = deferred<BridgeReply>();
   request.mockImplementation((_tag, payload) =>
-    (payload as { conversationId: string }).conversationId === "a" ? a.promise : b.promise,
+    (payload as { conversationId: string }).conversationId === CONVERSATION_A
+      ? a.promise
+      : b.promise,
   );
   const { wrapper, client } = setup();
   const { result, rerender } = renderHook(({ id }) => useFolder(id), {
     wrapper,
-    initialProps: { id: "a" },
+    initialProps: { id: CONVERSATION_A },
   });
   await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-  rerender({ id: "b" });
+  rerender({ id: CONVERSATION_B });
   expect(result.current?.readiness).toBe("loading");
   await act(async () => a.resolve(reply(attached)));
   expect(result.current?.status).toBeNull();
   await act(async () => b.resolve(reply(empty)));
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   expect(result.current?.status).toEqual(empty);
-  expect(client.getQueryData(folderQueryKey("a"))).toBeUndefined();
+  expect(client.getQueryData(folderQueryKey(CONVERSATION_A))).toBeUndefined();
 });
 
 it("cancels a delayed focus refresh before applying a folder mutation", async () => {
   const { wrapper, client } = setup();
-  const { result } = renderHook(() => useFolder("a"), { wrapper });
+  const { result } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   const refresh = deferred<BridgeReply>();
   request.mockImplementation((tag) =>
@@ -264,14 +273,14 @@ it("cancels a delayed focus refresh before applying a folder mutation", async ()
   act(() => result.current?.choose());
   await waitFor(() => expect(result.current?.status).toEqual(attached));
   await act(async () => refresh.resolve(reply(empty)));
-  expect(client.getQueryData(folderQueryKey("a"))).toEqual(attached);
+  expect(client.getQueryData(folderQueryKey(CONVERSATION_A))).toEqual(attached);
 });
 
 it("writes a delayed mutation to its captured conversation, not the newly opened one", async () => {
   const { wrapper, client } = setup();
   const { result, rerender } = renderHook(({ id }) => useFolder(id), {
     wrapper,
-    initialProps: { id: "a" },
+    initialProps: { id: CONVERSATION_A },
   });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   const chosen = deferred<BridgeReply>();
@@ -280,12 +289,14 @@ it("writes a delayed mutation to its captured conversation, not the newly opened
   );
   act(() => result.current?.choose());
   await waitFor(() =>
-    expect(request).toHaveBeenCalledWith("chooseFolder", { conversationId: "a" }),
+    expect(request).toHaveBeenCalledWith("chooseFolder", { conversationId: CONVERSATION_A }),
   );
-  rerender({ id: "b" });
+  rerender({ id: CONVERSATION_B });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   await act(async () => chosen.resolve(reply(attached)));
-  await waitFor(() => expect(client.getQueryData(folderQueryKey("a"))).toEqual(attached));
+  await waitFor(() =>
+    expect(client.getQueryData(folderQueryKey(CONVERSATION_A))).toEqual(attached),
+  );
   expect(result.current?.status).toEqual(empty);
 });
 
@@ -295,7 +306,7 @@ it.each(["query", "mutation"])(
     const pending = deferred<BridgeReply>();
     if (kind === "query") request.mockReturnValue(pending.promise);
     const { wrapper, client } = setup();
-    const { result, unmount } = renderHook(() => useFolder("a"), { wrapper });
+    const { result, unmount } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     if (kind === "mutation") {
       await waitFor(() => expect(result.current?.readiness).toBe("ready"));
@@ -311,323 +322,20 @@ it.each(["query", "mutation"])(
   },
 );
 
-it("holds the dispatch barrier through draft rebind and invalidates both folder keys", async () => {
-  const { client } = setup();
-  client.setQueryData(folderQueryKey(DRAFT_CONVERSATION), attached);
-  client.setQueryData(folderQueryKey("new"), empty);
-  const rebound = deferred<BridgeReply>();
-  request.mockReturnValue(rebound.promise);
-  const send = withDraftFolderBinding(async () => ({ conversationId: "new" }), client);
-  const released = vi.fn();
-  const barrier = waitForDraftBinding().then(released);
-  await waitFor(() =>
-    expect(request).toHaveBeenCalledWith("rebindFolder", {
-      fromConversationId: DRAFT_CONVERSATION,
-      toConversationId: "new",
-    }),
-  );
-  expect(released).not.toHaveBeenCalled();
-  rebound.resolve(reply(attached));
-  await send;
-  await barrier;
-  expect(client.getQueryState(folderQueryKey(DRAFT_CONVERSATION))?.isInvalidated).toBe(true);
-  expect(client.getQueryState(folderQueryKey("new"))?.isInvalidated).toBe(true);
-});
-
-it("does not stall other conversations after the create response names the destination", async () => {
-  const { client } = setup();
-  const created = deferred<{ conversationId: string }>();
-  const rebound = deferred<BridgeReply>();
-  request.mockReturnValue(rebound.promise);
-  let sending = false;
-  const send = withDraftFolderBinding(async () => {
-    sending = true;
-    return created.promise;
-  }, client);
-  await waitFor(() => expect(sending).toBe(true));
-  const otherDone = vi.fn();
-  const destDone = vi.fn();
-  void waitForDraftBinding("other").then(otherDone);
-  void waitForDraftBinding("new").then(destDone);
-  await Promise.resolve();
-  expect(otherDone).not.toHaveBeenCalled();
-  expect(destDone).not.toHaveBeenCalled();
-  created.resolve({ conversationId: "new" });
-  await waitFor(() =>
-    expect(request).toHaveBeenCalledWith("rebindFolder", {
-      fromConversationId: DRAFT_CONVERSATION,
-      toConversationId: "new",
-    }),
-  );
-  await waitFor(() => expect(otherDone).toHaveBeenCalled());
-  expect(destDone).not.toHaveBeenCalled();
-  rebound.resolve(reply(attached));
-  await send;
-  await waitFor(() => expect(destDone).toHaveBeenCalled());
-});
-
-it("returns the created conversation when rebind fails", async () => {
-  const { client } = setup();
-  request.mockRejectedValue(new Error("offline"));
-  await expect(
-    withDraftFolderBinding(async () => ({ conversationId: "new" }), client),
-  ).resolves.toEqual({ conversationId: "new" });
-  expect(request).toHaveBeenCalledWith("rebindFolder", {
-    fromConversationId: DRAFT_CONVERSATION,
-    toConversationId: "new",
-  });
-});
-
-it.each(["conversation", "draft"])(
-  "prepares %s folders before the routed Composer’s first commit",
-  async (kind) => {
-    const pending = deferred<BridgeReply>();
-    request.mockReturnValue(pending.promise);
-    const { client, wrapper } = setup();
-    const commits = vi.fn();
-    const id = kind === "draft" ? DRAFT_CONVERSATION : "a";
-    function RoutedComposer() {
-      const folder = useFolder(id);
-      const ref = useRef<HTMLDivElement>(null);
-      useLayoutEffect(() => {
-        commits(ref.current?.textContent);
-      }, []);
-      return (
-        <div ref={ref}>
-          <Composer
-            folder={folder}
-            mode={{ kind: "fixed", value: "work" }}
-            settings={{ permissionLevel: "manual", onChange: () => {} }}
-            onSend={async () => {}}
-            disabled={false}
-            modelId="m1"
-            onModelChange={() => {}}
-            searchEnabled={false}
-            onSearchEnabledChange={() => {}}
-          />
-        </div>
-      );
-    }
-    const root = createRootRouteWithContext<{ queryClient: QueryClient }>()();
-    const route = createRoute({
-      getParentRoute: () => root,
-      path: "/$conversationId",
-      loader: (args) => {
-        const loader = (kind === "draft" ? NewChatRoute : ChatRoute).options.loader;
-        return (
-          loader as (input: {
-            context: { queryClient: QueryClient };
-            params: { conversationId: string };
-            abortController: AbortController;
-          }) => Promise<void>
-        )(args);
-      },
-      component: RoutedComposer,
-    });
-    const router = createRouter({
-      routeTree: root.addChildren([route]),
-      history: createMemoryHistory({ initialEntries: ["/a"] }),
-      context: { queryClient: client },
-    });
-    render(<RouterProvider router={router} />, { wrapper });
-    await waitFor(() =>
-      expect(request).toHaveBeenCalledWith("folderStatus", { conversationId: id }),
-    );
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(commits).not.toHaveBeenCalled();
-    await act(async () => pending.resolve(reply(attached)));
-    await screen.findByRole("button", { name: "site" });
-    expect(commits).toHaveBeenCalledOnce();
-    expect(commits.mock.calls[0]?.[0]).toContain("site");
-    expect(commits.mock.calls[0]?.[0]).toContain("Approve each action");
-    expect(screen.queryByText("Checking folders…")).not.toBeInTheDocument();
-    expect(request).toHaveBeenCalledTimes(1);
-  },
-);
-
-it.each([
-  { outcome: "ready", preload: false },
-  { outcome: "error", preload: false },
-  { outcome: "ready", preload: true },
-  { outcome: "error", preload: true },
-])(
-  "keeps a loader-owned read alive on outgoing unmount ($outcome, preload=$preload)",
-  async ({ outcome, preload }) => {
-    const { client, wrapper } = setup();
-    const commits = vi.fn();
-    const outgoingUnmounted = vi.fn();
-    function Outgoing() {
-      useFolder(DRAFT_CONVERSATION);
-      useLayoutEffect(() => () => outgoingUnmounted(), []);
-      return <div>Outgoing chat</div>;
-    }
-    function Destination() {
-      const folder = useFolder(DRAFT_CONVERSATION);
-      useLayoutEffect(() => {
-        commits(folder?.readiness);
-      }, [folder?.readiness]);
-      return <div>Destination {folder?.readiness}</div>;
-    }
-    const root = createRootRouteWithContext<{ queryClient: QueryClient }>()();
-    const outgoing = createRoute({
-      getParentRoute: () => root,
-      path: "/outgoing",
-      component: Outgoing,
-    });
-    const destination = createRoute({
-      getParentRoute: () => root,
-      path: "/",
-      loader: (args) =>
-        (
-          NewChatRoute.options.loader as (input: {
-            context: { queryClient: QueryClient };
-            abortController: AbortController;
-          }) => Promise<void>
-        )(args),
-      component: Destination,
-      pendingComponent: () => <div>Preparing destination</div>,
-      errorComponent: ({ error }) => <div>Route error: {String(error)}</div>,
-      pendingMs: 1000,
-      pendingMinMs: 0,
-    });
-    const router = createRouter({
-      routeTree: root.addChildren([outgoing, destination]),
-      history: createMemoryHistory({ initialEntries: ["/outgoing"] }),
-      context: { queryClient: client },
-    });
-    render(<RouterProvider router={router} />, { wrapper });
-    await screen.findByText("Outgoing chat");
-    await waitFor(() =>
-      expect(client.getQueryData(folderQueryKey(DRAFT_CONVERSATION))).toEqual(empty),
-    );
-    const pending = deferred<BridgeReply>();
-    const started = deferred<void>();
-    request.mockImplementation(() => {
-      started.resolve();
-      return pending.promise;
-    });
-    let preloaded: ReturnType<typeof router.preloadRoute> | undefined;
-    if (preload) {
-      await act(async () => {
-        preloaded = router.preloadRoute({ to: "/" });
-        await started.promise;
-      });
-    }
-    vi.useFakeTimers();
-    let navigation!: Promise<void>;
-    await act(async () => {
-      navigation = router.navigate({ to: "/" });
-      await started.promise;
-    });
-    expect(outgoingUnmounted).not.toHaveBeenCalled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-    vi.useRealTimers();
-    await screen.findByText("Preparing destination");
-    await waitFor(() => expect(outgoingUnmounted).toHaveBeenCalledOnce());
-    expect(commits).not.toHaveBeenCalled();
-    await act(async () => {
-      pending.resolve(
-        outcome === "ready"
-          ? reply(attached)
-          : {
-              ok: false,
-              error: { _tag: "DesktopError", reason: "failed", message: "Offline" },
-            },
-      );
-      await navigation;
-      await preloaded;
-    });
-    // Outgoing already cached a status, so a failed refetch stays ready
-    // rather than looking like a missing folder.
-    await screen.findByText("Destination ready");
-    expect(commits).toHaveBeenCalledExactlyOnceWith("ready");
-    expect(screen.queryByText(/Route error/)).not.toBeInTheDocument();
-    expect(request).toHaveBeenCalledTimes(2);
-  },
-);
-
-it("abandons a superseded folder navigation without rendering cancellation or reviving its query", async () => {
-  const { client, wrapper } = setup();
-  const pending = deferred<BridgeReply>();
-  request.mockReturnValue(pending.promise);
-  const commits = vi.fn();
-  function Destination() {
-    const folder = useFolder(DRAFT_CONVERSATION);
-    useLayoutEffect(() => {
-      commits(folder?.readiness);
-    }, [folder?.readiness]);
-    return <div>Destination</div>;
-  }
-  const root = createRootRouteWithContext<{ queryClient: QueryClient }>()();
-  const start = createRoute({
-    getParentRoute: () => root,
-    path: "/login",
-    component: () => <div>Start</div>,
-  });
-  const destination = createRoute({
-    getParentRoute: () => root,
-    path: "/",
-    loader: (args) =>
-      (
-        NewChatRoute.options.loader as (input: {
-          context: { queryClient: QueryClient };
-          abortController: AbortController;
-        }) => Promise<void>
-      )(args),
-    component: Destination,
-    errorComponent: ({ error }) => <div>Route error: {String(error)}</div>,
-  });
-  const router = createRouter({
-    routeTree: root.addChildren([start, destination]),
-    history: createMemoryHistory({ initialEntries: ["/login"] }),
-    context: { queryClient: client },
-  });
-  render(<RouterProvider router={router} />, { wrapper });
-  await screen.findByText("Start");
-  let navigation!: Promise<void>;
-  act(() => {
-    navigation = router.navigate({ to: "/" });
-  });
-  await waitFor(() => expect(request).toHaveBeenCalledOnce());
-  await act(async () => {
-    await router.navigate({ to: "/login" });
-    await navigation;
-  });
-  expect(screen.getByText("Start")).toBeInTheDocument();
-  expect(commits).not.toHaveBeenCalled();
-  await waitFor(() =>
-    expect(
-      client
-        .getQueryCache()
-        .find({ queryKey: folderQueryKey(DRAFT_CONVERSATION) })
-        ?.getObserversCount(),
-    ).toBe(0),
-  );
-  client.clear();
-  await act(async () => {
-    pending.resolve(reply(attached));
-  });
-  expect(client.getQueryCache().getAll()).toHaveLength(0);
-  expect(screen.queryByText(/Route error/)).not.toBeInTheDocument();
-  expect(request).toHaveBeenCalledOnce();
-});
-
 it("deduplicates concurrent preparation, refreshes on re-entry, and retains focus refresh", async () => {
   const { client, wrapper } = setup();
   const pending = deferred<BridgeReply>();
   request.mockReturnValue(pending.promise);
-  const first = prepareWorkFolder(client, "a", new AbortController().signal);
-  const second = prepareWorkFolder(client, "a", new AbortController().signal);
+  const first = prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal);
+  const second = prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal);
   await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
   pending.resolve(reply(empty));
   await Promise.all([first, second]);
-  const { result } = renderHook(() => useFolder("a"), { wrapper });
+  const { result } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   expect(result.current?.status).toEqual(empty);
   expect(request).toHaveBeenCalledTimes(1);
   request.mockResolvedValue(reply(attached));
-  await act(async () => prepareWorkFolder(client, "a", new AbortController().signal));
+  await act(async () => prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal));
   await waitFor(() => expect(result.current?.status).toEqual(attached));
   expect(request).toHaveBeenCalledTimes(2);
   act(() => {
@@ -639,12 +347,12 @@ it("deduplicates concurrent preparation, refreshes on re-entry, and retains focu
 
 it("restarts preparation if a picker cancels its in-flight read", async () => {
   const { client, wrapper } = setup();
-  const { result } = renderHook(() => useFolder("a"), { wrapper });
+  const { result } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   const read = deferred<BridgeReply>();
   const chosen = deferred<BridgeReply>();
   request.mockImplementation((tag) => (tag === "chooseFolder" ? chosen.promise : read.promise));
-  const prepared = prepareWorkFolder(client, "a", new AbortController().signal);
+  const prepared = prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal);
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   act(() => result.current?.choose());
   await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
@@ -652,7 +360,7 @@ it("restarts preparation if a picker cancels its in-flight read", async () => {
   await act(async () => chosen.resolve(reply(attached)));
   await prepared;
   read.resolve(reply(empty));
-  expect(client.getQueryData(folderQueryKey("a"))).toEqual(attached);
+  expect(client.getQueryData(folderQueryKey(CONVERSATION_A))).toEqual(attached);
   expect(request).toHaveBeenCalledTimes(4);
 });
 
@@ -662,7 +370,7 @@ it("mounts a prepared IPC error without retrying until explicitly requested", as
     ok: false,
     error: { _tag: "DesktopError", reason: "failed", message: "Offline" },
   });
-  await prepareWorkFolder(client, "a", new AbortController().signal);
+  await prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal);
   render(<WorkComposer onSend={async () => {}} />, { wrapper });
   expect(screen.getByText("Could not check folders.")).toBeInTheDocument();
   expect(request).toHaveBeenCalledTimes(1);
@@ -692,7 +400,7 @@ it("keeps cached folders when a focus refetch fails", async () => {
 
 it("waits for a picker before preparing the destination of a navigation", async () => {
   const { client, wrapper } = setup();
-  const { result } = renderHook(() => useFolder("a"), { wrapper });
+  const { result } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   const chosen = deferred<BridgeReply>();
   request.mockImplementation((tag) =>
@@ -701,12 +409,14 @@ it("waits for a picker before preparing the destination of a navigation", async 
   act(() => result.current?.choose());
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   const settled = vi.fn();
-  const prepared = prepareWorkFolder(client, "a", new AbortController().signal).then(settled);
+  const prepared = prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal).then(
+    settled,
+  );
   expect(settled).not.toHaveBeenCalled();
   expect(request).toHaveBeenCalledTimes(2);
   await act(async () => chosen.resolve(reply(attached)));
   await prepared;
-  expect(client.getQueryData(folderQueryKey("a"))).toEqual(attached);
+  expect(client.getQueryData(folderQueryKey(CONVERSATION_A))).toEqual(attached);
   expect(request).toHaveBeenCalledTimes(3);
 });
 
@@ -717,68 +427,61 @@ it.each(["route", "identity", "read"])(
     const pending = deferred<BridgeReply>();
     request.mockReturnValue(pending.promise);
     const controller = new AbortController();
-    const prepared = prepareWorkFolder(client, "a", controller.signal);
-    const rejected = expect(prepared).rejects.toSatisfy(isCancelledError);
+    const prepared = prepareWorkFolder(client, CONVERSATION_A, controller.signal);
+    const cancelled = prepared.then(
+      () => false,
+      (error) => isCancelledError(error),
+    );
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     if (kind === "route") controller.abort();
     else if (kind === "identity") client.clear();
     else await client.cancelQueries();
-    await rejected;
+    expect(await cancelled).toBe(true);
     pending.resolve(reply(attached));
-    if (kind === "identity") expect(client.getQueryState(folderQueryKey("a"))).toBeUndefined();
+    if (kind === "identity")
+      expect(client.getQueryState(folderQueryKey(CONVERSATION_A))).toBeUndefined();
   },
 );
 
 it("cancels a mutation wait on identity teardown without recreating its query", async () => {
   const { client, wrapper } = setup();
-  const { result, unmount } = renderHook(() => useFolder("a"), { wrapper });
+  const { result, unmount } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
   const pending = deferred<BridgeReply>();
   request.mockReturnValue(pending.promise);
   act(() => result.current?.choose());
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-  const prepared = prepareWorkFolder(client, "a", new AbortController().signal);
-  const rejected = expect(prepared).rejects.toSatisfy(isCancelledError);
+  const prepared = prepareWorkFolder(client, CONVERSATION_A, new AbortController().signal);
+  const cancelled = prepared.then(
+    () => false,
+    (error) => isCancelledError(error),
+  );
   unmount();
   client.clear();
-  await rejected;
+  expect(await cancelled).toBe(true);
   await act(async () => pending.resolve(reply(attached)));
-  expect(client.getQueryState(folderQueryKey("a"))).toBeUndefined();
+  expect(client.getQueryState(folderQueryKey(CONVERSATION_A))).toBeUndefined();
   expect(request).toHaveBeenCalledTimes(2);
-});
-
-it("waits through draft rebinding before preparing draft and destination state", async () => {
-  const { client } = setup();
-  const rebound = deferred<BridgeReply>();
-  request.mockImplementation((tag) =>
-    tag === "rebindFolder" ? rebound.promise : Promise.resolve(reply(attached)),
-  );
-  const send = withDraftFolderBinding(async () => ({ conversationId: "new" }), client);
-  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-  const preparations = [DRAFT_CONVERSATION, "new"].map((id) =>
-    prepareWorkFolder(client, id, new AbortController().signal),
-  );
-  expect(request).toHaveBeenCalledTimes(1);
-  rebound.resolve(reply(attached));
-  await send;
-  await Promise.all(preparations);
-  expect(request).toHaveBeenCalledTimes(3);
-  expect(client.getQueryData(folderQueryKey("new"))).toEqual(attached);
 });
 
 it("rejects unresolved Work attempts before session IPC, while ready-empty remains valid", async () => {
   const pending = deferred<BridgeReply>();
   request.mockReturnValue(pending.promise);
   const { wrapper } = setup();
-  const { result } = renderHook(() => useFolder("a"), { wrapper });
+  const { result } = renderHook(() => useFolder(CONVERSATION_A), { wrapper });
   expect(() => requireWorkFolder(true, result.current)).toThrow("folder check");
   expect(requireWorkFolder(false, result.current)).toBeNull();
   await act(async () => pending.resolve(reply(empty)));
   await waitFor(() => expect(result.current?.readiness).toBe("ready"));
-  request.mockResolvedValue(reply({ id: "executor" }));
+  request.mockResolvedValue(
+    reply({ id: "executor", machineId: "machine-a", machineName: "Test Mac" }),
+  );
   expect(await desktopAttemptFields(requireWorkFolder(true, result.current))).toEqual({
     fromDesktop: true,
-    desktopCommands: false,
+    desktopFolders: [{ name: "workspace", path: "/data/workspaces/a" }],
+    desktopCommands: true,
     desktopExecutorId: "executor",
+    desktopMachineId: "machine-a",
+    desktopMachineName: "Test Mac",
   });
 });

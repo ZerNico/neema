@@ -7,8 +7,28 @@ import { Schema } from "effect";
  * unprivileged peer to the site.
  */
 
-/** Folder grants hang on this key until the first message creates a conversation. */
-export const DRAFT_CONVERSATION = "__draft__";
+/** A workspace is one server conversation and therefore one canonical UUIDv7. */
+export const WorkspaceId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
+    message: "Expected a canonical UUIDv7.",
+  }),
+);
+export type WorkspaceId = typeof WorkspaceId.Type;
+
+/** Local transaction identities never become filesystem names without this check. */
+export const LocalTransactionId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
+    message: "Expected a canonical UUID.",
+  }),
+);
+export type LocalTransactionId = typeof LocalTransactionId.Type;
+
+/**
+ * The name every work chat's own workspace answers to. It is the workspace
+ * chip's label and the name the picker refuses for a user folder, so no
+ * attached folder's basename collides with it.
+ */
+export const WORKSPACE_FOLDER_NAME = "workspace";
 
 /** Caps live here so a bounded result is the contract, not each caller's habit. */
 export const LIMITS = {
@@ -35,6 +55,29 @@ export const LIMITS = {
   deletedPaths: 100,
   /** Bytes of one binary file (image or document) sent to the model. */
   binaryBytes: 20 * 1024 * 1024,
+  /**
+   * Decoded bytes of one composer import that travels as base64 over IPC:
+   * pastes and picker files. At this cap a single import transiently costs
+   * ~67 MB of text plus structured-clone copies in both processes.
+   */
+  importBytes: 50 * 1024 * 1024,
+  /**
+   * An import the shell copies from a local path instead of receiving over
+   * IPC (drops inside the desktop, where the File still knows where it came
+   * from). No bytes cross the bridge, so the bound is only against dropping
+   * something huge by accident, and `cp` streams either way.
+   */
+  importPathBytes: 512 * 1024 * 1024,
+  /**
+   * Workspace size above which a branch refuses to copy it: the copy is
+   * awaited before navigation, so a multi-minute clone cannot pin the UI.
+   * The branch opens with an empty workspace instead, and says so.
+   */
+  cloneBytes: 2 * 1024 * 1024 * 1024,
+  /** Directory entries inspected before a branch copy refuses the workspace. */
+  cloneEntries: 100_000,
+  /** Nesting inspected independently of the entry cap. */
+  cloneDepth: 256,
 } as const;
 
 export const DirectoryEntry = Schema.Struct({
@@ -62,12 +105,53 @@ export const FileContents = Schema.Struct({
 });
 export type FileContents = typeof FileContents.Type;
 
+/** Size and kind without the bytes: previews size the dialog before reading. */
+export const FileInfo = Schema.Struct({
+  path: Schema.String,
+  bytes: Schema.Int,
+});
+export type FileInfo = typeof FileInfo.Type;
+
 export const WriteReceipt = Schema.Struct({
   path: Schema.String,
   created: Schema.Boolean,
   bytes: Schema.Int,
 });
 export type WriteReceipt = typeof WriteReceipt.Type;
+
+/** A composer file safely held outside every model-visible workspace. */
+export const StagedFileReceipt = Schema.Struct({
+  name: Schema.String,
+  bytes: Schema.Int,
+});
+export type StagedFileReceipt = typeof StagedFileReceipt.Type;
+
+export const PromotionReceipt = Schema.Struct({
+  reservationId: LocalTransactionId,
+  files: Schema.Array(
+    Schema.Struct({
+      stagedName: Schema.String,
+      finalName: Schema.String,
+      bytes: Schema.Int,
+    }),
+  ),
+});
+export type PromotionReceipt = typeof PromotionReceipt.Type;
+
+export const PendingPromotion = Schema.Struct({
+  conversationId: WorkspaceId,
+  reservationId: LocalTransactionId,
+  submissionId: LocalTransactionId,
+});
+export type PendingPromotion = typeof PendingPromotion.Type;
+
+/** Public metadata for the preload-only dropped-file staging channel. */
+export const DroppedFileStageInput = Schema.Struct({
+  conversationId: WorkspaceId,
+  submissionId: LocalTransactionId,
+  fileName: Schema.String,
+});
+export type DroppedFileStageInput = typeof DroppedFileStageInput.Type;
 
 /**
  * A file the model reads as bytes rather than text: an image for a vision
@@ -278,16 +362,17 @@ export const SandboxAvailability = Schema.Union([
 export type SandboxAvailability = typeof SandboxAvailability.Type;
 
 /**
- * One attached folder as the site sees it. The absolute path never crosses:
- * the site shows a name and the server stores nothing, so the same
- * conversation on another machine simply resolves to different folders.
- *
- * The name is the folder's basename and doubles as the first segment of every
- * path the model uses (`site/src/index.ts`), which is why two folders with the
- * same name cannot both be attached.
+ * One attached folder as the site sees it, by its real absolute path. The path
+ * is the model's address for every file inside: the tools take absolute paths
+ * and the sandbox decides what is reachable, the way Cursor and Claude Code
+ * work. Paths live in attempt-scoped prompt text and tool traffic, same as
+ * file contents; the server persists only the names.
  */
 export const AttachedFolder = Schema.Struct({
+  /** The folder's basename, for the strip and grouping in the transcript. */
   name: Schema.String,
+  /** The real absolute path. */
+  path: Schema.String,
   /** False when the remembered folder has been moved, renamed or deleted since. */
   alive: Schema.Boolean,
 });
@@ -297,5 +382,10 @@ export type AttachedFolder = typeof AttachedFolder.Type;
 export const FolderStatus = Schema.Struct({
   folders: Schema.Array(AttachedFolder),
   sandbox: SandboxAvailability,
+  /** The app-managed workspace, separate from user-picked folders. */
+  workspace: Schema.Struct({
+    /** The workspace directory's real absolute path. */
+    path: Schema.String,
+  }),
 });
 export type FolderStatus = typeof FolderStatus.Type;

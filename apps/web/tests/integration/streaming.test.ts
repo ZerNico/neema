@@ -29,6 +29,7 @@ import {
   skills,
   skillRevisions,
   usageEvents,
+  workTurnReservations,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
@@ -399,7 +400,7 @@ const setupQuestion = Effect.gen(function* () {
 });
 const answerInput = (seed: Effect.Success<typeof setupQuestion>) => ({
   userId: seed.userId,
-  conversationId: seed.conversation.id,
+  conversation: { kind: "existing" as const, id: seed.conversation.id },
   modelId: textModelId,
   attachmentIds: [],
   questionResponse: {
@@ -498,7 +499,7 @@ describe("conversational agent authoring", () => {
           ChatService.use((service) =>
             service.sendMessage({
               userId: seed.userId,
-              conversationId: seed.conversation.id,
+              conversation: { kind: "existing", id: seed.conversation.id },
               modelId: textModelId,
               content: "Help me edit this agent.",
               searchEnabled: false,
@@ -625,7 +626,7 @@ describe("conversational agent authoring", () => {
           ChatService.use((service) =>
             service.sendMessage({
               userId: seed.userId,
-              conversationId,
+              conversation: { kind: "existing", id: conversationId },
               modelId: textModelId,
               content: "Keep working with my changes.",
               searchEnabled: false,
@@ -714,7 +715,7 @@ describe("conversational agent authoring", () => {
           ChatService.use((service) =>
             service.sendMessage({
               userId: seed.userId,
-              conversationId: seed.conversation.id,
+              conversation: { kind: "existing", id: seed.conversation.id },
               modelId: textModelId,
               content: "Prepare an agent.",
               searchEnabled: false,
@@ -827,7 +828,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Use Claude as the preferred model.",
             searchEnabled: false,
@@ -897,7 +898,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Find a skill for a future agent.",
             searchEnabled: false,
@@ -948,7 +949,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Make a Jira agent.",
             searchEnabled: false,
@@ -1026,7 +1027,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Make a ticket agent.",
             searchEnabled: false,
@@ -1056,7 +1057,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Now make a release notes agent.",
             searchEnabled: false,
@@ -1141,7 +1142,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Make two agents.",
             searchEnabled: false,
@@ -1190,7 +1191,7 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Edit this unavailable agent.",
             searchEnabled: false,
@@ -1240,7 +1241,7 @@ describe("conversation documents", () => {
       Effect.flatMap(ChatService, (service) =>
         service.sendMessage({
           userId: seed.userId,
-          conversationId: seed.conversation.id,
+          conversation: { kind: "existing", id: seed.conversation.id },
           modelId: textModelId,
           content: "Make me a release checklist.",
           searchEnabled: false,
@@ -1772,7 +1773,7 @@ describe("atomic question answers", () => {
               ? repo
                   .createTurn({
                     userId: seed.userId,
-                    conversationId: seed.conversation.id,
+                    conversation: { kind: "existing", id: seed.conversation.id },
                     modelId: textModelId,
                     content: "ordinary reply",
                     attachmentIds: [],
@@ -1930,7 +1931,7 @@ describe("atomic question answers", () => {
         const sourceTurn = yield* repo.createTurn(answerInput(seed));
         const branchTurn = yield* repo.createTurn({
           ...answerInput(seed),
-          conversationId: branch.id,
+          conversation: { kind: "existing", id: branch.id },
           questionResponse: { callId: calls[0]!.id, response: { kind: "skip" } },
         });
         return { originalId: seed.callId, calls, sourceTurn, branchTurn };
@@ -2309,7 +2310,7 @@ describe("resumable streaming pipeline", () => {
         const busy = yield* repo
           .createTurn({
             userId,
-            conversationId: conversation.id,
+            conversation: { kind: "existing", id: conversation.id },
             modelId: textModelId,
             content: "again",
             attachmentIds: [],
@@ -2334,7 +2335,7 @@ describe("resumable streaming pipeline", () => {
         const toolCalls = yield* repo.listToolCalls([assistant.id]);
         const next = yield* repo.createTurn({
           userId,
-          conversationId: conversation.id,
+          conversation: { kind: "existing", id: conversation.id },
           modelId: textModelId,
           content: "again",
           attachmentIds: [],
@@ -2506,7 +2507,7 @@ describe("resumable streaming pipeline", () => {
         const turn = (content: string) =>
           repo.createTurn({
             userId,
-            conversationId: conversation.id,
+            conversation: { kind: "existing", id: conversation.id },
             modelId: null as never,
             content,
             attachmentIds: [],
@@ -2697,7 +2698,7 @@ describe("retry with a different model", () => {
         const { userId, conversation } = yield* seedAnswered(textModelId);
         const sent = yield* chat.sendMessage({
           userId,
-          conversationId: conversation.id,
+          conversation: { kind: "existing", id: conversation.id },
           modelId: textModelId,
           content: "What day is it?",
           searchEnabled: false,
@@ -2876,7 +2877,7 @@ describe("generated image streaming", () => {
 
           const edit = yield* repo.createTurn({
             userId,
-            conversationId: conversation.id,
+            conversation: { kind: "existing", id: conversation.id },
             modelId: imageModelId,
             content: "Replace the original image with a blue image",
             attachmentIds: [],
@@ -2921,7 +2922,7 @@ describe("generated image streaming", () => {
 
           const followup = yield* repo.createTurn({
             userId,
-            conversationId: conversation.id,
+            conversation: { kind: "existing", id: conversation.id },
             modelId: imageModelId,
             content: "Make the latest blue image larger",
             attachmentIds: [],
@@ -3408,7 +3409,7 @@ describe("custom tool calls", () => {
 });
 
 describe("local tools on the user's machine", () => {
-  const folder = "acme-site";
+  const folder = { name: "acme-site", path: "/home/test/acme-site" };
   const workConversation = (userId: string) =>
     Effect.gen(function* () {
       const conversation = yield* (yield* ChatRepo).createConversation({
@@ -3430,7 +3431,7 @@ describe("local tools on the user's machine", () => {
     Effect.flatMap(ChatService, (service) =>
       service.sendMessage({
         userId: seed.userId,
-        conversationId: seed.conversation.id,
+        conversation: { kind: "existing", id: seed.conversation.id },
         modelId: textModelId,
         content: "What is in the readme?",
         searchEnabled: false,
@@ -3442,6 +3443,261 @@ describe("local tools on the user's machine", () => {
         desktopCommands,
       }),
     );
+
+  it("reserves without transcript rows and activates a proposed id exactly once", async () => {
+    const promptsBefore = streamPrompts.length;
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Ready." }),
+        authoringFinish(),
+      );
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const { userId } = yield* setupConversation;
+          const service = yield* ChatService;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const conversationId = uuidv7();
+          const reservationId = uuidv7();
+          const conversation = { kind: "new" as const, id: conversationId, mode: "work" as const };
+          yield* service.reserveWorkTurn({ id: reservationId, userId, conversation });
+
+          const [beforeConversation, beforeMessages] = yield* Effect.all([
+            db
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(eq(conversations.id, conversationId)),
+            db
+              .select({ id: messages.id })
+              .from(messages)
+              .where(eq(messages.conversationId, conversationId)),
+          ]);
+
+          const input = {
+            userId,
+            reservationId,
+            conversation,
+            modelId: textModelId,
+            content: "Read the staged report.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [
+              { name: "workspace", path: `/data/workspaces/${conversationId}` },
+              folder,
+            ],
+            desktopCommands: true,
+            workspaceFiles: ["report.pdf"],
+          };
+          const first = yield* service.sendMessage(input);
+          const replay = yield* service.sendMessage(input);
+          yield* (yield* StreamEngine).subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
+          const status = yield* service.getWorkTurnReservation({ userId, reservationId });
+          const config = yield* repo.getGenerationConfig(first.assistantMessageId);
+          return { beforeConversation, beforeMessages, first, replay, status, config };
+        }),
+      );
+
+      expect(result.beforeConversation).toEqual([]);
+      expect(result.beforeMessages).toEqual([]);
+      expect(result.replay).toEqual(result.first);
+      expect(result.status).toMatchObject({
+        status: "activated",
+        conversationId: result.first.conversationId,
+        assistantMessageId: result.first.assistantMessageId,
+      });
+      expect(result.config.workspaceFiles).toEqual(["report.pdf"]);
+      expect(result.config.desktopFolders).toEqual(["workspace", "acme-site"]);
+      expect(JSON.stringify(result.config)).not.toContain("/data/workspaces/");
+      expect(JSON.stringify(result.config)).not.toContain("/home/test/");
+      expect(streamPrompts).toHaveLength(promptsBefore + 1);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("allows one live reservation and expires it by the database clock", async () => {
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* desktopChat;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const firstId = uuidv7();
+        const secondId = uuidv7();
+        const conversation = { kind: "existing" as const, id: seed.conversation.id };
+        const attempts = yield* Effect.all(
+          [
+            repo
+              .reserveWorkTurn({ id: firstId, userId: seed.userId, conversation })
+              .pipe(Effect.result),
+            repo
+              .reserveWorkTurn({ id: secondId, userId: seed.userId, conversation })
+              .pipe(Effect.result),
+          ],
+          { concurrency: "unbounded" },
+        );
+        const winner = attempts.find((attempt) => attempt._tag === "Success");
+        const loser = attempts.find((attempt) => attempt._tag === "Failure");
+        if (!winner || winner._tag !== "Success") return yield* Effect.die("No reservation won");
+        yield* db
+          .update(workTurnReservations)
+          .set({ expiresAt: sql`now() - interval '1 second'` })
+          .where(eq(workTurnReservations.id, winner.success.id));
+        const expired = yield* repo.getWorkTurnReservation(seed.userId, winner.success.id);
+        return { winner: winner.success, loser, expired };
+      }),
+    );
+
+    expect(outcome.loser?._tag).toBe("Failure");
+    if (outcome.loser?._tag === "Failure")
+      expect(outcome.loser.failure._tag).toBe("ConversationBusy");
+    expect(outcome.expired.status).toBe("expired");
+  });
+
+  it("fences retry, edit, and branch inside their mutation transactions", async () => {
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Ready." }),
+        authoringFinish(),
+      );
+    try {
+      const outcome = await runtime.runPromise(
+        Effect.gen(function* () {
+          const seed = yield* desktopChat;
+          const service = yield* ChatService;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const sent = yield* send(seed, true);
+          yield* (yield* StreamEngine).subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+          const beforeMessages = yield* repo.listMessages(seed.conversation.id);
+          const beforeConversations = yield* db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(eq(conversations.userId, seed.userId));
+          const userMessage = beforeMessages.find((message) => message.role === "user")!;
+          const reservationId = uuidv7();
+          yield* service.reserveWorkTurn({
+            id: reservationId,
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+          });
+
+          const retry = yield* service
+            .retryMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: sent.assistantMessageId,
+              fromDesktop: true,
+              desktopExecutorId: "reservation-fence-retry",
+              desktopCommands: true,
+            })
+            .pipe(Effect.result);
+          const edit = yield* service
+            .editMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: userMessage.id,
+              modelId: textModelId,
+              content: "Edited while reserved",
+              searchEnabled: false,
+              researchEnabled: false,
+              attachmentIds: [],
+              fromDesktop: true,
+              desktopExecutorId: "reservation-fence-edit",
+              desktopFolders: [folder],
+              desktopCommands: true,
+            })
+            .pipe(Effect.result);
+          const branch = yield* service
+            .branchConversation({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: sent.assistantMessageId,
+            })
+            .pipe(Effect.result);
+          const afterMessages = yield* repo.listMessages(seed.conversation.id);
+          const afterConversations = yield* db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(eq(conversations.userId, seed.userId));
+          yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
+          return {
+            failures: [retry, edit, branch].map((result) =>
+              result._tag === "Failure" ? result.failure._tag : "Success",
+            ),
+            beforeMessages,
+            afterMessages,
+            beforeConversations,
+            afterConversations,
+          };
+        }),
+      );
+
+      expect(outcome.failures).toEqual([
+        "ConversationBusy",
+        "ConversationBusy",
+        "ConversationBusy",
+      ]);
+      expect(outcome.afterMessages).toEqual(outcome.beforeMessages);
+      expect(outcome.afterConversations).toEqual(outcome.beforeConversations);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("rejects proposed-id collisions and reservations for another user's chat", async () => {
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        const owner = yield* desktopChat;
+        const stranger = yield* setupConversation;
+        const repo = yield* ChatRepo;
+        const service = yield* ChatService;
+        const ordinary = yield* service
+          .sendMessage({
+            userId: owner.userId,
+            conversation: { kind: "new", id: owner.conversation.id, mode: "work" },
+            modelId: textModelId,
+            content: "Do not reuse this id.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "collision-test",
+            desktopFolders: [folder],
+            desktopCommands: true,
+          })
+          .pipe(Effect.result);
+        const collision = yield* repo
+          .reserveWorkTurn({
+            id: uuidv7(),
+            userId: owner.userId,
+            conversation: { kind: "new", id: owner.conversation.id, mode: "work" },
+          })
+          .pipe(Effect.result);
+        const foreign = yield* repo
+          .reserveWorkTurn({
+            id: uuidv7(),
+            userId: stranger.userId,
+            conversation: { kind: "existing", id: owner.conversation.id },
+          })
+          .pipe(Effect.result);
+        return { ordinary, collision, foreign };
+      }),
+    );
+
+    expect(outcome.ordinary._tag).toBe("Failure");
+    if (outcome.ordinary._tag === "Failure")
+      expect(outcome.ordinary.failure._tag).toBe("InvalidMessage");
+    expect(outcome.collision._tag).toBe("Failure");
+    if (outcome.collision._tag === "Failure")
+      expect(outcome.collision.failure._tag).toBe("InvalidMessage");
+    expect(outcome.foreign._tag).toBe("Failure");
+    if (outcome.foreign._tag === "Failure")
+      expect(outcome.foreign.failure._tag).toBe("ConversationNotFound");
+  });
 
   /**
    * Stands in for the page: subscribes to the same stream the browser does,
@@ -3526,7 +3782,7 @@ describe("local tools on the user's machine", () => {
               researchEnabled: false,
               fromDesktop: true,
               desktopExecutorId: "answer-session",
-              desktopFolders: ["answer-folder"],
+              desktopFolders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
               desktopCommands: false,
             });
             yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
@@ -3550,7 +3806,7 @@ describe("local tools on the user's machine", () => {
               },
               fromDesktop: true,
               desktopExecutorId: "edit-answer-session",
-              desktopFolders: ["edited-folder"],
+              desktopFolders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
               desktopCommands: true,
             });
             yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
@@ -3648,7 +3904,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "current-edit-session",
-            desktopFolders: ["current-folder"],
+            desktopFolders: [{ name: "current-folder", path: "/home/test/current-folder" }],
             desktopCommands: true,
           }),
         ),
@@ -3706,8 +3962,9 @@ describe("local tools on the user's machine", () => {
         // the model read the file without the server ever touching it.
         expect(prompts).toHaveLength(2);
         expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
-        // The folder's name reaches the prompt; its path never existed here.
-        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder);
+        // The folder's real path reaches the prompt as the model's address;
+        // only the name outlives the attempt, in the generation config.
+        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder.path);
 
         const call = result.detail.toolCalls.at(-1)!;
         expect(call.toolName).toBe("read_local_file");
@@ -3730,6 +3987,80 @@ describe("local tools on the user's machine", () => {
     60_000,
   );
 
+  it("tells the model which files a send added to the workspace", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "A dump, plus two more." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const sent = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "can you check whats in this file?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [folder],
+            workspaceFiles: ["dump.sql.gz"],
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
+        ),
+      );
+      // The file is a name on the config row, and the prompt says what it
+      // means: without the line, the model is never told the workspace gained
+      // anything.
+      const config = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
+      );
+      expect(config?.workspaceFiles).toEqual(["dump.sql.gz"]);
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain(
+        "The user added this file to the workspace: dump.sql.gz",
+      );
+
+      const followUp = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "what was the file called?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [folder],
+            workspaceFiles: [],
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(followUp.assistantMessageId, 0)),
+        ),
+      );
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain(
+        "The user added this file to the workspace: dump.sql.gz",
+      );
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
   it("hands an image to a vision model as a file part, never as text in the row", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];
@@ -3748,7 +4079,7 @@ describe("local tools on the user's machine", () => {
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: visionModelId,
             content: "What is in the logo?",
             searchEnabled: false,
@@ -3804,8 +4135,7 @@ describe("local tools on the user's machine", () => {
 
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
-    authoringScript = (input) =>
-      authoringTool(input, "run_command", { command: "pnpm test", folder });
+    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
     try {
       const sent = await runtime.runPromise(send(seed, true));
       const result = await runtime.runPromise(
@@ -3843,7 +4173,7 @@ describe("local tools on the user's machine", () => {
 
       expect(result.waited).toEqual({
         name: "run_command",
-        args: { command: "pnpm test", folder },
+        args: { command: "pnpm test" },
       });
       expect(result.stopped).toBe(true);
       expect(result.late).toBe(false);
@@ -3876,7 +4206,10 @@ describe("local tools on the user's machine", () => {
           authoringFinish(),
         );
       asked.add(key);
-      return authoringTool(input, "write_local_file", { path: `${folder}/note.md`, text: "hi" });
+      return authoringTool(input, "write_local_file", {
+        path: `${folder.path}/note.md`,
+        text: "hi",
+      });
     };
     try {
       const outcome = await runtime.runPromise(
@@ -3894,7 +4227,7 @@ describe("local tools on the user's machine", () => {
               const conversation = yield* workConversation(userId);
               const sent = yield* service.sendMessage({
                 userId,
-                conversationId: conversation.id,
+                conversation: { kind: "existing", id: conversation.id },
                 modelId: textModelId,
                 content: "Write the note.",
                 searchEnabled: false,
@@ -4006,13 +4339,12 @@ describe("local tools on the user's machine", () => {
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: null,
+            conversation: { kind: "new", id: uuidv7(), mode: "work" },
             modelId: textModelId,
             content: "Start work.",
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            mode: "work",
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
             desktopFolders: [folder],
@@ -4036,7 +4368,7 @@ describe("local tools on the user's machine", () => {
           Effect.flatMap(ChatService, (service) =>
             service.sendMessage({
               userId: seed.userId,
-              conversationId: created.conversationId,
+              conversation: { kind: "existing", id: created.conversationId },
               modelId: textModelId,
               content: "Keep going.",
               searchEnabled: false,
@@ -4066,7 +4398,7 @@ describe("local tools on the user's machine", () => {
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: created.conversationId,
+            conversation: { kind: "existing", id: created.conversationId },
             modelId: textModelId,
             content: "Keep going.",
             searchEnabled: false,
@@ -4095,16 +4427,15 @@ describe("local tools on the user's machine", () => {
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: plainConversation.id,
+            conversation: { kind: "existing", id: plainConversation.id },
             modelId: textModelId,
             content: "Hello.",
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            mode: "work",
             fromDesktop: true,
             desktopExecutorId: "ignored-session",
-            desktopFolders: ["ignored-folder"],
+            desktopFolders: [{ name: "ignored-folder", path: "/home/test/ignored-folder" }],
             desktopCommands: true,
           }),
         ),
@@ -4139,7 +4470,7 @@ describe("local tools on the user's machine", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Read my readme.",
             fromDesktop: true,

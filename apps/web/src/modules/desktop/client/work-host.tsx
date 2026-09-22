@@ -26,9 +26,10 @@ import {
   desktopWorkSnapshot,
   submitDesktopToolResult,
 } from "../server/functions.ts";
+import { abortWorkTurn, getWorkTurnReservation } from "~/modules/chat/server/functions.ts";
 import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
 import { type ApprovalChoice, type PendingKind } from "./approvals.ts";
-import { useDesktop, waitForDraftBinding } from "./bridge.ts";
+import { useDesktop } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
 import { WorkController } from "./work-controller.ts";
 
@@ -48,6 +49,62 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
   const queryClient = useQueryClient();
   const [revision, setRevision] = useState(0);
   const [failedAfter, setFailedAfter] = useState<number | null>(null);
+  const [reconciledClient, setReconciledClient] = useState<typeof client>(null);
+  const reconciled = client === null || reconciledClient === client;
+  useEffect(() => {
+    let live = true;
+    if (!client) return;
+    void Effect.runPromise(client.listPendingPromotions(undefined))
+      .then(async (pending) => {
+        for (const item of pending) {
+          let status;
+          try {
+            status = await getWorkTurnReservation({
+              data: { reservationId: item.reservationId },
+            });
+          } catch {
+            // The server may be offline or this origin may no longer own it.
+            continue;
+          }
+          if (status.status === "activated") {
+            await Effect.runPromise(
+              client.commitPromotion({
+                conversationId: item.conversationId,
+                reservationId: item.reservationId,
+              }),
+            ).catch(() => {});
+            continue;
+          }
+          if (status.status === "reserved") {
+            try {
+              await abortWorkTurn({ data: { reservationId: item.reservationId } });
+            } catch {
+              // The server may have accepted the abort. Keep the journal until
+              // its state can be observed instead of deleting live files.
+              continue;
+            }
+          }
+          await Effect.runPromise(
+            client.rollbackPromotion({
+              conversationId: item.conversationId,
+              reservationId: item.reservationId,
+            }),
+          ).catch(() => {});
+          await Effect.runPromise(
+            client.discardSubmission({
+              conversationId: item.conversationId,
+              submissionId: item.submissionId,
+            }),
+          ).catch(() => {});
+        }
+      })
+      .finally(() => {
+        if (live) setReconciledClient(client);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client]);
   const session = useQuery({
     queryKey: ["desktop-session"],
     enabled: !!client,
@@ -62,7 +119,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
   });
 
   const controller = useMemo(() => {
-    if (!client || !executorId) return null;
+    if (!client || !executorId || !reconciled) return null;
     const report = (error: unknown) => {
       console.error("Background work connection failed", error);
       // Recording which snapshot was newest lets a later one disprove this.
@@ -70,7 +127,6 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       void boundary?.reconcile();
     };
     return new WorkController({
-      beforeExecute: (conversationId) => waitForDraftBinding(conversationId),
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
       execute: (call, remainingMs) =>
         Schema.is(DesktopToolName)(call.name)
@@ -94,7 +150,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       changed: () => setRevision((current) => current + 1),
       error: report,
     });
-  }, [client, executorId, queryClient, boundary]);
+  }, [client, executorId, reconciled, queryClient, boundary]);
   // A snapshot that arrived after the failure disproves it, so any answered
   // request clears this, not only a delivered result.
   const stale = failedAfter !== null && failedAfter >= work.dataUpdatedAt;

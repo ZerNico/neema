@@ -43,6 +43,7 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Disclosure,
@@ -118,6 +119,11 @@ export interface DisplayMessage {
   questionActions?: QuestionActions | undefined;
   /** Decisions this message is waiting on, by tool-call id. */
   desktopApprovals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
+  /**
+   * The attempt's roots (name + absolute path), so delete lists group by the
+   * folder that owns each path. Absent on user bubbles and browser history.
+   */
+  desktopRoots?: ReadonlyArray<{ name: string; path: string }> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /**
@@ -143,6 +149,12 @@ export interface DisplayMessage {
   inheritedSources?: ToolSource[];
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
+  /**
+   * Files this send copied into the chat's workspace, by basename. The path
+   * joins against the machine's current workspace root at click time: the
+   * server stores names only, and a browser renders these inert.
+   */
+  workspaceFiles?: ReadonlyArray<string>;
   /** Edit this completed user message. */
   onEdit?: () => void;
   editDisabled?: boolean;
@@ -308,6 +320,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
       ) : (
         <div className="group/user flex w-full flex-col items-end">
           {(message.attachments && message.attachments.length > 0) ||
+          (message.workspaceFiles && message.workspaceFiles.length > 0) ||
           (message.collectionIds && message.collectionIds.length > 0) ||
           (message.skills && message.skills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
@@ -332,6 +345,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
                   href={attachmentUrl(attachment.id)}
                   preview={attachmentUrl(attachment.id)}
                 />
+              ))}
+              {message.workspaceFiles?.map((name) => (
+                <WorkspaceFileChip key={name} fileName={name} />
               ))}
             </AttachmentChipRow>
           ) : null}
@@ -523,6 +539,7 @@ const AssistantBody = memo(function AssistantBody({
         <DesktopActivityBlock
           key={part.key}
           activity={part.activity}
+          roots={message.desktopRoots ?? []}
           {...(approval ? { approval } : {})}
         />
       );

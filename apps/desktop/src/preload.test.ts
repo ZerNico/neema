@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
-import { PROTOCOL_VERSION, type DesktopAuth, type DesktopChrome } from "@chat/desktop-rpc";
+import {
+  DROPPED_FILE_CHANNEL,
+  PROTOCOL_VERSION,
+  type DesktopAuth,
+  type DesktopChrome,
+} from "@chat/desktop-rpc";
 import {
   CHANGE_SERVER,
   CHROME_GET_STATE,
@@ -34,11 +39,13 @@ const probe = (
   const ipc = Object.assign(new EventEmitter(), {
     invoke: vi.fn(async (): Promise<unknown> => ({ fullscreen: true })),
   });
+  const webUtils = { getPathForFile: vi.fn(() => "") };
   const electron = {
     contextBridge: {
       exposeInMainWorld: (key: string, value: Record<string, unknown>) => exposed.set(key, value),
     },
     ipcRenderer: ipc,
+    webUtils,
   };
   const requireModule = vi.fn((name: string) => {
     if (name !== "electron") throw new Error(`Unavailable in sandbox: ${name}`);
@@ -57,7 +64,7 @@ const probe = (
     exports: {},
     module: { exports: {} },
   });
-  return { exposed, ipc, requireModule };
+  return { exposed, ipc, requireModule, webUtils };
 };
 
 describe("restricted bundled preloads", () => {
@@ -83,6 +90,31 @@ describe("restricted bundled preloads", () => {
     await chrome.setTheme("system");
     expect(ipc.invoke).toHaveBeenLastCalledWith(CHROME_SET_THEME, "system");
     expect(requireModule.mock.calls.every(([name]) => name === "electron")).toBe(true);
+  });
+
+  it("keeps a dropped file path inside preload and falls back for synthetic files", async () => {
+    const { exposed, ipc, webUtils } = probe("preload.ts", "https:");
+    const bridge = exposed.get("__chatDesktop")!;
+    const stage = bridge.stageDroppedFile as (file: object, payload: unknown) => Promise<unknown>;
+    const file = { name: "report.pdf" };
+    const payload = {
+      conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+      submissionId: "550e8400-e29b-41d4-a716-446655440000",
+      fileName: "report.pdf",
+    };
+
+    await expect(stage(file, payload)).resolves.toBeNull();
+    expect(ipc.invoke).not.toHaveBeenCalledWith(DROPPED_FILE_CHANNEL, expect.anything());
+
+    webUtils.getPathForFile.mockReturnValue("/Users/test/Downloads/report.pdf");
+    const reply = { ok: true, value: { name: "report.pdf", bytes: 12 } };
+    ipc.invoke.mockResolvedValueOnce(reply);
+    await expect(stage(file, payload)).resolves.toBe(reply);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(DROPPED_FILE_CHANNEL, {
+      payload,
+      sourcePath: "/Users/test/Downloads/report.pdf",
+    });
+    expect(bridge).not.toHaveProperty("filePathForFile");
   });
 
   it("withholds the server switch from every document while the server is pinned", () => {

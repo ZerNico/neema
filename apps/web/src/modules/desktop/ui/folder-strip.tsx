@@ -1,4 +1,9 @@
-import { Alert01Icon, Folder01Icon, FolderAddIcon, Shield01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert01Icon,
+  Folder01Icon,
+  FolderAddIcon,
+  Shield01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SandboxAvailability } from "@chat/desktop-rpc";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
@@ -75,6 +80,8 @@ export function FolderStrip({
           attention && "text-foreground border-warning/50 bg-warning/10",
         )}
       >
+        {/* The workspace is app-managed and needs no chip: it is always there,
+            so only the folders the user chose are worth showing. */}
         {status.folders.map((item) => (
           <DropdownMenu key={item.name}>
             <DropdownMenuTrigger
@@ -125,7 +132,7 @@ export function FolderStrip({
             {refusal}
           </span>
         ) : null}
-        {status.folders.length > 0 ? (
+        {status.folders.length > 0 || status.workspace ? (
           <>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
             {settings ? (

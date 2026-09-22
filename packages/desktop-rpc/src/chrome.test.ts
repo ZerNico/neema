@@ -11,6 +11,7 @@ it("has no chrome in server rendering, browsers, or existing desktop shells", ()
   const channel = {
     protocolVersion: PROTOCOL_VERSION,
     request: async () => ({ ok: true, value: null }),
+    stageDroppedFile: async () => null,
   };
   vi.stubGlobal("__chatDesktop", channel);
   expect(readDesktopChrome()).toBeNull();

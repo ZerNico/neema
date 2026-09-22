@@ -222,6 +222,11 @@ export class StreamEngine extends Context.Service<
       searchEnabled: boolean;
       generationId?: string | undefined;
       desktopExecutorId?: string | undefined;
+      /**
+       * The folders the sending machine named, paths included. Never stored:
+       * the paths exist for this attempt's prompt and tool traffic alone.
+       */
+      desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
       /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
@@ -352,6 +357,7 @@ export class StreamEngine extends Context.Service<
         searchEnabled: boolean;
         generationId?: string | undefined;
         desktopExecutorId?: string | undefined;
+        desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
@@ -377,12 +383,44 @@ export class StreamEngine extends Context.Service<
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
-        const completed = history.filter(
+        const rawCompleted = history.filter(
           (m) =>
             m.id !== input.messageId &&
             (m.status === "complete" ||
               (m.status !== "streaming" && !!m.assistantOutput?.files.length)),
         );
+        // Desktop sends carry their drops on the assistant attempt's config,
+        // not the user message text. Key each prior attempt's names back to its
+        // preceding user message, then add this attempt's own names to the last
+        // user message. Without this annotation the model never learns what its
+        // workspace gained.
+        const workspaceFilesByAttempt = yield* repo.listWorkspaceFilesByMessage(
+          rawCompleted
+            .filter((message) => message.role === "assistant")
+            .map((message) => message.id),
+        );
+        const workspaceFilesBySend = new Map<string, ReadonlyArray<string>>();
+        for (let index = 0; index < rawCompleted.length; index++) {
+          const files = workspaceFilesByAttempt.get(rawCompleted[index]!.id);
+          if (!files) continue;
+          for (let previous = index - 1; previous >= 0; previous--) {
+            const candidate = rawCompleted[previous]!;
+            if (candidate.role !== "user") continue;
+            workspaceFilesBySend.set(candidate.id, files);
+            break;
+          }
+        }
+        const currentSend = rawCompleted.at(-1);
+        if (
+          currentSend?.role === "user" &&
+          config.workspaceFiles &&
+          config.workspaceFiles.length > 0
+        )
+          workspaceFilesBySend.set(currentSend.id, config.workspaceFiles);
+        const completed = rawCompleted.map((message) => {
+          const files = workspaceFilesBySend.get(message.id);
+          return files ? Object.assign({}, message, { workspaceFiles: files }) : message;
+        });
         const readerUrls = extractUserMessageUrls(completed);
 
         // Conversation-scoped citations (Onyx-style): gather every source from
@@ -895,12 +933,12 @@ export class StreamEngine extends Context.Service<
               : []),
             // After the web hint, so the ranking between them is the last word.
             ...(researchTool ? [{ role: "system" as const, content: RESEARCH_APP_POLICY }] : []),
-            ...(desktopTools && config.desktopFolders
+            ...(desktopTools
               ? [
                   {
                     role: "system" as const,
                     content: desktopToolsSystemHint(
-                      config.desktopFolders,
+                      input.desktopFolders ?? [],
                       config.desktopCommands ?? false,
                     ),
                   },

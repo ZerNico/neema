@@ -212,7 +212,9 @@ const send = (input: {
     Effect.flatMap(ChatService, (chat) =>
       chat.sendMessage({
         userId: input.userId,
-        conversationId: input.conversationId ?? null,
+        conversation: input.conversationId
+          ? { kind: "existing", id: input.conversationId }
+          : { kind: "new", id: uuidv7(), mode: "chat" },
         modelId: input.modelId ?? smallModelId,
         content: input.content ?? "Summarize the notes.",
         searchEnabled: input.searchEnabled ?? false,
@@ -578,7 +580,7 @@ describe("knowledge-backed generations", () => {
             Effect.flatMap(ChatService, (chat) =>
               chat.sendMessage({
                 userId: owner,
-                conversationId: first.conversationId,
+                conversation: { kind: "existing", id: first.conversationId },
                 modelId: smallModelId,
                 content: "Again",
                 searchEnabled: false,
@@ -877,7 +879,7 @@ describe("knowledge-backed generations", () => {
             Effect.flatMap(ChatService, (chat) =>
               chat.sendMessage({
                 userId: recipient,
-                conversationId: first.conversationId,
+                conversation: { kind: "existing", id: first.conversationId },
                 modelId: smallModelId,
                 content: "Should not append",
                 searchEnabled: false,
@@ -995,7 +997,7 @@ describe("knowledge-backed generations", () => {
         Effect.flatMap(ChatService, (chat) =>
           chat.sendMessage({
             userId: owner,
-            conversationId: first.conversationId,
+            conversation: { kind: "existing", id: first.conversationId },
             modelId: researchModelId,
             searchEnabled: false,
             researchEnabled: false,
@@ -1304,7 +1306,7 @@ describe("knowledge-backed generations", () => {
         ChatService.use((chat) =>
           chat.sendMessage({
             userId: owner,
-            conversationId: sent.conversationId,
+            conversation: { kind: "existing", id: sent.conversationId },
             modelId: noToolModelId,
             searchEnabled: !searchEnabled,
             researchEnabled: false,
@@ -1337,7 +1339,7 @@ describe("knowledge-backed generations", () => {
       Effect.flatMap(ChatService, (chat) =>
         chat.sendMessage({
           userId: owner,
-          conversationId: sent.conversationId,
+          conversation: { kind: "existing", id: sent.conversationId },
           modelId,
           searchEnabled: false,
           researchEnabled: false,
@@ -1383,7 +1385,7 @@ describe("knowledge-backed generations", () => {
           Effect.flatMap(ChatService, (chat) =>
             chat.sendMessage({
               userId: stranger,
-              conversationId: null,
+              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
               modelId: smallModelId,
               content: "Hi",
               searchEnabled: false,

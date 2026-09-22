@@ -553,7 +553,7 @@ const send = (
   Effect.flatMap(ChatService, (service) =>
     service.sendMessage({
       userId,
-      conversationId,
+      conversation: { kind: "existing", id: conversationId },
       modelId,
       content,
       researchEnabled: true,
@@ -834,7 +834,7 @@ describe("deep research as a tool call", () => {
         return yield* ChatService.use((service) =>
           service.sendMessage({
             userId: input.userId,
-            conversationId: input.conversationId,
+            conversation: { kind: "existing", id: input.conversationId },
             modelId,
             questionResponse: { callId: call.id, response: { kind: "skip" } },
             searchEnabled: false,
@@ -888,7 +888,7 @@ describe("deep research as a tool call", () => {
       Effect.flatMap(ChatService, (service) =>
         service.sendMessage({
           userId: input.userId,
-          conversationId: input.conversationId,
+          conversation: { kind: "existing", id: input.conversationId },
           modelId,
           content: "Just answer.",
           researchEnabled: false,
@@ -1372,7 +1372,8 @@ describe("ending a run", () => {
         const repo = yield* ChatRepo;
         const db = yield* Db;
         const turn = yield* repo.createTurn({
-          ...input,
+          userId: input.userId,
+          conversation: { kind: "existing", id: input.conversationId },
           modelId,
           content: "first",
           attachmentIds: [],

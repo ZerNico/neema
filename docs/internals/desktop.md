@@ -2,8 +2,9 @@
 
 The Electron shell loads the deployed site and exposes an origin-checked,
 schema-derived bridge. The web application owns authentication; Electron owns
-folder grants, sandboxed local execution and native window controls. Absolute
-folder paths stay in the desktop profile, not in the server database.
+folder grants, sandboxed local execution and native window controls. Folder
+paths stay out of the server database; they live in the desktop profile and in
+attempt-scoped prompt and tool traffic only.
 
 The window uses `hiddenInset` on macOS and `hidden` with Window Controls Overlay
 on Windows/Linux, retaining standard controls rather than web replacements.
@@ -81,8 +82,7 @@ consent the verifier cannot supply for that path.
 
 Redemption creates a separate session for the desktop, ninety days long,
 and the shell renews it to a fresh ninety days on every authenticated mount
-through `/desktop/session/refresh`; Better Auth's own late refresh (from day
-84) would otherwise re-set the cookie to the browser's seven days. Refresh
+through `/desktop/session/refresh`; Better Auth's own late refresh (from day 84) would otherwise re-set the cookie to the browser's seven days. Refresh
 keys on the **stored** session user agent from redemption, not the request
 header. That gate is a convenience, not a boundary: any authenticated
 browser can mint and redeem a ticket and hold a 90-day session that way.
@@ -224,69 +224,163 @@ uploads settle. Draft text and skill chips stay live through that wait.
 
 `conversations.mode` is `chat | work`, fixed at creation and inherited by a
 branch, along with that chat's permission level. Work needs the desktop app,
-not a folder. Send, retry, edit and structured
+not a folder: every work conversation has an app-managed workspace that
+materializes on demand, so ready-empty means the workspace is there and empty,
+never that the chat is unusable. Send, retry, edit and structured
 answers all submit current desktop capabilities and executor identity. Work
 attempts without them are refused before rows are created or reset. Retry never
 revives an old attached-folder or command setting. Plain chat ignores local-tool
 capability fields. Browser Work history remains readable, with continuation
 actions disabled and server policy enforced independently.
 
-The server stores folder names per attempt (`desktop_folders`, an array),
-never paths. `folders.json` maps server origin plus conversation to local
-grants: ids are minted by the server the shell is connected to, so two servers
-can issue the same one, and a grant on one must not open the folder to the
-other. Writes are serialized and replaced by an atomic rename, so overlapping
-attach/detach cannot resurrect a detached folder after restart. Losing the
-file remains a supported outcome: every conversation asks again. The composer strip and submission share a
-conversation-keyed local query, cleared with the authenticated identity cache.
-On capable desktops, route loaders prepare Work conversation and draft folder
-state before the composer mounts. The hook consumes that cache without an immediate
-mount refetch or automatic retry. A failed first read opens the conversation with
-an inline folder retry, not a route error or empty grants. A later refetch that
-fails keeps the last successful status, so a blip on focus does not look like a
-missing folder or block send. Ready-empty is valid: a new
-machine can continue Work without file tools until folders are attached there.
-Folder loading and mutation state block new attempts without opening a second,
-animated warning inside the input. ChatView and NewChatView share that gate
-through `useWorkGate`; the composer is told `readOnly` rather than computing
-it again. Focus refresh does not remount the host.
+Each attempt is also stamped with the sending machine's id and display name
+(`desktop_machine_id` / `desktop_machine_name` on the generation config). The
+id is a per-install UUID the shell keeps in `machine.json`; a reinstall mints a
+new one, which is exactly the point: a chat whose latest attempt came from a
+machine this install does not know shows a dismissible banner naming it, with
+a take-over action that materializes this machine's workspace. Nothing is
+copied between machines, and the stamp is attempt metadata, never an address
+or a credential.
 
-Loader preparation holds a query observer so unmounting the outgoing composer for
-route pending UI cannot cancel the read the destination still needs. It respects
-explicit cancellation, pending folder mutations and draft rebinding. Mutations
-cancel older reads and update only their original cache entry; draft rebinding
-invalidates both draft and destination state before releasing dispatch. Local
-queries are neither server-rendered nor persisted in the web backend.
+The server persists folder and workspace-file names per attempt, never paths.
+Absolute paths cross it only in the attempt's system hint and desktop tool
+traffic, like file contents already do, so a conversation opened on another
+machine carries no stale addresses. `folders.json` maps server origin plus
+conversation to local grants: ids are minted by the connected server, so two
+servers can issue the same one and a grant on one must not open the folder to
+the other. Writes are serialized and replaced by an atomic rename, so
+concurrent attach and detach cannot resurrect a removed grant after restart.
+Losing the file remains supported: every conversation asks again.
 
-## Several folders, one file-tool address space
+The composer strip and submission share a conversation-keyed local query,
+cleared with the authenticated identity cache. Route loaders prepare Work
+folder state before the composer mounts. The hook consumes that cache without
+an immediate mount refetch or automatic retry. A failed first read opens the
+conversation with an inline retry rather than a route error or empty grants.
+A later failed refetch keeps the last successful status, so a focus-time blip
+does not look like a missing folder or block send. Ready-empty is valid: a new
+machine has its own empty workspace and can continue Work immediately, with
+user folders re-attached only when wanted. Folder loading and mutation state
+block new attempts without opening a second animated warning inside the input.
+`ChatView` and `NewChatView` share that gate through `useWorkGate`; the composer
+receives `readOnly` rather than recomputing it. Focus refresh does not remount
+the host.
 
-A model file path begins with an attached folder's basename, such as
-`site/src/index.ts`; `list_folder "."` lists the folders. Duplicate basenames are
-refused at choose and at rebind. A lost folder can be replaced by name from
-Choose it again. `find_files` names a matching folder and the files inside it,
-not only files whose own names match. `find_files` and `search_files` share the
-same glob address space: a pattern that starts with an attached folder name is
-scoped to that folder. This is a virtual address space for file tools, not a
-shell mount layout.
-`run_command` separately names its working folder. The shell sees real filesystem
-paths relative to that cwd; `other-folder/file` does not automatically resolve to
-another attached folder. Attached roots are writable under the command's sandbox
-policy, but are not remapped into virtual shell paths.
+## The workspace
 
-The two spaces contradict each other, so the system hint and the `run_command`
-description both spell out that a command leaves its folder's name out of its
-paths. Told only the file-tool rule, a model writes `cd site && python
-site/main.py`, which fails on both halves and costs two turns to learn.
+Beside the granted folders, every Work conversation has a local app-owned
+workspace under `<userData>/workspaces/<origin-hash>/<conversation-id>/`. The
+origin hash keeps servers separate. The conversation segment is always a
+canonical UUIDv7 and is validated again at the filesystem boundary. A new chat
+allocates its final UUIDv7 before its composer, folder state, or local files
+exist, so the first prompt already names the durable path and no draft path is
+ever renamed.
+
+The workspace is not a grant: the user did not pick it, it does not live in
+`folders.json`, the picker reserves the name `workspace`, and the strip shows
+only user-selected folders. Its directory is created lazily and nothing syncs
+between machines. It is always the first root in the desktop file-tool address
+space and the working directory for `run_command`, so a Work chat without a
+user folder can still read and write local files.
+
+Composer files do not enter that root when added. Each mounted Work composer
+owns a submission UUID and stages its files under
+`.staging/<conversation-id>/<submission-id>/`. The chip appears only after the
+copy lands there. Removing a chip removes its staged file, while abandoning a
+submission removes the staging directory. Staging directories are never tool
+roots, command allowances, branch inputs, or prompt paths. A send stores only
+the final basenames in the attempt generation config; the transcript renders
+them as local chips and resolves their metadata through a conversation-scoped
+React Query cache. Browser and foreign-machine chips remain inert.
+
+A pasted or synthetic file has no host path, so the renderer sends bounded
+base64 and the decoded limit is 50 MB. A real dropped `File` takes a separate
+preload channel: preload calls `webUtils.getPathForFile`, passes the path only
+to the main process, and returns only the staging receipt. The page never sees
+or submits that path. Main repeats the window, main-frame, and origin checks,
+accepts regular files only, copies rather than moves the source, and applies a
+512 MB limit. Both paths use a random same-filesystem temporary file and an
+exclusive hard link to choose a collision-free staged name atomically.
+
+A file-bearing send reserves the turn on the server before any staged file
+becomes model-visible. The reservation checks ownership, mode, live generation,
+and competing mutations without creating transcript rows. Promotion then
+hard-links the complete staged batch into the final workspace and records a
+local journal before exposing each link. Activation creates the turn and
+starts generation exactly once; it is idempotent if the response is lost.
+Commit removes the staging directory and journal. A definite rejection rolls
+back only final paths whose device and inode still match the staged file, which
+leaves the staged submission available for retry without deleting a later
+replacement. While a journal exists, neither one staged file nor the complete
+submission may be discarded because rollback needs those inodes as ownership
+proof.
+
+Promotion journals make ambiguous failures recoverable. Before the desktop
+host accepts tool work, it asks the authenticated server about each pending
+journal. Activated reservations commit locally. A still-reserved orphan is
+rolled back only after its abort response succeeds; an ambiguous abort retains
+the journal, final links, and staging until the server state can be observed.
+Terminal reservations are rolled back. If the server is unavailable or no
+longer authorizes the journal, it is retained rather than guessed away. Stale
+unowned staging, temporary journal files, and partial clones are swept at shell
+startup and whenever the shell connects or switches origin. Pending promotion
+journals are protected from age-based cleanup.
+
+Branching copies only the committed conversation root. The branch flow awaits
+copied folder grants and `cloneWorkspace` before navigating; failure still
+opens the branch and reports that its local files were omitted. Clone
+measurement independently limits total bytes, visited entries, and nesting
+depth, does not descend through symlink directories, and fails closed when a
+limit truncates the walk. Copying targets a random sibling `.partial-*`
+directory and publishes it with one final rename. All app-owned creation,
+promotion, deletion, and clone publication for a destination share one local
+workspace lock, and cloning refuses even an empty existing destination. A
+failed copy therefore leaves no partial destination blocking retry without
+silently replacing another app operation. Deleting a conversation still fires a
+best-effort `discardWorkspace`; there is deliberately no server-validity sweep
+because the shell cannot safely infer which committed workspace ids are dead.
+
+Loader preparation holds a query observer so pending route UI cannot cancel a
+read the destination still needs. It respects explicit cancellation and
+pending folder mutations. Mutations cancel older reads and update only their
+original cache entry. Local queries are neither server-rendered nor persisted
+in the web backend.
+
+## Several folders, one absolute address space
+
+Every tool the model sees takes and returns real absolute POSIX paths, the
+way Cursor and Claude Code work. The system hint names each root with its
+path — the workspace first, then the attached folders — and
+`list_folder "."` lists the roots by those paths. Find and search return
+absolute paths, so a result can be fed straight back into any other tool,
+and `cp` between an attached folder and the workspace needs no second
+mechanism. Names survive for display alone: the strip's chips, the
+transcript's short `name/relative` receipts, and the reserved `workspace`
+label the picker refuses for a user folder. Duplicate basenames are refused
+at choose and at rebind so a receipt's owner is unambiguous; a lost folder
+can be replaced by name from Choose it again. `find_files` names a matching
+folder and the files inside it, not only files whose own names match.
+
+`run_command` takes no folder: the command starts in the chat's workspace,
+and the sandbox's write allowance covers the workspace plus every attached
+folder, so `cd` and `cp` across roots work inside one address space. Each
+command is one fresh sandboxed process; there is no persistent shell.
 
 ## Containment and command isolation
 
-File paths pass through `resolveAcross` and `resolveInFolder`. Absolute paths are
-refused, existing ancestors are inspected with `lstat`, and `realpath` establishes
-containment. A dangling symlink is not treated as an absent ordinary path: its
-resolution fails closed. Refusals name the path the caller supplied, never a
-host absolute. Only `ENOENT` allows walking to a parent. Moves check
-both ends. This does not claim protection against every concurrent filesystem
-replacement or hard-link alias.
+File paths pass through `resolveAmongRoots` and `resolveInFolder`. The
+requested string is normalized with `resolve()`, matched against each root
+textually, and proven contained with `realpath`; existing ancestors are
+inspected with `lstat`, and a dangling symlink is not treated as an absent
+ordinary path: its resolution fails closed. A root that the requested string
+never textually sat inside answers "not mine" and the next root is tried;
+when the string did sit inside a root and resolved outside anyway — a
+symlink escape or a `..` walk — that refusal is final, so an escape landing
+inside a neighbouring root still fails. Refusals name the path the caller
+supplied, never a host absolute the caller did not already know. Only
+`ENOENT` allows walking to a parent. Moves check both ends. This does not
+claim protection against every concurrent filesystem replacement or
+hard-link alias.
 
 Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
 Its manager is one per process with one proxy and one live policy, which is
@@ -301,7 +395,8 @@ and a list of toolchain locations (version managers, package stores, caches,
 git's identity) is re-allowed inside it, with the few credential files that
 sit in those regions denied again. The rest of the disk stays readable. Each
 call adds its attached folders to both the read and the write allow lists;
-they are the only writable places. A tool installed somewhere unusual fails
+they and the chat's workspace (picked up per call through `rootsFor`) are
+the only writable places. A tool installed somewhere unusual fails
 with a denial that names the path, which is preferred over a readable
 `~/.git-credentials`.
 
