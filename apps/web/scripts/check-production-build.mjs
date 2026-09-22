@@ -109,7 +109,8 @@ console.log("Checked the production custom tool worker.");
 
 const publicDirectory = resolve(".output/public");
 const shell = await readFile(resolve(publicDirectory, "_shell.html"), "utf8");
-if (!shell.includes("Loading Chat…") || !shell.includes('id="desktop-titlebar-content"')) {
+// The startup frame is the spinner alone (StartupPending) plus the titlebar target.
+if (!shell.includes('data-slot="spinner"') || !shell.includes('id="desktop-titlebar-content"')) {
   throw new Error("The production SPA shell is missing its startup frame.");
 }
 const assets = new Set(

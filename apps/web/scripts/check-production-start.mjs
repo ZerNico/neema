@@ -60,7 +60,7 @@ try {
     assert.match(csp, /default-src 'self'/);
     assert.match(csp, /script-src 'self' 'sha256-/);
     assert.doesNotMatch(csp, /script-src [^;]*'unsafe-inline'/);
-    assert.match(html, /Loading Chat…/);
+    assert.match(html, /data-slot="spinner"/);
     assert.match(html, /id="desktop-titlebar-content"/);
     console.log(`Shell: ${path}`);
   }
@@ -71,7 +71,7 @@ try {
   ]) {
     const response = await fetch(new URL(path, origin), { signal: AbortSignal.timeout(10000) });
     assert.ok(response.status >= 400, `${path} unexpectedly returned ${response.status}`);
-    assert.doesNotMatch(await response.text(), /Loading Chat…/);
+    assert.doesNotMatch(await response.text(), /data-slot="spinner"/);
     console.log(`Not a shell: ${path} (${response.status})`);
   }
 } finally {
