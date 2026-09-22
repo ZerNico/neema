@@ -32,7 +32,7 @@ export function HelpPage() {
         </Button>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-col gap-4">
         {FEATURES.map((feature) => (
           <Card key={feature.key} size="sm">
             <CardHeader>
