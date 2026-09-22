@@ -111,7 +111,7 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return "Deleting files";
     }
     case "run_command":
-      return what ? `Running ${what}` : "Running a command";
+      return what ? `Running ${what}` : "Running a program";
   }
 };
 
@@ -177,7 +177,7 @@ const approvalTitle = (
           ? "Search this computer"
           : "Read this file";
     case "command":
-      return "Run on this computer";
+      return "Run a program on this computer";
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
@@ -231,7 +231,7 @@ function DeletePathList({
 }
 
 const blanketLabel = (kind: PendingKind) =>
-  kind === "command" ? "Allow commands for this chat" : "Allow edits for this chat";
+  kind === "command" ? "Let it run programs for this chat" : "Let it change files for this chat";
 
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
