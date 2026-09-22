@@ -113,7 +113,7 @@ const lifecycle = makeLifecycle({
       buttons: ["Keep working", "Quit"],
       defaultId: 0,
       cancelId: 0,
-      title: "Quit Chat?",
+      title: "Quit neema?",
       message: "Work is still active. Quitting stops work on this computer.",
       detail: "Close the window instead to keep working in the background.",
     });
@@ -173,7 +173,7 @@ const desktopShell: Shell = {
         : state.active > 0
           ? `${state.active} active`
           : "No active work";
-    tray?.setToolTip(`Chat: ${status}`);
+    tray?.setToolTip(`neema: ${status}`);
     app.dock?.setBadge(state.needsApproval > 0 ? String(state.needsApproval) : "");
   },
   pickDirectory: async () => {
@@ -444,15 +444,15 @@ void app.whenReady().then(async () => {
   // The pinned dev server is decided from the environment, before start() runs.
   const pinned = Boolean(process.env.CHAT_DESKTOP_SERVER);
   const actions = [
-    { label: "Show Chat", click: restoreWindow },
+    { label: "Show neema", click: restoreWindow },
     ...(pinned
       ? []
       : [{ label: "Connect to a different server…", click: () => void chooseServer() }]),
-    { label: "Quit Chat", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
+    { label: "Quit neema", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
   ];
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { label: "Chat", submenu: actions },
+      { label: "neema", submenu: actions },
       { role: "editMenu" },
       { role: "viewMenu" },
       { role: "windowMenu" },
@@ -474,7 +474,7 @@ void app.whenReady().then(async () => {
   const icon = nativeImage.createFromBitmap(pixels, { width: 18, height: 18 });
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip("Chat");
+  tray.setToolTip("neema");
   tray.setContextMenu(Menu.buildFromTemplate(actions));
   tray.on("click", restoreWindow);
 

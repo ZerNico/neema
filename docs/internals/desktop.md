@@ -86,7 +86,7 @@ through `/desktop/session/refresh`; Better Auth's own late refresh (from day 84)
 keys on the **stored** session user agent from redemption, not the request
 header. That gate is a convenience, not a boundary: any authenticated
 browser can mint and redeem a ticket and hold a 90-day session that way.
-The Devices label "Chat Desktop on …" reads that same stored token. Revoking
+The Devices label "neema Desktop on …" reads that same stored token. Revoking
 either session leaves the other valid. After redeeming, the page does what
 `IdentityBoundary` does on an identity change: clear the query cache and
 replace the document.

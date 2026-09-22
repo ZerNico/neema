@@ -49,7 +49,7 @@ describe("DesktopSignInPage", () => {
 
     await waitFor(() => expect(mint).toHaveBeenCalledWith({ challenge: "abc" }));
     expect(await screen.findByTestId("ticket-code")).toHaveTextContent("K7MX4-QPD9R-TA2HC-VB3N5");
-    expect(screen.getByRole("link", { name: "Open Chat Desktop" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open neema Desktop" })).toHaveAttribute(
       "href",
       `chat-desktop://sign-in?ticket=${TICKET}`,
     );

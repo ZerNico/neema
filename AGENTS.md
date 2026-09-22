@@ -305,7 +305,7 @@ Differs from most Effect 3 material online.
 - Provider API keys are AES-256-GCM at rest (`PROVIDER_KEY_SECRET`); ciphertext
   never leaves the server.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
-  ticket. The 90-day refresh and the Devices label "Chat Desktop on …" key on
+  ticket. The 90-day refresh and the Devices label "neema Desktop on …" key on
   the `ChatDesktop/` token stored on that session at redemption, not on the
   current request's user agent. A work attempt additionally stamps the sending
   install's machine id onto its generation config — attempt metadata for the

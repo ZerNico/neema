@@ -30,7 +30,7 @@ export function describeSession(userAgent: string | null | undefined): string {
           : /Linux|X11/.test(ua)
             ? "Linux"
             : null;
-  if (hasDesktopMarker(ua)) return os ? `Chat Desktop on ${os}` : "Chat Desktop";
+  if (hasDesktopMarker(ua)) return os ? `neema Desktop on ${os}` : "neema Desktop";
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /OPR\//.test(ua)
@@ -92,7 +92,7 @@ export function DevicesPage() {
                   await confirm({
                     title: "Sign out other devices?",
                     description:
-                      "Every device except this one will have to sign in again, including Chat Desktop.",
+                      "Every device except this one will have to sign in again, including neema Desktop.",
                     confirmLabel: "Sign out others",
                   })
                 )
@@ -150,7 +150,7 @@ export function DevicesPage() {
       </Section>
       <Section
         title="Add a desktop"
-        description="Generate a code and paste it into Chat Desktop’s sign-in screen. It works once and only for a few minutes."
+        description="Generate a code and paste it into neema Desktop’s sign-in screen. It works once and only for a few minutes."
       >
         {mint.data ? (
           <TicketCode

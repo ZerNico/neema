@@ -40,7 +40,7 @@ function DesktopSignInRoute() {
       <div className="flex min-h-svh items-center justify-center p-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>Sign in to Chat Desktop</CardTitle>
+            <CardTitle>Sign in to neema Desktop</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground text-sm">Open this page in your browser.</p>

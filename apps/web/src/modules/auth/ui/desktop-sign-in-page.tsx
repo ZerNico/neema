@@ -41,7 +41,7 @@ export function DesktopSignInPage({
     <div className="flex min-h-svh items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in to Chat Desktop</CardTitle>
+          <CardTitle>Sign in to neema Desktop</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {ticket ? (
@@ -50,7 +50,7 @@ export function DesktopSignInPage({
                 href={`${DESKTOP_SIGN_IN_SCHEME_URL}?ticket=${ticket.ticket}`}
                 className={cn(buttonVariants({ variant: "default" }), "w-full")}
               >
-                Open Chat Desktop
+                Open neema Desktop
               </a>
               <p className="text-muted-foreground text-sm">
                 If the app doesn’t open, paste this code into it.

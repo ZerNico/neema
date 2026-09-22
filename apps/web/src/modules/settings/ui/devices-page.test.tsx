@@ -75,9 +75,9 @@ beforeEach(() => {
 
 describe("describeSession", () => {
   it("names the desktop app by platform and browsers by name", () => {
-    expect(describeSession(DESKTOP_UA)).toBe("Chat Desktop on macOS");
+    expect(describeSession(DESKTOP_UA)).toBe("neema Desktop on macOS");
     expect(describeSession(CHROME_UA)).toBe("Chrome on Windows");
-    expect(describeSession("ChatDesktop/1")).toBe("Chat Desktop");
+    expect(describeSession("ChatDesktop/1")).toBe("neema Desktop");
     expect(describeSession(null)).toBe("Browser");
   });
 });
@@ -86,10 +86,10 @@ describe("DevicesPage", () => {
   it("lists every session, marks this device and offers revoke only for the others", async () => {
     renderPage();
 
-    const rows = await screen.findAllByText(/Chat Desktop on macOS|Chrome on Windows/);
+    const rows = await screen.findAllByText(/neema Desktop on macOS|Chrome on Windows/);
     expect(rows.map((row) => row.textContent)).toEqual([
       "Chrome on Windows",
-      "Chat Desktop on macOS",
+      "neema Desktop on macOS",
     ]);
     expect(screen.getByText("This device")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1);
@@ -102,7 +102,7 @@ describe("DevicesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Revoke" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Sign out Chat Desktop on macOS?");
+    expect(dialog).toHaveTextContent("Sign out neema Desktop on macOS?");
     await user.click(within(dialog).getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(revokeDesktopDevice).toHaveBeenCalledWith({ id: "desktop" }));
