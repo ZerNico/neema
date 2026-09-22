@@ -13,16 +13,39 @@ const make = (cron: string, timezone: string) =>
 export const nextFireAt = (cron: string, timezone: string, from: Date): Date | null =>
   make(cron, timezone).nextRun(from);
 
+/**
+ * Every fire starts a conversation and a model call, and the tick runs twice a
+ * minute, so a denser cron would spend without bound. The picker's finest
+ * option is hourly; this holds the model and the API to the same floor.
+ */
+export const MIN_FIRE_GAP_MS = 60 * 60 * 1000;
+const GAP_SAMPLE = 48;
+
 /** Null when valid; a short reason otherwise, safe to hand back to a model. */
 export const validateCron = (cron: string, timezone: string): string | null => {
+  // croner also takes a leading seconds field, which would fire every tick.
+  if (cron.trim().split(/\s+/).length !== 5)
+    return "use a 5-field cron expression (minute hour day month weekday)";
   try {
     const instance = make(cron, timezone);
     if (!instance.nextRun(new Date(0)) && !hasFarFutureRun(cron, timezone))
       return "this expression never fires";
+    if (firesTooOften(instance)) return "a schedule can run at most once an hour";
     return null;
   } catch (error) {
     return error instanceof Error ? error.message.slice(0, 200) : "invalid cron expression";
   }
+};
+
+const firesTooOften = (instance: Cron) => {
+  let previous = instance.nextRun();
+  for (let index = 0; previous && index < GAP_SAMPLE; index += 1) {
+    const next = instance.nextRun(previous);
+    if (!next) return false;
+    if (next.getTime() - previous.getTime() < MIN_FIRE_GAP_MS) return true;
+    previous = next;
+  }
+  return false;
 };
 
 // croner reports a never-firing expression (e.g. Feb 30) as no next run; probe

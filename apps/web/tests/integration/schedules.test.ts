@@ -94,12 +94,12 @@ describe("schedule claims", () => {
       Effect.gen(function* () {
         const userId = yield* makeUser();
         const repo = yield* ScheduleRepo;
-        // A 20-minute cadence two hours behind: six missed instants, one claim.
+        // An hourly cadence six hours behind: six missed instants, one claim.
         const row = yield* insert(userId, {
-          cron: "*/20 * * * *",
-          nextFireAt: new Date(Date.now() - 2 * 3_600_000),
+          cron: "0 * * * *",
+          nextFireAt: new Date(Date.now() - 6 * 3_600_000),
         });
-        const nextFor = () => new Date(Date.now() + 1_200_000);
+        const nextFor = () => new Date(Date.now() + 3_600_000);
         const claimed = yield* repo.claimDue(25, nextFor);
         return { claimed: claimed.filter((r) => r.id === row.id) };
       }),

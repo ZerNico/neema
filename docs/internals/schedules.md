@@ -12,7 +12,12 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   7am"), `cron` holds the 5-field expression, and `timezone` is the IANA name the cron is
   interpreted in (croner, via `cron.ts`, the only construction site). A one-time task is a
   single-fire cron plus `endAt` at the fire instant; there is no second cadence
-  representation.
+  representation. The editor's frequency picker is a view of that cron (`cadence.ts`), so
+  it offers only what cron repeats exactly: hour and month steps that divide evenly, never
+  every N days, weeks or years. A cron it cannot read is shown as set in chat, not edited.
+- `validateCron` is the one gate for every writer (save, preview, the model's draft tools):
+  exactly five fields, since croner would take a seconds field, and at most one fire an
+  hour (`MIN_FIRE_GAP_MS`). Each fire is a conversation and a model call.
 - `ScheduleService.tick` runs every 30 seconds (`forkScoped` in the app layer, so HMR disposal
   kills it). The claim is one transaction: due rows by database clock (`next_fire_at <=
   now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its

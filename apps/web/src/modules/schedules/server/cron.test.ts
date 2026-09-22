@@ -46,9 +46,21 @@ describe("cron", () => {
     expect(validateCron("not a cron", "UTC")).toBeTruthy();
     expect(validateCron("0 7 * *", "UTC")).toBeTruthy();
     expect(validateCron("0 0 30 2 *", "UTC")).toBe("this expression never fires");
-    expect(validateCron("*/20 * * * *", "UTC")).toBeNull();
+    expect(validateCron("0 */2 * * *", "UTC")).toBeNull();
     expect(validateCron("0 7 * * 1-5", "Europe/Berlin")).toBeNull();
     expect(validateCron("0 7 * * *", "Not/AZone")).toBeTruthy();
+  });
+
+  it("holds every cadence to at most one fire an hour", () => {
+    // A leading seconds field would fire on every tick.
+    expect(validateCron("* * * * * *", "UTC")).toMatch(/5-field/);
+    expect(validateCron("*/10 * * * * *", "UTC")).toMatch(/5-field/);
+    expect(validateCron("* * * * *", "UTC")).toMatch(/once an hour/);
+    expect(validateCron("*/20 * * * *", "UTC")).toMatch(/once an hour/);
+    // Two minutes apart once a day is still two fires within the hour.
+    expect(validateCron("0,1 9 * * *", "UTC")).toMatch(/once an hour/);
+    expect(validateCron("0 * * * *", "UTC")).toBeNull();
+    expect(validateCron("0 9 L * *", "Europe/Berlin")).toBeNull();
   });
 
   it("accepts a valid expression whose first fire is far ahead", () => {
