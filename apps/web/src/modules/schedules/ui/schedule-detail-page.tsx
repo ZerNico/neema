@@ -1,9 +1,10 @@
-import { Delete02Icon, PlayIcon } from "@hugeicons/core-free-icons";
+import { Delete02Icon, MoreHorizontalIcon, PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useStore } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useState } from "react";
+import { useId } from "react";
 import { toast } from "sonner";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
 import { ScheduleSettings } from "../schema.ts";
@@ -18,10 +19,15 @@ import { ScheduleSettingsFields } from "./schedule-settings-fields.tsx";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { ErrorState, FormActions, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
+import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import { PendingButton } from "~/ui/pending-button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 
 const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -110,12 +116,11 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     mutationFn: () => deleteSchedule({ data: { scheduleId } }),
     onError: () => toast.error("Could not delete the schedule."),
   });
-  const [saving, setSaving] = useState(false);
+  const formId = useId();
   const form = useAppForm({
     defaultValues: scheduleToSettings(schedule),
     validators: { onSubmit: Schema.toStandardSchemaV1(ScheduleSettings) },
     onSubmit: async ({ value, formApi }) => {
-      setSaving(true);
       try {
         await updateSchedule({ data: { scheduleId, settings: value } });
         if (JSON.stringify(formApi.state.values) === JSON.stringify(value))
@@ -124,11 +129,10 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         toast.success("Schedule saved.");
       } catch (error) {
         toast.error(message(error, "Could not save the schedule."));
-      } finally {
-        setSaving(false);
       }
     },
   });
+  const dirty = useStore(form.store, (state) => state.isDirty);
   return (
     <Page
       title={schedule.name}
@@ -136,6 +140,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       backLabel="Schedules"
       actions={
         <>
+          {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
           <Button
             size="sm"
             variant="outline"
@@ -153,35 +158,51 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
             Run now
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={remove.isPending}
-            onClick={() => {
-              void confirm({
-                title: `Delete “${schedule.name}”?`,
-                description:
-                  "Its past run conversations are deleted with it. No future runs will fire.",
-                confirmLabel: "Delete schedule",
-              }).then(async (confirmed) => {
-                if (!confirmed) return;
-                try {
-                  await remove.mutateAsync();
-                  await queryClient.invalidateQueries({ queryKey: ["schedules"] });
-                  await navigate({ to: "/schedules" });
-                } catch {
-                  // remove.onError already toasted
-                }
-              });
-            }}
-          >
-            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} data-icon="inline-start" />
-            Delete
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="icon-sm" variant="ghost" aria-label="Schedule actions" />}
+            >
+              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {/* A menu item closes on activation, so it cannot carry a
+                spinner; disabling it is the pending signal. */}
+              <DropdownMenuItem
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={() => {
+                  void confirm({
+                    title: `Delete “${schedule.name}”?`,
+                    description:
+                      "Its past run conversations are deleted with it. No future runs will fire.",
+                    confirmLabel: "Delete schedule",
+                  }).then(async (confirmed) => {
+                    if (!confirmed) return;
+                    try {
+                      await remove.mutateAsync();
+                      await queryClient.invalidateQueries({ queryKey: ["schedules"] });
+                      await navigate({ to: "/schedules" });
+                    } catch {
+                      // remove.onError already toasted
+                    }
+                  });
+                }}
+              >
+                <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                Delete schedule
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <form.AppForm>
+            <form.SubmitButton size="sm" form={formId}>
+              Save changes
+            </form.SubmitButton>
+          </form.AppForm>
         </>
       }
     >
       <form
+        id={formId}
         className="flex flex-col gap-6"
         onSubmit={(event) => {
           event.preventDefault();
@@ -189,11 +210,6 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         }}
       >
         <ScheduleSettingsFields form={form} />
-        <FormActions>
-          <PendingButton type="submit" size="sm" pending={saving}>
-            Save changes
-          </PendingButton>
-        </FormActions>
       </form>
       <Section title="Runs">
         {runs.isError ? (
