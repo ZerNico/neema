@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-const BASE_TITLE = "Chat";
+const BASE_TITLE = "neema";
 
 /**
  * Sets the browser tab title for as long as the component is mounted, then
