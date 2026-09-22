@@ -51,10 +51,16 @@ beforeEach(() => vi.clearAllMocks());
 describe("FeatureTourProvider", () => {
   it("welcomes someone new through every feature and remembers a skip", async () => {
     renderTour([]);
-    expect(await screen.findByText(`Welcome to neema · 1 of ${FEATURE_KEYS.length}`)).toBeVisible();
+    // A general welcome first, then one page per feature.
+    expect(await screen.findByRole("heading", { name: "Welcome to neema" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Show me" }));
+    expect(screen.getByText(`Welcome to neema · 2 of ${FEATURE_KEYS.length + 1}`)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Agents" })).toBeVisible();
+    expect(screen.getByText(/Contract reviewer/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open Agents" })).toHaveAttribute("href", "/agents");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("heading", { name: "Knowledge" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     await waitFor(() =>
@@ -95,7 +101,7 @@ describe("FeatureTourProvider", () => {
       "/settings/memory",
     );
     fireEvent.click(screen.getByRole("button", { name: "Show the tour again" }));
-    expect(await screen.findByText(`Welcome to neema · 1 of ${FEATURE_KEYS.length}`)).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Welcome to neema" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(markFeaturesSeen).not.toHaveBeenCalled();

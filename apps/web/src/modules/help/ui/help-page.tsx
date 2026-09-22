@@ -28,8 +28,14 @@ export function HelpPage() {
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <h2 className="text-sm font-medium">{feature.title}</h2>
               <p className="text-muted-foreground text-sm leading-relaxed">{feature.body}</p>
+              <p className="text-muted-foreground text-sm leading-relaxed">
+                For example: {feature.example}
+              </p>
             </div>
-            <Link to={feature.href} className={buttonVariants({ size: "sm", variant: "ghost" })}>
+            <Link
+              to={feature.href}
+              className={buttonVariants({ size: "sm", variant: "secondary" })}
+            >
               {feature.open}
             </Link>
           </ListRow>

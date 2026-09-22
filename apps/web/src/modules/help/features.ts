@@ -15,6 +15,8 @@ export interface Feature {
   title: string;
   summary: string;
   body: string;
+  /** One concrete case, so the idea lands without having to picture it. */
+  example: string;
   href: "/agents" | "/knowledge" | "/skills" | "/schedules" | "/settings/memory";
   /** The link's words, naming the place it opens. */
   open: string;
@@ -32,6 +34,8 @@ export const FEATURES: readonly Feature[] = [
     title: "Agents",
     summary: "Helpers set up for one kind of task.",
     body: "An agent keeps how you want a task done: its instructions, the documents it may look at and the tools it may use. Pick one when you start a chat and it works that way every time.",
+    example:
+      "A “Contract reviewer” that checks every contract you share against your company’s rules.",
     href: "/agents",
     open: "Open Agents",
   },
@@ -41,6 +45,8 @@ export const FEATURES: readonly Feature[] = [
     title: "Knowledge",
     summary: "Your documents, ready to use in chats.",
     body: "Put documents and notes into a collection. In a chat, the assistant can look things up in them and shows which document each answer came from.",
+    example:
+      "A “Company handbook” collection, so you can ask how many vacation days you have left.",
     href: "/knowledge",
     open: "Open Knowledge",
   },
@@ -50,6 +56,7 @@ export const FEATURES: readonly Feature[] = [
     title: "Skills",
     summary: "Know-how the assistant picks up when it’s needed.",
     body: "A skill is a short set of instructions for one kind of job, like reviewing a contract. The assistant uses it on its own when it fits, or when you choose it in a chat.",
+    example: "A “Meeting notes” skill that turns any transcript into decisions and to-dos.",
     href: "/skills",
     open: "Open Skills",
   },
@@ -59,6 +66,7 @@ export const FEATURES: readonly Feature[] = [
     title: "Schedules",
     summary: "Tasks that run on their own.",
     body: "Ask for something to happen regularly, like a news summary every weekday at 07:00. Each run starts a new chat, which you can open from the schedule.",
+    example: "“Every Monday at 08:00, sum up last week’s news about our industry.”",
     href: "/schedules",
     open: "Open Schedules",
   },
@@ -68,6 +76,7 @@ export const FEATURES: readonly Feature[] = [
     title: "Memory",
     summary: "Things the assistant remembers about you.",
     body: "The assistant can save small facts you share, like how you like answers written, and use them in later chats. You can see, change or delete them in Settings.",
+    example: "“I prefer short answers” is remembered, and every later chat keeps to it.",
     href: "/settings/memory",
     open: "Open Memory",
   },
