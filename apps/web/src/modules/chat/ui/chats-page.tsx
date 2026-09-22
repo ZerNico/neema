@@ -2,7 +2,7 @@ import { BubbleChatIcon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/cor
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { conversationsInfiniteQuery } from "../client/queries.ts";
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
 import { createTitleRevealRegistry } from "./conversation-title.tsx";
@@ -15,17 +15,7 @@ import { Button, buttonVariants } from "~/ui/primitives/button";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
-
-// Only consumer of a debounce in the repo, so it lives here rather than
-// becoming another shared helper.
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return settled;
-}
+import { useDebounced } from "~/ui/use-debounced.ts";
 
 export function ChatsPage() {
   const [search, setSearch] = useState("");
