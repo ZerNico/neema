@@ -125,7 +125,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
       if (/\.zip$/iu.test(file.name)) {
         const files = readSkillArchive(bytes);
         const roots = skillPackageRoots(files);
-        if (!roots.length) throw new Error("ZIP does not contain a SKILL.md package.");
+        if (!roots.length) throw new Error("This .zip doesn’t contain a skill.");
         setArchive(files);
         setUploaded(roots.length === 1 ? selectSkillPackage(files, roots[0]!) : null);
       } else if (/\.md$/iu.test(file.name)) {
@@ -133,9 +133,9 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         setUploaded(
           validateSkillPackage([{ path: "SKILL.md", content: decodeSkillText(bytes, file.name) }]),
         );
-      } else throw new Error("Upload a Markdown (.md) or ZIP file.");
+      } else throw new Error("Upload a skill file (.md) or a .zip.");
     } catch (cause) {
-      setError(message(cause, "Could not read this package."));
+      setError(message(cause, "Could not read this skill."));
     } finally {
       setReading(false);
     }
@@ -174,7 +174,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     : undefined;
   const waiting = remote.isFetching || reading;
   const failure =
-    error ?? (remote.error ? message(remote.error, "Could not read this package.") : null);
+    error ?? (remote.error ? message(remote.error, "Could not read this skill.") : null);
   return (
     <Page
       title={review ? review.metadata.name : (opened?.name ?? "Import skill")}
@@ -185,10 +185,10 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         review
           ? selected
             ? `${remote.data!.repository}/${selected.source.path} · ${remote.data!.commit}`
-            : "Uploaded package"
+            : "Uploaded skill"
           : waiting
-            ? (opened?.source ?? "Reading the package…")
-            : "Search the skills.sh directory, paste a GitHub link, or upload a package."
+            ? (opened?.source ?? "Reading the skill…")
+            : "Search the skills directory, paste a GitHub link, or upload a skill file."
       }
       actions={
         review ? (
@@ -208,7 +208,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
       {waiting ? (
         <div
           role="status"
-          aria-label="Reading the package"
+          aria-label="Reading the skill"
           className={cn(cardSurfaceClassName, "grid min-w-0 md:grid-cols-[13rem_minmax(0,1fr)]")}
         >
           <div className="flex flex-col gap-2 border-b p-3 md:border-r md:border-b-0">
@@ -227,7 +227,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         <>
           {/* One source can hold several packages; choose before reviewing. */}
           {remote.data?.choices.length ? (
-            <Section title="Select a package">
+            <Section title="Choose a skill">
               <ListCard>
                 {remote.data.choices.map((choice) => (
                   <button
@@ -256,7 +256,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
             </Section>
           ) : null}
           {archive ? (
-            <Section title="Select a package">
+            <Section title="Choose a skill">
               <ListCard>
                 {skillPackageRoots(archive).map((root) => (
                   <button
@@ -267,11 +267,11 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                       try {
                         setUploaded(selectSkillPackage(archive, root));
                       } catch (cause) {
-                        setError(message(cause, "Invalid package."));
+                        setError(message(cause, "This isn’t a skill that can be imported."));
                       }
                     }}
                   >
-                    <ListRow interactive>{root || "Package root"}</ListRow>
+                    <ListRow interactive>{root || "Main folder"}</ListRow>
                   </button>
                 ))}
               </ListCard>
@@ -293,7 +293,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
-                {link ? <Button type="submit">Review package</Button> : null}
+                {link ? <Button type="submit">Review skill</Button> : null}
                 <Button variant="outline" onClick={() => upload.current?.click()}>
                   <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} data-icon="inline-start" />
                   Upload
@@ -303,7 +303,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                   type="file"
                   accept=".md,.zip"
                   className="sr-only"
-                  aria-label="Upload a Markdown or ZIP package"
+                  aria-label="Upload a skill file"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) void readFile(file);
@@ -314,7 +314,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
               {discovery.isError && searchable ? (
                 <ErrorState
                   title="Discovery is unavailable"
-                  description="You can still paste a GitHub link or upload a package."
+                  description="You can still paste a GitHub link or upload a skill file."
                   onRetry={() => {
                     void discovery.refetch();
                   }}

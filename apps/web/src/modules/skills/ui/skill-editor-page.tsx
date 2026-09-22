@@ -34,6 +34,8 @@ import type { SkillDetail } from "../schema.ts";
 import { deleteSkill, saveSkill } from "../server/functions.ts";
 import { SkillUpdateReview } from "./skill-update-review.tsx";
 import { PackageWorkspace } from "./package-workspace.tsx";
+import { SkillSimpleForm, canEditSimply } from "./skill-simple-form.tsx";
+import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 
 function download(name: string, bytes: Uint8Array | string, type: string) {
@@ -105,6 +107,12 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
   const [revision, setRevision] = useState(initial?.revision);
   const [access, setAccess] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // Most people only ever need the form; a skill whose SKILL.md it can't read
+  // opens on its files, and the form stays unavailable until that's fixed.
+  const [view, setView] = useState<"form" | "files">(() =>
+    canEditSimply(initial?.files ?? NEW_SKILL_FILES) ? "form" : "files",
+  );
+  const formAvailable = canEditSimply(files);
   const dirty = JSON.stringify(files) !== saved;
   useBlocker({
     shouldBlockFn: async () =>
@@ -126,11 +134,12 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           error instanceof SkillPackageError
             ? error
             : new SkillPackageError([
-                { severity: "error", path: "SKILL.md", message: "Invalid package." },
+                { severity: "error", path: "SKILL.md", message: "This skill can’t be read." },
               ]),
       };
     }
   })();
+  const findings = validation.value?.findings ?? validation.error?.findings ?? [];
   const save = useMutation({
     mutationFn: (submitted: SkillFile[]) =>
       saveSkill({
@@ -264,12 +273,35 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
         </>
       }
     >
-      <PackageWorkspace
-        autoFocus={!initial}
-        files={files}
-        {...(!save.isPending || initial ? { onChange: setFiles } : {})}
-        findings={validation.value?.findings ?? validation.error?.findings ?? []}
-      />
+      <SegmentedControl
+        aria-label="Edit as"
+        value={[view === "form" && formAvailable ? "form" : "files"]}
+        multiple={false}
+        onValueChange={(value) => {
+          if (value[0] === "form" || value[0] === "files") setView(value[0]);
+        }}
+        className="self-start"
+      >
+        <SegmentedControlItem value="form" disabled={!formAvailable}>
+          Instructions
+        </SegmentedControlItem>
+        <SegmentedControlItem value="files">Files</SegmentedControlItem>
+      </SegmentedControl>
+      {view === "form" && formAvailable ? (
+        <SkillSimpleForm
+          autoFocus={!initial}
+          files={files}
+          onChange={!save.isPending || initial ? setFiles : undefined}
+          findings={findings}
+        />
+      ) : (
+        <PackageWorkspace
+          autoFocus={!initial}
+          files={files}
+          {...(!save.isPending || initial ? { onChange: setFiles } : {})}
+          findings={findings}
+        />
+      )}
       <p className="text-muted-foreground text-xs">
         A skill is instructions, not access: files here are stored and read, never run. Anyone you
         share it with can see its instructions.

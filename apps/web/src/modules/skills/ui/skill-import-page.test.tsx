@@ -59,7 +59,7 @@ describe("SkillImportPage", () => {
     // A pasted link is a package to fetch, not a search term.
     fireEvent.change(field(), { target: { value: "https://github.com/owner/repo" } });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Review package" })).toBeVisible(),
+      expect(screen.getByRole("button", { name: "Review skill" })).toBeVisible(),
     );
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(searchDiscoverableSkills).toHaveBeenCalledTimes(1);
@@ -83,7 +83,7 @@ describe("SkillImportPage", () => {
     reviewRemoteSkill.mockReturnValue(new Promise((resolve) => (release = resolve)));
     renderPage({ source: "https://skills.sh/owner/repo/review" });
     // The wait has the screen to itself, not a spinner inside a result row.
-    expect(await screen.findByLabelText("Reading the package")).toBeVisible();
+    expect(await screen.findByLabelText("Reading the skill")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Import skill" })).toBeNull();
     release({
       token: "t1",
@@ -209,7 +209,7 @@ describe("SkillImportPage", () => {
     renderPage();
     fireEvent.change(field(), { target: { value: "review" } });
     expect(await screen.findByText("Discovery is unavailable")).toBeVisible();
-    expect(screen.getByLabelText("Upload a Markdown or ZIP package")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload a skill file")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
   });
 });
