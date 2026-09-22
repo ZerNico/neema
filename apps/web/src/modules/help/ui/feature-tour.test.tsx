@@ -100,7 +100,7 @@ describe("FeatureTourProvider", () => {
       "href",
       "/settings/memory",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Show the tour again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show the tour" }));
     expect(await screen.findByRole("heading", { name: "Welcome to neema" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
