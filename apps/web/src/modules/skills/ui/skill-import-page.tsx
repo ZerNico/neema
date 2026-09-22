@@ -120,7 +120,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     setError(null);
     setReading(true);
     try {
-      if (file.size > SKILL_LIMITS.archiveBytes) throw new Error("Uploads must be at most 5 MiB.");
+      if (file.size > SKILL_LIMITS.archiveBytes) throw new Error("Files can be at most 5 MB.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (/\.zip$/iu.test(file.name)) {
         const files = readSkillArchive(bytes);

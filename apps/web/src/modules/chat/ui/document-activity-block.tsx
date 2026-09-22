@@ -40,8 +40,8 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   const name = entry?.title ?? title ?? "Document";
   const status = entry
     ? entry.tasks
-      ? `Markdown · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
-      : "Markdown"
+      ? `Document · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
+      : "Document"
     : gone
       ? "Document deleted"
       : owned

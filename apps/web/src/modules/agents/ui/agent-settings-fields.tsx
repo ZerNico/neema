@@ -320,7 +320,7 @@ export const AgentSettingsFields = withForm({
         </Section>
         <Section
           title="Custom tools"
-          description="Admin-authored code tools. Plain chats offer every module you can use; an agent offers only the ones picked here."
+          description="Extra actions set up by an admin. A chat without an agent can use all of them; this agent uses only the ones picked here."
         >
           <form.Field name="customToolIds">
             {(field) => {

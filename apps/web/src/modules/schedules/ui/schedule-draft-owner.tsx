@@ -20,8 +20,8 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
   useController: useScheduleDraft,
   labels: {
     name: "Name",
-    scheduleText: "Cadence",
-    cron: "Cron",
+    scheduleText: "Frequency text",
+    cron: "Frequency",
     timezone: "Timezone",
     endAt: "End",
     prompt: "Prompt",
