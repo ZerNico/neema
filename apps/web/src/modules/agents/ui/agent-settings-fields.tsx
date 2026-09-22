@@ -10,6 +10,8 @@ import { AGENT_LIMITS, AgentIcon } from "../schema.ts";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { AGENT_ICONS } from "~/modules/chat/ui/context-picker.tsx";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
+import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
+import { ResourcePicker } from "~/ui/resource-picker.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
@@ -41,9 +43,12 @@ export const AgentSettingsFields = withForm({
     const models = modelsQuery.data ?? [];
     const collections = useQuery(knowledgeCollectionsQuery);
     const skills = useQuery(skillsQuery);
+    const customTools = useQuery(usableCustomToolsQuery);
     const selectedModel = (id: string | null) => models.find((model) => model.id === id) ?? null;
     const [skillPickerOpen, setSkillPickerOpen] = useState(false);
     const [skillAnchor, setSkillAnchor] = useState<HTMLButtonElement | null>(null);
+    const [customToolPickerOpen, setCustomToolPickerOpen] = useState(false);
+    const [customToolAnchor, setCustomToolAnchor] = useState<HTMLButtonElement | null>(null);
     const [creatingCollection, setCreatingCollection] = useState(false);
     return (
       <>
@@ -306,6 +311,80 @@ export const AgentSettingsFields = withForm({
                     onOpenChange={setSkillPickerOpen}
                     anchor={skillAnchor}
                     limit={20}
+                  />
+                  <FieldError errors={field.state.meta.errors} />
+                </div>
+              );
+            }}
+          </form.Field>
+        </Section>
+        <Section
+          title="Custom tools"
+          description="Admin-authored code tools. Plain chats offer every module you can use; an agent offers only the ones picked here."
+        >
+          <form.Field name="customToolIds">
+            {(field) => {
+              const ids = field.state.value ?? [];
+              return (
+                <div className="space-y-3">
+                  {ids.length > 0 ? (
+                    <ListCard>
+                      {ids.map((id) => {
+                        const tool = customTools.data?.find((candidate) => candidate.id === id);
+                        return (
+                          <ListRow key={id}>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {tool?.name ?? "Unavailable custom tool"}
+                              </p>
+                              <p className="text-muted-foreground truncate text-xs">
+                                {tool?.description ??
+                                  "Remove this dependency or ask an admin to re-enable it."}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove ${tool?.name ?? "unavailable custom tool"}`}
+                              onClick={() =>
+                                field.handleChange(ids.filter((value) => value !== id))
+                              }
+                            >
+                              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                            </Button>
+                          </ListRow>
+                        );
+                      })}
+                    </ListCard>
+                  ) : null}
+                  {customTools.isError ? (
+                    <ErrorState
+                      title="Could not load custom tools"
+                      onRetry={() => void customTools.refetch()}
+                    />
+                  ) : (
+                    <Button
+                      ref={setCustomToolAnchor}
+                      type="button"
+                      variant="outline"
+                      disabled={!customTools.data || customTools.data.length === 0}
+                      onClick={() => setCustomToolPickerOpen(true)}
+                    >
+                      <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" strokeWidth={2} />
+                      Add custom tools
+                    </Button>
+                  )}
+                  <ResourcePicker
+                    items={customTools.data ?? []}
+                    selectedIds={ids}
+                    onChange={field.handleChange}
+                    open={customToolPickerOpen}
+                    onOpenChange={setCustomToolPickerOpen}
+                    anchor={customToolAnchor}
+                    limit={20}
+                    placeholder="Search custom tools…"
+                    empty="No matching custom tools."
                   />
                   <FieldError errors={field.state.meta.errors} />
                 </div>

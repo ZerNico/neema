@@ -17,7 +17,7 @@ const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength
 export const AgentIdInput = Schema.Struct({ agentId: ResourceId });
 export const AgentName = Schema.String.check(Schema.isMaxLength(120));
 export const AgentStarter = Schema.String.check(Schema.isMaxLength(200));
-export const AgentSkillIds = Schema.Array(ResourceId).check(Schema.isMaxLength(20));
+export const AgentResourceIds = Schema.Array(ResourceId).check(Schema.isMaxLength(20));
 export const AgentSettings = Schema.Struct({
   name: AgentName.check(Schema.isMinLength(1)),
   description: Schema.String.check(Schema.isMaxLength(500)),
@@ -29,7 +29,8 @@ export const AgentSettings = Schema.Struct({
   starters: Schema.Array(AgentStarter.check(Schema.isMinLength(1))).check(
     Schema.isMaxLength(AGENT_LIMITS.maxStarters),
   ),
-  skillIds: Schema.optional(AgentSkillIds),
+  skillIds: Schema.optional(AgentResourceIds),
+  customToolIds: Schema.optional(AgentResourceIds),
   collectionIds: Schema.Array(ResourceId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),
@@ -65,4 +66,5 @@ export interface AgentSelectionDetail extends AgentSummary {
   model: { id: string; name: string | null; available: boolean } | null;
   collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
   skills?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  customTools?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
 }

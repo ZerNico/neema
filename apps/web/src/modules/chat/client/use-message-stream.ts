@@ -11,7 +11,8 @@ import {
   type DocumentActivityResult,
 } from "~/modules/documents/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
-import { AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
+import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
+import { AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 import {
   KnowledgeToolEnvelope,
   type KnowledgeActivitySummary,
@@ -123,8 +124,19 @@ export interface DesktopToolActivity extends ToolActivityBase {
   result?: DesktopToolResult;
 }
 
+/** One admin-authored code tool call; the display name rides the envelope. */
+export interface CustomToolActivity extends ToolActivityBase {
+  family: "custom";
+  displayName: string;
+  resultPreview?: string;
+  resultChars?: number;
+  /** Attachments the call produced; the bytes live in the message's files. */
+  fileIds?: ReadonlyArray<string>;
+}
+
 export type ToolActivity =
   | AgentDraftToolActivity
+  | CustomToolActivity
   | DocumentToolActivity
   | DesktopToolActivity
   | WebToolActivity
@@ -160,7 +172,7 @@ export interface CompactionActivity {
 }
 
 export interface StreamState {
-  images: AssistantImage[];
+  files: AssistantFile[];
   /** Visible answer text accumulated from chunks. */
   text: string;
   /** Reasoning/thinking text; stays empty for hidden-reasoning providers. */
@@ -177,7 +189,7 @@ export interface StreamState {
 type Action =
   | {
       kind: "reset";
-      images?: AssistantImage[];
+      files?: AssistantFile[];
       text: string;
       reasoning: string;
       reasoningSeen: boolean;
@@ -188,7 +200,7 @@ type Action =
   | {
       kind: "chunk";
       seq: number;
-      chunkKind: "text" | "reasoning" | "tool" | "compaction" | "image";
+      chunkKind: "text" | "reasoning" | "tool" | "compaction" | "file";
       delta: string;
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
@@ -268,6 +280,7 @@ export function applyToolChunk(
   if (e.v !== 1 || !e.callId || !e.name) return tools;
   if (
     e.family !== "agent-draft" &&
+    e.family !== "custom" &&
     e.family !== "document" &&
     e.family !== "web" &&
     e.family !== "memory" &&
@@ -307,6 +320,32 @@ export function applyToolChunk(
       status: result ? (agentDraftResultOk(result) ? "complete" : "error") : "running",
       ...(result ? { result } : {}),
       ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "custom") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(CustomToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const next: CustomToolActivity = {
+      family: "custom",
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      displayName: parsed.displayName,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: parsed.phase === "start" ? "running" : parsed.status,
+      ...(parsed.phase === "result"
+        ? {
+            ...(parsed.resultPreview !== undefined ? { resultPreview: parsed.resultPreview } : {}),
+            ...(parsed.resultChars !== undefined ? { resultChars: parsed.resultChars } : {}),
+            ...(parsed.error ? { error: parsed.error } : {}),
+            ...(parsed.fileIds?.length ? { fileIds: parsed.fileIds } : {}),
+          }
+        : {}),
     };
     return index === -1
       ? [...tools, next]
@@ -692,20 +731,20 @@ export function applyCompactionChunk(
   );
 }
 
-export const applyImageChunk = (
-  images: ReadonlyArray<AssistantImage>,
+export const applyFileChunk = (
+  files: ReadonlyArray<AssistantFile>,
   delta: string,
-): AssistantImage[] => {
+): AssistantFile[] => {
   try {
-    const image = Schema.decodeUnknownSync(AssistantImage)(JSON.parse(delta));
+    const file = Schema.decodeUnknownSync(AssistantFile)(JSON.parse(delta));
     if (
-      images.some((item) => item.attachment.id === image.attachment.id) ||
-      images.length >= IMAGE_OUTPUT_LIMITS.count
+      files.some((item) => item.attachment.id === file.attachment.id) ||
+      files.length >= ASSISTANT_FILE_LIMITS.count
     )
-      return [...images];
-    return [...images, image];
+      return [...files];
+    return [...files, file];
   } catch {
-    return [...images];
+    return [...files];
   }
 };
 
@@ -713,7 +752,7 @@ function reducer(state: StreamState, action: Action): StreamState {
   switch (action.kind) {
     case "reset":
       return {
-        images: action.images ?? [],
+        files: action.files ?? [],
         text: action.text,
         reasoning: action.reasoning,
         reasoningSeen: action.reasoningSeen,
@@ -724,10 +763,10 @@ function reducer(state: StreamState, action: Action): StreamState {
       };
     case "chunk": {
       if (action.seq <= state.lastSeq) return state;
-      if (action.chunkKind === "image")
+      if (action.chunkKind === "file")
         return {
           ...state,
-          images: applyImageChunk(state.images, action.delta),
+          files: applyFileChunk(state.files, action.delta),
           lastSeq: action.seq,
         };
       if (action.chunkKind === "reasoning") {
@@ -764,7 +803,7 @@ function reducer(state: StreamState, action: Action): StreamState {
 }
 
 export interface InitialStream {
-  images?: AssistantImage[];
+  files?: AssistantFile[];
   text: string;
   reasoning: string;
   reasoningSeen: boolean;
@@ -791,7 +830,7 @@ export function useMessageStream(
 ) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
-    images: initial?.images ?? [],
+    files: initial?.files ?? [],
     text: initial?.text ?? "",
     reasoning: initial?.reasoning ?? "",
     reasoningSeen: initial?.reasoningSeen ?? false,
@@ -804,12 +843,12 @@ export function useMessageStream(
   // retry of the same message).
   const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
   const [stateGeneration, setStateGeneration] = useState(generationKey);
-  // Reset before commit: a same-message retry must never paint the prior images.
+  // Reset before commit: a same-message retry must never paint the prior files.
   if (messageId && stateGeneration !== generationKey) {
     setStateGeneration(generationKey);
     dispatch({
       kind: "reset",
-      images: initial?.images ?? [],
+      files: initial?.files ?? [],
       text: initial?.text ?? "",
       reasoning: initial?.reasoning ?? "",
       reasoningSeen: initial?.reasoningSeen ?? false,
@@ -845,7 +884,7 @@ export function useMessageStream(
     source.addEventListener("chunk", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         seq: number;
-        kind?: "text" | "reasoning" | "tool" | "compaction" | "image";
+        kind?: "text" | "reasoning" | "tool" | "compaction" | "file";
         delta: string;
         runId?: string;
       };

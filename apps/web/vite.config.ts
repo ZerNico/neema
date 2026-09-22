@@ -3,6 +3,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig, type Plugin } from "vite";
+import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
 
 // Dev only. Nitro's Vite middleware guesses static-vs-app from `sec-fetch-dest`:
 // neither `empty` nor document dest reaches Vite's static layer, so
@@ -27,14 +28,22 @@ export default defineConfig({
     host: "127.0.0.1",
     strictPort: true,
     allowedHosts: process.env.PORTLESS_URL ? [new URL(process.env.PORTLESS_URL).hostname] : [],
+    // Server-owned state lives here: blobs, and custom tool builds, which
+    // install node_modules and write a tsconfig.json. Vite force-reloads every
+    // client on any tsconfig.json it sees change, so a Check would reload the page.
+    watch: { ignored: ["**/.data/**"] },
   },
   resolve: {
     tsconfigPaths: true,
   },
   plugins: [
     apiRoutesAreNeverAssets(),
+    customToolRuntimeWorker(),
     tanstackStart({ spa: { enabled: true } }),
-    nitro(),
+    nitro({
+      rollupConfig: { external: [/^@npmcli\/arborist(?:\/|$)/] },
+      traceDeps: ["@npmcli/arborist*", "typescript*"],
+    }),
     viteReact(),
     tailwindcss(),
   ],

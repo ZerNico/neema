@@ -411,7 +411,10 @@ describe("conversation-owned agent draft", () => {
       expect(await ref.current!.flush()).toBe(false);
     });
     expect(name).toHaveValue("Keep this local text");
-    expect(screen.getByRole("alert")).toHaveTextContent("Offline");
+    // The draft error, not the custom-tools query error state, carries it.
+    expect(
+      screen.getAllByRole("alert").find((node) => node.textContent?.includes("Offline")),
+    ).toBeDefined();
     expect(blocker.current!.enableBeforeUnload()).toBe(true);
     await act(async () => {
       expect(await blocker.current!.shouldBlockFn()).toBe(true);

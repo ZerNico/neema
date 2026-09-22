@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { decodeGeneratedImage } from "./generated-images.ts";
-import { IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
+import { decodeGeneratedImage } from "./generated-files.ts";
+import { ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 
 const png = (size: number) => {
   const bytes = Buffer.alloc(size);
@@ -9,7 +9,7 @@ const png = (size: number) => {
   return bytes;
 };
 describe("generated image validation", () => {
-  for (const size of [8 * 1024 * 1024, IMAGE_OUTPUT_LIMITS.bytes]) {
+  for (const size of [8 * 1024 * 1024, ASSISTANT_FILE_LIMITS.bytes]) {
     it.effect(`accepts bounded ${size}-byte base64 without recursive regex overflow`, () =>
       Effect.gen(function* () {
         const bytes = png(size);
@@ -40,7 +40,7 @@ describe("generated image validation", () => {
       for (const [media, data] of [
         ["image/jpeg", png(20)],
         ["image/svg+xml", png(20)],
-        ["image/png", png(IMAGE_OUTPUT_LIMITS.bytes + 1)],
+        ["image/png", png(ASSISTANT_FILE_LIMITS.bytes + 1)],
       ] as const) {
         expect((yield* Effect.result(decodeGeneratedImage(media, data)))._tag).toBe("Failure");
       }

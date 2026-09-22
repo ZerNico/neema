@@ -1,6 +1,6 @@
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
-import type { AssistantImage } from "../assistant-output.ts";
+import type { AssistantFile } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -30,6 +30,7 @@ import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions } from "./message-actions.tsx";
@@ -102,10 +103,8 @@ const CitedAnswer = memo(function CitedAnswer({
   return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
 });
 
-
-
 export interface DisplayMessage {
-  images?: ReadonlyArray<AssistantImage>;
+  files?: ReadonlyArray<AssistantFile>;
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
@@ -368,10 +367,23 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
-function AssistantImageAttachment({ image }: { image: AssistantImage }) {
+function AssistantFileAttachment({ file }: { file: AssistantFile }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-  const url = attachmentUrl(image.attachment.id);
+  const url = attachmentUrl(file.attachment.id);
+  const { attachment } = file;
+  if (attachment.kind !== "image")
+    // A document sits where the tool produced it, as the chip a sent message
+    // uses; the click opens the same preview the composer's chips open.
+    return (
+      <AttachmentChipRow className="my-3">
+        <AttachmentChip
+          item={{ fileName: attachment.fileName, size: attachment.size, kind: attachment.kind }}
+          href={url}
+          preview={url}
+        />
+      </AttachmentChipRow>
+    );
   return (
     <figure className="my-3 max-w-full space-y-2">
       {state === "loading" && (
@@ -388,7 +400,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={`Preview ${image.attachment.fileName}`}
+          aria-label={`Preview ${attachment.fileName}`}
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -397,7 +409,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
         >
           <img
             src={url}
-            alt="Generated image"
+            alt={file.origin ? attachment.fileName : "Generated image"}
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
             className="max-h-144 max-w-full rounded-2xl object-contain"
@@ -405,12 +417,7 @@ function AssistantImageAttachment({ image }: { image: AssistantImage }) {
         </a>
       )}
       <AttachmentPreviewDialog
-        target={{
-          fileName: image.attachment.fileName,
-          size: image.attachment.size,
-          kind: "image",
-          url,
-        }}
+        target={{ fileName: attachment.fileName, size: attachment.size, kind: "image", url }}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
       />
@@ -433,13 +440,12 @@ const AssistantBody = memo(function AssistantBody({
     content: message.content,
     rawTextLength: message.rawTextLength ?? message.content.length,
     streaming,
-    images: message.images ?? [],
+    files: message.files ?? [],
     tools: message.toolActivities,
     compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
   });
   return parts.map((part) => {
-    if (part.kind === "image")
-      return <AssistantImageAttachment key={part.key} image={part.image} />;
+    if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">
@@ -505,6 +511,9 @@ const AssistantBody = memo(function AssistantBody({
       return <AgentDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "document")
       return <DocumentActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "custom") {
+      return <CustomToolActivityBlock key={part.key} activity={part.activity} />;
+    }
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }
@@ -722,7 +731,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   // "Thinking" is the phase before any visible answer text arrives, but not
   // while a tool is running (the tool block carries the progress feedback).
   const reasoningActive =
-    streaming && message.content.length === 0 && !message.images?.length && !toolRunning;
+    streaming && message.content.length === 0 && !message.files?.length && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
   const compactionActivities = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
@@ -767,7 +776,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         />
         {streaming &&
         message.content.length === 0 &&
-        !message.images?.length &&
+        !message.files?.length &&
         !showReasoning &&
         !toolRunning &&
         !compacting ? (
@@ -785,7 +794,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         {/* A turn that only asked a question or only ran research has nothing to
             copy and no answer to branch from; the row would be chrome around
             an empty message. Its actions return with the text. */}
-        {streaming || (message.content.length === 0 && !message.images?.length) ? null : (
+        {streaming || (message.content.length === 0 && !message.files?.length) ? null : (
           <MessageActions
             onOpenSources={openSources}
             content={message.content}

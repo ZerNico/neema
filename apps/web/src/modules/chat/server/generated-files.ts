@@ -3,9 +3,9 @@ import { Effect } from "effect";
 import { messageAttachments, messageChunks, messages } from "~/db/schema/index.ts";
 import { AttachmentRejected } from "~/modules/attachments/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { IMAGE_MEDIA_TYPES } from "~/modules/attachments/constants.ts";
+import { IMAGE_MEDIA_TYPES, type AttachmentKind } from "~/modules/attachments/constants.ts";
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
-import { type AssistantImage, IMAGE_OUTPUT_LIMITS } from "../assistant-output.ts";
+import { type AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 
 /** Strict base64 only: remote outputs are refused, never fetched. */
@@ -18,7 +18,7 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
       });
     if (
       typeof data === "string" &&
-      (data.length > Math.ceil(IMAGE_OUTPUT_LIMITS.bytes / 3) * 4 ||
+      (data.length > Math.ceil(ASSISTANT_FILE_LIMITS.bytes / 3) * 4 ||
         data.length % 4 !== 0 ||
         /[^A-Za-z0-9+/=]/.test(data) ||
         (data.indexOf("=") !== -1 &&
@@ -29,7 +29,7 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
         reason: "The model returned an invalid or oversized image.",
       });
     const bytes = typeof data === "string" ? Buffer.from(data, "base64") : data;
-    if (bytes.length === 0 || bytes.length > IMAGE_OUTPUT_LIMITS.bytes)
+    if (bytes.length === 0 || bytes.length > ASSISTANT_FILE_LIMITS.bytes)
       return yield* new AttachmentRejected({
         cause: "size",
         reason: "The generated image exceeds the supported size.",
@@ -42,7 +42,92 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
     return bytes;
   });
 
-/** Blob candidate/write precede the fenced atomic registration + ref-only event. */
+/**
+ * Blob candidate/write precede the fenced atomic registration + ref-only
+ * event. The same path stores a model's image output and a custom tool's
+ * returned file; only the caller-supplied validation differs.
+ */
+export const acceptGeneratedFile = (
+  service: AttachmentService["Service"],
+  input: {
+    fence: GenerationIdentity;
+    fileName: string;
+    mediaType: string;
+    bytes: Uint8Array;
+    allowedKinds?: ReadonlyArray<AttachmentKind>;
+    origin?: { toolCallId: string };
+    textOffset: number;
+    turnIndex: number;
+    eventIndex: number;
+    callIndex: number;
+    seq: number;
+  },
+) =>
+  Effect.gen(function* () {
+    let file: AssistantFile | undefined;
+    let previous: ReadonlyArray<AssistantFile> = [];
+    yield* service.upload({
+      userId: input.fence.userId,
+      fileName: input.fileName,
+      declaredMediaType: input.mediaType,
+      bytes: input.bytes,
+      ...(input.allowedKinds ? { allowedKinds: input.allowedKinds } : {}),
+      association: {
+        before: (tx) =>
+          Effect.gen(function* () {
+            const message = yield* lockGeneration(tx, input.fence);
+            previous = message.assistantOutput?.files ?? [];
+            if (
+              previous.length >= ASSISTANT_FILE_LIMITS.count ||
+              previous.reduce((sum, item) => sum + item.attachment.size, 0) + input.bytes.length >
+                ASSISTANT_FILE_LIMITS.totalBytes
+            )
+              return yield* new AttachmentRejected({
+                cause: "size",
+                reason: "This answer already holds as many files as one message may carry.",
+              });
+          }),
+        after: (tx, attachment) =>
+          Effect.gen(function* () {
+            file = {
+              v: 1,
+              attachment,
+              textOffset: input.textOffset,
+              turnIndex: input.turnIndex,
+              eventIndex: input.eventIndex,
+              callIndex: input.callIndex,
+              ...(input.origin ? { origin: input.origin } : {}),
+            };
+            yield* tx
+              .insert(messageAttachments)
+              .values({
+                messageId: input.fence.messageId,
+                attachmentId: attachment.id,
+                position: previous.length,
+              })
+              .pipe(Effect.orDie);
+            yield* tx
+              .update(messages)
+              .set({ assistantOutput: { v: 1, files: [...previous, file] } })
+              .where(eq(messages.id, input.fence.messageId))
+              .pipe(Effect.orDie);
+            yield* tx
+              .insert(messageChunks)
+              .values({
+                messageId: input.fence.messageId,
+                seq: input.seq,
+                kind: "file",
+                delta: JSON.stringify(file),
+              })
+              .pipe(Effect.orDie);
+          }),
+      },
+    });
+    if (!file) return yield* Effect.die(new Error("Generated file registration failed."));
+    return file;
+  });
+
+/** A model's own image output: strict base64 in, sniffed image out, then the shared path. */
 export const acceptGeneratedImage = (
   service: AttachmentService["Service"],
   input: {
@@ -58,61 +143,10 @@ export const acceptGeneratedImage = (
 ) =>
   Effect.gen(function* () {
     const bytes = yield* decodeGeneratedImage(input.mediaType, input.data);
-    let image: AssistantImage | undefined;
-    let previous: ReadonlyArray<AssistantImage> = [];
-    yield* service.upload({
-      userId: input.fence.userId,
+    return yield* acceptGeneratedFile(service, {
+      ...input,
       fileName: `generated-${input.eventIndex + 1}.${input.mediaType.split("/")[1]}`,
-      declaredMediaType: input.mediaType,
       bytes,
       allowedKinds: ["image"],
-      association: {
-        before: (tx) =>
-          Effect.gen(function* () {
-            const message = yield* lockGeneration(tx, input.fence);
-            previous = message.assistantOutput?.images ?? [];
-            if (
-              previous.length >= IMAGE_OUTPUT_LIMITS.count ||
-              previous.reduce((sum, item) => sum + item.attachment.size, 0) + bytes.length >
-                IMAGE_OUTPUT_LIMITS.totalBytes
-            )
-              return yield* Effect.die(new Error("Generated images exceed the per-message limit."));
-          }),
-        after: (tx, attachment) =>
-          Effect.gen(function* () {
-            image = {
-              v: 1,
-              attachment,
-              textOffset: input.textOffset,
-              turnIndex: input.turnIndex,
-              eventIndex: input.eventIndex,
-              callIndex: input.callIndex,
-            };
-            yield* tx
-              .insert(messageAttachments)
-              .values({
-                messageId: input.fence.messageId,
-                attachmentId: attachment.id,
-                position: previous.length,
-              })
-              .pipe(Effect.orDie);
-            yield* tx
-              .update(messages)
-              .set({ assistantOutput: { v: 1, images: [...previous, image] } })
-              .where(eq(messages.id, input.fence.messageId))
-              .pipe(Effect.orDie);
-            yield* tx
-              .insert(messageChunks)
-              .values({
-                messageId: input.fence.messageId,
-                seq: input.seq,
-                kind: "image",
-                delta: JSON.stringify(image),
-              })
-              .pipe(Effect.orDie);
-          }),
-      },
     });
-    if (!image) return yield* Effect.die(new Error("Generated image registration failed."));
-    return image;
   });

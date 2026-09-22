@@ -28,7 +28,7 @@ import {
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { acceptGeneratedImage } from "~/modules/chat/server/generated-images.ts";
+import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -941,7 +941,7 @@ describe("generated assistant image transactions", () => {
         };
         const image = yield* acceptGeneratedImage(service, input);
         const stored = yield* repo.getMessage(turn.assistant.id);
-        expect(stored?.assistantOutput?.images).toEqual([image]);
+        expect(stored?.assistantOutput?.files).toEqual([image]);
         const chunks = yield* db
           .select()
           .from(messageChunks)
@@ -969,7 +969,7 @@ describe("generated assistant image transactions", () => {
         const cloned = (yield* repo.listMessages(branch.id)).find(
           (message) => message.role === "assistant",
         )!;
-        const clonedImage = cloned.assistantOutput!.images[0]!;
+        const clonedImage = cloned.assistantOutput!.files[0]!;
         expect(cloned.generationId).toBeNull();
         expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
         expect(clonedImage).toMatchObject({

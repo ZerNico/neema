@@ -148,6 +148,7 @@ const labels: Record<DraftField, string> = {
   starters: "Conversation starters",
   collectionIds: "Collections",
   skillIds: "Skills",
+  customToolIds: "Custom tools",
 };
 
 function AgentDraftSession({

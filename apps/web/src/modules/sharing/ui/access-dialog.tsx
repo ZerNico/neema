@@ -412,7 +412,9 @@ export function AccessDialog({
                   ? "Anyone with an account here can use it. It is not public on the internet."
                   : resource.kind === "agent"
                     ? "People you add can use this agent, not edit it. They need their own access to its model and collections."
-                    : "People you add can use this collection in chats, not edit it."}
+                    : resource.kind === "customTool"
+                      ? "People you add can use agents that have this module. Anyone else gets that agent without it."
+                      : "People you add can use this collection in chats, not edit it."}
               </p>
             </div>
           </div>

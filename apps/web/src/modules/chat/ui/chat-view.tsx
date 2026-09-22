@@ -13,8 +13,10 @@ import {
   agentDraftResultOk,
 } from "~/modules/agents/tool-schema.ts";
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
-import { applyImageChunk } from "../client/use-message-stream.ts";
-import type { AssistantImage } from "../assistant-output.ts";
+import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
+import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
+import { applyFileChunk } from "../client/use-message-stream.ts";
+import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
@@ -226,6 +228,26 @@ export function toActivity(row: {
       ...(outcome ? { outcome } : {}),
       ...(reason ? { reason } : {}),
       ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+
+  if (isCustomToolName(row.toolName)) {
+    // Must precede the web fallback below: a `custom_…` row holds a
+    // CustomToolActivity, not web targets.
+    const stored = Option.getOrNull(Schema.decodeUnknownOption(CustomToolActivity)(row.result));
+    return {
+      family: "custom",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      displayName: stored?.displayName ?? row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...(stored?.resultPreview !== undefined ? { resultPreview: stored.resultPreview } : {}),
+      ...(stored?.resultChars !== undefined ? { resultChars: stored.resultChars } : {}),
+      ...(row.error ? { error: row.error.message } : stored?.error ? { error: stored.error } : {}),
+      ...(stored?.fileIds?.length ? { fileIds: stored.fileIds } : {}),
     };
   }
 
@@ -450,11 +472,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         durableCompactions,
       );
     return {
-      images: data.pendingChunks
-        .filter((chunk) => chunk.kind === "image")
-        .reduce<AssistantImage[]>(
-          (images, chunk) => applyImageChunk(images, chunk.delta),
-          [...(streamingMessage.assistantOutput?.images ?? [])],
+      files: data.pendingChunks
+        .filter((chunk) => chunk.kind === "file")
+        .reduce<AssistantFile[]>(
+          (files, chunk) => applyFileChunk(files, chunk.delta),
+          [...(streamingMessage.assistantOutput?.files ?? [])],
         ),
       text,
       reasoning,
@@ -1217,7 +1239,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             }
           : {}),
         reasoning,
-        images: message.assistantOutput?.images ?? [],
+        files: message.assistantOutput?.files ?? [],
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
@@ -1353,7 +1375,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         // Overlay live stream state onto only the active assistant row.
         const live = {
           ...projected,
-          images: stream.images,
+          files: stream.files,
           rawTextLength: stream.rawTextLength,
           reasoning: stream.reasoning,
           reasoningSeen: stream.reasoningSeen || base.reasoningSeen,

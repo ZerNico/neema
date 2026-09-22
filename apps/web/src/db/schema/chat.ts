@@ -140,7 +140,7 @@ export const messageChunks = pgTable(
     // what the delta belongs to: the visible answer, the reasoning trace, or a
     // tool/compaction activity marker (JSON envelope in delta). Plain text
     // column, so a new marker kind is a TypeScript change only.
-    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "image"] })
+    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "file"] })
       .notNull()
       .default("text"),
     delta: text().notNull(),

@@ -158,12 +158,7 @@ describe("upload-queued composer requests", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith(
-        "Original draft",
-        [attachment.id],
-        false,
-        [],
-      ),
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Original draft", [attachment.id], false, []),
     );
   });
 
@@ -173,12 +168,9 @@ describe("upload-queued composer requests", () => {
     rerender(currentSend);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith(
-        "Original draft",
-        [attachment.id],
-        false,
-        ["review"],
-      ),
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Original draft", [attachment.id], false, [
+        "review",
+      ]),
     );
     expect(currentSend).not.toHaveBeenCalled();
   });

@@ -5,7 +5,11 @@ import { ChatInput } from "./chat-input.tsx";
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
-import { useDesktop, useDesktopOutdated, type FolderState } from "~/modules/desktop/client/bridge.ts";
+import {
+  useDesktop,
+  useDesktopOutdated,
+  type FolderState,
+} from "~/modules/desktop/client/bridge.ts";
 import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */

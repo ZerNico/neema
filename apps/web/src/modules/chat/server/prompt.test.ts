@@ -345,7 +345,7 @@ describe("assistant image replay", () => {
     id: "answer",
     role: "assistant",
     content: "😀after",
-    assistantOutput: { v: 1, images: [image] },
+    assistantOutput: { v: 1, files: [image] },
     providerReplay: {
       v: 1,
       providerId: "provider",
@@ -431,7 +431,7 @@ describe("assistant image replay", () => {
           completedAt,
           assistantOutput: {
             v: 1,
-            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+            files: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
           },
           providerReplay: {
             ...message.providerReplay!,
@@ -463,7 +463,7 @@ describe("assistant image replay", () => {
           { type: "text", text: "after" },
         ]);
         expect(JSON.stringify(rendered)).not.toContain("opaque");
-        expect(history.assistantOutput?.images[0]?.textOffset).toBe(prefix.length);
+        expect(history.assistantOutput?.files[0]?.textOffset).toBe(prefix.length);
         expect(history.content).toBe(content);
       }),
     );
@@ -503,7 +503,7 @@ describe("assistant image replay", () => {
           completedAt,
           assistantOutput: {
             v: 1,
-            images: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
+            files: [{ ...image, turnIndex: 0, textOffset: prefix.length }],
           },
           providerReplay: {
             ...message.providerReplay!,

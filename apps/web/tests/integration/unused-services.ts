@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 
@@ -32,4 +33,11 @@ export const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
 export const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
   handler: unavailable("read_url"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
+});
+
+// The engine requires the runtime even when no module is pinned; a call here
+// means an attempt pinned custom tools the suite did not set up.
+export const FakeCustomToolRuntime = Layer.succeed(CustomToolRuntime, {
+  inspect: () => Effect.die("no custom tool builds in these tests"),
+  run: () => Effect.die("no custom tool calls in these tests"),
 });

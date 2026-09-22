@@ -1,4 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { FakeCustomToolRuntime } from "./unused-services.ts";
 import { PgClient } from "@effect/sql-pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
@@ -21,6 +22,7 @@ import { ExternalCompletion } from "~/modules/tools/server/external-completion.t
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -400,6 +402,7 @@ beforeAll(async () => {
   );
   const ReposLayer = Layer.mergeAll(
     AnalyticsRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
@@ -418,6 +421,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeCustomToolRuntime,
         ExternalCompletion.layer,
         SyncBus.layer,
       ).pipe(Layer.provideMerge(ReposLayer)),

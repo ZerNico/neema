@@ -34,6 +34,11 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import {
+  CustomToolRuntime,
+  type CustomToolRunResult,
+} from "~/modules/custom-tools/server/runtime.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -76,6 +81,7 @@ let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<
   | AgentRepo
   | AgentDraftService
+  | CustomToolRepo
   | DocumentService
   | ChatRepo
   | ProviderRepo
@@ -103,6 +109,9 @@ const editedPng = Buffer.from(
 );
 let nextGeneratedImage: Uint8Array | undefined;
 let terminalFixtures: ChatStreamPart[][] | undefined;
+/** Set by a test that pins a custom tool; the runtime is otherwise never called. */
+let customToolRun: ((input: { functionKey: string }) => Effect.Effect<CustomToolRunResult>) | null =
+  null;
 const generatedBlobs = new Map<string, Uint8Array>();
 const ImageBlobStore = Layer.succeed(BlobStore, {
   put: (key, bytes) =>
@@ -252,6 +261,7 @@ beforeAll(async () => {
   // ChatRepo reconciles attachment claims, so AttachmentRepo sits under it.
   const ReposLayer = Layer.mergeAll(
     AnalyticsRepo.layer,
+    CustomToolRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
@@ -267,6 +277,11 @@ beforeAll(async () => {
     FakeUrlReader,
     ImageBlobStore,
     FakeDocumentParser,
+    Layer.succeed(CustomToolRuntime, {
+      inspect: () => Effect.die("no custom tool builds in these tests"),
+      run: (input) =>
+        customToolRun ? customToolRun(input) : Effect.die("no custom tool calls in these tests"),
+    }),
     FakeMemoryService,
     ExternalCompletion.layer,
     SyncBus.layer,
@@ -2857,7 +2872,7 @@ describe("generated image streaming", () => {
               );
           yield* run(assistant);
           const initial = yield* repo.getMessage(assistant.id);
-          const initialId = initial!.assistantOutput!.images[0]!.attachment.id;
+          const initialId = initial!.assistantOutput!.files[0]!.attachment.id;
 
           const edit = yield* repo.createTurn({
             userId,
@@ -2870,10 +2885,10 @@ describe("generated image streaming", () => {
           const editedEvents = yield* run(edit.assistant);
           const edited = yield* repo.getMessage(edit.assistant.id);
           expect(edited!.status).toBe("complete");
-          const editedId = edited!.assistantOutput!.images[0]!.attachment.id;
+          const editedId = edited!.assistantOutput!.files[0]!.attachment.id;
           expect(editedId).not.toBe(initialId);
           const event = editedEvents.find(
-            (event) => event.kind === "chunk" && event.chunkKind === "image",
+            (event) => event.kind === "chunk" && event.chunkKind === "file",
           );
           expect(event && event.kind === "chunk" ? JSON.parse(event.delta) : null).toMatchObject({
             attachment: { id: editedId },
@@ -2897,11 +2912,11 @@ describe("generated image streaming", () => {
           const detail = yield* loadConversationDetail(userId, conversation.id);
           expect(
             detail.messages.find((message) => message.id === assistant.id)!.assistantOutput!
-              .images[0]!.attachment.id,
+              .files[0]!.attachment.id,
           ).toBe(initialId);
           expect(
             detail.messages.find((message) => message.id === edit.assistant.id)!.assistantOutput!
-              .images[0]!.attachment.id,
+              .files[0]!.attachment.id,
           ).toBe(editedId);
 
           const followup = yield* repo.createTurn({
@@ -2967,7 +2982,7 @@ describe("generated image streaming", () => {
         expect(live).toEqual(replay);
         expect(
           live.filter((event) => event.kind === "chunk").map((event) => event.chunkKind),
-        ).toEqual(["text", "image", "text"]);
+        ).toEqual(["text", "file", "text"]);
         expect(live.at(-1)).toMatchObject({
           kind: "done",
           status: "complete",
@@ -2983,7 +2998,7 @@ describe("generated image streaming", () => {
         expect(final).toMatchObject({
           content: "BeforeAfter",
           status: "complete",
-          assistantOutput: { images: [{ textOffset: 6, turnIndex: 0 }] },
+          assistantOutput: { files: [{ textOffset: 6, turnIndex: 0 }] },
           providerReplay: { turns: [{ reasoningDetails: [{ data: "private-replay" }] }] },
         });
       }),
@@ -3133,7 +3148,7 @@ describe("terminal response validation", () => {
             expect(events.at(-1)).toMatchObject({ kind: "done", status });
             const message = yield* repo.getMessage(assistant.id);
             expect(message).toMatchObject({ content: text, status });
-            expect(message?.assistantOutput?.images.length ?? 0).toBe(image ? 1 : 0);
+            expect(message?.assistantOutput?.files.length ?? 0).toBe(image ? 1 : 0);
             if (code) expect(message?.error?.message).toContain(`[${code}]`);
             else expect(message?.error).toBeNull();
             const ledger = yield* db
@@ -3227,6 +3242,170 @@ for (const presented of [true, false]) {
     }
   });
 }
+
+describe("custom tool calls", () => {
+  const reply = () =>
+    Stream.make(
+      AiResponse.makePart("text-delta", { id: "t", delta: "Nothing to look up." }),
+      authoringFinish(),
+    );
+
+  it("treats an invented custom_ name as an unknown tool rather than failing the attempt", async () => {
+    const seed = await runtime.runPromise(setupConversation);
+    const conversationId = (
+      await runtime.runPromise(
+        ChatRepo.use((repo) =>
+          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+        ),
+      )
+    ).id;
+    let round = 0;
+    // Nothing is pinned to this attempt, so the name has no manifest entry.
+    // The SDK still forwards the part; the engine must not throw on it.
+    authoringScript = () =>
+      ++round === 1
+        ? (Stream.make(
+            AiResponse.makePart("tool-call", {
+              id: uuidv7(),
+              name: "custom_nope__lookup",
+              params: {},
+              providerExecuted: false,
+            }),
+            authoringFinish("tool-calls"),
+          ) as Stream.Stream<ChatStreamPart>)
+        : reply();
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId,
+            modelId: textModelId,
+            content: "Look it up.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+        ),
+      );
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      expect(detail.messages.at(-1)).toMatchObject({ status: "complete" });
+      expect(detail.toolCalls).toEqual([]);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("stores a tool's files as attachments of the answer and shares only what it asked to", async () => {
+    const seed = await runtime.runPromise(setupConversation);
+    const pdf = Buffer.from("%PDF-1.4 minimal");
+    const csv = Buffer.from("a,b\n1,2\n");
+    customToolRun = () =>
+      Effect.succeed({
+        ok: true,
+        output: "Generated the report.",
+        logs: [],
+        durationMs: 1,
+        files: [
+          { name: "q3.pdf", mediaType: "application/pdf", share: false, bytes: pdf },
+          { name: "q3.csv", mediaType: "text/csv", share: true, bytes: csv },
+        ],
+      });
+    const created = await runtime.runPromise(
+      CustomToolRepo.use((repo) =>
+        repo.create({
+          slug: `report_${seed.userId.slice(-8)}`,
+          name: "Report",
+          description: "",
+          createdBy: seed.userId,
+          build: {
+            source: "",
+            dependencies: [],
+            compiled: "",
+            functions: [
+              {
+                key: "make",
+                name: "Make report",
+                description: "Make the report.",
+                modelName: `custom_report_${seed.userId.slice(-8)}__make`,
+                parametersSchema: { type: "object", properties: {} },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    const conversationId = (
+      await runtime.runPromise(
+        ChatRepo.use((repo) =>
+          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+        ),
+      )
+    ).id;
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return prompts.length === 1
+        ? authoringTool(input, created.functions[0]!.modelName, {})
+        : reply();
+    };
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversationId,
+            modelId: textModelId,
+            content: "Make me the Q3 report.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      const events = Array.from(
+        await runtime.runPromise(
+          Effect.flatMap(StreamEngine, (engine) =>
+            Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+          ),
+        ),
+      );
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const answer = detail.messages.at(-1)!;
+      expect(answer.status).toBe("complete");
+      // Both files are attachments of the answer, anchored where the tool ran.
+      const stored = detail.attachments.filter((row) => row.messageId === assistantMessageId);
+      expect(stored.map((row) => [row.fileName, row.kind])).toEqual([
+        ["q3.pdf", "pdf"],
+        ["q3.csv", "text"],
+      ]);
+      expect(answer.assistantOutput?.files.map((file) => file.origin)).toEqual([
+        { toolCallId: expect.any(String) },
+        { toolCallId: expect.any(String) },
+      ]);
+      expect(
+        events.filter((event) => event.kind === "chunk" && event.chunkKind === "file"),
+      ).toHaveLength(2);
+      // The tool row names its files; the transcript result carries names only.
+      const call = detail.toolCalls.find((row) => row.messageId === assistantMessageId)!;
+      expect(call.result).toMatchObject({ fileIds: stored.map((row) => row.id) });
+      expect(JSON.stringify(call.result)).not.toContain(csv.toString("base64"));
+      // Only the shared CSV reached the model's next round, as an inline fence.
+      const second = JSON.stringify(prompts[1]!.prompt);
+      expect(second).toContain("1,2");
+      expect(second).not.toContain("%PDF");
+      expect(second).toContain('"name":"q3.pdf"');
+    } finally {
+      authoringScript = null;
+      customToolRun = null;
+    }
+  }, 60_000);
+});
 
 describe("local tools on the user's machine", () => {
   const folder = "acme-site";

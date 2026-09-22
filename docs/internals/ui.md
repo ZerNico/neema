@@ -194,6 +194,11 @@ false`), so a page body is written against data already there. This includes loc
   click; what they can still edit while uploads settle (draft text, skill chips) is read at dispatch.
   `Composer` keeps one effect-updated request ref for both and copies it at the click; see
   `docs/internals/desktop.md` for the mode-fixed rule this serves.
+- A file an answer produced, a model's image or a custom tool's return, sits at the text offset
+  where it appeared (`assistant-body.ts` orders it with the tool rows): images inline, anything
+  else as the same `AttachmentChip` a sent message uses, opening the shared preview dialog. The
+  tool row that produced it does not repeat the chip: the two would sit a line apart and read
+  as two files.
 - `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line transcript summary row,
   sitting beside `disclosureTriggerClassName` — a message stacks both. Chat disclosures use
   `~/ui/disclosure.tsx` for measured-height/opacity animation, reduced-motion and hidden-until-found

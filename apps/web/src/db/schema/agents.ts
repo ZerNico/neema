@@ -112,6 +112,7 @@ export type ResolvedAgentConfig = {
   instructions: string;
   collectionIds: ReadonlyArray<string>;
   skillIds?: ReadonlyArray<string>;
+  customToolIds?: ReadonlyArray<string>;
   searchEnabled: boolean;
   planEnabled: boolean;
 };

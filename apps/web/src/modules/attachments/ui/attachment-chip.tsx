@@ -31,6 +31,7 @@ export function AttachmentChip({
   onRemove,
   href,
   preview,
+  previewActions,
   className,
 }: {
   item: AttachmentChipItem;
@@ -40,6 +41,8 @@ export function AttachmentChip({
   href?: string | undefined;
   /** Full-content URL; when set, clicking the chip opens an in-app preview. */
   preview?: string | null | undefined;
+  /** Replaces the preview's "Open original" link; required for a `data:` or `blob:` preview. */
+  previewActions?: ReactNode;
   className?: string;
 }) {
   const status = item.status ?? "complete";
@@ -88,6 +91,7 @@ export function AttachmentChip({
   const dialog = preview ? (
     <AttachmentPreviewDialog
       target={{ fileName: item.fileName, size: item.size, kind: item.kind, url: preview }}
+      {...(previewActions ? { actions: previewActions } : {})}
       open={previewOpen}
       onOpenChange={setPreviewOpen}
     />
@@ -109,11 +113,7 @@ export function AttachmentChip({
           target="_blank"
           rel="noreferrer"
           title={problem ?? item.fileName}
-          className={cn(
-            shell,
-            focusRingClassName,
-            "hover:bg-accent transition-colors",
-          )}
+          className={cn(shell, focusRingClassName, "hover:bg-accent transition-colors")}
           // Plain click previews in place; modified clicks keep the browser's
           // open-in-new-tab behavior for the raw file.
           onClick={

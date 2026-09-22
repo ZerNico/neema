@@ -205,7 +205,7 @@ const GENERATION_LEASE = sql`interval '45 seconds'`;
 const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
 export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
 
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "image";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -1306,10 +1306,10 @@ export class ChatRepo extends Context.Service<
                     .set({
                       assistantOutput: {
                         ...message.assistantOutput,
-                        images: message.assistantOutput.images.map((image) => {
-                          const id = attachmentIds.get(image.attachment.id);
-                          if (!id) throw new Error("Missing cloned assistant image");
-                          return { ...image, attachment: { ...image.attachment, id } };
+                        files: message.assistantOutput.files.map((file) => {
+                          const id = attachmentIds.get(file.attachment.id);
+                          if (!id) throw new Error("Missing cloned assistant file");
+                          return { ...file, attachment: { ...file.attachment, id } };
                         }),
                       },
                     })

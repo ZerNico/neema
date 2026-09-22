@@ -1,4 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { FakeCustomToolRuntime } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
@@ -30,6 +31,7 @@ import {
   type CompactionDeps,
 } from "~/modules/chat/server/compaction.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import {
@@ -253,7 +255,12 @@ beforeAll(async () => {
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
-  const ReposLayer = Layer.mergeAll(AnalyticsRepo.layer, ChatRepo.layer, ProviderRepo.layer).pipe(
+  const ReposLayer = Layer.mergeAll(
+    AnalyticsRepo.layer,
+    ChatRepo.layer,
+    CustomToolRepo.layer,
+    ProviderRepo.layer,
+  ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(InfraLayer),
   );
@@ -266,6 +273,7 @@ beforeAll(async () => {
         FakeUrlReader,
         FakeBlobStore,
         FakeDocumentParser,
+        FakeCustomToolRuntime,
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,

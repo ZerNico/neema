@@ -8,7 +8,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { agentQuery } from "../client/queries.ts";
 import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
-import { AgentSettings, AgentSkillIds, type AgentDetail } from "../schema.ts";
+import { AgentSettings, AgentResourceIds, type AgentDetail } from "../schema.ts";
 import { createAgent, deleteAgent, updateAgent } from "../server/functions.ts";
 import { AgentSettingsFields } from "./agent-settings-fields.tsx";
 import { AgentAuthoringLaunchButton } from "./agent-authoring-launch.tsx";
@@ -26,7 +26,11 @@ import {
 import { FieldError } from "~/ui/primitives/field";
 
 const agentFormValidator = Schema.toStandardSchemaV1(
-  Schema.Struct({ ...AgentSettings.fields, skillIds: AgentSkillIds }),
+  Schema.Struct({
+    ...AgentSettings.fields,
+    skillIds: AgentResourceIds,
+    customToolIds: AgentResourceIds,
+  }),
 );
 
 const message = (error: unknown, fallback: string) =>
