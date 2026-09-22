@@ -165,6 +165,39 @@ describe("before a folder is attached", () => {
     );
     expect(await readFile(join(workspaceRoot, fresh, "note.txt"), "utf8")).toBe("hi");
 
+    // A server file lands beside it; a second copy takes a new name rather
+    // than replacing the first.
+    const pdf = Buffer.from("%PDF-1.4 minimal");
+    const first = await Effect.runPromise(
+      handlers.saveToWorkspace({
+        conversationId: fresh,
+        callId: "s1",
+        fileName: "q3.pdf",
+        base64: pdf.toString("base64"),
+      }),
+    );
+    expect(first).toEqual({ path: join(ws, "q3.pdf"), created: true, bytes: pdf.length });
+    const second = await Effect.runPromise(
+      handlers.saveToWorkspace({
+        conversationId: fresh,
+        callId: "s2",
+        fileName: "q3.pdf",
+        base64: pdf.toString("base64"),
+      }),
+    );
+    expect(second.path).toBe(join(ws, "q3-1.pdf"));
+    expect(await readFile(first.path)).toEqual(pdf);
+    // Path components in the name are not honoured: the file stays in the root.
+    const escaped = await Effect.runPromise(
+      handlers.saveToWorkspace({
+        conversationId: fresh,
+        callId: "s3",
+        fileName: "../escape.txt",
+        base64: Buffer.from("x").toString("base64"),
+      }),
+    );
+    expect(escaped.path).toBe(join(ws, "escape.txt"));
+
     ran = [];
     await Effect.runPromise(
       handlers.runCommand({

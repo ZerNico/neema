@@ -195,6 +195,10 @@ replayed by the same rule when history is rebuilt, so switching to a narrower
 model later never fails a turn on a file it was handed earlier. A file the
 validator refuses is dropped with a warning; the text result still lands.
 
+The model's result also names each stored file by attachment id. In a Work
+chat that id is what `save_to_workspace` takes to copy the file onto the
+machine; see `docs/internals/desktop.md`. Nothing else reads it.
+
 An admin Test has no message to attach to, so its files come back inline as
 `data:` URLs (capped at `testFileBytes`) and preview through the same dialog
 without an "Open original" link.

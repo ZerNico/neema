@@ -366,6 +366,21 @@ and the sandbox's write allowance covers the workspace plus every attached
 folder, so `cd` and `cp` across roots work inside one address space. Each
 command is one fresh sandboxed process; there is no persistent shell.
 
+A file a custom tool returned stays a server attachment of the answer in a
+Work chat too, never pushed to the machine on its own: the shell may be
+closed when the result lands, a resumed or retried generation has no page
+listening, and a second machine opening the chat would find a path that means
+nothing there. The attachment is the one home that survives all of those, the
+same trade a drop makes in the other direction. When the model needs the
+bytes on disk it calls `save_to_workspace` with the attachment id its tool
+result carried: the page fetches `/api/files/:id` under its own session, so
+the shell holds no credential and the server's access rule decides, and the
+shell lands the bytes in the workspace root under a collision-free name
+through the same primitive a staged drop uses. No approval is asked: the
+workspace is app-owned, a drop lands there unasked, and the copy never
+overwrites. The tool is a model operation on the shell's ledger, retained like
+a write so a replayed call does not land the file twice.
+
 ## Containment and command isolation
 
 File paths pass through `resolveAmongRoots` and `resolveInFolder`. The

@@ -16,6 +16,7 @@ export const DESKTOP_TOOL_NAMES = [
   "search_files",
   "read_local_file",
   "write_local_file",
+  "save_to_workspace",
   "edit_local_file",
   "move_local_file",
   "delete_local_file",
@@ -29,7 +30,9 @@ export type DesktopToolName = typeof DesktopToolName.Type;
  * What a call asks permission to do. Reads ask for nothing: the folder was
  * handed over on purpose. Edits, deletes and commands are tracked apart, so
  * allowing a refactor to keep editing never quietly allows a delete or a
- * shell; deletes are never covered by a blanket grant at all.
+ * shell; deletes are never covered by a blanket grant at all. Saving a file
+ * the chat already holds into the app-owned workspace asks for nothing
+ * either: it never overwrites, and a drop lands there without a prompt too.
  */
 export type ApprovalKind = "edit" | "delete" | "command";
 
@@ -186,6 +189,9 @@ export const desktopToolsSystemHint = (
     addressSpace,
     workspace
       ? `Files the user drops into the chat land in the workspace, and the message that names them says so; keep anything you create for this chat there too.`
+      : null,
+    workspace
+      ? "A file a tool returned in this chat lives on the server; save_to_workspace copies it into the workspace by its attachment id when you need it on disk, for a command or to hand to another tool."
       : null,
     "Find your way with find_files and search_files before reading; both skip what .gitignore skips. Read a file before changing it. Prefer edit_local_file for a change inside an existing file, and write_local_file only for a new file or a rewrite. Images and PDFs come back through read_local_file for you to look at when the model can take them.",
     commands

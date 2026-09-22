@@ -73,6 +73,12 @@ export interface Workspaces {
     fileName: string,
     sourcePath: string,
   ): Effect.Effect<StagedFileReceipt, DesktopError>;
+  /** Bytes straight into the workspace root, named apart from anything there. */
+  landFile(
+    conversationId: string,
+    fileName: string,
+    bytes: Uint8Array,
+  ): Effect.Effect<StagedFileReceipt, DesktopError>;
   discardStagedFile(
     conversationId: string,
     submissionId: string,
@@ -328,6 +334,19 @@ const makeWorkspaces = (root: string): Workspaces => {
         try: () => stageFromPath(conversationId, submissionId, fileName, sourcePath),
         catch: (cause) =>
           cause instanceof DesktopError ? cause : failed("Could not stage that file."),
+      }),
+
+    landFile: (conversationId, fileName, bytes) =>
+      Effect.tryPromise({
+        try: () =>
+          serialized(`workspace:${workspaceId(conversationId)}`, () =>
+            landFile(dir(conversationId), fileName, async (tmp) => {
+              await writeFile(tmp, bytes, { flag: "wx" });
+              return bytes.length;
+            }),
+          ),
+        catch: (cause) =>
+          cause instanceof DesktopError ? cause : failed("Could not save that file."),
       }),
 
     discardStagedFile: (conversationId, submissionId, name) =>
@@ -618,6 +637,8 @@ export class WorkspaceRegistry extends Context.Service<WorkspaceRegistry, Worksp
           forOrigin().stageFile(conversationId, submissionId, fileName, bytes),
         stageFileFromPath: (conversationId, submissionId, fileName, sourcePath) =>
           forOrigin().stageFileFromPath(conversationId, submissionId, fileName, sourcePath),
+        landFile: (conversationId, fileName, bytes) =>
+          forOrigin().landFile(conversationId, fileName, bytes),
         discardStagedFile: (conversationId, submissionId, name) =>
           forOrigin().discardStagedFile(conversationId, submissionId, name),
         discardSubmission: (conversationId, submissionId) =>

@@ -1,6 +1,7 @@
 import {
   ArrowDown01Icon,
   Delete02Icon,
+  Download04Icon,
   Edit02Icon,
   File01Icon,
   Folder01Icon,
@@ -37,6 +38,7 @@ const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   search_files: SearchList01Icon,
   read_local_file: File01Icon,
   write_local_file: PencilEdit02Icon,
+  save_to_workspace: Download04Icon,
   edit_local_file: Edit02Icon,
   move_local_file: FolderTransferIcon,
   delete_local_file: Delete02Icon,
@@ -96,6 +98,8 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Reading ${what}` : "Reading a file";
     case "write_local_file":
       return what ? `Writing ${what}` : "Writing a file";
+    case "save_to_workspace":
+      return "Saving a file to the workspace";
     case "edit_local_file":
       return what ? `Editing ${what}` : "Editing a file";
     case "move_local_file":

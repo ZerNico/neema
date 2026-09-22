@@ -30,6 +30,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   fileInfo: unimplemented("fileInfo"),
   readFile: unimplemented("readFile"),
   writeFile: unimplemented("writeFile"),
+  saveToWorkspace: unimplemented("saveToWorkspace"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),

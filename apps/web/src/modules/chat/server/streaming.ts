@@ -1991,6 +1991,11 @@ export class StreamEngine extends Context.Service<
                             // model's own image; a shared one also rides the
                             // next round as a user file part.
                             const fileIds: string[] = [];
+                            // Ids by returned name, patched into the result the
+                            // model reads so a later save_to_workspace can name
+                            // the file; the part is already in turnParts and
+                            // the round has not been folded yet.
+                            const storedIds = new Map<string, string>();
                             for (const item of customTools?.takeFiles(part.id) ?? []) {
                               if (!fence || Option.isNone(imageAttachments)) break;
                               yield* flush;
@@ -2033,6 +2038,7 @@ export class StreamEngine extends Context.Service<
                               );
                               if (!stored) continue;
                               fileIds.push(stored.attachment.id);
+                              storedIds.set(item.name, stored.attachment.id);
                               if (item.share)
                                 turnFiles.push(
                                   yield* fileForModel(promptDeps.parser, {
@@ -2043,6 +2049,19 @@ export class StreamEngine extends Context.Service<
                                     files: model?.capabilities.files ?? false,
                                   }),
                                 );
+                            }
+                            if (storedIds.size > 0) {
+                              const result = part.result as {
+                                files?: ReadonlyArray<{ name: string }>;
+                              };
+                              const named = {
+                                ...result,
+                                files: (result.files ?? []).map((file) => {
+                                  const attachmentId = storedIds.get(file.name);
+                                  return attachmentId ? { ...file, attachmentId } : file;
+                                }),
+                              };
+                              Object.assign(part, { result: named, encodedResult: named });
                             }
                             const activity = projectCustomToolResult({
                               name: part.name,

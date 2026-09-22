@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deletePathsOf, desktopToolsSystemHint, forTranscript } from "./tool-schema.ts";
+import {
+  approvalKind,
+  deletePathsOf,
+  desktopToolsSystemHint,
+  forTranscript,
+} from "./tool-schema.ts";
 
 describe("desktop tools system hint", () => {
   it("names the absolute path as the address space", () => {
@@ -37,9 +42,12 @@ describe("desktop tools system hint", () => {
     );
     // The user never picked it; "has attached" must not credit them with it.
     expect(hint).not.toContain("has attached");
-    expect(hint).toContain('this chat\'s own workspace on the user\'s computer at "/data/workspaces/abc"');
+    expect(hint).toContain(
+      "this chat's own workspace on the user's computer at \"/data/workspaces/abc\"",
+    );
     expect(hint).toContain("Files the user drops into the chat land in the workspace");
     expect(hint).toContain('Paths are absolute, like "/data/workspaces/abc/README.md"');
+    expect(hint).toContain("save_to_workspace copies it into the workspace by its attachment id");
   });
 
   it("names the workspace first and the attached folders after it", () => {
@@ -61,6 +69,15 @@ describe("desktop tools system hint", () => {
   it("leaves the workspace unmentioned when the shell predates it", () => {
     const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], true);
     expect(hint).not.toContain("drops into the chat");
+  });
+});
+
+describe("approvalKind", () => {
+  it("asks for nothing when a chat's own file is saved into the workspace", () => {
+    // The workspace is app-owned and a drop lands there unasked; the copy
+    // never overwrites, so there is nothing for a person to weigh.
+    expect(approvalKind("save_to_workspace")).toBeNull();
+    expect(approvalKind("write_local_file")).toBe("edit");
   });
 });
 

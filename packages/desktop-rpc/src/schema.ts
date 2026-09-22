@@ -271,6 +271,8 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
     /** The pattern could not be compiled. */
     "bad-pattern",
     "too-large",
+    /** The server would not hand over the attachment: not in this chat, or not readable. */
+    "not-available",
     /** Commands are unavailable because the sandbox is not ready. */
     "sandbox-unavailable",
     "timed-out",

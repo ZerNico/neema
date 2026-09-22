@@ -3280,7 +3280,7 @@ describe("custom tool calls", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId: textModelId,
             content: "Look it up.",
             searchEnabled: false,
@@ -3360,7 +3360,7 @@ describe("custom tool calls", () => {
         ChatService.use((service) =>
           service.sendMessage({
             userId: seed.userId,
-            conversationId,
+            conversation: { kind: "existing", id: conversationId },
             modelId: textModelId,
             content: "Make me the Q3 report.",
             searchEnabled: false,
@@ -3396,8 +3396,11 @@ describe("custom tool calls", () => {
       const call = detail.toolCalls.find((row) => row.messageId === assistantMessageId)!;
       expect(call.result).toMatchObject({ fileIds: stored.map((row) => row.id) });
       expect(JSON.stringify(call.result)).not.toContain(csv.toString("base64"));
-      // Only the shared CSV reached the model's next round, as an inline fence.
+      // The model is handed each file's attachment id, the handle
+      // save_to_workspace takes; the bytes stay on the server.
       const second = JSON.stringify(prompts[1]!.prompt);
+      for (const row of stored) expect(second).toContain(`"attachmentId":"${row.id}"`);
+      // Only the shared CSV reached the model's next round, as an inline fence.
       expect(second).toContain("1,2");
       expect(second).not.toContain("%PDF");
       expect(second).toContain('"name":"q3.pdf"');
@@ -4321,6 +4324,7 @@ describe("local tools on the user's machine", () => {
       const offered = Object.keys(prompts[0]!.toolkit?.tools ?? {});
       expect(offered).toContain("read_local_file");
       expect(offered).toContain("write_local_file");
+      expect(offered).toContain("save_to_workspace");
       expect(offered).not.toContain("run_command");
       // And the model is told, rather than left to discover it by trying.
       expect(JSON.stringify(prompts[0]!.prompt)).toContain("Running commands is unavailable");

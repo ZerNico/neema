@@ -112,6 +112,17 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
   failureMode: "return",
 });
 
+export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
+  description:
+    "Copy a file this chat already holds on the server into the chat's workspace on the user's " +
+    "computer, so a command or another local tool can reach it. Name it by the attachment id a " +
+    "tool result gave you. Returns the absolute path it landed at; an existing name is never " +
+    "overwritten, the copy gets a new one.",
+  parameters: Schema.Struct({ attachmentId: Schema.String.check(Schema.isMinLength(1)) }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export const runCommandTool = Tool.make("run_command", {
   description:
     "Run a shell command on the user's computer. The command starts in this chat's workspace, " +
@@ -179,6 +190,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     searchFilesTool,
     readLocalFileTool,
     writeLocalFileTool,
+    saveToWorkspaceTool,
     editLocalFileTool,
     moveLocalFileTool,
     deleteLocalFileTool,
@@ -192,6 +204,8 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       read_local_file: handle("read_local_file", DESKTOP_TIMEOUTS.quick),
       // Changes wait on a person as well as a machine.
       write_local_file: handle("write_local_file", DESKTOP_TIMEOUTS.command),
+      // A download plus a write; nobody is asked, but the bytes take time.
+      save_to_workspace: handle("save_to_workspace", DESKTOP_TIMEOUTS.command),
       edit_local_file: handle("edit_local_file", DESKTOP_TIMEOUTS.command),
       move_local_file: handle("move_local_file", DESKTOP_TIMEOUTS.command),
       delete_local_file: handle("delete_local_file", DESKTOP_TIMEOUTS.command),

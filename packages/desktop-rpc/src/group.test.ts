@@ -12,6 +12,10 @@ const cases = [
   { tag: "readFile", payload: path },
   { tag: "readBinary", payload: path },
   { tag: "writeFile", payload: { ...path, text: "hello" } },
+  {
+    tag: "saveToWorkspace",
+    payload: { conversationId: CONVERSATION, fileName: "q3.pdf", base64: "JVBERi0=" },
+  },
   { tag: "editFile", payload: { ...path, old: "hello", new: "world", all: false } },
   { tag: "movePath", payload: { conversationId: CONVERSATION, from: "work/a", to: "work/b" } },
   { tag: "deletePath", payload: { conversationId: CONVERSATION, paths: ["work/file"] } },

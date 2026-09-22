@@ -10,6 +10,8 @@ export const CustomToolResultFile = Schema.Struct({
   name: Schema.String,
   mediaType: Schema.String,
   size: Schema.Int,
+  /** The stored attachment, so a later save_to_workspace can name it. */
+  attachmentId: Schema.optional(Schema.String),
 });
 
 export const CustomToolResult = Schema.Struct({

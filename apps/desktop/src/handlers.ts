@@ -774,6 +774,27 @@ export const makeHandlers = (shell: Shell) =>
           return { path: target.relative, created: !existed, bytes };
         }),
 
+      saveToWorkspace: ({ conversationId, fileName, base64 }) =>
+        Effect.gen(function* () {
+          // Same ceiling as a composer import, refused while it is still text.
+          if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
+            return yield* new DesktopError({
+              reason: "too-large",
+              message: "That file is too large to save to the workspace.",
+            });
+          }
+          const landed = yield* workspaces.landFile(
+            conversationId,
+            fileName,
+            Buffer.from(base64, "base64"),
+          );
+          return {
+            path: join(workspaces.path(conversationId), landed.name),
+            created: true,
+            bytes: landed.bytes,
+          };
+        }),
+
       runCommand: ({ conversationId, callId, command, timeoutMs }) =>
         Effect.gen(function* () {
           const roots = yield* rootsFor(conversationId);

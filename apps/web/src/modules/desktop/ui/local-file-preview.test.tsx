@@ -55,6 +55,7 @@ const connect = (): DesktopClient => {
           : Effect.succeed({ path, bytes: 4 });
       }),
     writeFile: notUsed("writeFile"),
+    saveToWorkspace: notUsed("saveToWorkspace"),
     editFile: notUsed("editFile"),
     movePath: notUsed("movePath"),
     deletePath: notUsed("deletePath"),

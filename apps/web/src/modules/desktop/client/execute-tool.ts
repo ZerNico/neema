@@ -1,7 +1,8 @@
 import { Effect } from "effect";
-import type { DesktopClient, DesktopError } from "@chat/desktop-rpc";
+import { DesktopError, type DesktopClient } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
+import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import {
   DesktopToolResult,
   desktopFailure,
@@ -45,6 +46,8 @@ const refusalSummary = (reason: string) => {
       return "That took too long";
     case "denied-by-user":
       return "You declined that";
+    case "not-available":
+      return "That file is not in this chat";
     default:
       return "That did not run";
   }
@@ -73,6 +76,46 @@ const describeEntry = (entry: {
       return entry.name;
   }
 };
+
+/** The name the server sent in Content-Disposition, or the id when it sent none. */
+const fileNameOf = (response: Response, fallback: string) => {
+  const header = response.headers.get("content-disposition") ?? "";
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]!);
+    } catch {
+      /* the plain name below */
+    }
+  }
+  const plain = /filename="([^"]*)"/i.exec(header);
+  return plain?.[1] || fallback;
+};
+
+/**
+ * The page fetches under its own session, so the shell never holds a
+ * credential and the server's access rule decides what may be copied.
+ */
+const fetchAttachment = (attachmentId: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(attachmentUrl(attachmentId), { credentials: "same-origin" });
+      if (!response.ok) throw new Error(String(response.status));
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      let binary = "";
+      for (let index = 0; index < bytes.length; index += 0x8000)
+        binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+      return { name: fileNameOf(response, attachmentId), base64: btoa(binary) };
+    },
+    catch: (cause) =>
+      new DesktopError({
+        reason: "not-available",
+        message:
+          cause instanceof Error && cause.message === "404"
+            ? "That attachment is not in this chat, or you cannot read it."
+            : "The file could not be fetched from the server.",
+      }),
+  });
 
 export const executeDesktopTool = (
   client: DesktopClient,
@@ -240,6 +283,28 @@ export const executeDesktopTool = (
             truncated: false,
           }),
         );
+      case "save_to_workspace": {
+        const attachmentId = str(args.attachmentId);
+        if (!attachmentId)
+          return Effect.succeed(desktopFailure("Nothing to save", "No attachment id was named."));
+        return Effect.flatMap(fetchAttachment(attachmentId), (file) =>
+          Effect.map(
+            client.saveToWorkspace({
+              callId: activity.callId,
+              conversationId,
+              fileName: file.name,
+              base64: file.base64,
+            }),
+            (receipt) => ({
+              v: 1 as const,
+              ok: true,
+              summary: `Saved ${receipt.path}`,
+              detail: `${receipt.path}\n${formatFileSize(receipt.bytes)} written.`,
+              truncated: false,
+            }),
+          ),
+        );
+      }
       case "run_command": {
         // A slow approval has already eaten into the server's wait; what is
         // left, minus the trip back, is all the command may take.

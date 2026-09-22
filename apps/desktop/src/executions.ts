@@ -7,6 +7,7 @@ const MODEL_OPERATIONS = new Set([
   "readFile",
   "readBinary",
   "writeFile",
+  "saveToWorkspace",
   "editFile",
   "movePath",
   "deletePath",
@@ -16,7 +17,14 @@ const MODEL_OPERATIONS = new Set([
 ]);
 
 /** Operations whose result must be kept for a while: running them twice is a second edit. */
-const SIDE_EFFECTS = new Set(["writeFile", "editFile", "movePath", "deletePath", "runCommand"]);
+const SIDE_EFFECTS = new Set([
+  "writeFile",
+  "saveToWorkspace",
+  "editFile",
+  "movePath",
+  "deletePath",
+  "runCommand",
+]);
 
 // Workspace staging, promotion, cloning, grants, and cleanup deliberately stay
 // out of both sets: they are user actions like chooseFolder, so they carry no

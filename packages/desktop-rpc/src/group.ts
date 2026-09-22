@@ -135,6 +135,22 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
+  /**
+   * Lands bytes the page fetched from the server inside the chat's workspace,
+   * under a collision-free name. A model operation, so it carries a callId and
+   * is retained like a write: replaying it must not land the file twice.
+   */
+  Rpc.make("saveToWorkspace", {
+    payload: {
+      conversationId: WorkspaceId,
+      callId: Schema.String,
+      fileName: Schema.String,
+      base64: Schema.String,
+    },
+    success: WriteReceipt,
+    error: DesktopError,
+  }),
+
   /** The raw bytes of an image or document, for a model that can take them. */
   Rpc.make("readBinary", {
     payload: {
