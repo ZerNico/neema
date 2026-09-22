@@ -177,7 +177,7 @@ it("hydrates a generic shell into the desktop header without replacing its frame
   const shell = (
     <>
       <DesktopChromeFrame />
-      <ClientOnly fallback={<p>Loading Chat…</p>}>
+      <ClientOnly fallback={<p>Loading…</p>}>
         <App />
       </ClientOnly>
     </>
@@ -187,7 +187,7 @@ it("hydrates a generic shell into the desktop header without replacing its frame
   document.body.append(container);
   const frame = container.querySelector(".desktop-titlebar");
   const target = container.querySelector(".desktop-titlebar-content");
-  expect(container.textContent).toBe("Loading Chat…");
+  expect(container.textContent).toBe("Loading…");
   expect(chrome.getState).not.toHaveBeenCalled();
   expect(chrome.setTheme).not.toHaveBeenCalled();
   const errors = vi.fn();
