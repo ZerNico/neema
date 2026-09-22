@@ -16,10 +16,12 @@ import {
   updateSchedule,
 } from "../server/functions.ts";
 import { ScheduleSettingsFields } from "./schedule-settings-fields.tsx";
-import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
+import { absoluteLabel, clockLabel, dayLabel } from "~/modules/chat/ui/timestamps.ts";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { cn } from "~/ui/utils";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
+import { ErrorState, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -28,6 +30,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+
+/** Today's runs by clock time, older ones by day, like the chats list. */
+const runStamp = (date: Date) => {
+  const day = dayLabel(date);
+  return day === "Today" ? clockLabel(date) : day;
+};
 
 const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -224,31 +232,49 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         ) : runs.data.runs.length === 0 ? (
           <p className="text-muted-foreground text-sm">No runs yet.</p>
         ) : (
-          <ListCard>
-            {runs.data.runs.map((run) => (
-              <ListRow key={run.id}>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-2 text-sm font-medium">
-                    {run.conversationId ? (
-                      <Link
-                        to="/chat/$conversationId"
-                        params={{ conversationId: run.conversationId }}
-                        className="truncate underline-offset-2 hover:underline"
-                      >
-                        {run.conversationTitle ?? "Untitled chat"}
-                      </Link>
-                    ) : (
-                      <span className="truncate">{run.error ?? "Could not run"}</span>
-                    )}
-                    {run.status === "error" ? <Badge variant="destructive">Failed</Badge> : null}
+          // The chats page's idiom: whole-row links with a hover surface and
+          // the time on the right, since each run is a chat.
+          <ul className="-mx-3 flex flex-col">
+            {runs.data.runs.map((run) => {
+              const content = (
+                <>
+                  <span className="min-w-0 flex-1 truncate">
+                    {run.conversationId
+                      ? (run.conversationTitle ?? "Untitled chat")
+                      : (run.error ?? "Could not run")}
                   </span>
-                  <span className="text-muted-foreground truncate text-xs">
-                    {relativeAgeLabel(run.firedAt)}
-                  </span>
-                </div>
-              </ListRow>
-            ))}
-          </ListCard>
+                  {run.status === "error" ? <Badge variant="destructive">Failed</Badge> : null}
+                  <time
+                    dateTime={new Date(run.firedAt).toISOString()}
+                    title={absoluteLabel(new Date(run.firedAt))}
+                    className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                  >
+                    {runStamp(new Date(run.firedAt))}
+                  </time>
+                </>
+              );
+              const row = "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm";
+              return (
+                <li key={run.id}>
+                  {run.conversationId ? (
+                    <Link
+                      to="/chat/$conversationId"
+                      params={{ conversationId: run.conversationId }}
+                      className={cn(
+                        focusRingClassName,
+                        row,
+                        "hover:bg-accent hover:text-accent-foreground transition-colors",
+                      )}
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div className={cn(row, "text-muted-foreground")}>{content}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </Section>
     </Page>

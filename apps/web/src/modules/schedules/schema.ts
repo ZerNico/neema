@@ -31,6 +31,7 @@ export const ScheduleSummary = Schema.Struct({
   id: ResourceId,
   name: Schema.String,
   scheduleText: Schema.String,
+  cron: Schema.String,
   timezone: Schema.String,
   paused: Schema.Boolean,
   nextFireAt: Schema.NullOr(Schema.String),

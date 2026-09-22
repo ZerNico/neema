@@ -13,6 +13,7 @@ export const toSummary = (row: ScheduleRow): ScheduleSummary => ({
   id: row.id,
   name: row.name,
   scheduleText: row.scheduleText,
+  cron: row.cron,
   timezone: row.timezone,
   paused: row.paused,
   nextFireAt: row.nextFireAt?.toISOString() ?? null,

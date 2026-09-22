@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConfirmProvider } from "~/ui/confirm.tsx";
 import type { ScheduleSummary } from "../schema.ts";
-import { deleteSchedule, listSchedules, pauseSchedule, resumeSchedule } from "../server/functions.ts";
+import { listSchedules } from "../server/functions.ts";
 import { SchedulesPage } from "./schedules-page.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -19,12 +18,7 @@ vi.mock("../server/functions.ts", () => ({
   previewSchedule: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    params,
-    children,
-    ...rest
-  }: Record<string, unknown> & { children?: unknown }) => (
+  Link: ({ to, params, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
     <a
       href={String(to)}
       data-schedule-id={(params as { scheduleId?: string } | undefined)?.scheduleId}
@@ -43,6 +37,7 @@ vi.stubGlobal(
 const schedule = (overrides: Partial<ScheduleSummary> & { id: string }): ScheduleSummary => ({
   name: "Digest",
   scheduleText: "every weekday at 7am",
+  cron: "0 7 * * 1-5",
   timezone: "UTC",
   paused: false,
   nextFireAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -58,9 +53,7 @@ const renderPage = (rows: ScheduleSummary[]) => {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <ConfirmProvider>
-          <SchedulesPage />
-        </ConfirmProvider>
+        <SchedulesPage />
       </QueryClientProvider>,
     ),
   };
@@ -71,61 +64,47 @@ beforeEach(() => {
 });
 
 describe("SchedulesPage", () => {
-  it("shows each cadence with its next run and a paused badge where relevant", () => {
+  it("names each cadence from its cron, with the next run and a paused badge", () => {
     renderPage([
       schedule({ id: "s1", name: "Digest" }),
       schedule({ id: "s2", name: "Retro", paused: true, nextFireAt: null }),
       schedule({ id: "s3", name: "Done", nextFireAt: null }),
     ]);
-    expect(screen.getByText(/every weekday at 7am · Next run/)).toBeInTheDocument();
-    expect(screen.getByText(/every weekday at 7am · Paused/)).toBeInTheDocument();
-    expect(screen.getByText(/every weekday at 7am · No upcoming run/)).toBeInTheDocument();
-    // Only the paused row wears the badge; "No upcoming run" is not paused.
+    expect(screen.getByText(/^Every weekday at 07:00 · Next run/)).toBeInTheDocument();
+    expect(screen.getByText(/^Every weekday at 07:00 · No upcoming run/)).toBeInTheDocument();
+    // Paused says so once, as the badge, not again in the line.
     expect(screen.getAllByText("Paused")).toHaveLength(1);
+    expect(screen.getByText(/^Every weekday at 07:00$/)).toBeInTheDocument();
   });
 
-  it("pauses a live schedule and resumes a paused one through their own server functions", async () => {
-    vi.mocked(pauseSchedule).mockResolvedValue(undefined);
-    vi.mocked(resumeSchedule).mockResolvedValue(undefined);
-    renderPage([schedule({ id: "s1", name: "Digest" }), schedule({ id: "s2", name: "Retro", paused: true })]);
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    await waitFor(() =>
-      expect(vi.mocked(pauseSchedule)).toHaveBeenCalledWith({ data: { scheduleId: "s1" } }),
-    );
-    // Both toggles share the pending state, so wait for the first to settle.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    await waitFor(() =>
-      expect(vi.mocked(resumeSchedule)).toHaveBeenCalledWith({ data: { scheduleId: "s2" } }),
-    );
+  it("counts a long day list and keeps the author's words for a cron it cannot read", () => {
+    renderPage([
+      schedule({ id: "s1", name: "Many", cron: "45 9 3,4,6,8,9,L * *" }),
+      schedule({ id: "s2", name: "Odd", cron: "0 7-9 * * *", scheduleText: "mornings" }),
+    ]);
+    expect(screen.getByText(/^Every month on 6 days at 09:45 · /)).toBeInTheDocument();
+    expect(screen.getByText(/^mornings · /)).toBeInTheDocument();
   });
 
-  it("links Edit to the schedule page and deletes only after confirmation", async () => {
-    vi.mocked(deleteSchedule).mockResolvedValue(undefined);
+  it("opens a schedule from its whole row", () => {
     renderPage([schedule({ id: "s1", name: "Digest" })]);
-    fireEvent.click(screen.getByRole("button", { name: "Actions for Digest" }));
-    expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open Digest" })).toHaveAttribute(
       "data-schedule-id",
       "s1",
     );
-    fireEvent.click(screen.getByRole("menuitem", { name: /Delete/ }));
-    expect(await screen.findByText(/past run conversations are deleted with it/)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() =>
-      expect(screen.queryByText(/past run conversations/)).not.toBeInTheDocument(),
-    );
-    expect(vi.mocked(deleteSchedule)).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Actions for Digest" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Delete/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete schedule" }));
-    await waitFor(() =>
-      expect(vi.mocked(deleteSchedule)).toHaveBeenCalledWith({ data: { scheduleId: "s1" } }),
-    );
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
   });
 
-  it("offers creation through chat when there is nothing yet", () => {
+  it("offers creation through chat, or by hand from the menu, when there is nothing yet", async () => {
     renderPage([]);
     expect(screen.getByText("No schedules yet")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /New schedule/ }).length).toBeGreaterThan(0);
+    const [chat] = screen.getAllByRole("link", { name: "New schedule" });
+    expect(chat).toHaveAttribute("href", "/");
+    const [menu] = screen.getAllByRole("button", { name: "More ways to create: New schedule" });
+    fireEvent.click(menu!);
+    expect(await screen.findByRole("menuitem", { name: "Set up manually" })).toHaveAttribute(
+      "href",
+      "/schedules/new",
+    );
   });
 });
