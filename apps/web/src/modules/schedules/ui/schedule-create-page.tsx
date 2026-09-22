@@ -3,7 +3,6 @@ import { useStore } from "@tanstack/react-form";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useId } from "react";
-import { toast } from "sonner";
 import { DEFAULT_CADENCE, cadenceCron, cadenceText } from "../cadence.ts";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
 import { ScheduleSettings } from "../schema.ts";
@@ -13,9 +12,8 @@ import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { Page } from "~/ui/page-shell.tsx";
+import { toastError } from "~/ui/error-toast.ts";
 
-const message = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback;
 
 export function ScheduleCreatePage() {
   const queryClient = useQueryClient();
@@ -38,7 +36,7 @@ export function ScheduleCreatePage() {
         await queryClient.invalidateQueries({ queryKey: ["schedules"] });
         await navigate({ to: "/schedules/$scheduleId", params: { scheduleId: created.id } });
       } catch (error) {
-        toast.error(message(error, "Could not create the schedule."));
+        toastError("Could not create the schedule.", error);
       }
     },
   });

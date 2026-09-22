@@ -105,7 +105,9 @@ describe("GroupDetailPage sharing permissions", () => {
     const { invalidate } = renderPage();
     fireEvent.click(shareSwitch("Bob"));
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Could not update sharing permission."),
+      expect(toast.error).toHaveBeenCalledWith("Could not update sharing permission.", {
+        description: "Failed.",
+      }),
     );
     expect(updateGroupMemberSharing).toHaveBeenCalledWith({
       data: { groupId: "g1", userId: "u2", canShare: false },

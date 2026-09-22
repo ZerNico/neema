@@ -11,7 +11,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentAuthoringLaunchMenuItem } from "./agent-authoring-launch.tsx";
-import { toast } from "sonner";
 import { agentsQuery } from "../client/queries.ts";
 import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
 import { agentAuthoringRequest } from "../authoring.ts";
@@ -39,6 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { toastError } from "~/ui/error-toast.ts";
 
 export function AgentsPage() {
   const queryClient = useQueryClient();
@@ -48,7 +48,7 @@ export function AgentsPage() {
   const remove = useMutation({
     mutationFn: (agentId: string) => deleteAgent({ data: { agentId } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
-    onError: () => toast.error("Could not delete the agent."),
+    onError: (error) => toastError("Could not delete the agent.", error),
   });
   const rows = agents.data ?? [];
   const own = rows.filter((agent) => agent.canEdit);

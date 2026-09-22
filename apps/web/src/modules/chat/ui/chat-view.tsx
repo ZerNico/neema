@@ -105,6 +105,7 @@ import { prefersReducedMotion } from "~/ui/motion.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const sendReservedWorkspaceTurn = async (input: {
   conversation:
@@ -675,7 +676,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     mutationFn: (permissionLevel: PermissionLevel) =>
       updateWorkSettings({ data: { conversationId, permissionLevel } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
-    onError: () => toast.error("Could not change the approval level."),
+    onError: (error) => toastError("Could not change the approval level.", error),
   });
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
@@ -899,7 +900,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         { throwOnError: true },
       ),
     onSuccess: () => setQuestionNeedsRefresh(false),
-    onError: () => toast.error("Could not refresh the chat."),
+    onError: (error) => toastError("Could not refresh the chat.", error),
   });
   const refreshQuestionState = async () => {
     try {
@@ -931,7 +932,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...documentFocus(),
         },
       }),
-    onError: () => toast.error("Could not send your answers."),
+    onError: (error) => toastError("Could not send your answers.", error),
     onSettled: refreshQuestionState,
   });
   const mutateAnswer = answerMutation.mutateAsync;

@@ -69,6 +69,7 @@ import { exampleArguments } from "../schema-example.ts";
 import { TEMPLATE_SOURCE } from "../template.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const customToolQuery = (toolId: string) =>
   queryOptions({
@@ -340,7 +341,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       await invalidateLists(queryClient);
       await queryClient.invalidateQueries({ queryKey: ["admin", "custom-tools", tool!.id] });
     },
-    onError: () => toast.error("Could not update the module."),
+    onError: (error) => toastError("Could not update the module.", error),
   });
   const remove = useMutation({
     mutationFn: () => settled(deleteCustomTool({ data: { toolId: tool!.id } })),
@@ -348,7 +349,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       await invalidateLists(queryClient);
       await navigate({ to: "/admin/custom-tools" });
     },
-    onError: () => toast.error("Could not delete the module."),
+    onError: (error) => toastError("Could not delete the module.", error),
   });
   const test = useMutation({
     mutationFn: async (): Promise<CustomToolTestResult> => {

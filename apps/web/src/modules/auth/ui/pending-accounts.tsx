@@ -1,10 +1,10 @@
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { decideAccount, listPendingAccounts } from "../server/signup-functions.ts";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const pendingAccountsQuery = queryOptions({
   queryKey: ["admin", "pending-accounts"],
@@ -29,7 +29,7 @@ export function PendingAccounts() {
         queryClient.invalidateQueries({ queryKey: ["admin", "pending-accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
       ]),
-    onError: () => toast.error("Could not decide on the account."),
+    onError: (error) => toastError("Could not decide on the account.", error),
   });
 
   if (pending.length === 0) return null;

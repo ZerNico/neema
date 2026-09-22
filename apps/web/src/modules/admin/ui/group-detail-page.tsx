@@ -14,7 +14,6 @@ import {
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 import {
   addGroupMember,
   deleteGroup,
@@ -66,6 +65,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { Spinner } from "~/ui/primitives/spinner";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const membersQuery = (groupId: string) =>
   queryOptions({
@@ -100,20 +100,20 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
   const add = useMutation({
     mutationFn: (userId: string) => addGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not add the member."),
+    onError: (error) => toastError("Could not add the member.", error),
   });
 
   const remove = useMutation({
     mutationFn: (userId: string) => removeGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not remove the member."),
+    onError: (error) => toastError("Could not remove the member.", error),
   });
 
   const sharing = useMutation({
     mutationFn: ({ userId, canShare }: { userId: string; canShare: boolean }) =>
       updateGroupMemberSharing({ data: { groupId, userId, canShare } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not update sharing permission."),
+    onError: (error) => toastError("Could not update sharing permission.", error),
   });
 
   const removeWholeGroup = useMutation({
@@ -122,7 +122,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       await invalidate();
       await navigate({ to: "/admin/groups" });
     },
-    onError: () => toast.error("Could not delete the group."),
+    onError: (error) => toastError("Could not delete the group.", error),
   });
 
   if (!group) {

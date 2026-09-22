@@ -45,6 +45,7 @@ import {
 } from "~/ui/primitives/select";
 import { Separator } from "~/ui/primitives/separator";
 import { Spinner } from "~/ui/primitives/spinner";
+import { toastError } from "~/ui/error-toast.ts";
 
 interface EligibleGroup {
   id: string;
@@ -146,19 +147,19 @@ export function AccessDialog({
           : `Removed ${user.name}.`,
       );
     },
-    onError: () => toast.error("Could not remove access."),
+    onError: (error) => toastError("Could not remove access.", error),
   });
   const revokeGroup = useMutation({
     mutationFn: (group: { groupId: string }) =>
       revokeResourceGroup({ data: { ...resource, groupId: group.groupId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not remove access."),
+    onError: (error) => toastError("Could not remove access.", error),
   });
   const publish = useMutation({
     mutationFn: (audience: "private" | "instance") =>
       publishResource({ data: { ...resource, audience } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not change general access."),
+    onError: (error) => toastError("Could not change general access.", error),
   });
   const pending =
     confirming ||

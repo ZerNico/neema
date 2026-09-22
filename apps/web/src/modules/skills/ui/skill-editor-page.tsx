@@ -34,6 +34,7 @@ import type { SkillDetail } from "../schema.ts";
 import { deleteSkill, saveSkill } from "../server/functions.ts";
 import { SkillUpdateReview } from "./skill-update-review.tsx";
 import { PackageWorkspace } from "./package-workspace.tsx";
+import { toastError } from "~/ui/error-toast.ts";
 
 function download(name: string, bytes: Uint8Array | string, type: string) {
   const url = URL.createObjectURL(
@@ -157,7 +158,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       await navigate({ to: "/skills", ignoreBlocker: true });
     },
-    onError: () => toast.error("Could not delete the skill."),
+    onError: (error) => toastError("Could not delete the skill.", error),
   });
   if (updating && initial)
     return (

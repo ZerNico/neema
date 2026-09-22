@@ -36,6 +36,7 @@ import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const embeddingConfigurationQuery = queryOptions({
   queryKey: ["admin", "tools", "embeddings"],
@@ -94,7 +95,7 @@ function SemanticSearchSection() {
   const disable = useMutation({
     mutationFn: () => disableEmbeddings({ data: { expectedRevision: current.connectionRevision } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not disable semantic search."),
+    onError: (error) => toastError("Could not disable semantic search.", error),
   });
   const rebuildAll = useMutation({
     mutationFn: () => rebuildAllKnowledgeIndexes(),
@@ -291,7 +292,7 @@ function DocumentParserSection() {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateDocumentParserTool({ data: { enabled } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not update document parsing."),
+    onError: (error) => toastError("Could not update document parsing.", error),
   });
 
   const form = useAppForm({

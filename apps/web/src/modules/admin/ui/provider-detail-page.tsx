@@ -9,7 +9,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useRef, useState } from "react";
-import { toast } from "sonner";
 import {
   probeEmbeddingDimensions,
   createModel,
@@ -51,6 +50,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
+import { toastError } from "~/ui/error-toast.ts";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const id = useId();
@@ -77,7 +77,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const toggleProvider = useMutation({
     mutationFn: (enabled: boolean) => updateProvider({ data: { providerId, enabled } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not update the provider."),
+    onError: (error) => toastError("Could not update the provider.", error),
   });
 
   const removeProvider = useMutation({
@@ -86,13 +86,13 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       await invalidate();
       await navigate({ to: "/admin/providers" });
     },
-    onError: () => toast.error("Could not delete the provider."),
+    onError: (error) => toastError("Could not delete the provider.", error),
   });
 
   const removeModel = useMutation({
     mutationFn: (modelId: string) => deleteModel({ data: { modelId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not delete the model."),
+    onError: (error) => toastError("Could not delete the model.", error),
   });
 
   if (!provider) {

@@ -23,6 +23,7 @@ import {
   updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const memoryToolQuery = queryOptions({
   queryKey: ["admin", "tools", "memory"],
@@ -74,7 +75,7 @@ function MemorySection() {
         queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
         queryClient.invalidateQueries({ queryKey: ["memory"] }),
       ]),
-    onError: () => toast.error("Could not update memory."),
+    onError: (error) => toastError("Could not update memory.", error),
   });
 
   if (!tool) {
@@ -119,13 +120,13 @@ function WebSearchSection() {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateWebSearchTool({ data: { enabled } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not update web search."),
+    onError: (error) => toastError("Could not update web search.", error),
   });
 
   const clearSecret = useMutation({
     mutationFn: () => updateWebSearchTool({ data: { clearSecret: true } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not clear the secret."),
+    onError: (error) => toastError("Could not clear the secret.", error),
   });
 
   const test = useMutation({
@@ -134,7 +135,7 @@ function WebSearchSection() {
         data: { baseUrl: input.baseUrl, ...(input.secret ? { secret: input.secret } : {}) },
       }),
     onSuccess: (result) => setTestResult(result),
-    onError: () => toast.error("Could not test the connection."),
+    onError: (error) => toastError("Could not test the connection.", error),
   });
 
   const form = useAppForm({
@@ -333,7 +334,7 @@ function UrlReaderSection() {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateUrlReaderTool({ data: { enabled } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not update the URL reader."),
+    onError: (error) => toastError("Could not update the URL reader.", error),
   });
 
   const form = useAppForm({

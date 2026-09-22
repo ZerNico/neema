@@ -66,6 +66,7 @@ import {
 import { useAppReducedMotion } from "~/ui/motion.tsx";
 import * as m from "motion/react-m";
 import { cn } from "~/ui/utils";
+import { toastError } from "~/ui/error-toast.ts";
 
 const NoteForm = Schema.Struct({
   title: Schema.String.check(
@@ -80,8 +81,6 @@ const NoteForm = Schema.Struct({
   ),
 });
 
-const message = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback;
 
 const statusBadge = (document: KnowledgeDocument) => {
   if (document.status === "failed")
@@ -172,7 +171,7 @@ function NoteDialog({
         onOpenChange(false);
         form.reset();
       } catch (error) {
-        toast.error(message(error, "Could not save the note."));
+        toastError("Could not save the note.", error);
       }
     },
   });
@@ -278,7 +277,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       return uploadKnowledgeDocument({ data: body });
     },
     onSuccess: invalidate,
-    onError: (error) => toast.error(message(error, "Could not upload the document.")),
+    onError: (error) => toastError("Could not upload the document.", error),
   });
   // A drop can carry several files; each is its own upload with its own
   // outcome, so one bad file does not swallow the rest.
@@ -288,12 +287,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const remove = useMutation({
     mutationFn: (documentId: string) => deleteKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not delete the document."),
+    onError: (error) => toastError("Could not delete the document.", error),
   });
   const retry = useMutation({
     mutationFn: (documentId: string) => retryKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
-    onError: (error) => toast.error(message(error, "Could not try again.")),
+    onError: (error) => toastError("Could not try again.", error),
   });
   const rebuild = useMutation({
     mutationFn: () => rebuildKnowledgeIndex({ data: { collectionId } }),
@@ -306,7 +305,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
           : `Rebuilding ${total} ${total === 1 ? "document" : "documents"} in the background. Search keeps working meanwhile.`,
       );
     },
-    onError: (error) => toast.error(message(error, "Could not redo preparation.")),
+    onError: (error) => toastError("Could not redo preparation.", error),
   });
   const removeCollection = useMutation({
     mutationFn: () => deleteKnowledgeCollection({ data: { collectionId } }),
@@ -314,7 +313,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       await invalidate();
       await navigate({ to: "/knowledge" });
     },
-    onError: () => toast.error("Could not delete the collection."),
+    onError: (error) => toastError("Could not delete the collection.", error),
   });
 
   if (detail.isError)

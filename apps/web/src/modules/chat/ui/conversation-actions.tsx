@@ -3,7 +3,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { toast } from "sonner";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -25,6 +24,7 @@ import {
 import { Input } from "~/ui/primitives/input";
 import { useConfirm } from "~/ui/confirm.tsx";
 import type { ReactElement, ReactNode } from "react";
+import { toastError } from "~/ui/error-toast.ts";
 
 export interface ActionableConversation {
   readonly id: string;
@@ -64,7 +64,7 @@ export function useConversationActions(): ConversationActions {
       // away; on /chats there is no conversationId param at all.
       if (activeId === conversationId) await navigate({ to: "/" });
     },
-    onError: () => toast.error("Could not delete the chat."),
+    onError: (error) => toastError("Could not delete the chat.", error),
   });
 
   const renameMutation = useMutation({
@@ -74,7 +74,7 @@ export function useConversationActions(): ConversationActions {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setRenaming(null);
     },
-    onError: () => toast.error("Could not rename the chat."),
+    onError: (error) => toastError("Could not rename the chat.", error),
   });
 
   const title = renaming?.title.trim() ?? "";

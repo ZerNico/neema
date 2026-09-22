@@ -471,7 +471,7 @@ describe("impersonation controls", () => {
     );
     expect(screen.getByRole("button", { name: "Actions for Target" })).toBeDisabled();
     await act(async () => pending.resolve({ error: { message: "denied" } }));
-    expect(mocks.toast).toHaveBeenCalledWith("Could not impersonate the user.");
+    expect(mocks.toast).toHaveBeenCalledWith("Could not impersonate the user.", { description: "Denied." });
     expect(identityNavigation.replace).not.toHaveBeenCalled();
     expect(localStorage.getItem(IDENTITY_CHANGE_KEY)).toBeNull();
   });
@@ -559,7 +559,9 @@ describe("impersonation controls", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Stop impersonating" }));
     expect(mocks.stop).not.toHaveBeenCalled();
     await act(async () => pending.resolve({ error: { message: "offline" } }));
-    expect(mocks.toast).toHaveBeenCalledWith("Could not sign out. Please retry.");
+    expect(mocks.toast).toHaveBeenCalledWith("Could not sign out. Please retry.", {
+      description: "Offline.",
+    });
     expect(client.getQueryData(["private-data"])).toBeDefined();
     expect(identityNavigation.replace).not.toHaveBeenCalled();
     await waitFor(() =>

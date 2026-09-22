@@ -31,6 +31,7 @@ import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
 import { getSignupPolicy, setSignupPolicy } from "../server/signup-functions.ts";
 import { SIGNUP_POLICIES, SIGNUP_POLICY_LABELS, type SignupPolicy } from "../signup.ts";
 import { OAuthProviderDialog } from "./oauth-provider-dialog.tsx";
+import { toastError } from "~/ui/error-toast.ts";
 
 export const oauthProvidersQuery = queryOptions({
   queryKey: ["admin", "oauth"],
@@ -72,13 +73,13 @@ export function OAuthPage() {
       }
       await invalidate();
     },
-    onError: () => toast.error("Could not update the provider."),
+    onError: (error) => toastError("Could not update the provider.", error),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteOAuthProvider({ data: { id } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not remove the provider."),
+    onError: (error) => toastError("Could not remove the provider.", error),
   });
 
   const addButton = (
@@ -207,7 +208,7 @@ function SignupPolicySection() {
   const save = useMutation({
     mutationFn: (next: SignupPolicy) => setSignupPolicy({ data: { policy: next } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "signup-policy"] }),
-    onError: () => toast.error("Could not change who can join."),
+    onError: (error) => toastError("Could not change who can join.", error),
   });
 
   return (

@@ -24,17 +24,12 @@ const PreviewInput = Schema.Struct({
   endAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
+// Unexpected failures (driver errors can carry SQL or the content being
+// written) are logged and replaced by `reportUnexpectedFailures`.
 const publicResult = <A, R>(
   effect: Effect.Effect<A, ScheduleNotAvailable | ScheduleRejected, R>,
 ) =>
   effect.pipe(
-    // Driver defects can contain SQL and private settings; keep recoverable
-    // domain responses, never serialize a driver exception.
-    Effect.catchDefect(() =>
-      Effect.logError("schedule request failed").pipe(
-        Effect.andThen(Effect.die(new Response("Could not update the schedule", { status: 500 }))),
-      ),
-    ),
     Effect.catchTag("ScheduleNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),
     ),

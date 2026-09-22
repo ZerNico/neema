@@ -113,8 +113,15 @@ false`), so a page body is written against data already there. This includes loc
 ## Errors and confirmations
 
 - Inline errors are `FieldError` (`role="alert"` + destructive text, null when empty) — override size with
-  `className`, don't re-derive colour/role on a `<p>`. Non-inline failures stay `toast.error` ("Could not
-  <verb> the <thing>."); confirmations go through `useConfirm()` (AlertDialog).
+  `className`, don't re-derive colour/role on a `<p>`. A failed request is reported with
+  `toastError(title, error)` (`src/ui/error-toast.ts`): the title is always the plain "Could not <verb>
+  the <thing>."; a reason the server sent becomes the description; anything else (network, a bug in the
+  page) adds nothing. Confirmations go through `useConfirm()` (AlertDialog).
+- A server function never answers with a raw exception: driver errors can carry SQL or the content being
+  written. `reportUnexpectedFailures` (`src/server/unexpected-failure.ts`, registered for every function in
+  `src/start.ts`) lets deliberate `Response`s through and turns anything else into a logged failure under
+  a short reference. The client sees `src/server-error.ts`'s fixed body and offers "Copy details" with that
+  reference, so a report can be matched to its log line. Modules therefore map only their own rejections.
 - Access is managed through `sharing/ui/access-dialog.tsx`, not link copying. `SharingService.recipients`
   is a deliberate account directory readable by any signed-in user — fits a single-tenant self-hosted
   deployment and exposes nothing else about an account. Every grant is the same permission, so rows carry

@@ -1,7 +1,6 @@
 import { ComputerIcon, GlobeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import {
   authClient,
   createDesktopTicket,
@@ -15,6 +14,7 @@ import { useConfirm } from "~/ui/confirm.tsx";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
+import { toastError } from "~/ui/error-toast.ts";
 
 /** Coarse and forgiving: a wrong guess here costs a label, not access. */
 export function describeSession(userAgent: string | null | undefined): string {
@@ -58,7 +58,7 @@ export function DevicesPage() {
   const revoke = useMutation({
     mutationFn: (session: DesktopSession) => revokeDesktopDevice({ id: session.id }),
     onSuccess: refresh,
-    onError: () => toast.error("Could not sign out the device."),
+    onError: (error) => toastError("Could not sign out the device.", error),
   });
   const revokeOthers = useMutation({
     mutationFn: async () => {
@@ -66,7 +66,7 @@ export function DevicesPage() {
       if (error) throw new Error(error.message ?? "Could not sign out other devices.");
     },
     onSuccess: refresh,
-    onError: () => toast.error("Could not sign out other devices."),
+    onError: (error) => toastError("Could not sign out other devices.", error),
   });
   const mint = useMutation({ mutationFn: () => createDesktopTicket() });
 
@@ -167,7 +167,7 @@ export function DevicesPage() {
               pending={mint.isPending}
               onClick={() =>
                 mint.mutate(undefined, {
-                  onError: () => toast.error("Could not generate a code."),
+                  onError: (error) => toastError("Could not generate a code.", error),
                 })
               }
             >

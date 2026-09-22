@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { toastError } from "~/ui/error-toast.ts";
 
 // Group badges shown per row before collapsing into a "+N more" badge.
 const MAX_GROUP_BADGES = 2;
@@ -54,7 +55,7 @@ export function UsersPage() {
         if (error) throw new Error(error.message);
       }, "/");
     },
-    onError: () => toast.error("Could not impersonate the user."),
+    onError: (error) => toastError("Could not impersonate the user.", error),
   });
 
   const setRole = useMutation({
@@ -63,7 +64,7 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
-    onError: () => toast.error("Could not change the role."),
+    onError: (error) => toastError("Could not change the role.", error),
   });
 
   const ban = useMutation({
@@ -75,7 +76,7 @@ export function UsersPage() {
       await invalidate();
       toast.success("User banned.");
     },
-    onError: () => toast.error("Could not ban the user."),
+    onError: (error) => toastError("Could not ban the user.", error),
   });
 
   const unban = useMutation({
@@ -84,7 +85,7 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
-    onError: () => toast.error("Could not unban the user."),
+    onError: (error) => toastError("Could not unban the user.", error),
   });
 
   return (

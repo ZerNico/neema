@@ -23,6 +23,7 @@ import {
 import { SidebarMenuButton } from "~/ui/primitives/sidebar";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
+import { toastError } from "~/ui/error-toast.ts";
 
 async function signOutSession() {
   const { error } = await authClient.signOut();
@@ -70,7 +71,7 @@ export function AccountMenu({
         await navigate({ to: "/login" });
       }
     },
-    onError: () => toast.error("Could not sign out. Please retry."),
+    onError: (error) => toastError("Could not sign out. Please retry.", error),
   });
   const pending = stop.isPending || signOut.isPending;
   return (

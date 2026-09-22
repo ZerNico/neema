@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
+import { toastError } from "~/ui/error-toast.ts";
 
 const agentFormValidator = Schema.toStandardSchemaV1(
   Schema.Struct({
@@ -37,8 +38,6 @@ const agentFormValidator = Schema.toStandardSchemaV1(
   }),
 );
 
-const message = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback;
 
 /**
  * Owner-only editor. Recipients start chats from the agent list instead.
@@ -146,7 +145,7 @@ function AgentForm({
           await onSaved(id);
         }
       } catch (error) {
-        toast.error(message(error, "Could not save the agent."));
+        toastError("Could not save the agent.", error);
       }
     },
   });

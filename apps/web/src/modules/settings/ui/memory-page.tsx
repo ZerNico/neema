@@ -40,6 +40,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { Switch } from "~/ui/primitives/switch";
+import { toastError } from "~/ui/error-toast.ts";
 
 const MemoryFormSchema = Schema.Struct({
   content: Schema.String.check(
@@ -119,17 +120,17 @@ export function MemoryPage() {
     onSuccess: (next) => {
       queryClient.setQueryData(memorySettingsQuery.queryKey, next);
     },
-    onError: () => toast.error("Could not update memory settings."),
+    onError: (error) => toastError("Could not update memory settings.", error),
   });
   const remove = useMutation({
     mutationFn: (memoryId: string) => deleteMemory({ data: { memoryId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not delete the memory."),
+    onError: (error) => toastError("Could not delete the memory.", error),
   });
   const clear = useMutation({
     mutationFn: () => clearMemories(),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not clear saved memories."),
+    onError: (error) => toastError("Could not clear saved memories.", error),
   });
 
   const updateSetting = (key: "referenceEnabled" | "autoSaveEnabled", value: boolean) => {

@@ -334,7 +334,7 @@ describe("CustomToolEditorPage", () => {
     renderEditor(detail());
 
     await user.click(screen.getByRole("switch", { name: "Enabled" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not update the module."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not update the module.", { description: "Boom." }));
 
     await user.click(screen.getByRole("button", { name: "Module actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete module" }));

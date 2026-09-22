@@ -14,19 +14,12 @@ import {
 } from "../draft-schema.ts";
 import { ScheduleDraftService } from "./draft-service.ts";
 
+// Unexpected failures (driver errors can carry SQL or the content being
+// written) are logged and replaced by `reportUnexpectedFailures`.
 const publicResult = <A, R>(
   effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>,
 ) =>
   effect.pipe(
-    // Driver defects can contain SQL and the private settings being written.
-    // Keep recoverable domain responses, but never serialize a driver exception.
-    Effect.catchDefect(() =>
-      Effect.logError("schedule draft request failed").pipe(
-        Effect.andThen(
-          Effect.die(new Response("Could not update the schedule draft", { status: 500 })),
-        ),
-      ),
-    ),
     Effect.catchTag("DraftNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),
     ),

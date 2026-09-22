@@ -37,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { toastError } from "~/ui/error-toast.ts";
 
 /** Today's runs by clock time, older ones by day, like the chats list. */
 const runStamp = (date: Date) => {
@@ -44,8 +45,6 @@ const runStamp = (date: Date) => {
   return day === "Today" ? clockLabel(date) : day;
 };
 
-const message = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback;
 
 const scheduleToSettings = (schedule: {
   name: string;
@@ -112,12 +111,12 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const pause = useMutation({
     mutationFn: () => pauseSchedule({ data: { scheduleId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not pause the schedule."),
+    onError: (error) => toastError("Could not pause the schedule.", error),
   });
   const resume = useMutation({
     mutationFn: () => resumeSchedule({ data: { scheduleId } }),
     onSuccess: invalidate,
-    onError: () => toast.error("Could not resume the schedule."),
+    onError: (error) => toastError("Could not resume the schedule.", error),
   });
   const runNow = useMutation({
     mutationFn: () => runScheduleNow({ data: { scheduleId } }),
@@ -125,11 +124,11 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       toast.success("Run started.");
       void invalidate();
     },
-    onError: () => toast.error("Could not start a run."),
+    onError: (error) => toastError("Could not start a run.", error),
   });
   const remove = useMutation({
     mutationFn: () => deleteSchedule({ data: { scheduleId } }),
-    onError: () => toast.error("Could not delete the schedule."),
+    onError: (error) => toastError("Could not delete the schedule.", error),
   });
   const formId = useId();
   const form = useAppForm({
@@ -143,7 +142,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         await invalidate();
         toast.success("Schedule saved.");
       } catch (error) {
-        toast.error(message(error, "Could not save the schedule."));
+        toastError("Could not save the schedule.", error);
       }
     },
   });

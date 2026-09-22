@@ -1295,7 +1295,9 @@ describe("ChatView question handoff", () => {
     expect(screen.getByRole("textbox", { name: "Or write your own answer" })).toHaveValue(
       "Keep this answer",
     );
-    expect(toast.error).toHaveBeenCalledWith("Could not send your answers.");
+    expect(toast.error).toHaveBeenCalledWith("Could not send your answers.", {
+      description: "Connection lost.",
+    });
   });
 
   it("keeps answers locked after failed recovery until an explicit refresh succeeds", async () => {

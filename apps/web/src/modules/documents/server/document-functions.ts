@@ -12,15 +12,10 @@ import {
 } from "../schema.ts";
 import { DocumentService } from "./document-service.ts";
 
+// Unexpected failures (driver errors can carry SQL or the content being
+// written) are logged and replaced by `reportUnexpectedFailures`.
 const publicResult = <A, R>(effect: Effect.Effect<A, DocumentNotAvailable | DocumentRejected, R>) =>
   effect.pipe(
-    // Driver defects can contain SQL and the content being written. Keep
-    // recoverable domain responses, but never serialize a driver exception.
-    Effect.catchDefect(() =>
-      Effect.logError("document request failed").pipe(
-        Effect.andThen(Effect.die(new Response("Could not update the document", { status: 500 }))),
-      ),
-    ),
     Effect.catchTag("DocumentNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),
     ),
