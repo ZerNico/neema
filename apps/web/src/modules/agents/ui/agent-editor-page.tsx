@@ -2,9 +2,9 @@ import { Delete02Icon, MoreHorizontalIcon, UserGroupIcon } from "@hugeicons/core
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "@tanstack/react-form";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { agentQuery } from "../client/queries.ts";
 import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
@@ -15,7 +15,7 @@ import { AgentAuthoringLaunchButton } from "./agent-authoring-launch.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
-import { ErrorState, FormActions, Page } from "~/ui/page-shell.tsx";
+import { ErrorState, Page } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -109,6 +109,8 @@ function AgentForm({
   onDelete: (() => Promise<void>) | undefined;
 }) {
   const formElement = useRef<HTMLFormElement>(null);
+  const formId = useId();
+  const confirm = useConfirm();
   const [invalidSubmit, setInvalidSubmit] = useState(false);
   const [sharing, setSharing] = useState(false);
   // Dirty values retain the revision they came from, not the latest query revision.
@@ -144,6 +146,20 @@ function AgentForm({
     form.store,
     (state) => state.isDirty && !!agent && agent.configRevision !== revision.current,
   );
+  const dirty = useStore(form.store, (state) => state.isDirty);
+  const submitting = useStore(form.store, (state) => state.isSubmitting);
+  // A save resets the form on success, so `dirty` is also "not yet saved".
+  useBlocker({
+    shouldBlockFn: async () =>
+      dirty &&
+      !submitting &&
+      !(await confirm({
+        title: "Discard unsaved changes?",
+        description: "Your agent has not been saved.",
+        confirmLabel: "Discard changes",
+      })),
+    enableBeforeUnload: dirty,
+  });
   useEffect(() => {
     if (!agent || agent.configRevision === revision.current || form.state.isDirty) return;
     revision.current = agent.configRevision;
@@ -157,46 +173,55 @@ function AgentForm({
       backTo="/agents"
       backLabel="Agents"
       actions={
-        agent ? (
-          <>
-            <AgentAuthoringLaunchButton targetAgentId={agent.id} />
-            <Link
-              to="/"
-              search={{ agent: agent.id }}
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              Start chat
-            </Link>
-            <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
-              <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-              Access
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button size="icon-sm" variant="ghost" aria-label="Agent actions" />}
+        <>
+          {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
+          {agent ? (
+            <>
+              <AgentAuthoringLaunchButton targetAgentId={agent.id} />
+              <Link
+                to="/"
+                search={{ agent: agent.id }}
+                className={buttonVariants({ size: "sm", variant: "outline" })}
               >
-                <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {/* A menu item closes on activation, so it cannot carry a
-                    spinner; disabling it is the pending signal. */}
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={remove.isPending}
-                  onClick={() => remove.mutate()}
+                Start chat
+              </Link>
+              <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
+                <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
+                Access
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button size="icon-sm" variant="ghost" aria-label="Agent actions" />}
                 >
-                  <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  Delete agent
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        ) : (
-          <AgentAuthoringLaunchButton />
-        )
+                  <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {/* A menu item closes on activation, so it cannot carry a
+                    spinner; disabling it is the pending signal. */}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate()}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                    Delete agent
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            <AgentAuthoringLaunchButton />
+          )}
+          <form.AppForm>
+            <form.SubmitButton size="sm" form={formId}>
+              {agent ? "Save changes" : "Create agent"}
+            </form.SubmitButton>
+          </form.AppForm>
+        </>
       }
     >
       <form
+        id={formId}
         ref={formElement}
         className="flex flex-col gap-8"
         onSubmit={(event) => {
@@ -236,11 +261,6 @@ function AgentForm({
         {invalidSubmit ? (
           <FieldError>Check the highlighted fields before saving.</FieldError>
         ) : null}
-        <form.AppForm>
-          <FormActions>
-            <form.SubmitButton>{agent ? "Save changes" : "Create agent"}</form.SubmitButton>
-          </FormActions>
-        </form.AppForm>
       </form>
       {agent ? (
         <AccessDialog

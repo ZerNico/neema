@@ -78,10 +78,17 @@ false`), so a page body is written against data already there. This includes loc
   the view consumes. Local failures remain inline and retryable rather than failing the chat route.
   Where a loader can't cover it, `ListSkeleton` (`page-shell.tsx`) is the one pending shape, never a
   bare `null` or `animate-pulse` div.
-- Buttons go in exactly two places, chosen by what the button does: `Section`'s `actions` slot (top-right)
-  is for "add one of these"; `FormActions` (`page-shell.tsx`) is the row under the fields, for
-  Save/Apply/Reset. Skip it and a submit button that's a direct child of a `flex-col` form stretches full
-  width — how the agent editor got a full-bleed Save.
+- Where the primary action lives depends on how long the page is. A long editor (agent, skill, custom
+  tool: several sections, a code or package workspace, scrolls) puts Save in `Page.actions` at the
+  top-right, beside the record's own controls (Enabled, Access, the overflow menu) and an "Unsaved
+  changes" hint, disabled until dirty; the reader may be editing anywhere on the page and Save has to be
+  findable without hunting. A short form that fits on screen (profile, password, tool settings, model
+  order) puts Save in `FormActions` (`page-shell.tsx`), the row under its fields, since reading
+  top-to-bottom ends there. Skip `FormActions` and a submit button that's a direct child of a `flex-col`
+  form stretches full width. `Section`'s `actions` slot (top-right of the section) is for "add one of
+  these" and for verbs on that section's content (Verify and Debug on a custom tool's Source), never for
+  Save. Dialogs always end in `DialogFooter`, Cancel then the primary on the right. A header Save that
+  submits a form in the body reaches it through the `form` attribute, as the draft panel's does.
 
 ## Buttons and pending state
 
