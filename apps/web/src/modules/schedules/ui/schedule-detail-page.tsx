@@ -9,7 +9,7 @@ import { useStore } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { scheduleAuthoringRequest } from "../authoring.ts";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
@@ -30,6 +30,7 @@ import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { ErrorState, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -154,6 +155,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     },
   });
   const dirty = useStore(form.store, (state) => state.isDirty);
+  const [startingRun, setStartingRun] = useState(false);
   const { justSaved, markSaved } = useSaveStatus();
   const submitting = useStore(form.store, (state) => state.isSubmitting);
   // Same guard as the agent and skill editors; a successful save resets the
@@ -185,15 +187,33 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           >
             {schedule.paused ? "Resume" : "Pause"}
           </Button>
-          <Button
+          {/* A run uses the saved schedule, so with edits pending it saves
+              first and runs only if that save went through: what runs is
+              always what is on screen. The label stays put; Save beside it
+              turning to "Saved" shows the save happened. */}
+          <PendingButton
             size="sm"
             variant="outline"
-            disabled={runNow.isPending}
-            onClick={() => runNow.mutate()}
+            title={dirty ? "Saves your changes, then runs" : undefined}
+            pending={runNow.isPending || startingRun}
+            onClick={() => {
+              setStartingRun(true);
+              void (async () => {
+                try {
+                  if (form.state.isDirty) {
+                    await form.handleSubmit();
+                    if (form.state.isDirty) return;
+                  }
+                  runNow.mutate();
+                } finally {
+                  setStartingRun(false);
+                }
+              })();
+            }}
           >
             <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
             Run now
-          </Button>
+          </PendingButton>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button size="icon-sm" variant="ghost" aria-label="Schedule actions" />}

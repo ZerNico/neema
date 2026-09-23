@@ -1,0 +1,117 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { runScheduleNow, updateSchedule } from "../server/functions.ts";
+import { ScheduleDetailPage } from "./schedule-detail-page.tsx";
+
+vi.mock("../server/functions.ts", () => ({
+  listSchedules: vi.fn().mockResolvedValue([]),
+  getSchedule: vi.fn(),
+  listScheduleRuns: vi.fn().mockResolvedValue({ runs: [], nextCursor: null }),
+  createSchedule: vi.fn(),
+  updateSchedule: vi.fn(),
+  pauseSchedule: vi.fn(),
+  resumeSchedule: vi.fn(),
+  deleteSchedule: vi.fn(),
+  runScheduleNow: vi.fn(),
+  previewSchedule: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("~/modules/chat/server/functions.ts", () => ({
+  listChatModels: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue({ conversations: [], nextCursor: null }),
+}));
+vi.mock("~/modules/knowledge/server/functions.ts", () => ({
+  listKnowledgeCollections: vi.fn().mockResolvedValue([]),
+  createKnowledgeCollection: vi.fn(),
+}));
+vi.mock("~/modules/skills/server/functions.ts", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
+    <a href={to}>{children}</a>
+  ),
+  useNavigate: () => vi.fn(),
+  useBlocker: vi.fn(),
+}));
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+);
+
+const schedule = {
+  id: "s1",
+  name: "Digest",
+  prompt: "Summarize the news",
+  scheduleText: "Every day at 07:00",
+  cron: "0 7 * * *",
+  timezone: "UTC",
+  endAt: null,
+  modelId: null,
+  agentId: null,
+  searchEnabled: false,
+  researchEnabled: false,
+  collectionIds: [],
+  skillIds: [],
+  chatMode: "new" as const,
+  chatId: null,
+  paused: false,
+};
+
+const renderPage = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["schedule", "s1"], schedule);
+  client.setQueryData(["chat-models"], []);
+  render(
+    <QueryClientProvider client={client}>
+      <ConfirmProvider>
+        <ScheduleDetailPage scheduleId="s1" />
+      </ConfirmProvider>
+    </QueryClientProvider>,
+  );
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(runScheduleNow).mockResolvedValue(undefined as never);
+});
+
+describe("ScheduleDetailPage run now", () => {
+  it("runs the saved schedule straight away when nothing is edited", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(runScheduleNow).toHaveBeenCalledOnce());
+    expect(updateSchedule).not.toHaveBeenCalled();
+  });
+
+  it("saves pending edits first, so the run uses what is on screen", async () => {
+    vi.mocked(updateSchedule).mockResolvedValue(undefined as never);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Prompt"), {
+      target: { value: "Summarize the tech news" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(runScheduleNow).toHaveBeenCalledOnce());
+    expect(vi.mocked(updateSchedule).mock.calls[0]![0].data.settings).toMatchObject({
+      prompt: "Summarize the tech news",
+    });
+    expect(vi.mocked(updateSchedule).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(runScheduleNow).mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not run when saving the edits fails", async () => {
+    vi.mocked(updateSchedule).mockRejectedValue(
+      new Error("a schedule can run at most once an hour"),
+    );
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Prompt"), {
+      target: { value: "Summarize the tech news" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(updateSchedule).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled());
+    expect(runScheduleNow).not.toHaveBeenCalled();
+  });
+});
