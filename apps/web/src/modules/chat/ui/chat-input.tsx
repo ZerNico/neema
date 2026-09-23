@@ -22,7 +22,6 @@ import { resolveChatModel } from "../client/selected-model.ts";
 import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
 import { ModelPicker } from "./model-picker.tsx";
 import {
-  AgentBar,
   AgentPicker,
   CollectionPicker,
   ContextChips,
@@ -380,9 +379,6 @@ export const ChatInput = forwardRef<
         }
       }}
     >
-      {context?.agentLocked && context.selection.agent ? (
-        <AgentBar agent={context.selection.agent} />
-      ) : null}
       {(references && references.items.length > 0) ||
       (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
       (skills && skills.selectedIds.length > 0) ||

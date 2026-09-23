@@ -428,7 +428,6 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
   collectionIds: [] as string[],
   generations: [] as Array<{
     messageId: string;
-    agent: { name: string; icon: string } | null;
     collectionIds: ReadonlyArray<string>;
     knowledgeMode: "none" | "context" | "retrieval";
     skills?: ReadonlyArray<{ id: string; name: string }>;
@@ -1082,7 +1081,6 @@ describe("ChatView inline question answers", () => {
       generations: [
         {
           messageId: "m-answer",
-          agent: null,
           collectionIds: ["c-agent", "c-standalone"],
           knowledgeMode: "context" as const,
           skills: [{ id: "s1", name: "Brand" }],
@@ -2357,7 +2355,6 @@ describe("ChatView knowledge placement", () => {
       generations: [
         {
           messageId: "m-answer",
-          agent: null,
           collectionIds: ["c-contracts"],
           knowledgeMode: "context",
         },

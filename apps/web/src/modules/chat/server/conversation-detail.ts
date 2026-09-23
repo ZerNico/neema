@@ -114,9 +114,9 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
       // Only the installed agent persists between turns. Standalone knowledge
       // is message input, not a conversation default.
       defaults: repo.getConversationDefaults(conversation.id),
-      // What each answer ran with: the agent (for the answer's label) and the
-      // collections (shown on the *question* that added them, like attached
-      // files). Snapshot text and document manifests stay server-side; only
+      // What each answer ran with: the collections (shown on the *question*
+      // that added them, like attached files). Snapshot text and document
+      // manifests stay server-side; only
       // names travel, resolved client-side against what the viewer may read.
       generations: repo.listGenerationDisplay(assistantIds),
       // Messages waiting behind the live answer. They are conversation state,

@@ -1450,15 +1450,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // Durable rows change only with query data or global action availability. Live
   // stream and edit state are layered below so every unrelated row keeps its
   // object identity across stream chunks and local editor updates.
-  const agentByMessage = useMemo(
-    () =>
-      new Map(
-        (data.generations ?? []).flatMap((row) =>
-          row.agent ? [[row.messageId, row.agent] as const] : [],
-        ),
-      ),
-    [data.generations],
-  );
+
   // Collections belong to the turn that added them: the user message directly
   // before each answer. That is where the composer showed them, so that is
   // where they stay.
@@ -1633,7 +1625,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
-        ...(agentByMessage.has(message.id) ? { agent: agentByMessage.get(message.id)! } : {}),
         ...(skillsByUserMessage.has(message.id)
           ? { skills: skillsByUserMessage.get(message.id)! }
           : {}),
@@ -1669,7 +1660,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     });
   }, [
     actionsDisabled,
-    agentByMessage,
     collectionsByUserMessage,
     skillsByUserMessage,
     workspaceFilesByUserMessage,
@@ -1903,6 +1893,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             title={data.conversation.title}
             schedule={data.schedule}
             branchedFrom={data.branchedFrom}
+            agent={data.agent}
           />
           {foreignMachine ? (
             <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />

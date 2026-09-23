@@ -8,6 +8,7 @@ import { cadenceLabel, nextFireLabel } from "~/modules/schedules/ui/schedule-lab
 import { HeaderContent } from "~/ui/header-slot.tsx";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
 import { Badge } from "~/ui/primitives/badge";
+import { agentIcon } from "./context-picker.tsx";
 
 interface ScheduleOrigin {
   scheduleId: string;
@@ -15,20 +16,22 @@ interface ScheduleOrigin {
   runsHere: boolean;
 }
 
-// A tag names its origin's kind by icon, so it truncates rather than the title.
+// A tag names its kind by icon, so it truncates rather than the title.
 const tagClassName = "max-w-48 shrink";
 
 /**
- * The conversation's title in the app header, tagged with where it came from.
- * Provenance belongs to the whole conversation, so it sits in the chrome
- * rather than above the first message.
+ * The conversation's title in the app header, tagged with its agent and where
+ * it came from. Both belong to the whole conversation, so they sit in the
+ * chrome rather than above the first message or in the composer.
  */
 export function ConversationCrumbs({
   title,
   schedule,
   branchedFrom,
+  agent,
 }: {
   title: string | null;
+  agent: { id: string | null; name: string | null; icon?: string } | null | undefined;
   schedule: ScheduleOrigin | null | undefined;
   branchedFrom: { conversationId: string; title: string | null } | null | undefined;
 }) {
@@ -36,6 +39,7 @@ export function ConversationCrumbs({
     <HeaderContent>
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="truncate text-sm">{title ?? "New chat…"}</h1>
+        {agent ? <AgentTag agent={agent} /> : null}
         {schedule ? <ScheduleTag schedule={schedule} /> : null}
         {branchedFrom ? (
           <Badge
@@ -100,5 +104,20 @@ function ScheduleTag({ schedule }: { schedule: ScheduleOrigin }) {
         </p>
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+/**
+ * Not a link: the agent page is its owner's editor, and a recipient would land
+ * on an error. The agent cannot be swapped once the chat exists.
+ */
+function AgentTag({ agent }: { agent: { id: string | null; name: string | null; icon?: string } }) {
+  const name = agent.name ?? (agent.id === null ? "Deleted agent" : "Agent unavailable");
+  return (
+    <Badge variant={agent.name === null ? "destructive" : "secondary"} className={tagClassName}>
+      <HugeiconsIcon icon={agentIcon(agent.icon ?? "robot")} strokeWidth={2} aria-hidden />
+      <span className="sr-only">Agent:</span>
+      <span className="truncate">{name}</span>
+    </Badge>
   );
 }

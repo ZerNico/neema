@@ -1,0 +1,64 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
+import { ConversationCrumbs } from "./conversation-crumbs.tsx";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, params: _params, children, ...rest }: Record<string, unknown>) => (
+    <a href={String(to)} {...(rest as object)}>
+      {children as never}
+    </a>
+  ),
+}));
+
+vi.mock("~/modules/schedules/server/functions.ts", () => ({
+  getSchedule: vi.fn(),
+  listSchedules: vi.fn(),
+  listScheduleRuns: vi.fn(),
+}));
+
+const renderCrumbs = (props: Partial<Parameters<typeof ConversationCrumbs>[0]>) =>
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <HeaderSlotProvider>
+        <header>
+          <HeaderSlot />
+        </header>
+        <ConversationCrumbs
+          title="Weekly digest"
+          schedule={null}
+          branchedFrom={null}
+          agent={null}
+          {...props}
+        />
+      </HeaderSlotProvider>
+    </QueryClientProvider>,
+  );
+
+describe("ConversationCrumbs", () => {
+  it("puts the title in the header, untagged for a plain chat", () => {
+    renderCrumbs({});
+    const header = screen.getByRole("banner");
+    expect(header).toHaveTextContent(/^Weekly digest$/);
+  });
+
+  it("tags the installed agent without linking to its owner's editor", () => {
+    renderCrumbs({ agent: { id: "a1", name: "Reviewer", icon: "code" } });
+    expect(screen.getByText("Reviewer")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("keeps an agent that no longer resolves visible as unavailable", () => {
+    renderCrumbs({ agent: { id: "gone", name: null } });
+    expect(screen.getByText("Agent unavailable")).toBeInTheDocument();
+  });
+
+  it("links the schedule that runs in this chat", () => {
+    renderCrumbs({ schedule: { scheduleId: "s1", name: "wqd", runsHere: true } });
+    expect(screen.getByRole("link", { name: /^Schedule running here\s?wqd$/ })).toHaveAttribute(
+      "href",
+      "/schedules/$scheduleId",
+    );
+  });
+});

@@ -770,7 +770,6 @@ export class ChatRepo extends Context.Service<
     listGenerationDisplay(messageIds: ReadonlyArray<string>): Effect.Effect<
       Array<{
         messageId: string;
-        agent: { name: string; icon: string } | null;
         collectionIds: ReadonlyArray<string>;
         skills?: ReadonlyArray<{ id: string; name: string }>;
         /**
@@ -1865,10 +1864,6 @@ export class ChatRepo extends Context.Service<
           const rows = yield* db
             .select({
               messageId: messageGenerationConfig.messageId,
-              agent: sql<{
-                name: string;
-                icon: string;
-              } | null>`case when ${messageGenerationConfig.resolvedAgent} is null then null else jsonb_build_object('name', ${messageGenerationConfig.resolvedAgent}->>'name', 'icon', ${messageGenerationConfig.resolvedAgent}->>'icon') end`,
               collectionIds: messageGenerationConfig.collectionIds,
               skills: sql<
                 Array<{ id: string; name: string }>
@@ -1886,7 +1881,6 @@ export class ChatRepo extends Context.Service<
           return rows
             .filter(
               (row) =>
-                row.agent ||
                 row.collectionIds.length > 0 ||
                 row.skills.length > 0 ||
                 row.desktopMachineId !== null ||

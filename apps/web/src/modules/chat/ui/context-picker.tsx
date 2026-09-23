@@ -557,34 +557,3 @@ export function CollectionChip({ collectionId }: { collectionId: string }) {
     />
   );
 }
-
-/**
- * The associated agent of an existing conversation, as a header row inside the
- * composer: an agent chat reads differently from a plain one, and the agent
- * cannot be swapped or removed once the chat exists.
- */
-export function AgentBar({ agent }: { agent: NonNullable<ContextSelection["agent"]> }) {
-  const unavailable = agent.id !== null && agent.name === null;
-  const name = agent.name ?? (agent.id === null ? "Deleted agent" : "Agent unavailable");
-  return (
-    <div
-      role="status"
-      aria-label={`Agent: ${name}`}
-      className="border-border text-muted-foreground flex items-center gap-2 border-b px-3 py-2 text-xs"
-    >
-      <HugeiconsIcon
-        icon={agentIcon(agent.icon ?? "robot")}
-        strokeWidth={2}
-        className="size-3.5 shrink-0"
-      />
-      <span
-        className={cn("text-foreground truncate font-medium", unavailable && "text-destructive")}
-      >
-        {name}
-      </span>
-      <span className="truncate">
-        {unavailable ? "No longer available to you" : "answers in this chat"}
-      </span>
-    </div>
-  );
-}

@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  AgentBar,
   AgentPicker,
   CollectionPicker,
   ContextChips,
@@ -74,9 +73,6 @@ function Harness({ initial }: { initial: Parameters<typeof useContextSelection>[
   return (
     <>
       <div aria-label="Chat context">
-        {context.agentLocked && context.selection.agent ? (
-          <AgentBar agent={context.selection.agent} />
-        ) : null}
         <ContextChips
           selection={context.selection}
           agentCollectionIds={context.agentCollectionIds}
@@ -177,7 +173,8 @@ describe("composer context selection", () => {
     // Collections are per message, so an empty list is sent even when untouched.
     expect(latest.sendFields).toEqual({ collectionIds: [] });
     const chips = screen.getByLabelText("Chat context");
-    expect(within(chips).getByText("Reviewer")).toBeInTheDocument();
+    // The chat header names the agent; the composer only carries what it adds.
+    expect(within(chips).queryByText("Reviewer")).toBeNull();
     // The agent's own collection is shown as attached, not sent separately.
     expect(within(chips).getByText("Contracts")).toBeInTheDocument();
     expect(within(chips).getByText("From agent")).toBeInTheDocument();
@@ -196,7 +193,6 @@ describe("composer context selection", () => {
       agent: { id: AGENT.id, name: "After", icon: "book", collectionIds: ["collection-2"] },
     });
     expect(latest.selection.agent).toEqual({ id: AGENT.id, name: "After", icon: "book" });
-    expect(screen.getByRole("status", { name: "Agent: After" })).toBeInTheDocument();
     expect(latest.selection.collectionIds).toEqual(["collection-2"]);
     expect(latest.sendFields.collectionIds).toEqual(["collection-2"]);
     act(() => latest.onCollectionsChange(["collection-2"]));
@@ -339,7 +335,6 @@ describe("composer context selection", () => {
     expect(screen.queryByRole("menuitem", { name: /^Agent/ })).not.toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     expect(screen.queryByRole("button", { name: "Remove Reviewer" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Agent: Reviewer" })).toBeInTheDocument();
     // The agent's collections still ride along; only standalone ones are per message.
     expect(latest.selection.collectionIds).toEqual(["collection-1"]);
     act(() => latest.onAgentChange(null));
@@ -352,12 +347,5 @@ describe("composer context selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(latest.sendFields).toEqual({ collectionIds: ["collection-2"] });
     expect(latest.selection.collectionIds).toEqual(["collection-1", "collection-2"]);
-  });
-
-  it("marks an agent that no longer resolves instead of dropping it", () => {
-    setup({ mode: "installed", agent: { id: "gone", name: null, collectionIds: [] } });
-    const chips = screen.getByLabelText("Chat context");
-    expect(within(chips).getByText("Agent unavailable")).toBeInTheDocument();
-    expect(within(chips).getByText("No longer available to you")).toBeInTheDocument();
   });
 });

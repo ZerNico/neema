@@ -25,7 +25,7 @@ import {
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
-import { agentIcon, CollectionChip, ReferenceChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
+import { CollectionChip, ReferenceChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
 import { extractReferences, restoreReferences } from "../references.ts";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
@@ -139,8 +139,6 @@ export interface DisplayMessage {
   steers?: ReadonlyArray<AssistantSteer>;
   /** Local send time for the action row; absent if its date will not parse. */
   time?: MessageTime | null;
-  /** The agent this answer ran with, when one was installed. */
-  agent?: { name: string; icon: string } | null;
   /** Collections the user added with this message, shown beside its files. */
   collectionIds?: ReadonlyArray<string>;
   skills?: ReadonlyArray<{ id: string; name: string }>;
@@ -827,17 +825,6 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className="flex w-full justify-start">
       <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
-        {message.agent ? (
-          <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-xs">
-            <HugeiconsIcon
-              icon={agentIcon(message.agent.icon)}
-              strokeWidth={2}
-              className="size-3.5"
-              aria-hidden
-            />
-            <span className="truncate">{message.agent.name}</span>
-          </div>
-        ) : null}
         {showReasoning ? (
           <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
         ) : null}
