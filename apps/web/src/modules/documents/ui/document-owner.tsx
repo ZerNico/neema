@@ -13,11 +13,7 @@ import {
 } from "react";
 import { useDocument } from "../client/use-document.ts";
 import { listTaskItems } from "../task-items.ts";
-import {
-  DocumentPanelActions,
-  DocumentPanelBody,
-  documentSubtitle,
-} from "./document-panel.tsx";
+import { DocumentPanelActions, DocumentPanelBody, documentSubtitle } from "./document-panel.tsx";
 import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 
 export interface DocumentOwnerHandle {
@@ -128,9 +124,7 @@ export function DocumentOwner({
     () => ({
       owned: new Set(documentIds),
       gone: goneIds,
-      entries: new Map(
-        [...sessions].map(([documentId, session]) => [documentId, session.entry]),
-      ),
+      entries: new Map([...sessions].map(([documentId, session]) => [documentId, session.entry])),
     }),
     [documentIds, goneIds, sessions],
   );
@@ -209,7 +203,7 @@ function DocumentSession({
   const failed = controller.query.isError || controller.query.data === null;
   const entry = useMemo<DocumentPanelEntry>(
     () => ({
-      title: available ? controller.document?.title ?? null : null,
+      title: available ? (controller.document?.title ?? null) : null,
       status: !available
         ? failed
           ? "Could not load document"

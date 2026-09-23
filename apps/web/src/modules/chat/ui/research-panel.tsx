@@ -173,10 +173,7 @@ function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
               >
                 {/* Inline, not inline-flex: a flex box's baseline would be the
                     image's bottom edge and push the label off the line. */}
-                <Favicon
-                  url={item.url}
-                  className="mr-1 inline-block size-3 align-[-2px]"
-                />
+                <Favicon url={item.url} className="mr-1 inline-block size-3 align-[-2px]" />
                 {item.label}
               </a>
             ) : (

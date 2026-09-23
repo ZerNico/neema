@@ -13,9 +13,7 @@ import { AgentDraftService } from "./draft-service.ts";
 
 // Unexpected failures (driver errors can carry SQL or the content being
 // written) are logged and replaced by `reportUnexpectedFailures`.
-const publicResult = <A, R>(
-  effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>,
-) =>
+const publicResult = <A, R>(effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>) =>
   effect.pipe(
     Effect.catchTag("DraftNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),

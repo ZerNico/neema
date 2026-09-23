@@ -9,20 +9,11 @@ const attempts = (entries: Array<[string, string | null]>) =>
 
 describe("foreignMachineStamp", () => {
   it("is absent on the machine that sent the latest attempt", () => {
-    expect(
-      foreignMachineStamp(
-        "chat",
-        "a",
-        attempts([["m1", "a"]]),
-        ["m1"],
-      ),
-    ).toBeNull();
+    expect(foreignMachineStamp("chat", "a", attempts([["m1", "a"]]), ["m1"])).toBeNull();
   });
 
   it("is absent where no attempt ever came from a machine (browser sends)", () => {
-    expect(
-      foreignMachineStamp("chat", "a", attempts([["m1", null]]), ["m1"]),
-    ).toBeNull();
+    expect(foreignMachineStamp("chat", "a", attempts([["m1", null]]), ["m1"])).toBeNull();
   });
 
   it("is absent in a browser, which has no machine id", () => {

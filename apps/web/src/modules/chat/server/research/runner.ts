@@ -531,4 +531,3 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
         : "None reached.",
   };
 });
-

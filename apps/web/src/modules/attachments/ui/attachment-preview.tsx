@@ -86,9 +86,7 @@ export function AttachmentPreviewDialog({
           </DialogDescription>
         </DialogHeader>
         {target.unsupported ? (
-          <p className="text-muted-foreground text-sm">
-            There’s no preview for this kind of file.
-          </p>
+          <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
         ) : target.kind === "image" ? (
           <img
             src={target.url}

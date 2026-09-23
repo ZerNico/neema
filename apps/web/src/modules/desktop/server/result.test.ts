@@ -60,8 +60,9 @@ describe("acceptDesktopToolResult", () => {
     ).toBe(false);
     const oversized = "A".repeat(Math.ceil((LIMITS.binaryBytes * 4) / 3) + 8);
     expect(
-      acceptDesktopToolResult(ok({ file: { mediaType: "image/png", base64: oversized, name: "x" } }))
-        .ok,
+      acceptDesktopToolResult(
+        ok({ file: { mediaType: "image/png", base64: oversized, name: "x" } }),
+      ).ok,
     ).toBe(false);
   });
 });

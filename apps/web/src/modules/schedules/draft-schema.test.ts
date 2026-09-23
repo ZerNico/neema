@@ -53,9 +53,9 @@ describe("schedule draft settings", () => {
       prompt: "Remind me.",
     };
     expect(Schema.is(ScheduleDraftSettings)({ ...draft, endAt: null })).toBe(true);
-    expect(
-      Schema.is(ScheduleDraftSettings)({ ...draft, endAt: "2026-09-22T07:00:00.000Z" }),
-    ).toBe(true);
+    expect(Schema.is(ScheduleDraftSettings)({ ...draft, endAt: "2026-09-22T07:00:00.000Z" })).toBe(
+      true,
+    );
     expect(Schema.is(ScheduleDraftSettings)({ ...draft, endAt: 5 })).toBe(false);
   });
 });

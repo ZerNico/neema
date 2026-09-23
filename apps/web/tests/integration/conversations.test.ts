@@ -283,10 +283,7 @@ describe("listConversations scheduled runs", () => {
           { id: "kept", title: "Kept", created: 0 },
           { id: "run-chat", title: "Run", created: 1000 },
         ]);
-        yield* db
-          .update(conversations)
-          .set({ scheduleId })
-          .where(eq(conversations.id, "run-chat"));
+        yield* db.update(conversations).set({ scheduleId }).where(eq(conversations.id, "run-chat"));
         yield* db.delete(schedules).where(eq(schedules.id, scheduleId));
         // The chats stay as ordinary ones; only the link back is cleared.
         return (yield* page(userId, { limit: 10 })).ids;

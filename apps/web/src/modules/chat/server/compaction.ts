@@ -895,8 +895,7 @@ const summarizeRange = Effect.fn("chat.summarizeRange")(function* (
     maxInputTokens,
     maxTranscriptChars: maxInputTokens * COMPACTION_CONFIG.charsPerToken,
   });
-  if (estimatePromptTokens(prompt.content) > maxInputTokens)
-    return null;
+  if (estimatePromptTokens(prompt.content) > maxInputTokens) return null;
   return yield* deps.gateway
     .generateText({
       modelId: input.modelId,

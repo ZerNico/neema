@@ -1,9 +1,4 @@
-import {
-  Alert01Icon,
-  Folder01Icon,
-  FolderAddIcon,
-  Shield01Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert01Icon, Folder01Icon, FolderAddIcon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SandboxAvailability } from "@chat/desktop-rpc";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
@@ -54,12 +49,7 @@ export function FolderStrip({
           {folder.readiness === "loading" ? "Checking folders…" : "Could not check folders."}
         </span>
         {folder.readiness === "error" ? (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={folder.refresh}
-            disabled={folder.busy}
-          >
+          <Button size="xs" variant="ghost" onClick={folder.refresh} disabled={folder.busy}>
             Retry folder check
           </Button>
         ) : null}
@@ -161,13 +151,7 @@ function SandboxNotice({
   if (state.kind === "ready") return null;
   if (state.kind === "setup-needed") {
     return (
-      <Button
-        size="xs"
-        variant="ghost"
-        className="ml-auto"
-        disabled={busy}
-        onClick={onSetUp}
-      >
+      <Button size="xs" variant="ghost" className="ml-auto" disabled={busy} onClick={onSetUp}>
         Commands need a one-time setup
       </Button>
     );

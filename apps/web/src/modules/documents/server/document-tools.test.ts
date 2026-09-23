@@ -127,20 +127,23 @@ describe("document tools parameter transport", () => {
     ["create_document", { title: "Checklist" }],
     ["edit_document", { old: "before" }],
     ["replace_document", { documentId: "doc-1", content: "after" }],
-  ] as const)("accepts a %s call with omitted required keys for the handler to correct", async (name, params) => {
-    const { service } = fakeService();
-    const tools = await prepare(service);
-    const decoded = await Effect.runPromise(
-      Schema.decodeUnknownEffect(AiResponse.StreamPart(tools.group.toolkit))({
-        type: "tool-call",
-        id: "tool-1",
-        name,
-        params,
-        providerExecuted: false,
-      }),
-    );
-    expect(decoded).toMatchObject({ type: "tool-call", name, params });
-  });
+  ] as const)(
+    "accepts a %s call with omitted required keys for the handler to correct",
+    async (name, params) => {
+      const { service } = fakeService();
+      const tools = await prepare(service);
+      const decoded = await Effect.runPromise(
+        Schema.decodeUnknownEffect(AiResponse.StreamPart(tools.group.toolkit))({
+          type: "tool-call",
+          id: "tool-1",
+          name,
+          params,
+          providerExecuted: false,
+        }),
+      );
+      expect(decoded).toMatchObject({ type: "tool-call", name, params });
+    },
+  );
 });
 
 describe("document tools trailing data", () => {
@@ -224,9 +227,7 @@ describe("document tools trailing data", () => {
     expect(repeat.message).toContain("Already focused at revision 1");
 
     // Moving the window is the one reason to ask again.
-    const moved = await Effect.runPromise(
-      tools.group.handlers.read_chat_document({ fromLine: 1 }),
-    );
+    const moved = await Effect.runPromise(tools.group.handlers.read_chat_document({ fromLine: 1 }));
     expect(moved.message).toBeUndefined();
 
     // So is catching up with the person.

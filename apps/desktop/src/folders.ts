@@ -167,7 +167,9 @@ export const resolveAmongRoots = (
       const found = resolved.success;
       return {
         root:
-          found.relative === "." ? found.absolute : found.absolute.slice(0, -found.relative.length - 1),
+          found.relative === "."
+            ? found.absolute
+            : found.absolute.slice(0, -found.relative.length - 1),
         absolute: found.absolute,
         relative: found.relative === "." ? name : `${name}/${found.relative}`,
       };

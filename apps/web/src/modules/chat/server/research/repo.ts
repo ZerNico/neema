@@ -183,12 +183,7 @@ export const createResearchStore = (db: Db["Service"]) => {
     }
     if (calls.some((call) => call.phase !== "compaction" && call.usage?.providerCost == null))
       totals.providerCost = null;
-    const status =
-      phase === "aborted"
-        ? "aborted"
-        : phase === "complete"
-          ? "complete"
-          : "error";
+    const status = phase === "aborted" ? "aborted" : phase === "complete" ? "complete" : "error";
     const progress = projectResearchProgress({
       ...run.progress,
       phase,
@@ -383,7 +378,10 @@ export const createResearchStore = (db: Db["Service"]) => {
       generationId: string;
       toolCallId: string;
       modelId: string;
-    }) => db.transaction((tx) => queueResearch(tx, input)).pipe(Effect.catchTag("SqlError", Effect.die)),
+    }) =>
+      db
+        .transaction((tx) => queueResearch(tx, input))
+        .pipe(Effect.catchTag("SqlError", Effect.die)),
     claim: (runId: string) =>
       db
         .transaction((tx) =>
@@ -409,18 +407,18 @@ export const createResearchStore = (db: Db["Service"]) => {
               .pipe(Effect.orDie);
             const run = rows[0];
             if (run)
-            return run
-              ? {
-                  run,
-                  fence: {
-                    runId,
-                    owner,
-                    messageId: run.messageId,
-                    conversationId: run.conversationId,
-                    generationId: run.generationId,
-                  },
-                }
-              : null;
+              return run
+                ? {
+                    run,
+                    fence: {
+                      runId,
+                      owner,
+                      messageId: run.messageId,
+                      conversationId: run.conversationId,
+                      generationId: run.generationId,
+                    },
+                  }
+                : null;
           }),
         )
         .pipe(Effect.orDie),

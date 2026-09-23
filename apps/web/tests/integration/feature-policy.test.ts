@@ -103,23 +103,19 @@ describe("feature policy", () => {
         yield* db
           .insert(agents)
           .values({ id: agentId, userId: creator, name: "Shared agent", audience: "instance" });
-        yield* db
-          .insert(skills)
-          .values({
-            id: skillId,
-            userId: creator,
-            name: "Shared skill",
-            description: "",
-            audience: "instance",
-          });
-        yield* db
-          .insert(knowledgeCollections)
-          .values({
-            id: collectionId,
-            userId: creator,
-            name: "Shared collection",
-            audience: "instance",
-          });
+        yield* db.insert(skills).values({
+          id: skillId,
+          userId: creator,
+          name: "Shared skill",
+          description: "",
+          audience: "instance",
+        });
+        yield* db.insert(knowledgeCollections).values({
+          id: collectionId,
+          userId: creator,
+          name: "Shared collection",
+          audience: "instance",
+        });
       }),
     );
     const readable = () =>

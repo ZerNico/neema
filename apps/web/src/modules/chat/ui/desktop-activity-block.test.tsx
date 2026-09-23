@@ -37,7 +37,9 @@ describe("DesktopActivityBlock", () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Let it run programs for this chat" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Let it run programs for this chat" }),
+    );
     expect(decide).toHaveBeenCalledWith("allow-rest");
 
     decide.mockClear();
@@ -51,7 +53,9 @@ describe("DesktopActivityBlock", () => {
         approval={{ kind: "edit", decide }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Let it change files for this chat" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Let it change files for this chat" }),
+    ).toBeInTheDocument();
   });
 
   it("offers no blanket grant for a delete and lists every path", () => {

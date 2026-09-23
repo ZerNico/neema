@@ -123,8 +123,7 @@ beforeEach(() => {
 
 // The page's own save confirmation is a status too; these tests mean the other one.
 const otherStatus = () =>
-  screen.queryAllByRole("status").find((element) => element.dataset.slot !== "save-status") ??
-  null;
+  screen.queryAllByRole("status").find((element) => element.dataset.slot !== "save-status") ?? null;
 
 describe("CustomToolEditorPage", () => {
   it("derives the identifier from the name until it is edited, and gates Check on it", async () => {
@@ -339,7 +338,11 @@ describe("CustomToolEditorPage", () => {
     renderEditor(detail());
 
     await user.click(screen.getByRole("switch", { name: "Enabled" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not update the module.", { description: "Boom." }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not update the module.", {
+        description: "Boom.",
+      }),
+    );
 
     await user.click(screen.getByRole("button", { name: "Module actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete module" }));

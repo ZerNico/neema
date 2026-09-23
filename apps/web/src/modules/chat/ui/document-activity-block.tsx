@@ -50,14 +50,24 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   const contents = (
     <>
       <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-xl">
-        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="text-muted-foreground size-4" aria-hidden />
+        <HugeiconsIcon
+          icon={File01Icon}
+          strokeWidth={2}
+          className="text-muted-foreground size-4"
+          aria-hidden
+        />
       </span>
       <span className="min-w-0 flex-1 text-left">
         <span className="block truncate text-sm font-medium">{name}</span>
         <span className="text-muted-foreground block truncate text-xs">{status}</span>
       </span>
       {entry?.open ? (
-        <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        <HugeiconsIcon
+          icon={ArrowRight01Icon}
+          strokeWidth={2}
+          className="text-muted-foreground size-4 shrink-0"
+          aria-hidden
+        />
       ) : null}
     </>
   );
@@ -126,7 +136,9 @@ function DocumentActivityRow({
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
       {icon}
-      <span className={cn("min-w-0", activity.status === "running" && "text-shimmer")}>{label}</span>
+      <span className={cn("min-w-0", activity.status === "running" && "text-shimmer")}>
+        {label}
+      </span>
     </div>
   );
 }
@@ -135,6 +147,11 @@ export function DocumentActivityBlock({ activity }: { activity: DocumentToolActi
   const reference = activity.result?.documentId;
   const create = activity.name === "create_document" && activity.result?.outcome === "created";
   if (reference && create)
-    return <DocumentWidget documentId={reference} {...(activity.result?.title ? { title: activity.result.title } : {})} />;
+    return (
+      <DocumentWidget
+        documentId={reference}
+        {...(activity.result?.title ? { title: activity.result.title } : {})}
+      />
+    );
   return <DocumentActivityRow activity={activity} documentId={reference} />;
 }

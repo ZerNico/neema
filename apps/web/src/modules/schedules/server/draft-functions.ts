@@ -3,10 +3,7 @@ import { Effect } from "effect";
 import { Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
-import {
-  DraftNotAvailable,
-  DraftRejected,
-} from "~/modules/drafts/draft-schema.ts";
+import { DraftNotAvailable, DraftRejected } from "~/modules/drafts/draft-schema.ts";
 import {
   PatchScheduleDraftInput,
   ScheduleDraftIdInput,
@@ -16,9 +13,7 @@ import { ScheduleDraftService } from "./draft-service.ts";
 
 // Unexpected failures (driver errors can carry SQL or the content being
 // written) are logged and replaced by `reportUnexpectedFailures`.
-const publicResult = <A, R>(
-  effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>,
-) =>
+const publicResult = <A, R>(effect: Effect.Effect<A, DraftNotAvailable | DraftRejected, R>) =>
   effect.pipe(
     Effect.catchTag("DraftNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),

@@ -263,7 +263,14 @@ export class SkillRepo extends Context.Service<
                 eq(skills.revision, skillRevisions.revision),
               ),
             )
-            .where(and(eq(skills.id, skillId), eq(skills.userId, userId), isNull(skills.deletedAt), capabilityAllowedSql(userId, "skillsCreate")))
+            .where(
+              and(
+                eq(skills.id, skillId),
+                eq(skills.userId, userId),
+                isNull(skills.deletedAt),
+                capabilityAllowedSql(userId, "skillsCreate"),
+              ),
+            )
             .pipe(Effect.orDie);
           if (!row) return yield* new SkillNotAvailable({ skillId });
           return row.revision;
@@ -298,7 +305,8 @@ export class SkillRepo extends Context.Service<
             .from(user)
             .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
             .pipe(Effect.orDie);
-          if (!allowed) return yield* new SkillRejected({ reason: "skill creation is unavailable" });
+          if (!allowed)
+            return yield* new SkillRejected({ reason: "skill creation is unavailable" });
           if (input.skillId) {
             const [current] = yield* db
               .select()
@@ -346,7 +354,8 @@ export class SkillRepo extends Context.Service<
                   .from(user)
                   .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
                   .for("update");
-                if (!allowed) return yield* new SkillRejected({ reason: "skill creation is unavailable" });
+                if (!allowed)
+                  return yield* new SkillRejected({ reason: "skill creation is unavailable" });
                 const skillId = input.skillId ?? uuidv7();
                 let revision = 1;
                 let previous: Revision | undefined;

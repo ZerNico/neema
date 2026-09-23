@@ -14,7 +14,6 @@ import { useAppForm } from "~/ui/form/app-form.tsx";
 import { Page } from "~/ui/page-shell.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 
-
 export function ScheduleCreatePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();

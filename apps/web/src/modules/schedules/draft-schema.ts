@@ -5,9 +5,7 @@ import type { ConversationDraft } from "~/modules/drafts/draft-schema.ts";
 /** Working input retains unfinished text; only the explicit Save validates a schedule. */
 export const ScheduleDraftSettings = ScheduleSettings;
 export type ScheduleDraftSettings = typeof ScheduleDraftSettings.Type;
-export const ScheduleDraftPatch = ScheduleDraftSettings.mapFields(
-  Struct.map(Schema.optionalKey),
-);
+export const ScheduleDraftPatch = ScheduleDraftSettings.mapFields(Struct.map(Schema.optionalKey));
 export type ScheduleDraftPatch = typeof ScheduleDraftPatch.Type;
 
 export const EMPTY_SCHEDULE_DRAFT: ScheduleDraftSettings = {

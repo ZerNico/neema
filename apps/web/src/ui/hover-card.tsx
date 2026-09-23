@@ -7,10 +7,7 @@ import { cn } from "~/ui/utils";
  * popup is a small inverted label, so every call site that wanted a card was
  * rewriting the surface. That surface belongs here instead.
  */
-export function HoverCardContent({
-  className,
-  ...props
-}: ComponentProps<typeof TooltipContent>) {
+export function HoverCardContent({ className, ...props }: ComponentProps<typeof TooltipContent>) {
   return (
     <TooltipContent
       showArrow={false}

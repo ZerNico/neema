@@ -82,12 +82,17 @@ const isPrivateIpv6 = (ip: string): boolean => {
   if ((groups[0]! & 0xfe00) === 0xfc00) return true; // ULA fc00::/7
   if ((groups[0]! & 0xff00) === 0xff00) return true; // multicast
   // IPv4-mapped ::ffff:x:x, IPv4-translated ::ffff:0:x:x, IPv4-compatible ::x:x.
-  if (zeroHead(5) && groups[5] === 0xffff) return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
+  if (zeroHead(5) && groups[5] === 0xffff)
+    return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
   if (zeroHead(4) && groups[4] === 0xffff && groups[5] === 0)
     return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
   if (zeroHead(6)) return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
   // NAT64 well-known prefix 64:ff9b::/96 (groups 2-5 are the prefix padding).
-  if (groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0))
+  if (
+    groups[0] === 0x64 &&
+    groups[1] === 0xff9b &&
+    groups.slice(2, 6).every((group) => group === 0)
+  )
     return isPrivateIpv4(ipv4FromGroups(groups[6]!, groups[7]!));
   // 6to4 2002:x:x:: embeds the IPv4 address in the next 32 bits.
   if (groups[0] === 0x2002) return isPrivateIpv4(ipv4FromGroups(groups[1]!, groups[2]!));

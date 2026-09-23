@@ -77,7 +77,11 @@ export function DesktopSignInPage({
                 </div>
               </div>
               {mint.isError ? <FieldError>{mint.error.message}</FieldError> : null}
-              <PendingButton className="w-full" pending={mint.isPending} onClick={() => mint.mutate()}>
+              <PendingButton
+                className="w-full"
+                pending={mint.isPending}
+                onClick={() => mint.mutate()}
+              >
                 Continue as {user.name}
               </PendingButton>
             </>

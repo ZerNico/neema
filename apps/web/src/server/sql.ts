@@ -12,9 +12,7 @@ export const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "
  */
 export const isUniqueViolation = (error: unknown): boolean => {
   const outer =
-    typeof error === "object" && error !== null
-      ? (error as { cause?: unknown }).cause
-      : undefined;
+    typeof error === "object" && error !== null ? (error as { cause?: unknown }).cause : undefined;
   // Squash rather than assume an exact nesting depth.
   for (
     let current: unknown = Cause.isCause(outer) ? Cause.squash(outer) : error, depth = 0;

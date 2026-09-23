@@ -71,9 +71,7 @@ export function CreateSplitButton({
       <DropdownMenu>
         <DropdownMenuTrigger
           disabled={disabled}
-          render={
-            <Button size="icon-sm" aria-label={`More ways to create: ${label}`} />
-          }
+          render={<Button size="icon-sm" aria-label={`More ways to create: ${label}`} />}
         >
           <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
         </DropdownMenuTrigger>

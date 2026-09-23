@@ -12,7 +12,10 @@ import {
   initialResearchProgress,
   type ResearchFence,
 } from "~/modules/chat/server/research/repo.ts";
-import { GenerationFence, type GenerationIdentity } from "~/modules/chat/server/generation-fence.ts";
+import {
+  GenerationFence,
+  type GenerationIdentity,
+} from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -66,9 +69,7 @@ const fixture = async () => {
   await runtime.runPromise(
     Effect.flatMap(Db, (db) =>
       Effect.gen(function* () {
-        yield* db
-          .insert(user)
-          .values({ id: userId, name: "Write fence", email: `${userId}@t.io` });
+        yield* db.insert(user).values({ id: userId, name: "Write fence", email: `${userId}@t.io` });
         yield* db.insert(conversations).values({ id: identity.conversationId, userId });
         yield* db.insert(messages).values([
           { id: sourceMessageId, conversationId: identity.conversationId, role: "user", content },

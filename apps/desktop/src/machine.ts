@@ -22,7 +22,10 @@ export interface MachineIdentity {
 
 /** Hostnames make the friendliest labels; length-capped like any user-facing string. */
 const defaultName = () => {
-  const host = os.hostname().replace(/\.(local|lan)$/, "").trim();
+  const host = os
+    .hostname()
+    .replace(/\.(local|lan)$/, "")
+    .trim();
   return (host || "This computer").slice(0, 64);
 };
 

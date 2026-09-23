@@ -4,11 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { conversationDrafts, conversations } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
-import {
-  DraftNotAvailable,
-  type ConversationDraft,
-  type DraftKind,
-} from "../draft-schema.ts";
+import { DraftNotAvailable, type ConversationDraft, type DraftKind } from "../draft-schema.ts";
 
 export type DraftRow = typeof conversationDrafts.$inferSelect;
 export type DraftWrite = Partial<
@@ -46,7 +42,11 @@ export class DraftRepo extends Context.Service<
       kind: DraftKind,
     ): Effect.Effect<ConversationDraft[]>;
     /** Always conversation → draft; a model fence runs before this acquires either lock. */
-    lock(tx: DbTx, userId: string, draftId: string): Effect.Effect<ConversationDraft, DraftNotAvailable>;
+    lock(
+      tx: DbTx,
+      userId: string,
+      draftId: string,
+    ): Effect.Effect<ConversationDraft, DraftNotAvailable>;
     /** Caller holds lock; settings and receipt updates remain in that transaction. */
     write(tx: DbTx, draftId: string, changes: DraftWrite): Effect.Effect<ConversationDraft>;
     remove(tx: DbTx, draftId: string): Effect.Effect<void>;

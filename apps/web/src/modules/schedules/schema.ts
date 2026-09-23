@@ -2,10 +2,7 @@ import { Schema } from "effect";
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /** 5-field cron expression; the module's cron.ts validates it parses. */
-export const CronExpression = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(100),
-);
+export const CronExpression = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100));
 /** IANA timezone name; validated with Intl at write time. */
 export const Timezone = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100));
 
@@ -59,7 +56,6 @@ export class ScheduleNotAvailable extends Schema.TaggedError<ScheduleNotAvailabl
   "ScheduleNotAvailable",
   { scheduleId: Schema.String },
 ) {}
-export class ScheduleRejected extends Schema.TaggedError<ScheduleRejected>()(
-  "ScheduleRejected",
-  { reason: Schema.String },
-) {}
+export class ScheduleRejected extends Schema.TaggedError<ScheduleRejected>()("ScheduleRejected", {
+  reason: Schema.String,
+}) {}

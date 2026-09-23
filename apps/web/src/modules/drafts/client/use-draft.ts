@@ -176,7 +176,10 @@ export function useDraft<S extends Record<string, unknown>>(
         return false;
       } catch (failure) {
         setError(
-          failureMessage(failure, "Could not keep your draft changes. Try again before continuing."),
+          failureMessage(
+            failure,
+            "Could not keep your draft changes. Try again before continuing.",
+          ),
         );
         return false;
       } finally {

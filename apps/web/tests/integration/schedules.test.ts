@@ -359,7 +359,10 @@ describe("schedule removal", () => {
           error: "no model",
         });
         yield* repo.remove(userId, row.id);
-        const runs = yield* db.select().from(scheduleRuns).where(eq(scheduleRuns.scheduleId, row.id));
+        const runs = yield* db
+          .select()
+          .from(scheduleRuns)
+          .where(eq(scheduleRuns.scheduleId, row.id));
         const [remaining] = yield* db
           .select()
           .from(schedules)

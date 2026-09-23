@@ -92,8 +92,7 @@ export interface DesktopSession {
 
 export const desktopSessionsQuery = queryOptions({
   queryKey: ["desktop-sessions"],
-  queryFn: () =>
-    unwrap(authClient.$fetch<DesktopSession[]>("/desktop/devices", { method: "GET" })),
+  queryFn: () => unwrap(authClient.$fetch<DesktopSession[]>("/desktop/devices", { method: "GET" })),
   staleTime: 30_000,
 });
 

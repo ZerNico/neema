@@ -486,10 +486,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         break;
       }
     }
-    const toLine = Math.min(
-      nextFromLine + (nextFromCharacter > 0 ? 1 : 0),
-      lines.length,
-    );
+    const toLine = Math.min(nextFromLine + (nextFromCharacter > 0 ? 1 : 0), lines.length);
     const continuation =
       nextFromLine < lines.length
         ? {

@@ -30,7 +30,8 @@ export const scheduleDraftClient: DraftClient<ScheduleDraftSettings> = {
     if (result.outcome === "saved")
       return { outcome: "saved", draft: result.draft, targetId: result.scheduleId };
     if (result.outcome === "invalid") return result;
-    if (result.outcome === "schedule_changed") return { outcome: "target_changed", draft: result.draft };
+    if (result.outcome === "schedule_changed")
+      return { outcome: "target_changed", draft: result.draft };
     if (result.outcome === "schedule_unavailable")
       return { outcome: "target_unavailable", draft: result.draft };
     return { outcome: "conflict", draft: result.draft };

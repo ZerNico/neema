@@ -14,9 +14,7 @@ const UpdateScheduleInput = Schema.Struct({
 });
 const ListRunsInput = Schema.Struct({
   ...ScheduleIdInput.fields,
-  cursor: Schema.optionalKey(
-    Schema.Struct({ firedAt: Schema.String, id: Schema.String }),
-  ),
+  cursor: Schema.optionalKey(Schema.Struct({ firedAt: Schema.String, id: Schema.String })),
 });
 const PreviewInput = Schema.Struct({
   cron: ScheduleSettings.fields.cron,
@@ -26,9 +24,7 @@ const PreviewInput = Schema.Struct({
 
 // Unexpected failures (driver errors can carry SQL or the content being
 // written) are logged and replaced by `reportUnexpectedFailures`.
-const publicResult = <A, R>(
-  effect: Effect.Effect<A, ScheduleNotAvailable | ScheduleRejected, R>,
-) =>
+const publicResult = <A, R>(effect: Effect.Effect<A, ScheduleNotAvailable | ScheduleRejected, R>) =>
   effect.pipe(
     Effect.catchTag("ScheduleNotAvailable", () =>
       Effect.die(new Response("Not found", { status: 404 })),

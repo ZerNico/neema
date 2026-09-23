@@ -38,7 +38,7 @@ beforeAll(async () => {
     Layer.mergeAll(
       ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer)),
       AgentRepo.layer,
-ScheduleRepo.layer,
+      ScheduleRepo.layer,
     ).pipe(Layer.provideMerge(InfraLayer)),
   );
 

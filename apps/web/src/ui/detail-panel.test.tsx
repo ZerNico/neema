@@ -259,8 +259,7 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
   act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
   const rail = screen.getByRole("complementary");
   const handle = screen.getByRole("separator", { name: "Resize panel" });
-  const width = async (expected: string) =>
-    waitFor(() => expect(rail.style.width).toBe(expected));
+  const width = async (expected: string) => waitFor(() => expect(rail.style.width).toBe(expected));
   await width("352px");
 
   // The rail is on the right, so dragging its edge left widens it.

@@ -12,7 +12,13 @@ describe("TicketCode", () => {
     const user = userEvent.setup();
     const onRenew = vi.fn();
     const view = render(
-      <TicketCode ticket={TICKET} ticketId="t1" expiresAt={EXPIRES} onRenew={onRenew} renewing={false} />,
+      <TicketCode
+        ticket={TICKET}
+        ticketId="t1"
+        expiresAt={EXPIRES}
+        onRenew={onRenew}
+        renewing={false}
+      />,
     );
 
     act(() => announceTicketRedeemed("t2"));
@@ -24,7 +30,13 @@ describe("TicketCode", () => {
     expect(onRenew).toHaveBeenCalledTimes(1);
 
     view.rerender(
-      <TicketCode ticket="ABCDEFGHJKMNPQRSTVWX" ticketId="t2" expiresAt={EXPIRES} onRenew={onRenew} renewing={false} />,
+      <TicketCode
+        ticket="ABCDEFGHJKMNPQRSTVWX"
+        ticketId="t2"
+        expiresAt={EXPIRES}
+        onRenew={onRenew}
+        renewing={false}
+      />,
     );
     expect(screen.getByTestId("ticket-code")).toHaveTextContent("ABCDE-FGHJK-MNPQR-STVWX");
   });
@@ -32,7 +44,13 @@ describe("TicketCode", () => {
   it("stops listening once unmounted", () => {
     const remove = vi.spyOn(window, "removeEventListener");
     const { unmount } = render(
-      <TicketCode ticket={TICKET} ticketId="t1" expiresAt={EXPIRES} onRenew={() => {}} renewing={false} />,
+      <TicketCode
+        ticket={TICKET}
+        ticketId="t1"
+        expiresAt={EXPIRES}
+        onRenew={() => {}}
+        renewing={false}
+      />,
     );
     unmount();
     expect(remove).toHaveBeenCalledWith("chat:desktop-session-created", expect.any(Function));

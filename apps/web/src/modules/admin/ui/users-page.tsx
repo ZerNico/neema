@@ -152,27 +152,24 @@ export function UsersPage() {
                       <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {!isSelf &&
-                        !isAdmin &&
-                        !user.banned &&
-                        !identity?.impersonatedBy && (
-                          <DropdownMenuItem
-                            disabled={impersonate.isPending}
-                            onClick={async () => {
-                              if (
-                                await confirm({
-                                  title: `Impersonate ${user.name}?`,
-                                  description: `You will have access to ${user.name}’s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
-                                  confirmLabel: "Impersonate user",
-                                  destructive: false,
-                                })
-                              )
-                                impersonate.mutate(user.id);
-                            }}
-                          >
-                            Impersonate user
-                          </DropdownMenuItem>
-                        )}
+                      {!isSelf && !isAdmin && !user.banned && !identity?.impersonatedBy && (
+                        <DropdownMenuItem
+                          disabled={impersonate.isPending}
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `Impersonate ${user.name}?`,
+                                description: `You will have access to ${user.name}’s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
+                                confirmLabel: "Impersonate user",
+                                destructive: false,
+                              })
+                            )
+                              impersonate.mutate(user.id);
+                          }}
+                        >
+                          Impersonate user
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         onClick={() =>
                           setRole.mutate({ userId: user.id, role: isAdmin ? "user" : "admin" })

@@ -58,7 +58,11 @@ export class DraftService extends Context.Service<
   DraftService,
   {
     get<S>(userId: string, draftId: string): Effect.Effect<ConversationDraft<S> | null>;
-    list<S>(userId: string, conversationId: string, kind: DraftKind): Effect.Effect<ConversationDraft<S>[]>;
+    list<S>(
+      userId: string,
+      conversationId: string,
+      kind: DraftKind,
+    ): Effect.Effect<ConversationDraft<S>[]>;
     open<S, E = never, R = never>(
       userId: string,
       config: DraftKindConfig<S>,
@@ -70,12 +74,27 @@ export class DraftService extends Context.Service<
       config: DraftKindConfig<S>,
       input: PatchDraftInput,
       guard?: DraftWriteGuard<E, R>,
-    ): Effect.Effect<{ outcome: "updated" | "unchanged" | "conflict"; draft: ConversationDraft<S> }, DraftError | E, R>;
+    ): Effect.Effect<
+      { outcome: "updated" | "unchanged" | "conflict"; draft: ConversationDraft<S> },
+      DraftError | E,
+      R
+    >;
     discard(userId: string, draftId: string): Effect.Effect<ConversationDraft, DraftError>;
     /** Per-kind services call this after their own mutations. */
-    changed(userId: string, draft: Pick<ConversationDraft, "id" | "conversationId" | "kind">): Effect.Effect<void>;
-    lock<S>(tx: DbTx, userId: string, draftId: string): Effect.Effect<ConversationDraft<S>, DraftNotAvailable>;
-    write<S>(tx: DbTx, draftId: string, changes: Partial<ConversationDraft<S>>): Effect.Effect<ConversationDraft<S>>;
+    changed(
+      userId: string,
+      draft: Pick<ConversationDraft, "id" | "conversationId" | "kind">,
+    ): Effect.Effect<void>;
+    lock<S>(
+      tx: DbTx,
+      userId: string,
+      draftId: string,
+    ): Effect.Effect<ConversationDraft<S>, DraftNotAvailable>;
+    write<S>(
+      tx: DbTx,
+      draftId: string,
+      changes: Partial<ConversationDraft<S>>,
+    ): Effect.Effect<ConversationDraft<S>>;
   }
 >()("chat/drafts/DraftService") {
   static readonly layer = Layer.effect(
@@ -142,7 +161,11 @@ export class DraftService extends Context.Service<
                     targetId === null ? blank(config, draft) : draft.targetId === targetId,
                   );
                   if (reusable) {
-                    const locked = (yield* drafts.lock(tx, userId, reusable.id)) as ConversationDraft<S>;
+                    const locked = (yield* drafts.lock(
+                      tx,
+                      userId,
+                      reusable.id,
+                    )) as ConversationDraft<S>;
                     // A blank draft has nothing to lose, so the changes this call
                     // carried still land. A draft already holding a target keeps
                     // its settings: those may be the user's own edits.
@@ -197,7 +220,11 @@ export class DraftService extends Context.Service<
                 Effect.gen(function* () {
                   // Keep fence failures outside recoverable validation/conflict handling.
                   if (guard) yield* guard(tx);
-                  const draft = (yield* drafts.lock(tx, userId, input.draftId)) as ConversationDraft<S>;
+                  const draft = (yield* drafts.lock(
+                    tx,
+                    userId,
+                    input.draftId,
+                  )) as ConversationDraft<S>;
                   if (draft.revision !== input.expectedRevision)
                     return { outcome: "conflict" as const, draft };
                   const current = draft.settings as Record<string, unknown>;

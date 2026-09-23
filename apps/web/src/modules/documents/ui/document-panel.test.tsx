@@ -4,11 +4,7 @@ import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationDocument } from "../schema.ts";
 import { toggleTaskItem } from "../task-items.ts";
-import {
-  getDocument,
-  saveDocument,
-  toggleDocumentTask,
-} from "../server/document-functions.ts";
+import { getDocument, saveDocument, toggleDocumentTask } from "../server/document-functions.ts";
 import { DocumentOwner } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";

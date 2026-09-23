@@ -27,25 +27,27 @@ export class ScheduleRepo extends Context.Service<
   {
     list(userId: string): Effect.Effect<ScheduleRow[]>;
     get(userId: string, scheduleId: string, tx?: DbTx): Effect.Effect<ScheduleRow | null>;
-    insert(input: {
-      userId: string;
-      name: string;
-      prompt: string;
-      scheduleText: string;
-      cron: string;
-      timezone: string;
-      endAt: Date | null;
-      modelId: string | null;
-      agentId: string | null;
-      searchEnabled: boolean;
-      researchEnabled: boolean;
-      collectionIds: string[];
-      skillIds: string[];
-      chatMode: "new" | "same";
-      chatId: string | null;
-      nextFireAt: Date | null;
-    },
-    tx?: DbTx): Effect.Effect<ScheduleRow>;
+    insert(
+      input: {
+        userId: string;
+        name: string;
+        prompt: string;
+        scheduleText: string;
+        cron: string;
+        timezone: string;
+        endAt: Date | null;
+        modelId: string | null;
+        agentId: string | null;
+        searchEnabled: boolean;
+        researchEnabled: boolean;
+        collectionIds: string[];
+        skillIds: string[];
+        chatMode: "new" | "same";
+        chatId: string | null;
+        nextFireAt: Date | null;
+      },
+      tx?: DbTx,
+    ): Effect.Effect<ScheduleRow>;
     /**
      * Records the chat a "same chat" schedule's first fire created. Only while
      * the schedule still wants one: an edit that picked another chat, or
@@ -86,7 +88,10 @@ export class ScheduleRepo extends Context.Service<
       scheduleId: string,
       cursor: { firedAt: Date; id: string } | undefined,
       limit: number,
-    ): Effect.Effect<{ runs: ScheduleRunSummary[]; nextCursor: { firedAt: Date; id: string } | null }>;
+    ): Effect.Effect<{
+      runs: ScheduleRunSummary[];
+      nextCursor: { firedAt: Date; id: string } | null;
+    }>;
     recordRun(input: {
       scheduleId: string;
       conversationId: string | null;
@@ -171,12 +176,7 @@ export class ScheduleRepo extends Context.Service<
             .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
             .pipe(Effect.orDie, Effect.asVoid);
         }),
-        listRuns: Effect.fn("ScheduleRepo.listRuns")(function* (
-          userId,
-          scheduleId,
-          cursor,
-          limit,
-        ) {
+        listRuns: Effect.fn("ScheduleRepo.listRuns")(function* (userId, scheduleId, cursor, limit) {
           const rows = yield* db
             .select({
               run: scheduleRuns,

@@ -16,7 +16,10 @@ import {
 import { AppMotionProvider } from "~/ui/motion";
 
 const blocker = vi.hoisted(() => ({
-  current: null as null | { shouldBlockFn: () => Promise<boolean>; enableBeforeUnload: () => boolean },
+  current: null as null | {
+    shouldBlockFn: () => Promise<boolean>;
+    enableBeforeUnload: () => boolean;
+  },
 }));
 vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
@@ -25,7 +28,15 @@ vi.mock("../server/document-functions.ts", () => ({
   listDocuments: vi.fn(),
 }));
 vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
-  default: ({ value, onChange, label }: { value: string; onChange: (value: string) => void; label: string }) => (
+  default: ({
+    value,
+    onChange,
+    label,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    label: string;
+  }) => (
     <textarea aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />
   ),
 }));
@@ -136,7 +147,9 @@ describe("conversation-owned document", () => {
     await act(async () => {
       expect(await blocker.current!.shouldBlockFn()).toBe(true);
     });
-    await waitFor(() => expect(screen.getByRole("region", { name: "Document conflict" })).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Document conflict" })).toBeVisible(),
+    );
   });
 
   it("forgets a document the conversation rewound away", async () => {

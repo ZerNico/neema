@@ -471,7 +471,9 @@ describe("impersonation controls", () => {
     );
     expect(screen.getByRole("button", { name: "Actions for Target" })).toBeDisabled();
     await act(async () => pending.resolve({ error: { message: "denied" } }));
-    expect(mocks.toast).toHaveBeenCalledWith("Could not impersonate the user.", { description: "Denied." });
+    expect(mocks.toast).toHaveBeenCalledWith("Could not impersonate the user.", {
+      description: "Denied.",
+    });
     expect(identityNavigation.replace).not.toHaveBeenCalled();
     expect(localStorage.getItem(IDENTITY_CHANGE_KEY)).toBeNull();
   });

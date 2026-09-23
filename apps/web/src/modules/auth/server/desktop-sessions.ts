@@ -82,7 +82,11 @@ export const desktopSessions = ({
           const expiresAt = new Date(Date.now() + DESKTOP_TICKET_MINUTES * 60 * 1000);
           await ctx.context.internalAdapter.createVerificationValue({
             identifier: IDENTIFIER_PREFIX + (await hashTicket(ticket)),
-            value: encodeStored({ userId: user.id, challenge: ctx.body.challenge ?? null, ticketId }),
+            value: encodeStored({
+              userId: user.id,
+              challenge: ctx.body.challenge ?? null,
+              ticketId,
+            }),
             expiresAt,
           });
           return ctx.json({ ticket, ticketId, expiresAt: expiresAt.toISOString() });

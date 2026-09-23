@@ -36,7 +36,9 @@ export const schedules = pgTable(
      * `new` fires into a fresh chat each time; `same` keeps using `chatId`, and
      * a null `chatId` means the next fire creates that chat and stores it.
      */
-    chatMode: text("chat_mode", { enum: ["new", "same"] }).notNull().default("new"),
+    chatMode: text("chat_mode", { enum: ["new", "same"] })
+      .notNull()
+      .default("new"),
     chatId: text("chat_id").references(() => conversations.id, { onDelete: "set null" }),
     paused: boolean().notNull().default(false),
     /** Null while paused or past endAt; the claim reschedules from now, never replays. */
@@ -47,7 +49,9 @@ export const schedules = pgTable(
   },
   (t) => [
     index("schedules_user_idx").on(t.userId),
-    index("schedules_due_idx").on(t.nextFireAt).where(sql`${t.nextFireAt} is not null`),
+    index("schedules_due_idx")
+      .on(t.nextFireAt)
+      .where(sql`${t.nextFireAt} is not null`),
     // Deleting a chat clears `chat_id` on the schedules that use it.
     index("schedules_chat_idx").on(t.chatId),
   ],

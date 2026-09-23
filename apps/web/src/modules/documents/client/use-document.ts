@@ -130,14 +130,11 @@ export function useDocument(documentId: string, enabled = true, locked = false) 
       pending.current = null;
     }
   }, [documentId, remember]);
-  const enqueue = useCallback(
-    (work: () => Promise<boolean>) => {
-      const next = queue.current.then(work, work);
-      queue.current = next;
-      return next;
-    },
-    [],
-  );
+  const enqueue = useCallback((work: () => Promise<boolean>) => {
+    const next = queue.current.then(work, work);
+    queue.current = next;
+    return next;
+  }, []);
   /** Persist everything typed so far; never refetches, so it cannot adopt mid-edit. */
   const flush = useCallback(() => enqueue(drain), [drain, enqueue]);
   useEffect(() => {

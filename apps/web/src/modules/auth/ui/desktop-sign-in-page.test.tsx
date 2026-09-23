@@ -41,7 +41,11 @@ afterEach(() => {
 describe("DesktopSignInPage", () => {
   it("mints a ticket with the challenge and shows it formatted with the deep link", async () => {
     const user = userEvent.setup();
-    mint.mockResolvedValue({ ticket: TICKET, ticketId: "t1", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: TICKET,
+      ticketId: "t1",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     renderPage("abc");
 
     expect(screen.getByText("nico@example.com")).toBeInTheDocument();
@@ -55,12 +59,18 @@ describe("DesktopSignInPage", () => {
     );
     expect(screen.getByRole("timer")).toHaveTextContent(/Expires in (3:00|2:5\d)/);
     expect(screen.getByText("You can close this tab afterwards.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Use a different account" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use a different account" }),
+    ).not.toBeInTheDocument();
   });
 
   it("mints a paste-only ticket when no challenge was given", async () => {
     const user = userEvent.setup();
-    mint.mockResolvedValue({ ticket: TICKET, ticketId: "t1", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: TICKET,
+      ticketId: "t1",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     renderPage();
 
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
@@ -72,7 +82,11 @@ describe("DesktopSignInPage", () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    mint.mockResolvedValue({ ticket: TICKET, ticketId: "t1", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: TICKET,
+      ticketId: "t1",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     renderPage("abc");
 
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
@@ -85,7 +99,11 @@ describe("DesktopSignInPage", () => {
   it("offers a new code once the countdown reaches zero", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    mint.mockResolvedValue({ ticket: TICKET, ticketId: "t1", expiresAt: new Date(Date.now() + 2_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: TICKET,
+      ticketId: "t1",
+      expiresAt: new Date(Date.now() + 2_000).toISOString(),
+    });
     renderPage("abc");
 
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
@@ -96,7 +114,11 @@ describe("DesktopSignInPage", () => {
     });
 
     expect(screen.getByText("This code has expired.")).toBeInTheDocument();
-    mint.mockResolvedValue({ ticket: "ABCDEFGHJKMNPQRSTVWX", ticketId: "t2", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: "ABCDEFGHJKMNPQRSTVWX",
+      ticketId: "t2",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     await user.click(screen.getByRole("button", { name: "Get a new code" }));
     expect(await screen.findByTestId("ticket-code")).toHaveTextContent("ABCDE-FGHJK-MNPQR-STVWX");
     expect(mint).toHaveBeenCalledTimes(2);
@@ -104,7 +126,11 @@ describe("DesktopSignInPage", () => {
 
   it("reports the sign-in the moment its own ticket is redeemed and offers another", async () => {
     const user = userEvent.setup();
-    mint.mockResolvedValue({ ticket: TICKET, ticketId: "t1", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: TICKET,
+      ticketId: "t1",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     renderPage("abc");
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
     await screen.findByTestId("ticket-code");
@@ -117,7 +143,11 @@ describe("DesktopSignInPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Signed in on the new device.");
     expect(screen.queryByTestId("ticket-code")).not.toBeInTheDocument();
 
-    mint.mockResolvedValue({ ticket: "ABCDEFGHJKMNPQRSTVWX", ticketId: "t2", expiresAt: new Date(Date.now() + 180_000).toISOString() });
+    mint.mockResolvedValue({
+      ticket: "ABCDEFGHJKMNPQRSTVWX",
+      ticketId: "t2",
+      expiresAt: new Date(Date.now() + 180_000).toISOString(),
+    });
     await user.click(screen.getByRole("button", { name: "Generate another code" }));
     expect(await screen.findByTestId("ticket-code")).toHaveTextContent("ABCDE-FGHJK-MNPQR-STVWX");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -130,7 +160,9 @@ describe("DesktopSignInPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your account is waiting for approval.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your account is waiting for approval.",
+    );
     expect(screen.getByRole("button", { name: "Continue as Nico" })).toBeEnabled();
   });
 

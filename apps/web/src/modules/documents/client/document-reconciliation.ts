@@ -20,8 +20,7 @@ export function reconcileDocument(
   if (previous && incoming.revision <= previous.revision)
     return { document: previous, content: local, conflict };
   if (!previous) return { document: incoming, content: incoming.content, conflict: false };
-  if (local === incoming.content)
-    return { document: incoming, content: local, conflict: false };
+  if (local === incoming.content) return { document: incoming, content: local, conflict: false };
   // The reply can acknowledge the value sent while a later keystroke remains
   // local. It is our write, not a competing whole-document edit.
   if (pending !== null && pending === incoming.content)

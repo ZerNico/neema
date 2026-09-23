@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeConnectFlow } from "./connect-flow.ts";
 
-
 const host = (
   overrides: Partial<{
     fixedServer: () => boolean;
@@ -53,7 +52,11 @@ describe("server chooser", () => {
   });
 
   it("does not ask on first run, when no main window exists", async () => {
-    const { effects } = host({ hasMain: () => false, hasWork: () => true, currentOrigin: () => null });
+    const { effects } = host({
+      hasMain: () => false,
+      hasWork: () => true,
+      currentOrigin: () => null,
+    });
     await makeConnectFlow(effects).openChooser();
     expect(effects.confirmSwitch).not.toHaveBeenCalled();
     expect(effects.openConnect).toHaveBeenCalledExactlyOnceWith(null);

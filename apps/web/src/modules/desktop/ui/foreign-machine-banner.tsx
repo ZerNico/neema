@@ -31,7 +31,10 @@ export const foreignMachineStamp = (
 ): { id: string; name: string | null } | null => {
   if (localMachineId === null) return null;
   const byMessage = new Map(attempts.map((row) => [row.messageId, row.desktopMachine ?? null]));
-  const latest = [...messageOrder].reverse().map((id) => byMessage.get(id)).find((m) => m != null);
+  const latest = [...messageOrder]
+    .reverse()
+    .map((id) => byMessage.get(id))
+    .find((m) => m != null);
   if (!latest || latest.id === localMachineId) return null;
   if (settled.get(conversationId) === latest.id) return null;
   return latest;
@@ -66,8 +69,7 @@ export function ForeignMachineBanner({
       // strip on the fresh state. The banner itself clears via `settle`.
       await queryClient.fetchQuery({
         queryKey: folderQueryKey(conversationId),
-        queryFn: () =>
-          Effect.runPromise(desktopClient()!.folderStatus({ conversationId })),
+        queryFn: () => Effect.runPromise(desktopClient()!.folderStatus({ conversationId })),
         staleTime: 0,
       });
       settle();

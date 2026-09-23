@@ -76,11 +76,11 @@ const prepared = (indexer: SourceIndexer) =>
 
 const runSearch = (toolkit: Toolkit.WithHandler<any>, queries: string[]) =>
   Effect.gen(function* () {
-    const stream = yield* (toolkit.handle("web_search", { queries }) as Effect.Effect<
+    const stream = yield* toolkit.handle("web_search", { queries }) as Effect.Effect<
       Stream.Stream<{ result: unknown }, unknown, unknown>,
       unknown,
       never
-    >);
+    >;
     const narrowedStream = stream as Stream.Stream<{ result: unknown }, unknown, never>;
     const parts = yield* Stream.runCollect(narrowedStream);
     return [...parts].at(-1)!.result as WebToolResult;

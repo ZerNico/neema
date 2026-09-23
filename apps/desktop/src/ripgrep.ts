@@ -105,15 +105,7 @@ export const findWithRipgrep = (
     // `--sortr modified` is what the walker does by hand; `-g` without a slash
     // matches at any depth, the same rule `globToRegExp` applies.
     const { code, stdout, stderr } = yield* rg(
-      [
-        "--files",
-        ...RG_TREE,
-        "--sortr",
-        "modified",
-        ...(glob ? ["--glob", glob] : []),
-        "--",
-        ".",
-      ],
+      ["--files", ...RG_TREE, "--sortr", "modified", ...(glob ? ["--glob", glob] : []), "--", "."],
       root,
     );
     if (code === 2 && stdout === "") return yield* Effect.fail(explainFailure(stderr, glob ?? "*"));
@@ -215,6 +207,11 @@ export const searchWithRipgrep = (
     const parsed = parseRipgrepSearchOutput(stdout);
     // 0 matches, 1 none. 2 with a summary is a partial search (some file
     // could not be read) and is still an answer.
-    if (code === 2 && !parsed.summarised) return yield* Effect.fail(explainFailure(stderr, pattern));
-    return { matches: parsed.matches, filesSearched: parsed.filesSearched, truncated: parsed.truncated };
+    if (code === 2 && !parsed.summarised)
+      return yield* Effect.fail(explainFailure(stderr, pattern));
+    return {
+      matches: parsed.matches,
+      filesSearched: parsed.filesSearched,
+      truncated: parsed.truncated,
+    };
   });

@@ -289,7 +289,11 @@ describe("ToolsPage", () => {
 
     await user.click(screen.getByRole("switch", { name: "Web search enabled" }));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not update web search.", { description: "Boom." }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not update web search.", {
+        description: "Boom.",
+      }),
+    );
   });
 
   it("shows an empty state when the tool row is missing", () => {

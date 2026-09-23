@@ -134,51 +134,53 @@ export function DocumentPanelBody({
         ) : null}
       </AnimatePresence>
       <div className="min-w-0 space-y-3">
-      {controller.conflict ? (
-        <section className="space-y-2 rounded-2xl border p-3" aria-label="Document conflict">
-          <p className="text-sm font-medium">Changed while you were editing</p>
-          <p className="text-muted-foreground text-xs">
-            Your source is still here. Choose which whole document to keep.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => controller.resolve("local")}>
-              Keep mine
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => controller.resolve("remote")}>
-              Take theirs
-            </Button>
-          </div>
-        </section>
-      ) : null}
-      {controller.error ? <FieldError>{controller.error}</FieldError> : null}
-      {/* Dimmed while locked so "you cannot edit this right now" is visible
+        {controller.conflict ? (
+          <section className="space-y-2 rounded-2xl border p-3" aria-label="Document conflict">
+            <p className="text-sm font-medium">Changed while you were editing</p>
+            <p className="text-muted-foreground text-xs">
+              Your source is still here. Choose which whole document to keep.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => controller.resolve("local")}>
+                Keep mine
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => controller.resolve("remote")}>
+                Take theirs
+              </Button>
+            </div>
+          </section>
+        ) : null}
+        {controller.error ? <FieldError>{controller.error}</FieldError> : null}
+        {/* Dimmed while locked so "you cannot edit this right now" is visible
           without reading the line above. */}
-      <div className={cn("min-w-0", controller.locked && "opacity-60")}>
-      {preview ? (
-        <DocumentTaskScope disabled={controller.locked} onToggle={controller.toggleTask}>
-          <AssistantMarkdown
-            content={source}
-            components={documentTaskMarkdownComponents}
-            streaming={false}
-          />
-        </DocumentTaskScope>
-      ) : (
-        // The editor carries its own 1rem gutter, which on top of the panel's
-        // padding indented source a step further than the preview beside it.
-        // Pulling only the editor to the panel edge lets that gutter be the
-        // padding; the fallback has none, so it keeps the panel's.
-        <Suspense
-          fallback={<Spinner aria-label="Loading source editor" className="text-muted-foreground" />}
-        >
-          {/* Bounded to the rail rather than the editor's default 40rem: it
+        <div className={cn("min-w-0", controller.locked && "opacity-60")}>
+          {preview ? (
+            <DocumentTaskScope disabled={controller.locked} onToggle={controller.toggleTask}>
+              <AssistantMarkdown
+                content={source}
+                components={documentTaskMarkdownComponents}
+                streaming={false}
+              />
+            </DocumentTaskScope>
+          ) : (
+            // The editor carries its own 1rem gutter, which on top of the panel's
+            // padding indented source a step further than the preview beside it.
+            // Pulling only the editor to the panel edge lets that gutter be the
+            // padding; the fallback has none, so it keeps the panel's.
+            <Suspense
+              fallback={
+                <Spinner aria-label="Loading source editor" className="text-muted-foreground" />
+              }
+            >
+              {/* Bounded to the rail rather than the editor's default 40rem: it
               uses the height it has while keeping its own scrollbars, the
               sideways one included, on screen. */}
-          <div className="-mx-4 [--editor-max-height:calc(100vh-13rem)] [--editor-min-height:12rem]">
-            <DocumentSourceEditor controller={controller} />
-          </div>
-        </Suspense>
-      )}
-      </div>
+              <div className="-mx-4 [--editor-max-height:calc(100vh-13rem)] [--editor-min-height:12rem]">
+                <DocumentSourceEditor controller={controller} />
+              </div>
+            </Suspense>
+          )}
+        </div>
       </div>
     </div>
   );

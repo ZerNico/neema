@@ -36,7 +36,9 @@ describe("assertPublicHttpUrl", () => {
   it.effect("rejects ipv4-mapped ipv6 hex private", () => rejects("http://[::ffff:c0a8:1]/"));
   it.effect("rejects ipv4-compatible ipv6 loopback", () => rejects("http://[::127.0.0.1]/"));
   it.effect("rejects ipv4-compatible ipv6 hex loopback", () => rejects("http://[::7f00:1]/"));
-  it.effect("rejects ipv4-translated ipv6 private", () => rejects("http://[::ffff:0:192.168.0.1]/"));
+  it.effect("rejects ipv4-translated ipv6 private", () =>
+    rejects("http://[::ffff:0:192.168.0.1]/"),
+  );
   it.effect("rejects nat64 ipv6 private", () => rejects("http://[64:ff9b::192.168.0.1]/"));
   it.effect("rejects 6to4 ipv6 private", () => rejects("http://[2002:c0a8:1::1]/"));
   it.effect("rejects single-label hostnames", () => rejects("http://intranet/"));

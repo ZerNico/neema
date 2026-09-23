@@ -30,7 +30,8 @@ export const agentDraftClient: DraftClient<DraftSettings> = {
     if (result.outcome === "saved")
       return { outcome: "saved", draft: result.draft, targetId: result.agentId };
     if (result.outcome === "invalid") return result;
-    if (result.outcome === "agent_changed") return { outcome: "target_changed", draft: result.draft };
+    if (result.outcome === "agent_changed")
+      return { outcome: "target_changed", draft: result.draft };
     if (result.outcome === "agent_unavailable")
       return { outcome: "target_unavailable", draft: result.draft };
     return { outcome: "conflict", draft: result.draft };

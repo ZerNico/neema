@@ -49,7 +49,9 @@ describe("schedule authoring projections", () => {
       outcome: "updated",
     };
     expect(Schema.is(ScheduleDraftToolEnvelope)(envelope)).toBe(true);
-    expect(Schema.is(ScheduleDraftToolEnvelope)({ ...envelope, family: "agent-draft" })).toBe(false);
+    expect(Schema.is(ScheduleDraftToolEnvelope)({ ...envelope, family: "agent-draft" })).toBe(
+      false,
+    );
     expect(Schema.is(ScheduleDraftToolEnvelope)({ ...envelope, name: "draft_agent" })).toBe(false);
   });
 

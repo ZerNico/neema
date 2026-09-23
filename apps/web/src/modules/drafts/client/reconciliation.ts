@@ -11,7 +11,9 @@ export const sameDraftSettings = <S>(fields: DraftFields<S>, a: S, b: S) =>
   fields.every((key) => sameDraftValue(a[key], b[key]));
 export const draftChanges = <S>(fields: DraftFields<S>, base: S, values: S): Partial<S> =>
   Object.fromEntries(
-    fields.filter((key) => !sameDraftValue(base[key], values[key])).map((key) => [key, values[key]]),
+    fields
+      .filter((key) => !sameDraftValue(base[key], values[key]))
+      .map((key) => [key, values[key]]),
   ) as Partial<S>;
 
 /** Arrays and prose are whole fields, not a text-merge/history engine. */

@@ -58,9 +58,7 @@ describe("SkillImportPage", () => {
 
     // A pasted link is a package to fetch, not a search term.
     fireEvent.change(field(), { target: { value: "https://github.com/owner/repo" } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Review skill" })).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review skill" })).toBeVisible());
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(searchDiscoverableSkills).toHaveBeenCalledTimes(1);
   });

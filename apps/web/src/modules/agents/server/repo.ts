@@ -34,7 +34,11 @@ export interface StoredAgent {
   customToolIds: ReadonlyArray<string>;
 }
 const owned = (userId: string, agentId: string) =>
-  and(eq(agents.id, agentId), eq(agents.userId, userId), capabilityAllowedSql(userId, "agentsCreate"));
+  and(
+    eq(agents.id, agentId),
+    eq(agents.userId, userId),
+    capabilityAllowedSql(userId, "agentsCreate"),
+  );
 export const summarizeAgent = (
   row: Pick<
     AgentRow,
@@ -110,7 +114,8 @@ export class AgentRepo extends Context.Service<
               .from(user)
               .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "agentsCreate")))
               .for("update");
-            if (!owner) return yield* new AgentRejected({ reason: "agent creation is unavailable" });
+            if (!owner)
+              return yield* new AgentRejected({ reason: "agent creation is unavailable" });
             const [count] = yield* tx
               .select({ value: sql<number>`count(*)::int` })
               .from(agents)
