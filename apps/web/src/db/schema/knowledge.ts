@@ -344,6 +344,8 @@ export const knowledgeEmbeddingJobs = pgTable(
     leaseUntil: timestamp("lease_until", { withTimezone: true }),
     attempts: integer().notNull().default(0),
     error: text(),
+    /** Not claimed before this, judged by the database clock: a retry's backoff. */
+    notBefore: timestamp("not_before", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

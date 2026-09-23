@@ -29,6 +29,35 @@ import { withHermesTools } from "./hermes-tools.ts";
 import { ProviderRepo } from "./repo.ts";
 import { extractThinkTags } from "./think-extractor.ts";
 
+/** `Retry-After` as seconds or an HTTP date, in milliseconds; null when absent or unreadable. */
+export const parseRetryAfter = (header: string | undefined, now = Date.now()): number | null => {
+  if (!header) return null;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+};
+
+/**
+ * What an embedding answer's status means for the queue: a rate limit pauses
+ * it, a provider fault is retried later, anything else is the request's own
+ * fault and would fail the same way again.
+ */
+const embeddingDiagnostic = (status: number, retryAfter: string | undefined) => {
+  if (status === 429) {
+    const retryAfterMs = parseRetryAfter(retryAfter);
+    return {
+      kind: "RateLimitError" as const,
+      status,
+      ...(retryAfterMs === null ? {} : { retryAfterMs }),
+    };
+  }
+  if (status >= 500 || status === 408) return { kind: "InternalProviderError" as const, status };
+  // A key an admin will fix: waiting is right, failing every page at once is not.
+  if (status === 401 || status === 403) return { kind: "AuthenticationError" as const, status };
+  return { kind: "InvalidRequestError" as const, status };
+};
+
 export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>()(
   "ProviderUnreachable",
   {
@@ -61,6 +90,8 @@ export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>
         status: Schema.optionalKey(
           Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 599 })),
         ),
+        /** From a rate limit's `Retry-After`, when the provider sent one. */
+        retryAfterMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
       }),
     ),
   },
@@ -807,7 +838,16 @@ export class AiGateway extends Context.Service<
             Effect.flatMap((res) =>
               Effect.gen(function* () {
                 if (res.status < 200 || res.status >= 300)
-                  return yield* Effect.fail(new Error(`HTTP ${res.status}`));
+                  return yield* Effect.fail(
+                    new ProviderUnreachable({
+                      providerId,
+                      message:
+                        res.status === 429
+                          ? "the embedding provider is rate limiting requests"
+                          : `the embedding provider answered ${res.status}`,
+                      diagnostic: embeddingDiagnostic(res.status, res.headers["retry-after"]),
+                    }),
+                  );
                 let length = 0;
                 const parts: Uint8Array[] = [];
                 yield* Stream.runForEach(res.stream, (part) =>
@@ -838,12 +878,15 @@ export class AiGateway extends Context.Service<
             }),
             Effect.timeout(Duration.seconds(45)),
             // Never persist provider response bodies, echoed inputs or credentials.
-            Effect.mapError(
-              () =>
-                new ProviderUnreachable({
-                  providerId,
-                  message: "embedding request failed or timed out",
-                }),
+            // An HTTP status already classified above keeps its diagnosis.
+            Effect.mapError((error) =>
+              error instanceof ProviderUnreachable
+                ? error
+                : new ProviderUnreachable({
+                    providerId,
+                    message: "embedding request failed or timed out",
+                    diagnostic: { kind: "NetworkError" },
+                  }),
             ),
           );
 

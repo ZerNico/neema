@@ -1,0 +1,1 @@
+ALTER TABLE "knowledge_embedding_jobs" ADD COLUMN "not_before" timestamp with time zone;

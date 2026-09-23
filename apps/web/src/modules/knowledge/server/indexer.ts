@@ -11,6 +11,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import { chunkDocument } from "./chunking.ts";
 import { EmbeddingSpace } from "./embedding-space.ts";
+import { embeddingRetry } from "./embedding-retry.ts";
 import { KnowledgeRepo } from "./repo.ts";
 
 // Expired leases become claimable without a write or notification.
@@ -211,7 +212,14 @@ export class KnowledgeIndexer extends Context.Service<
         return true;
       });
 
+      // A rate limit is on the provider key, not the page, so it pauses every
+      // job; `rateLimits` counts them in a row to grow the pause.
+      let pausedUntil = 0;
+      let rateLimits = 0;
       const runEmbedding = Effect.fn("KnowledgeIndexer.runEmbedding")(function* () {
+        // Paused: report nothing to do; the recovery tick or the next wake
+        // checks again, so a pause lasts at least as long as asked.
+        if (pausedUntil > Date.now()) return false;
         const target = yield* space.current();
         if (!target) return false;
         const claim = yield* repo.claimEmbedding(target.spaceId, target.connectionRevision);
@@ -279,18 +287,25 @@ export class KnowledgeIndexer extends Context.Service<
             })
             .pipe(Effect.result);
           if (result._tag === "Failure") {
-            // Provider trouble is transient far more often than not; the
-            // attempt counter is what stops it from retrying forever.
+            const retry = embeddingRetry(result.failure, claim.attempts, rateLimits);
+            if (retry.kind === "pause") {
+              rateLimits += 1;
+              pausedUntil = Date.now() + retry.delayMs;
+            }
+            // A rate limit hands the attempt back: the page was fine. Other
+            // transient trouble waits longer each time, and the attempt
+            // counter is what stops it retrying forever.
             yield* repo.failEmbedding({
               versionId,
               leaseToken,
               error: describeFailure(result.failure),
-              retryable:
-                result.failure._tag === "ProviderUnreachable" &&
-                result.failure.diagnostic?.kind !== "InvalidRequestError",
+              retryable: retry.kind !== "fail",
+              ...(retry.kind === "fail" ? {} : { delayMs: retry.delayMs }),
+              ...(retry.kind === "pause" ? { countAttempt: false } : {}),
             });
             return true;
           }
+          rateLimits = 0;
           for (const [position, embedding] of result.success.embeddings.entries()) {
             vectors.push({ chunkId: batch[position]!.id, embedding });
           }

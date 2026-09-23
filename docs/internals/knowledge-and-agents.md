@@ -188,6 +188,13 @@ whatever agent the conversation is associated with.
   Reconnect also drains. A thirty-second recovery scan remains because lease expiry needs
   no database write to make a job claimable; one process-scoped sweep fails exhausted jobs.
   Unexpected step failures retry after five seconds, independently of idle recovery.
+- Embedding provider failures are classified by the gateway, which keeps the status and any
+  `Retry-After`. A rate limit belongs to the key, not the page: the job goes back without
+  spending an attempt and the whole embedding worker pauses (the provider's figure, else 5 s
+  doubling to 5 min, jittered). A paused worker reports no work rather than sleeping, so the
+  pause lasts until the next recovery tick or wake after it. Provider faults, network errors
+  and a rejected key are retried per job with a growing delay (`not_before`, judged by the
+  database clock); a request the provider rejects as invalid fails at once.
   See [notification recovery](sync.md).
 - Owners see one repair, Rebuild index (`rebuildIndex`): re-extract stale documents, then
   re-embed only versions not indexed for the current model, safe to run on any doubt.

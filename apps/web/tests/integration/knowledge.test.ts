@@ -2156,6 +2156,65 @@ describe("knowledge ingestion safety", () => {
     ).toBe("ready");
   });
 
+  it("hands back the attempt on a rate limit and delays other provider trouble", async () => {
+    await configureEmbeddings({ spaceId: "backoff", enabled: true, modelId: embeddingModelId });
+    await drainIndexer();
+    const owner = await createUser();
+    const collectionId = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.createCollection(owner, { name: "Backoff", description: "" }),
+      ),
+    );
+    const note = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.addNoteDocument(owner, {
+          collectionId,
+          title: "Holidays",
+          content: "Twenty-five days a year.",
+        }),
+      ),
+    );
+    const job = async () =>
+      (
+        await exec(
+          `select status, attempts, not_before > now() as delayed from knowledge_embedding_jobs where version_id = '${note!.versionId}'`,
+        )
+      ).rows[0];
+
+    // Retry-After of zero keeps the in-memory pause from outliving this test.
+    embedFailure = new ProviderUnreachable({
+      providerId: "fake",
+      message: "the embedding provider is rate limiting requests",
+      diagnostic: { kind: "RateLimitError", status: 429, retryAfterMs: 0 },
+    });
+    try {
+      await run(
+        Effect.gen(function* () {
+          const indexer = yield* KnowledgeIndexer;
+          for (let step = 0; step < 50; step++) if (!(yield* indexer.runExtraction())) break;
+          yield* indexer.runEmbedding();
+        }),
+      );
+      // Queued again with no attempt spent: the page was fine, the key was busy.
+      expect(await job()).toMatchObject({ status: "queued", attempts: 0 });
+
+      embedFailure = new ProviderUnreachable({
+        providerId: "fake",
+        message: "the embedding provider answered 503",
+        diagnostic: { kind: "InternalProviderError", status: 503 },
+      });
+      await run(Effect.flatMap(KnowledgeIndexer, (indexer) => indexer.runEmbedding()));
+      // Counted, and not claimable until its backoff has passed.
+      expect(await job()).toMatchObject({ status: "queued", attempts: 1, delayed: true });
+      embedFailure = null;
+      const calls = embedCalls;
+      await drainIndexer();
+      expect(embedCalls).toBe(calls);
+    } finally {
+      embedFailure = null;
+    }
+  });
+
   it("does not retry deterministic embedding input rejections or lose lexical readiness", async () => {
     await configureEmbeddings({
       spaceId: "rejected-input",

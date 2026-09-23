@@ -254,7 +254,13 @@ export class KnowledgeRepo extends Context.Service<
     claimEmbedding(
       spaceId: string,
       connectionRevision: string,
-    ): Effect.Effect<{ versionId: string; leaseToken: string; ownerUserId: string } | null>;
+    ): Effect.Effect<{
+      versionId: string;
+      leaseToken: string;
+      ownerUserId: string;
+      /** This claim included. */
+      attempts: number;
+    } | null>;
     renewEmbedding(
       versionId: string,
       leaseToken: string,
@@ -278,6 +284,10 @@ export class KnowledgeRepo extends Context.Service<
       leaseToken: string;
       error: string;
       retryable: boolean;
+      /** Not claimed again for this long. */
+      delayMs?: number;
+      /** False for a rate limit: the page was fine, the provider was busy. */
+      countAttempt?: boolean;
     }): Effect.Effect<void>;
     /**
      * Every collection id on the instance, for an admin-triggered rebuild.
@@ -1086,6 +1096,7 @@ export class KnowledgeRepo extends Context.Service<
               where version_id = (
                 select version_id from knowledge_embedding_jobs
                 where space_id = ${spaceId} and connection_revision = ${connectionRevision} and attempts < ${MAX_ATTEMPTS}
+                  and (not_before is null or not_before <= now())
                   and exists (select 1 from knowledge_document_versions v where v.id = version_id and v.status = 'ready')
                   and (
                     status = 'queued'
@@ -1095,10 +1106,12 @@ export class KnowledgeRepo extends Context.Service<
                 for update skip locked
                 limit 1
               )
-              returning version_id
+              returning version_id, attempts
             `,
           )
           .pipe(Effect.orDie);
+        const claimed = (rows as { rows: ReadonlyArray<{ version_id: string; attempts: number }> })
+          .rows[0];
         const versionId = (rows as { rows: ReadonlyArray<{ version_id: string }> }).rows[0]
           ?.version_id;
         if (!versionId) return null;
@@ -1115,7 +1128,14 @@ export class KnowledgeRepo extends Context.Service<
           )
           .where(eq(knowledgeDocumentVersions.id, versionId))
           .pipe(Effect.orDie);
-        return owner ? { versionId, leaseToken, ownerUserId: owner.ownerUserId } : null;
+        return owner
+          ? {
+              versionId,
+              leaseToken,
+              ownerUserId: owner.ownerUserId,
+              attempts: claimed?.attempts ?? 1,
+            }
+          : null;
       });
 
       const renewEmbedding = Effect.fn("KnowledgeRepo.renewEmbedding")(function* (
@@ -1269,16 +1289,28 @@ export class KnowledgeRepo extends Context.Service<
         leaseToken: string;
         error: string;
         retryable: boolean;
+        delayMs?: number;
+        countAttempt?: boolean;
       }) {
+        const counted = input.countAttempt ?? true;
         yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
               const updated = yield* tx
                 .update(knowledgeEmbeddingJobs)
                 .set({
-                  status: input.retryable
-                    ? sql`case when ${knowledgeEmbeddingJobs.attempts} >= ${MAX_ATTEMPTS} then 'failed' else 'queued' end`
-                    : "failed",
+                  status: !input.retryable
+                    ? "failed"
+                    : counted
+                      ? sql`case when ${knowledgeEmbeddingJobs.attempts} >= ${MAX_ATTEMPTS} then 'failed' else 'queued' end`
+                      : "queued",
+                  // The claim counted this attempt; a rate limit gives it back.
+                  ...(counted
+                    ? {}
+                    : { attempts: sql`greatest(${knowledgeEmbeddingJobs.attempts} - 1, 0)` }),
+                  notBefore: input.delayMs
+                    ? sql`now() + ${`${Math.round(input.delayMs)} milliseconds`}::interval`
+                    : null,
                   error: input.error,
                   leaseToken: null,
                   leaseUntil: null,

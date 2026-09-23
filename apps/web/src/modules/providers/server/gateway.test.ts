@@ -74,6 +74,7 @@ const GatewayLayer = AiGateway.layer.pipe(Layer.provide(analyticsStub));
 const requests: Array<{ url: string; body: unknown }> = [];
 let responseBody = "";
 let responseStatus = 200;
+let responseHeaders: Record<string, string> = {};
 let delayedResponse: (() => Promise<Response>) | null = null;
 let embeddingContextLength: number | null = null;
 let embeddingInputPrice = 0.02;
@@ -106,12 +107,13 @@ vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
       status: responseStatus,
       headers: {
         "content-type": responseStatus === 200 ? "text/event-stream" : "application/json",
+        ...responseHeaders,
       },
     }),
   );
 });
 
-const stubProvider = (body: string, status = 200) => {
+const stubProvider = (body: string, status = 200, headers: Record<string, string> = {}) => {
   requests.length = 0;
   ledger.length = 0;
   delayedResponse = null;
@@ -120,6 +122,7 @@ const stubProvider = (body: string, status = 200) => {
   embeddingInputPrice = 0.02;
   responseBody = body;
   responseStatus = status;
+  responseHeaders = headers;
   return requests;
 };
 
@@ -940,8 +943,20 @@ describe("bounded embedding gateway", () => {
     Effect.gen(function* () {
       stubProvider(JSON.stringify({ error: "private input fake-secret" }), 400);
       const error = yield* Effect.flip(embed);
-      expect(error).toMatchObject({ message: "embedding request failed or timed out" });
+      expect(error).toMatchObject({
+        message: "the embedding provider answered 400",
+        diagnostic: { kind: "InvalidRequestError", status: 400 },
+      });
       expect(JSON.stringify(error)).not.toContain("private input");
+    }),
+  );
+  it.effect("reports a rate limit with the wait the provider asked for", () =>
+    Effect.gen(function* () {
+      stubProvider(JSON.stringify({ error: "slow down" }), 429, { "retry-after": "12" });
+      const error = yield* Effect.flip(embed);
+      expect(error).toMatchObject({
+        diagnostic: { kind: "RateLimitError", status: 429, retryAfterMs: 12_000 },
+      });
     }),
   );
   it.effect("rejects a changed approved connection before sending any input", () =>
