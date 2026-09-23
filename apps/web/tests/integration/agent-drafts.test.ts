@@ -138,12 +138,21 @@ const initialize = (userId: string, targetId: string | null = null) =>
           if (targetId !== null && revision === null) return yield* Effect.fail("not owned");
           const settings =
             targetId === null
-              ? EMPTY_AGENT_DRAFT
+              ? // Saving requires instructions; a fresh draft here stands in for one already written.
+                { ...EMPTY_AGENT_DRAFT, instructions: "Draft instructions" }
               : storedAgentToDraftSettings(
                   (yield* Effect.flatMap(AgentRepo, (repo) => repo.get(userId, targetId, tx)))!,
                 );
           return asAgentDraft(
-            yield* drafts.initialize(tx, userId, conversationId, "agent", settings, targetId, revision),
+            yield* drafts.initialize(
+              tx,
+              userId,
+              conversationId,
+              "agent",
+              settings,
+              targetId,
+              revision,
+            ),
           );
         }),
       );
@@ -308,8 +317,12 @@ describe("tool-created agent drafts", () => {
   it("keeps two drafts of the same chat independent through save and discard", async () => {
     const owner = await createUser();
     const fence = await ordinary(owner);
-    const first = (await open(owner, fence, { changes: { name: "First agent" } })).draft;
-    const second = (await open(owner, fence, { changes: { name: "Second agent" } })).draft;
+    const first = (
+      await open(owner, fence, { changes: { name: "First agent", instructions: "Help." } })
+    ).draft;
+    const second = (
+      await open(owner, fence, { changes: { name: "Second agent", instructions: "Help." } })
+    ).draft;
     expect(second.id).not.toBe(first.id);
     const saved = await save(owner, first);
     if (saved.outcome !== "saved") throw new Error("expected saved");
@@ -450,7 +463,7 @@ describe("persistent agent drafts", () => {
     const stranger = await createUser();
     const draft = await initialize(owner);
     expect(draft).toMatchObject({
-      settings: EMPTY_AGENT_DRAFT,
+      settings: { ...EMPTY_AGENT_DRAFT, instructions: "Draft instructions" },
       revision: 1,
       targetId: null,
       targetRevision: null,
@@ -573,6 +586,7 @@ describe("persistent agent drafts", () => {
         service.create(owner, {
           ...EMPTY_AGENT_DRAFT,
           name: "Dependencies",
+          instructions: "Use the shared collection.",
           collectionIds: [collectionId],
           skillIds: [skillId],
         }),
@@ -671,6 +685,7 @@ describe("persistent agent drafts", () => {
           agentId,
           expectedRevision: 1,
           name: "External edit",
+          instructions: "External instructions",
         }),
       ),
     );
@@ -683,7 +698,7 @@ describe("persistent agent drafts", () => {
       draft: {
         revision: draft.revision + 1,
         targetRevision: 2,
-        settings: { name: "External edit", instructions: "" },
+        settings: { name: "External edit", instructions: "External instructions" },
       },
     });
     const edited = (

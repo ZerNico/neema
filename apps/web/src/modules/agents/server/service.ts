@@ -39,8 +39,14 @@ export const validateAgentSettings = Effect.fn(function* (
   const settings = yield* Schema.decodeUnknownEffect(AgentSettings)(input).pipe(
     Effect.mapError(() => new AgentRejected({ reason: "invalid agent settings" })),
   );
-  if (!settings.name.trim() || settings.starters.some((starter) => !starter.trim()))
-    return yield* new AgentRejected({ reason: "name and conversation starters must not be blank" });
+  if (
+    !settings.name.trim() ||
+    !settings.instructions.trim() ||
+    settings.starters.some((starter) => !starter.trim())
+  )
+    return yield* new AgentRejected({
+      reason: "name, instructions and conversation starters must not be blank",
+    });
   if (settings.modelId && !(yield* modelFor(providers, userId, settings.modelId)))
     return yield* new AgentRejected({ reason: "selected model is unavailable" });
   return {

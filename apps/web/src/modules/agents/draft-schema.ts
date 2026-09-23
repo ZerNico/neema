@@ -1,6 +1,7 @@
 import { Schema, Struct } from "effect";
 import {
   AGENT_LIMITS,
+  AgentInstructions,
   AgentName,
   AgentSettings,
   AgentResourceIds,
@@ -12,6 +13,7 @@ import {
 export const DraftSettings = Schema.Struct({
   ...AgentSettings.fields,
   name: AgentName,
+  instructions: AgentInstructions,
   starters: Schema.Array(AgentStarter).check(Schema.isMaxLength(AGENT_LIMITS.maxStarters)),
   skillIds: AgentResourceIds,
   customToolIds: AgentResourceIds,

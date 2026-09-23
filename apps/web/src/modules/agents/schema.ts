@@ -16,13 +16,18 @@ export type AgentIcon = typeof AgentIcon.Type;
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const AgentIdInput = Schema.Struct({ agentId: ResourceId });
 export const AgentName = Schema.String.check(Schema.isMaxLength(120));
+export const AgentInstructions = Schema.String.check(
+  Schema.isMaxLength(AGENT_LIMITS.maxInstructions),
+);
 export const AgentStarter = Schema.String.check(Schema.isMaxLength(200));
 export const AgentResourceIds = Schema.Array(ResourceId).check(Schema.isMaxLength(20));
 export const AgentSettings = Schema.Struct({
-  name: AgentName.check(Schema.isMinLength(1)),
+  name: AgentName.check(Schema.isMinLength(1, { message: "Enter a name." })),
   description: Schema.String.check(Schema.isMaxLength(500)),
   icon: AgentIcon,
-  instructions: Schema.String.check(Schema.isMaxLength(AGENT_LIMITS.maxInstructions)),
+  instructions: AgentInstructions.check(
+    Schema.isMinLength(1, { message: "Enter the instructions." }),
+  ),
   modelId: Schema.NullOr(ResourceId),
   searchEnabled: Schema.Boolean,
   planEnabled: Schema.Boolean,

@@ -9,11 +9,13 @@ import {
 } from "./draft-schema.ts";
 
 describe("agent draft settings", () => {
-  it("retains blank intermediate names and starters without making them save-valid", () => {
+  it("retains blank intermediate names, instructions and starters without making them save-valid", () => {
     const input = { ...EMPTY_AGENT_DRAFT, starters: [""] };
     expect(Schema.decodeUnknownSync(DraftSettings)(input)).toEqual(input);
     expect(Schema.is(AgentSettings)(input)).toBe(false);
-    expect(Schema.is(AgentSettings)({ ...input, name: "Agent", starters: ["Begin"] })).toBe(true);
+    const complete = { ...input, name: "Agent", instructions: "Help.", starters: ["Begin"] };
+    expect(Schema.is(AgentSettings)({ ...complete, instructions: "" })).toBe(false);
+    expect(Schema.is(AgentSettings)(complete)).toBe(true);
   });
 
   it("shares saved-agent field limits and requires complete settings", () => {

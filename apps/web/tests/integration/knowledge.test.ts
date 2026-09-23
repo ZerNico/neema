@@ -3786,7 +3786,7 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
                 name: "Shared specialist",
                 description: "",
                 icon: "robot",
-                instructions: "",
+                instructions: "Answer questions.",
                 modelId: null,
                 searchEnabled: false,
                 planEnabled: false,
