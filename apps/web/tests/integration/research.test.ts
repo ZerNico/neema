@@ -4,7 +4,7 @@ import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import {
   messages,
@@ -1484,13 +1484,12 @@ describe("ending a run", () => {
       Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
     );
     const run = (await runFor(sent.assistantMessageId))!;
+    const generationId = await generationOf(sent.assistantMessageId);
     await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
     hold = null;
     await runtime.runPromise(Deferred.succeed(release, undefined));
     await runtime.runPromise(
-      awaitRunStatus(sent.assistantMessageId, "terminal").pipe(
-        Effect.catchCause(() => Effect.void),
-      ) as Effect.Effect<void>,
+      StreamEngine.use((engine) => engine.awaitSettled(sent.assistantMessageId, generationId)),
     );
     await runtime.runPromise(
       Effect.gen(function* () {
@@ -1540,6 +1539,10 @@ describe("ending a run", () => {
         }),
       ),
     );
+    await runtime.runPromise(Deferred.await(gate.interrupted));
+    await runtime.runPromise(
+      StreamEngine.use((engine) => engine.awaitSettled(first.assistantMessageId, generationId)),
+    );
     await runtime.runPromise(collect(first.assistantMessageId, generationId));
     expect(
       (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(first.assistantMessageId))))
@@ -1585,15 +1588,21 @@ describe("ending a run", () => {
       coordinatorFailure = failure;
       const sent = await runtime.runPromise(send(input.userId, input.conversationId));
       const events = await runtime.runPromise(collect(sent.assistantMessageId));
-      expect(requests.some((request) => phaseOf(request) === "worker")).toBe(false);
       await runtime.runPromise(
         Effect.gen(function* () {
+          const db = yield* Db;
           const repo = yield* ChatRepo;
           const message = (yield* repo.getMessage(sent.assistantMessageId))!;
           // The investigation failed; the turn it ran inside did not.
           expect(message.status).toBe("complete");
           expect(message.content).toContain("Supported conclusion");
           const run = (yield* runOf(message.id))!;
+          expect(
+            yield* db
+              .select()
+              .from(researchCalls)
+              .where(and(eq(researchCalls.runId, run.id), eq(researchCalls.phase, "worker"))),
+          ).toHaveLength(0);
           expect(run.progress.phase).toBe("error");
           expect(run.progress.tasks).toHaveLength(0);
           expect(run.progress.limitations.join(" ")).toContain(diagnostic);
