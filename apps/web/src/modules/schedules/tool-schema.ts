@@ -41,6 +41,8 @@ const ScheduleDraftField = Schema.Literals([
   "researchEnabled",
   "collectionIds",
   "skillIds",
+  "chatMode",
+  "chatId",
 ]);
 /**
  * Why a call did not update the draft. Handler-authored text only (schema
@@ -54,7 +56,7 @@ export const ScheduleDraftActivityResult = Schema.Struct({
   draftId: Schema.optionalKey(ActivityId),
   draftConversationId: Schema.optionalKey(ActivityId),
   revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  changedFields: Schema.optionalKey(Schema.Array(ScheduleDraftField).check(Schema.isMaxLength(12))),
+  changedFields: Schema.optionalKey(Schema.Array(ScheduleDraftField).check(Schema.isMaxLength(14))),
 });
 export type ScheduleDraftActivityResult = typeof ScheduleDraftActivityResult.Type;
 

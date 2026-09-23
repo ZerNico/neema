@@ -233,10 +233,11 @@ export class ChatService extends Context.Service<
       title: string;
     }): Effect.Effect<void, ConversationNotFound>;
     /**
-     * Fires one schedule into a fresh conversation. Internal: no composer
-     * concerns (attachments, desktop, clarifications) apply. A missing or
-     * inaccessible model falls back to the user's default; a deleted agent
-     * degrades the fire to a plain chat with the schedule's own selections.
+     * Fires one schedule into a fresh conversation or an existing one.
+     * Internal: no composer concerns (attachments, desktop, clarifications)
+     * apply. A missing or inaccessible model falls back to the user's default;
+     * a deleted agent degrades the fire to a plain chat with the schedule's own
+     * selections. An existing chat keeps its own agent.
      */
     runScheduledTurn(input: {
       userId: string;
@@ -249,6 +250,7 @@ export class ChatService extends Context.Service<
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
       timeZone: string;
+      target: { kind: "new" } | { kind: "existing"; conversationId: string };
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
       | ModelNotFound
@@ -705,6 +707,11 @@ function makeChatService() {
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
       timeZone: string;
+      /**
+       * A fresh chat, tagged with the schedule and its agent; or an existing
+       * chat, which keeps its own agent (one cannot change after creation).
+       */
+      target: { kind: "new" } | { kind: "existing"; conversationId: string };
     }) {
       if (input.prompt.trim() === "")
         return yield* new InvalidMessage({ reason: "message is empty" });
@@ -721,16 +728,27 @@ function makeChatService() {
         researchEnabled: input.researchEnabled,
       });
       const searchAvailable = yield* searchToolEnabled;
+      const target = input.target;
+      // Saving a schedule already refuses a work chat; this keeps the fire
+      // itself safe. Its tools run in the desktop app, which an unattended
+      // turn never has, so it would start with nothing to run them.
+      if (
+        target.kind === "existing" &&
+        (yield* repo.getConversationDefaults(target.conversationId)).mode === "work"
+      )
+        return yield* new InvalidMessage({ reason: "a work chat cannot run a schedule" });
       const fire = (agentId: string | undefined) =>
         repo.createTurn({
           userId: input.userId,
-          // Always its own fresh chat: a fire never extends an existing one.
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation:
+            target.kind === "existing"
+              ? { kind: "existing", id: target.conversationId }
+              : { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
           content: input.prompt,
           attachmentIds: [],
           ...(agentId !== undefined ? { associateAgentId: agentId } : {}),
-          scheduleId: input.scheduleId,
+          ...(target.kind === "new" ? { scheduleId: input.scheduleId } : {}),
           resolve: resolver({
             attempt: "send",
             userId: input.userId,
@@ -742,7 +760,9 @@ function makeChatService() {
             skillIds: input.skillIds,
           }),
         });
-      const turn = yield* fire(input.agentId ?? undefined).pipe(
+      const turn = yield* fire(
+        target.kind === "new" ? (input.agentId ?? undefined) : undefined,
+      ).pipe(
         // The agent association is a preference snapshot from when the schedule
         // was saved; a deleted agent degrades the fire to a plain chat rather
         // than erroring an unattended schedule.

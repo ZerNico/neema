@@ -1,8 +1,9 @@
 # Schedules
 
-A schedule asks one prompt on a cadence: every fire starts a fresh conversation that answers
-it on its own, with the schedule's model, collections, skills and search toggles. It never
-reuses or extends an existing chat. Creation and editing happen from the schedules pages and
+A schedule asks one prompt on a cadence, with the schedule's model, collections, skills and
+search toggles. `chatMode` decides where: `new` starts a fresh chat each fire; `same` keeps
+answering in one chat, `chatId`, which is either picked in the editor or created and adopted
+by the first fire. Creation and editing happen from the schedules pages and
 from chat through the generalized draft machinery ([agents](knowledge-and-agents.md)), with
 the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.md)).
 
@@ -37,11 +38,22 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   into the scheduler. The shared tail (createTurn, publish, startGeneration, title fork) is
   extracted; the scheduled call passes `conversationId: undefined` so `createTurn` writes the
   conversation row with `conversations.scheduleId` set.
-- Run conversations are ordinary chats that the sidebar omits (`listConversations` filters
-  `scheduleId is null`); `getConversation` deliberately does not filter, since the schedule
-  detail page deep-links into them. Retry, edit and structured answers work there as normal;
-  if nobody answers a clarification, the message lease reaps the turn. Branching a run chat
-  produces a normal sidebar conversation (`scheduleId` null on the copy).
+- Run conversations are ordinary sidebar chats, marked with a calendar
+  (`listConversations.scheduled`: created by a schedule, or a schedule's `chatId`), because a
+  run hidden on the schedule page is a run nobody finds. `conversations.scheduleId` means
+  "a fire created this"; a picked chat keeps it null and links back through `chatId`
+  instead. Retry, edit and structured answers work there as normal; if nobody answers a
+  clarification, the message lease reaps the turn. Branching a run chat produces a normal
+  conversation (`scheduleId` null on the copy).
+- `same` mode fires `createTurn` with `{ kind: "existing" }`. An agent cannot change after a
+  chat's creation, so an existing chat keeps its own agent and the schedule's `agentId` only
+  applies to chats a fire creates. Work chats run their tools in the desktop app, which an
+  unattended fire never has, so they are refused at save (`checkScheduleResources`) and
+  again by `runScheduledTurn` itself. A chat that is still answering is waited
+  on, every 15 seconds for up to five minutes, then the run is recorded as skipped: the
+  owner may be mid-conversation in it. A picked chat that was deleted is cleared by its FK
+  (`on delete set null`); that fire and later ones start a new chat and adopt it
+  (`adoptChat`, only while the schedule still wants one, so an edit mid-fire wins).
 - Retained selections are never permissions: `modelId` and `agentId` have no FK. A missing
   model falls back to the user's default chat model at fire time (an unattended missed fire is
   worse than a different model answering); a deleted agent degrades the fire to a plain chat
@@ -49,8 +61,9 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   re-checked at fire and end the run as an `error` row when gone, because losing a selected
   collection failing the turn is the existing chat rule. A fire that never started (no
   available model) records `status: 'error'` with `conversationId: null`.
-- Delete mid-run needs nothing new: the cascade removes conversation and messages, and the
-  in-flight generation's next fenced write interrupts. Pause and resume touch only `paused`
+- Deleting a schedule keeps its chats: `conversations.schedule_id` is `on delete set null`,
+  since they sit in the sidebar like any other chat. The run history goes with the schedule;
+  an in-flight fire finishes in its chat. Pause and resume touch only `paused`
   and `nextFireAt`; an in-flight fire is unaffected. "Run now" calls the same fire path
   without claiming, so the cadence is untouched and a run row is still written.
 - Run status beyond "started" is derived by joining the run's conversation messages — no

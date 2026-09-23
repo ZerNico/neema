@@ -26,8 +26,9 @@ edit the wrong thing.
   one turn may start several. Ending one must not touch anything else on the
   message.
 - **schedule / scheduled run**: a `schedules` row firing one prompt on a cron
-  cadence; each fire is a fresh conversation hidden from the sidebar, recorded
-  as a `schedule_runs` row. Prose says "scheduled run" — bare "run" still means
+  cadence into a chat: a new one each fire, or one chat it keeps using
+  (`chatMode`). Run chats are ordinary sidebar chats; each fire is recorded as
+  a `schedule_runs` row. Prose says "scheduled run" — bare "run" still means
   a research run. Catch-up-once: downtime collapses to a single fire, never a
   replayed backlog.
 - **task / worker / coordinator**: inside a run, the coordinator dispatches tasks;

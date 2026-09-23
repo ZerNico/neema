@@ -60,6 +60,8 @@ const scheduleToSettings = (schedule: {
   researchEnabled: boolean;
   collectionIds: string[];
   skillIds: string[];
+  chatMode: "new" | "same";
+  chatId: string | null;
 }): ScheduleSettings => ({
   name: schedule.name,
   scheduleText: schedule.scheduleText,
@@ -73,6 +75,8 @@ const scheduleToSettings = (schedule: {
   researchEnabled: schedule.researchEnabled,
   collectionIds: [...schedule.collectionIds],
   skillIds: [...schedule.skillIds],
+  chatMode: schedule.chatMode,
+  chatId: schedule.chatId,
 });
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {
@@ -219,7 +223,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                   void confirm({
                     title: `Delete “${schedule.name}”?`,
                     description:
-                      "Its past run conversations are deleted with it. No future runs will fire.",
+                      "No future runs will fire. Its chats stay in your chat list.",
                     confirmLabel: "Delete schedule",
                   }).then(async (confirmed) => {
                     if (!confirmed) return;

@@ -46,6 +46,7 @@ import {
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
+  schedules,
   usageEvents,
   workTurnReservations,
 } from "~/db/schema/index.ts";
@@ -175,7 +176,11 @@ export type WorkTurnReservationRow = typeof workTurnReservations.$inferSelect;
 
 export type ConversationRow = typeof conversations.$inferSelect;
 /** A list row plus the live state the list surfaces (sidebar spinner). */
-export type ConversationListRow = ConversationRow & { generating: boolean };
+export type ConversationListRow = ConversationRow & {
+  generating: boolean;
+  /** Created by a schedule, or the chat a schedule keeps running in. */
+  scheduled: boolean;
+};
 /** Position in the conversation list order: activity timestamp, then id. */
 export interface ConversationCursor {
   readonly activity: Date;
@@ -869,14 +874,12 @@ export class ChatRepo extends Context.Service<
               // invalidates the list on every message.status flip, so the
               // flag turns on and off without polling.
               generating: sql<boolean>`exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming')`,
+              scheduled: sql<boolean>`(${conversations.scheduleId} is not null or exists (select 1 from ${schedules} where ${schedules.chatId} = ${conversations.id}))`,
             })
             .from(conversations)
             .where(
               and(
                 eq(conversations.userId, input.userId),
-                // Scheduled-run chats live under their schedule's page, not in
-                // the sidebar list. Deep links still resolve via getConversation.
-                isNull(conversations.scheduleId),
                 // Keyset, not OFFSET: the list reorders whenever a message
                 // lands, and an offset would then skip or repeat rows.
                 input.cursor

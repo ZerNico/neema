@@ -24,6 +24,13 @@ export const ScheduleSettings = Schema.Struct({
   researchEnabled: Schema.Boolean,
   collectionIds: Schema.Array(ResourceId).check(Schema.isMaxLength(5)),
   skillIds: Schema.Array(ResourceId).check(Schema.isMaxLength(20)),
+  /**
+   * `new`: a fresh chat each fire. `same`: one chat every fire, `chatId`, or one
+   * the next fire creates when that is null. Optional so drafts written before
+   * these existed still decode; absent means `new`.
+   */
+  chatMode: Schema.optionalKey(Schema.Literals(["new", "same"])),
+  chatId: Schema.optionalKey(Schema.NullOr(ResourceId)),
 });
 export type ScheduleSettings = typeof ScheduleSettings.Type;
 

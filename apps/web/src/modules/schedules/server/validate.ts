@@ -1,6 +1,6 @@
-import { and, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import { knowledgeCollections, skills } from "~/db/schema/index.ts";
+import { conversations, knowledgeCollections, skills } from "~/db/schema/index.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { collectionReadable } from "~/modules/knowledge/server/access.ts";
@@ -9,10 +9,16 @@ import { skillReadable } from "~/modules/skills/server/access.ts";
 import { ScheduleRejected, ScheduleSettings } from "../schema.ts";
 import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
 
-export type ValidatedSchedule = Omit<ScheduleSettings, "endAt" | "collectionIds" | "skillIds"> & {
+export type ValidatedSchedule = Omit<
+  ScheduleSettings,
+  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId"
+> & {
   endAt: Date | null;
   collectionIds: string[];
   skillIds: string[];
+  chatMode: "new" | "same";
+  /** Always null in `new` mode, so a stale pick never lingers on the row. */
+  chatId: string | null;
 };
 
 /**
@@ -51,6 +57,8 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     endAt,
     collectionIds: [...new Set(settings.collectionIds)],
     skillIds: [...new Set(settings.skillIds)],
+    chatMode: settings.chatMode ?? "new",
+    chatId: settings.chatMode === "same" ? (settings.chatId ?? null) : null,
   };
   return validated;
 });
@@ -59,9 +67,21 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
 export const checkScheduleResources = (
   tx: DbTx,
   userId: string,
-  settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds">,
+  settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds" | "chatId">,
 ) =>
   Effect.gen(function* () {
+    // A chosen chat must be the owner's and a plain chat: a work chat needs
+    // the desktop app, which an unattended fire never has.
+    if (settings.chatId) {
+      const [chat] = yield* tx
+        .select({ mode: conversations.mode })
+        .from(conversations)
+        .where(and(eq(conversations.id, settings.chatId), eq(conversations.userId, userId)))
+        .limit(1);
+      if (!chat) return yield* new ScheduleRejected({ reason: "the selected chat is unavailable" });
+      if (chat.mode !== "chat")
+        return yield* new ScheduleRejected({ reason: "a work chat cannot run a schedule" });
+    }
     if (settings.skillIds.length) {
       const available = yield* tx
         .select({ id: skills.id })

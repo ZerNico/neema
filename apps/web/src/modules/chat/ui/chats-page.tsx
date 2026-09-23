@@ -103,6 +103,7 @@ export function ChatsPage() {
                         <ConversationStatusTitle
                           generating={conversation.generating}
                           branched={!!conversation.branchedFrom}
+                          scheduled={conversation.scheduled}
                           conversationId={conversation.id}
                           title={conversation.title}
                           registry={revealRegistry}

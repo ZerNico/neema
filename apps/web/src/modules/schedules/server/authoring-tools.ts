@@ -62,6 +62,10 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
   skill_ids: "skillIds",
   collections: "collectionIds",
   collection_ids: "collectionIds",
+  chat_mode: "chatMode",
+  chat_id: "chatId",
+  conversationId: "chatId",
+  conversation_id: "chatId",
 };
 const OpenParams = Schema.Struct({
   scheduleId: OpenScheduleDraftInput.fields.scheduleId,
@@ -144,7 +148,7 @@ const readTool = Tool.make("read_schedule_draft", {
 });
 const updateTool = Tool.make("update_schedule_draft", {
   description:
-    "Patch one schedule draft at its current expectedRevision. draftId may be omitted only when this chat has exactly one schedule draft; with several, pass the draftId of the one you mean. Only supplied settings change; an empty array clears that selection, and null clears modelId, agentId, or endAt. Never change unrelated fields. The cron field must be a valid 5-field cron expression interpreted in the draft's timezone. A conflict means someone edited the draft; read its current values instead of overwriting their changes. This updates only the draft, not the saved schedule.",
+    "Patch one schedule draft at its current expectedRevision. draftId may be omitted only when this chat has exactly one schedule draft; with several, pass the draftId of the one you mean. Only supplied settings change; an empty array clears that selection, and null clears modelId, agentId, endAt, or chatId. Never change unrelated fields. The cron field must be a valid 5-field cron expression interpreted in the draft's timezone. A conflict means someone edited the draft; read its current values instead of overwriting their changes. This updates only the draft, not the saved schedule.",
   parameters: Schema.Struct({
     draftId: Schema.optionalKey(transport(DraftId)),
     expectedRevision: Schema.optionalKey(transport(UpdateParams.fields.expectedRevision)),

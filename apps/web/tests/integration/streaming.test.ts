@@ -2675,7 +2675,7 @@ describe("resumable streaming pipeline", () => {
 });
 
 describe("scheduled turns", () => {
-  it("fires into a fresh hidden conversation, records the run, and degrades a missing agent", async () => {
+  it("fires into a fresh sidebar conversation and degrades a missing agent", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
         const seed = yield* setupConversation;
@@ -2710,6 +2710,7 @@ describe("scheduled turns", () => {
           collectionIds: [],
           skillIds: [],
           timeZone: "Europe/Berlin",
+          target: { kind: "new" },
         });
         yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runDrain);
         const [conversation] = yield* db
@@ -2730,7 +2731,10 @@ describe("scheduled turns", () => {
       }),
     );
     expect(result.conversation?.scheduleId).toBeTypeOf("string");
-    expect(result.listed.conversations.map((c) => c.id)).not.toContain(result.conversation!.id);
+    // Listed like any chat, and marked as a schedule's.
+    expect(
+      result.listed.conversations.find((c) => c.id === result.conversation!.id),
+    ).toMatchObject({ scheduled: true });
     expect(result.answer).toMatchObject({
       status: "complete",
       content: "alpha beta gamma delta epsilon",
@@ -2738,6 +2742,115 @@ describe("scheduled turns", () => {
     });
     expect(result.agent).toBeNull();
     expect(JSON.stringify(result.prompt)).toContain("Time zone: Europe/Berlin");
+  }, 60_000);
+
+  it("fires a same-chat schedule into an existing chat, which keeps its agent", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const db = yield* Db;
+        const scheduleId = uuidv7();
+        yield* db.insert(schedules).values({
+          id: scheduleId,
+          userId: seed.userId,
+          name: "Digest",
+          prompt: "Summarize yesterday.",
+          scheduleText: "every weekday at 7am",
+          cron: "0 7 * * 1-5",
+          timezone: "Europe/Berlin",
+          chatMode: "same",
+          chatId: seed.conversation.id,
+        });
+        // The fixture leaves its answer streaming; a fire would wait on it.
+        yield* db
+          .update(messages)
+          .set({ status: "complete" })
+          .where(eq(messages.id, seed.assistant.id));
+        const count = () =>
+          db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(eq(messages.conversationId, seed.conversation.id))
+            .pipe(Effect.map((rows) => rows.length));
+        const before = yield* count();
+        const fire = () =>
+          chat.runScheduledTurn({
+            userId: seed.userId,
+            scheduleId,
+            prompt: "Summarize yesterday.",
+            modelId: textModelId,
+            // Ignored for an existing chat: an agent cannot change after creation.
+            agentId: "some-agent",
+            searchEnabled: false,
+            researchEnabled: false,
+            collectionIds: [],
+            skillIds: [],
+            timeZone: "Europe/Berlin",
+            target: { kind: "existing", conversationId: seed.conversation.id },
+          });
+        const first = yield* fire();
+        yield* engine.subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
+        const second = yield* fire();
+        yield* engine.subscribe(second.assistantMessageId, 0).pipe(Stream.runDrain);
+        const after = yield* count();
+        const [conversation] = yield* db
+          .select()
+          .from(conversations)
+          .where(eq(conversations.id, seed.conversation.id));
+        const listed = yield* repo.listConversations({ userId: seed.userId, limit: 50 });
+        return {
+          first,
+          second,
+          added: after - before,
+          conversation,
+          agent: (yield* repo.getConversationDefaults(seed.conversation.id)).agent,
+          listed: listed.conversations.find((c) => c.id === seed.conversation.id),
+        };
+      }),
+    );
+    expect(result.first.conversationId).toBe(result.conversation!.id);
+    expect(result.second.conversationId).toBe(result.conversation!.id);
+    // Two runs, each a user prompt and an answer, in the one chat.
+    expect(result.added).toBe(4);
+    // Not created by the schedule, but marked as the one it runs in.
+    expect(result.conversation?.scheduleId).toBeNull();
+    expect(result.listed).toMatchObject({ scheduled: true });
+    expect(result.agent).toBeNull();
+  }, 60_000);
+});
+
+describe("scheduled turns into a work chat", () => {
+  it("refuses to fire into a work chat, which needs the desktop app", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const chat = yield* ChatService;
+        const db = yield* Db;
+        yield* db
+          .update(conversations)
+          .set({ mode: "work" })
+          .where(eq(conversations.id, seed.conversation.id));
+        return yield* chat
+          .runScheduledTurn({
+            userId: seed.userId,
+            scheduleId: uuidv7(),
+            prompt: "Tidy the repo.",
+            modelId: textModelId,
+            agentId: null,
+            searchEnabled: false,
+            researchEnabled: false,
+            collectionIds: [],
+            skillIds: [],
+            timeZone: "UTC",
+            target: { kind: "existing", conversationId: seed.conversation.id },
+          })
+          .pipe(Effect.flip);
+      }),
+    );
+    expect(result).toMatchObject({ reason: "a work chat cannot run a schedule" });
   }, 60_000);
 });
 

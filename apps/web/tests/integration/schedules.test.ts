@@ -1,12 +1,13 @@
 import { PgClient } from "@effect/sql-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { execSync } from "node:child_process";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { scheduleRuns, schedules, user } from "~/db/schema/index.ts";
+import { conversations, scheduleRuns, schedules, user } from "~/db/schema/index.ts";
 import { ScheduleRepo, type ScheduleRow } from "~/modules/schedules/server/repo.ts";
+import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -60,6 +61,8 @@ const insert = Effect.fn("test.insertSchedule")(function* (
     agentId: null,
     searchEnabled: false,
     researchEnabled: false,
+    chatMode: "new",
+    chatId: null,
     collectionIds: [],
     skillIds: [],
     nextFireAt: null,
@@ -69,6 +72,14 @@ const insert = Effect.fn("test.insertSchedule")(function* (
 
 // The claim is the whole scheduler: due-ness by DB clock, SKIP LOCKED, and
 // rescheduling from now, so downtime costs one catch-up fire.
+const chat = (userId: string, scheduleId: string | null = null) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const id = uuidv7();
+    yield* db.insert(conversations).values({ id, userId, scheduleId });
+    return id;
+  });
+
 describe("schedule claims", () => {
   it("claims a due schedule exactly once and reschedules from now", async () => {
     const result = await run(
@@ -198,5 +209,95 @@ describe("schedule removal", () => {
       }),
     );
     expect(result).toEqual({ runs: 0, gone: true });
+  });
+
+  it("keeps a schedule's chats as ordinary chats when the schedule is deleted", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const db = yield* Db;
+        const row = yield* insert(userId);
+        const created = yield* chat(userId, row.id);
+        yield* repo.remove(userId, row.id);
+        const [kept] = yield* db.select().from(conversations).where(eq(conversations.id, created));
+        return kept;
+      }),
+    );
+    expect(result).toMatchObject({ scheduleId: null });
+  });
+
+  it("adopts a same-chat schedule's first chat only while it still wants one", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const same = yield* insert(userId, { chatMode: "same", chatId: null });
+        const fresh = yield* insert(userId, { chatMode: "new" });
+        const first = yield* chat(userId, same.id);
+        const second = yield* chat(userId, same.id);
+        yield* repo.adoptChat(same.id, first);
+        // A later fire (or a race) never replaces the chat already in use.
+        yield* repo.adoptChat(same.id, second);
+        yield* repo.adoptChat(fresh.id, first);
+        return {
+          same: (yield* repo.get(userId, same.id))!.chatId,
+          fresh: (yield* repo.get(userId, fresh.id))!.chatId,
+          first,
+        };
+      }),
+    );
+    expect(result.same).toBe(result.first);
+    expect(result.fresh).toBeNull();
+  });
+
+  it("only accepts the owner's plain chat as a schedule's chat", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const mine = yield* chat(userId);
+        const theirs = yield* chat(yield* makeUser());
+        const work = uuidv7();
+        yield* db.insert(conversations).values({ id: work, userId, mode: "work" });
+        const check = (chatId: string) =>
+          checkScheduleResources(db as never, userId, {
+            skillIds: [],
+            collectionIds: [],
+            chatId,
+          }).pipe(
+            Effect.match({
+              onFailure: (error) => ("reason" in error ? error.reason : "query failed"),
+              onSuccess: () => "ok",
+            }),
+          );
+        return { mine: yield* check(mine), theirs: yield* check(theirs), work: yield* check(work) };
+      }),
+    );
+    expect(result).toEqual({
+      mine: "ok",
+      theirs: "the selected chat is unavailable",
+      work: "a work chat cannot run a schedule",
+    });
+  });
+
+  it("finds the schedule running in a chat and forgets a chat that was deleted", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const db = yield* Db;
+        const chosen = yield* chat(userId);
+        const row = yield* insert(userId, { chatMode: "same", chatId: chosen });
+        const found = yield* repo.findByChat(userId, chosen);
+        const stranger = yield* repo.findByChat(yield* makeUser(), chosen);
+        yield* db.delete(conversations).where(eq(conversations.id, chosen));
+        return { found: found?.id, stranger, row: row.id, after: yield* repo.get(userId, row.id) };
+      }),
+    );
+    expect(result.found).toBe(result.row);
+    expect(result.stranger).toBeNull();
+    // The next fire starts a new chat and adopts it.
+    expect(result.after).toMatchObject({ chatMode: "same", chatId: null });
   });
 });

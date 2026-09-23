@@ -21,6 +21,13 @@ vi.mock("../server/functions.ts", () => ({
 }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({
   listChatModels: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue({
+    conversations: [
+      { id: "c-news", title: "Morning news", mode: "chat" },
+      { id: "c-work", title: "Repo cleanup", mode: "work" },
+    ],
+    nextCursor: null,
+  }),
 }));
 vi.mock("~/modules/knowledge/server/functions.ts", () => ({
   listKnowledgeCollections: vi.fn().mockResolvedValue([]),
@@ -95,6 +102,18 @@ describe("ScheduleCreatePage", () => {
     expect(screen.getByRole("combobox", { name: "Repeats" })).toBeInTheDocument();
     await pick(user, "Every", "6 hours");
     expect(await submitted()).toMatchObject({ cron: "0 */6 * * *", scheduleText: "Every 6 hours" });
+  });
+
+  it("runs in a new chat each time unless told to keep using one", async () => {
+    const user = renderPage();
+    await pick(user, "Chat", "Same chat every time");
+    // A plain chat can be picked; a work chat needs the desktop app and is left out.
+    await user.click(screen.getByRole("combobox", { name: "Which chat" }));
+    expect(await screen.findByRole("option", { name: "Start one on the first run" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Repo cleanup" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Morning news" }));
+    expect(screen.getByText(/Runs use this chat’s own agent/)).toBeVisible();
+    expect(await submitted()).toMatchObject({ chatMode: "same", chatId: "c-news" });
   });
 
   it("writes the picked cadence as cron and text, in the reader's timezone, then opens it", async () => {

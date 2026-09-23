@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { conversations, scheduleRuns, schedules } from "~/db/schema/index.ts";
@@ -41,9 +41,19 @@ export class ScheduleRepo extends Context.Service<
       researchEnabled: boolean;
       collectionIds: string[];
       skillIds: string[];
+      chatMode: "new" | "same";
+      chatId: string | null;
       nextFireAt: Date | null;
     },
     tx?: DbTx): Effect.Effect<ScheduleRow>;
+    /**
+     * Records the chat a "same chat" schedule's first fire created. Only while
+     * the schedule still wants one: an edit that picked another chat, or
+     * switched to a new chat each time, wins over a fire already running.
+     */
+    adoptChat(scheduleId: string, chatId: string): Effect.Effect<void>;
+    /** The owner's schedule that keeps running in this chat, if any. */
+    findByChat(userId: string, chatId: string): Effect.Effect<ScheduleRow | null>;
     update(
       userId: string,
       scheduleId: string,
@@ -62,6 +72,8 @@ export class ScheduleRepo extends Context.Service<
           | "researchEnabled"
           | "collectionIds"
           | "skillIds"
+          | "chatMode"
+          | "chatId"
           | "paused"
           | "nextFireAt"
         >
@@ -120,6 +132,29 @@ export class ScheduleRepo extends Context.Service<
             .returning()
             .pipe(Effect.orDie);
           return row!;
+        }),
+        findByChat: Effect.fn("ScheduleRepo.findByChat")(function* (userId, chatId) {
+          const [row] = yield* db
+            .select()
+            .from(schedules)
+            .where(and(eq(schedules.userId, userId), eq(schedules.chatId, chatId)))
+            .orderBy(asc(schedules.createdAt))
+            .limit(1)
+            .pipe(Effect.orDie);
+          return row ?? null;
+        }),
+        adoptChat: Effect.fn("ScheduleRepo.adoptChat")(function* (scheduleId, chatId) {
+          yield* db
+            .update(schedules)
+            .set({ chatId, updatedAt: new Date() })
+            .where(
+              and(
+                eq(schedules.id, scheduleId),
+                eq(schedules.chatMode, "same"),
+                isNull(schedules.chatId),
+              ),
+            )
+            .pipe(Effect.orDie);
         }),
         update: Effect.fn("ScheduleRepo.update")(function* (userId, scheduleId, changes, tx) {
           const [row] = yield* (tx ?? db)

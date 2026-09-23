@@ -18,8 +18,8 @@ let container: StartedPostgreSqlContainer;
 let runtime: ManagedRuntime.ManagedRuntime<Db, unknown>;
 let url: string;
 
-// drizzle-kit reads one folder; a copy with the last migration removed is the
-// database as it stood the day before this change shipped. The config names
+// drizzle-kit reads one folder; a copy without this migration and all later
+// ones (which may build on it) is the database before this change shipped. The config names
 // the folder, so each run gets a throwaway config pointing at its copy.
 const migrateTo = (folder: string) => {
   const config = join(folder, "drizzle.config.ts");
@@ -60,7 +60,10 @@ describe("agent drafts migrate onto the generic draft store", () => {
     const before = mkdtempSync(join(tmpdir(), "drizzle-before-"));
     try {
       cpSync(join(root, "drizzle"), before, { recursive: true });
-      rmSync(join(before, GENERIC_DRAFTS), { recursive: true });
+      // Folder names start with their timestamp, so they sort in apply order.
+      for (const name of readdirSync(before))
+        if (name >= GENERIC_DRAFTS && name !== "meta")
+          rmSync(join(before, name), { recursive: true });
       expect(readdirSync(before)).not.toContain(GENERIC_DRAFTS);
       migrateTo(before);
       await runtime.runPromise(

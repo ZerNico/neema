@@ -58,13 +58,17 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
             Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
           )
         : Effect.succeed(null),
-      // The schedule a run conversation belongs to, for the banner link back.
-      // Read optionally like branchedFrom: the row may have been deleted since.
-      schedule: conversation.scheduleId
-        ? schedules
-            .get(userId, conversation.scheduleId)
-            .pipe(Effect.map((row) => (row ? { scheduleId: row.id, name: row.name } : null)))
-        : Effect.succeed(null),
+      // The schedule behind this chat, for the banner link back: one that keeps
+      // running here first, else the one whose fire created it. Read optionally
+      // like branchedFrom: either may have been deleted since.
+      schedule: Effect.gen(function* () {
+        const runsHere = yield* schedules.findByChat(userId, conversation.id);
+        if (runsHere) return { scheduleId: runsHere.id, name: runsHere.name, runsHere: true };
+        const created = conversation.scheduleId
+          ? yield* schedules.get(userId, conversation.scheduleId)
+          : null;
+        return created ? { scheduleId: created.id, name: created.name, runsHere: false } : null;
+      }),
     },
     { concurrency: "unbounded" },
   );

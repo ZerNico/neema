@@ -47,6 +47,8 @@ const scheduleToSettings = (row: ScheduleRow): ScheduleDraftSettings => ({
   researchEnabled: row.researchEnabled,
   collectionIds: [...row.collectionIds],
   skillIds: [...row.skillIds],
+  chatMode: row.chatMode,
+  chatId: row.chatId,
 });
 
 export class ScheduleDraftService extends Context.Service<

@@ -13,6 +13,7 @@ import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
+import { ScheduleChatField } from "./schedule-chat-field.tsx";
 import { ScheduleTimingFields } from "./schedule-timing-fields.tsx";
 import { withForm } from "~/ui/form/app-form.tsx";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
@@ -50,6 +51,7 @@ export const ScheduleSettingsFields = withForm({
           </form.AppField>
         </div>
         <ScheduleTimingFields form={form} />
+        <ScheduleChatField form={form} />
         <div>
           <form.AppField name="prompt">
             {(field) => (

@@ -1790,7 +1790,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <div className="[scrollbar-gutter:stable_both-edges]">
               <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
                 <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-3.5 shrink-0" />
-                <span className="shrink-0">Scheduled run of</span>
+                <span className="shrink-0">
+                  {data.schedule.runsHere ? "Schedule running here:" : "Scheduled run of"}
+                </span>
                 <Link
                   to="/schedules/$scheduleId"
                   params={{ scheduleId: data.schedule.scheduleId }}

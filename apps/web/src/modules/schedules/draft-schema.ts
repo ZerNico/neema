@@ -23,6 +23,8 @@ export const EMPTY_SCHEDULE_DRAFT: ScheduleDraftSettings = {
   researchEnabled: false,
   collectionIds: [],
   skillIds: [],
+  chatMode: "new",
+  chatId: null,
 };
 
 export interface ScheduleDraft extends ConversationDraft<ScheduleDraftSettings> {

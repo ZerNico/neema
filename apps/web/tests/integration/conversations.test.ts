@@ -229,8 +229,8 @@ describe("listConversations generating flag", () => {
 });
 
 describe("listConversations scheduled runs", () => {
-  it("keeps schedule-owned run chats out of the sidebar list", async () => {
-    const ids = await run(
+  it("lists run chats like any chat and marks them as a schedule's", async () => {
+    const listed = await run(
       Effect.gen(function* () {
         const userId = yield* makeUser();
         const db = yield* Db;
@@ -248,19 +248,23 @@ describe("listConversations scheduled runs", () => {
           { id: "ordinary", title: "Ordinary", created: 0 },
           { id: "scheduled-run", title: "Scheduled run", created: 1000 },
         ]);
-        // A run chat is an ordinary row with scheduleId set; the list filter,
-        // not the row shape, is what hides it.
+        // A run chat is an ordinary row with scheduleId set.
         yield* db
           .update(conversations)
           .set({ scheduleId })
           .where(eq(conversations.id, "scheduled-run"));
-        return (yield* page(userId, { limit: 10 })).ids;
+        const repo = yield* ChatRepo;
+        const result = yield* repo.listConversations({ userId, limit: 10 });
+        return result.conversations.map((c) => ({ id: c.id, scheduled: c.scheduled }));
       }),
     );
-    expect(ids).toEqual(["ordinary"]);
+    expect(listed).toEqual([
+      { id: "scheduled-run", scheduled: true },
+      { id: "ordinary", scheduled: false },
+    ]);
   });
 
-  it("cascades a run chat when its schedule is deleted", async () => {
+  it("keeps a run chat when its schedule is deleted", async () => {
     const result = await run(
       Effect.gen(function* () {
         const userId = yield* makeUser();
@@ -284,11 +288,11 @@ describe("listConversations scheduled runs", () => {
           .set({ scheduleId })
           .where(eq(conversations.id, "run-chat"));
         yield* db.delete(schedules).where(eq(schedules.id, scheduleId));
-        // The schedule's run chats go with it; unrelated chats are untouched.
+        // The chats stay as ordinary ones; only the link back is cleared.
         return (yield* page(userId, { limit: 10 })).ids;
       }),
     );
-    expect(result).toEqual(["kept"]);
+    expect(result).toEqual(["run-chat", "kept"]);
   });
 });
 
