@@ -217,8 +217,6 @@ function ViewToggle({
         onValueChange={(value) => {
           if (value[0]) onChange(value[0] === "rendered");
         }}
-        size="sm"
-        spacing={0.5}
       >
         <SegmentedControlItem value="rendered">Rendered</SegmentedControlItem>
         <SegmentedControlItem value="plain">Plain</SegmentedControlItem>

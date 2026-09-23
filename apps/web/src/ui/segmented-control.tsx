@@ -7,14 +7,38 @@ import { cn } from "~/ui/utils";
  * primitive's own shape is a joined bar with square inner corners, so each place
  * that wanted the pill was restating the track from scratch.
  */
-export function SegmentedControl({ className, ...props }: ComponentProps<typeof ToggleGroup>) {
-  return <ToggleGroup className={cn("bg-muted rounded-full p-0.5", className)} {...props} />;
+export function SegmentedControl({
+  className,
+  size = "sm",
+  spacing = 0.5,
+  ...props
+}: ComponentProps<typeof ToggleGroup>) {
+  return (
+    <ToggleGroup
+      size={size}
+      spacing={spacing}
+      className={cn("bg-muted rounded-full p-0.5", className)}
+      {...props}
+    />
+  );
 }
 
-/** A text segment. Icon-only segments size themselves and pass `px-0`. */
+/**
+ * A segment. The primitive presses to `bg-muted`, the track's own colour, so the chosen
+ * segment is raised onto the background instead. Icon-only segments size themselves and pass `px-0`.
+ */
 export function SegmentedControlItem({
   className,
   ...props
 }: ComponentProps<typeof ToggleGroupItem>) {
-  return <ToggleGroupItem className={cn("h-7 rounded-full px-2.5 text-xs", className)} {...props} />;
+  return (
+    <ToggleGroupItem
+      className={cn(
+        "text-muted-foreground hover:text-foreground h-7 rounded-full px-2.5 text-xs hover:bg-transparent",
+        "aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
