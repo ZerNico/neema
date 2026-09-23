@@ -26,6 +26,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -73,6 +74,7 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
     searchEnabled: boolean;
     researchEnabled: boolean;
+    reasoningEffort?: ReasoningEffort | null | undefined;
     /** Folders attached on the machine this send came from. */
     desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
     desktopCommands?: boolean | undefined;
@@ -296,6 +298,7 @@ export class ChatService extends Context.Service<
         modelId: string;
         searchEnabled: boolean;
         researchEnabled: boolean;
+        reasoningEffort?: ReasoningEffort | null | undefined;
         desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
         desktopCommands?: boolean | undefined;
         fromDesktop?: boolean | undefined;
@@ -437,6 +440,23 @@ function makeChatService() {
     const analytics = yield* AnalyticsRepo;
     const titleDeps: TitleDeps = { gateway, repo, sync, providers, analytics };
 
+    const supportsReasoningEffort = Effect.fn("ChatService.supportsReasoningEffort")(function* (
+      model: {
+        providerId: string;
+        capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
+      },
+      effort: ReasoningEffort,
+    ) {
+      if (!model.capabilities.reasoningEfforts?.includes(effort)) return false;
+      const provider = (yield* providers.listProviders()).find(
+        (row) => row.id === model.providerId,
+      );
+      return (
+        !!provider &&
+        (provider.kind === "openrouter" || provider.reasoningEffortFormat !== "unsupported")
+      );
+    });
+
     const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
       function* (input: {
         userId: string;
@@ -444,6 +464,7 @@ function makeChatService() {
         searchEnabled: boolean;
         attachmentIds: ReadonlyArray<string>;
         researchEnabled?: boolean | undefined;
+        reasoningEffort?: ReasoningEffort | null | undefined;
       }) {
         if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
           return yield* new InvalidMessage({
@@ -460,6 +481,13 @@ function makeChatService() {
         if (!(yield* providers.isModelAccessible(input.userId, input.modelId))) {
           return yield* new ModelNotFound({ modelId: input.modelId });
         }
+        if (
+          input.reasoningEffort != null &&
+          !(yield* supportsReasoningEffort(model, input.reasoningEffort))
+        )
+          return yield* new InvalidMessage({
+            reason: "This model does not support the selected reasoning effort.",
+          });
 
         if (input.searchEnabled && !(yield* policy.can(input.userId, "webSearch")))
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not permitted" });
@@ -554,7 +582,11 @@ function makeChatService() {
       (
         input: {
           userId: string;
-          model: { contextLength: number | null | undefined };
+          model: {
+            providerId: string;
+            contextLength: number | null | undefined;
+            capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
+          };
           searchAvailable: boolean;
           collectionIds?: ReadonlyArray<string> | undefined;
           skillIds?: ReadonlyArray<string> | undefined;
@@ -568,9 +600,21 @@ function makeChatService() {
           desktopMachineName?: string | undefined;
           /** Files this send copied into the workspace; only a send carries them. */
           workspaceFiles?: ReadonlyArray<string> | undefined;
+          /** A queued choice was valid when submitted, but policy may have changed. */
+          allowStaleReasoningEffort?: boolean;
         } & (
-          | { attempt: "retry"; searchEnabled?: never; researchEnabled?: never }
-          | { attempt: "send" | "edit"; searchEnabled: boolean; researchEnabled: boolean }
+          | {
+              attempt: "retry";
+              searchEnabled?: never;
+              researchEnabled?: never;
+              reasoningEffort?: never;
+            }
+          | {
+              attempt: "send" | "edit";
+              searchEnabled: boolean;
+              researchEnabled: boolean;
+              reasoningEffort?: ReasoningEffort | null | undefined;
+            }
         ),
       ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
@@ -594,6 +638,16 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.researchEnabled
                 : (continuation?.researchEnabled ?? input.researchEnabled);
+          const savedEffort = continuation?.reasoningEffort ?? null;
+          const submittedEffort = input.attempt === "retry" ? undefined : input.reasoningEffort;
+          const chosenEffort = submittedEffort !== undefined ? submittedEffort : savedEffort;
+          const supportedEffort =
+            chosenEffort === null || (yield* supportsReasoningEffort(input.model, chosenEffort));
+          if (!supportedEffort && submittedEffort != null && !input.allowStaleReasoningEffort)
+            return yield* new InvalidMessage({
+              reason: "This model does not support the selected reasoning effort.",
+            });
+          const reasoningEffort = supportedEffort ? chosenEffort : null;
           if (searchEnabled && !allowedSearch)
             return yield* new InvalidMessage({ reason: "web search is not permitted" });
           if (researchEnabled && (!allowedResearch || !allowedSearch))
@@ -639,6 +693,7 @@ function makeChatService() {
               ),
               searchEnabled,
               researchEnabled,
+              reasoningEffort,
               desktopFolders: desktopFolderEntries?.map((folder) => folder.name) ?? null,
               desktopCommands,
               desktopMachineId,
@@ -669,6 +724,7 @@ function makeChatService() {
               : (continuation?.standaloneSkillIds ?? input.skillIds),
             searchEnabled,
             researchEnabled,
+            reasoningEffort,
             desktopFolders: desktopFolderEntries,
             desktopCommands,
             desktopMachineId,
@@ -733,6 +789,7 @@ function makeChatService() {
         modelId: input.input.modelId,
         searchEnabled: input.input.searchEnabled,
         researchEnabled: input.input.researchEnabled,
+        reasoningEffort: input.input.reasoningEffort,
         attachmentIds: input.attachmentIds,
       });
     });
@@ -858,6 +915,8 @@ function makeChatService() {
             searchAvailable,
             searchEnabled: head.input.searchEnabled,
             researchEnabled,
+            reasoningEffort: head.input.reasoningEffort,
+            allowStaleReasoningEffort: true,
             collectionIds: head.input.collectionIds,
             skillIds: head.input.skillIds,
             // Taken from the dispatching app now, never from queue time.
@@ -1005,6 +1064,7 @@ function makeChatService() {
           userId: input.userId,
           searchEnabled: input.searchEnabled,
           researchEnabled,
+          reasoningEffort: input.reasoningEffort,
           ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
@@ -1167,6 +1227,7 @@ function makeChatService() {
             userId: input.userId,
             searchEnabled: input.searchEnabled,
             researchEnabled,
+            reasoningEffort: null,
             model,
             searchAvailable,
             collectionIds: input.collectionIds,
@@ -1234,6 +1295,7 @@ function makeChatService() {
           attachmentIds: ReadonlyArray<string>;
           searchEnabled: boolean;
           researchEnabled: boolean;
+          reasoningEffort?: ReasoningEffort | null | undefined;
           desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
           desktopCommands?: boolean | undefined;
           fromDesktop?: boolean | undefined;
@@ -1265,6 +1327,7 @@ function makeChatService() {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
                   researchEnabled: input.edit.researchEnabled,
+                  reasoningEffort: input.edit.reasoningEffort,
                   desktopExecutorId: input.desktopExecutorId,
                   desktopMachineId: input.edit.desktopMachineId,
                   desktopMachineName: input.edit.desktopMachineName,
@@ -1527,6 +1590,8 @@ function makeChatService() {
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        researchEnabled: boolean;
+        reasoningEffort?: ReasoningEffort | null | undefined;
         /** Folders attached on the machine this edit came from. */
         desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
         desktopCommands?: boolean | undefined;
@@ -1615,6 +1680,7 @@ function makeChatService() {
             attachmentIds: input.attachmentIds,
             searchEnabled: input.searchEnabled,
             researchEnabled,
+            reasoningEffort: input.reasoningEffort,
             fromDesktop: input.fromDesktop,
             desktopExecutorId: input.desktopExecutorId,
             desktopMachineId: input.desktopMachineId,
@@ -1650,6 +1716,7 @@ function makeChatService() {
           userId: input.userId,
           searchEnabled: input.searchEnabled,
           researchEnabled,
+          reasoningEffort: input.reasoningEffort,
           ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }

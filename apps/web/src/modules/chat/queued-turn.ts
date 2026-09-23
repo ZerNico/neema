@@ -9,8 +9,11 @@
  * time the entry reaches the front, so a Work entry takes them fresh from the
  * desktop app that dispatches it. Files live in their own ownership table.
  */
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
+
 export interface QueuedTurnInput {
   modelId: string;
+  reasoningEffort?: ReasoningEffort | null;
   searchEnabled: boolean;
   researchEnabled: boolean;
   skillIds?: ReadonlyArray<string> | undefined;

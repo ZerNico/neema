@@ -129,6 +129,7 @@ const repoWith = (
   kind = "openai-compatible",
   vision = false,
   modelKey = "vendor/model",
+  reasoningEffortFormat: "unsupported" | "flat" | "nested" = "unsupported",
 ) =>
   Layer.succeed(ProviderRepo)(
     ProviderRepo.of(
@@ -147,6 +148,7 @@ const repoWith = (
             apiKey: "sk-test",
             baseUrl: "https://provider.test/v1",
             kind,
+            reasoningEffortFormat,
           }),
       }),
     ),
@@ -250,6 +252,67 @@ describe("prompt cache points", () => {
         expect(body).not.toContain("anchor");
       }),
     );
+});
+
+describe("reasoning effort requests", () => {
+  const send = (kind: string, format: "unsupported" | "flat" | "nested", effort?: "high" | null) =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([usageChunk({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })]),
+      );
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(
+          gateway.streamChat({
+            modelId: "m1",
+            prompt: Prompt.make("Hello"),
+            ...(effort === undefined ? {} : { reasoningEffort: effort }),
+          }),
+        ),
+      ).pipe(
+        Effect.provide(
+          GatewayLayer.pipe(
+            Layer.provide(repoWith(true, false, kind, false, "vendor/model", format)),
+          ),
+        ),
+      );
+      return recorded[0]?.body;
+    });
+
+  it.effect("sends nested effort to OpenRouter regardless of the stored generic format", () =>
+    Effect.gen(function* () {
+      expect(yield* send("openrouter", "unsupported", "high")).toMatchObject({
+        reasoning: { effort: "high" },
+      });
+    }),
+  );
+  it.effect("sends flat and nested effort only when explicitly configured", () =>
+    Effect.gen(function* () {
+      expect(yield* send("openai-compatible", "flat", "high")).toMatchObject({
+        reasoning_effort: "high",
+      });
+      expect(yield* send("openai-compatible", "nested", "high")).toMatchObject({
+        reasoning: { effort: "high" },
+      });
+      const unsupported = yield* send("openai-compatible", "unsupported", "high");
+      expect(unsupported).not.toHaveProperty("reasoning");
+      expect(unsupported).not.toHaveProperty("reasoning_effort");
+    }),
+  );
+  it.effect("omits effort on null or omitted input and on side generations", () =>
+    Effect.gen(function* () {
+      for (const effort of [null, undefined]) {
+        const body = yield* send("openrouter", "unsupported", effort);
+        expect(body).not.toHaveProperty("reasoning");
+        expect(body).not.toHaveProperty("reasoning_effort");
+      }
+      const recorded = stubProvider(
+        sse([usageChunk({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })]),
+      );
+      yield* generate;
+      expect(recorded[0]?.body).not.toHaveProperty("reasoning");
+      expect(recorded[0]?.body).not.toHaveProperty("reasoning_effort");
+    }),
+  );
 });
 
 describe("side generations", () => {
@@ -1142,7 +1205,10 @@ describe("provider catalog", () => {
             })
           : JSON.stringify({
               data: [
-                catalogEntry("vendor/model", ["text"]),
+                {
+                  ...catalogEntry("vendor/model", ["text"]),
+                  reasoning: { supported_efforts: ["high", "nonsense", "low", "high"] },
+                },
                 catalogEntry("vendor/painter", ["image"]),
               ],
             });
@@ -1170,6 +1236,11 @@ describe("provider catalog", () => {
         ["vendor/model", "chat"],
         ["qwen/qwen3-embedding-8b", "embedding"],
       ]);
+      expect(catalog[0]?.capabilities).toMatchObject({
+        reasoning: true,
+        reasoningEfforts: ["low", "high"],
+      });
+      expect(catalog[1]?.capabilities.reasoningEfforts).toBeUndefined();
     }),
   );
 
@@ -1179,7 +1250,7 @@ describe("provider catalog", () => {
       responseFor = () =>
         JSON.stringify({
           data: [
-            catalogEntry("gpt", ["text"]),
+            { ...catalogEntry("gpt", ["text"]), reasoning: { supported_efforts: ["low", "high"] } },
             catalogEntry("text-embedding-3-small", ["embeddings"]),
             // No architecture at all: the admin sets the type by hand.
             { id: "mystery", name: "mystery" },
@@ -1207,6 +1278,7 @@ describe("provider catalog", () => {
         ["text-embedding-3-small", "embedding"],
         ["mystery", "chat"],
       ]);
+      expect(catalog[0]?.capabilities.reasoningEfforts).toBeUndefined();
     }),
   );
 });

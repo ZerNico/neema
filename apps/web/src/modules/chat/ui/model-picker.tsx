@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
 import type { Capabilities } from "~/modules/providers/ui/capability-icons.tsx";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { ReactNode } from "react";
 import {
   Combobox,
@@ -23,6 +24,7 @@ export interface PickableModel {
   providerName: string;
   contextLength: number | null;
   capabilities: Capabilities | null;
+  reasoningEfforts?: ReadonlyArray<ReasoningEffort>;
 }
 
 interface ProviderGroup {

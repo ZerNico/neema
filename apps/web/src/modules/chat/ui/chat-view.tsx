@@ -87,6 +87,8 @@ import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
 import { useSearchMode } from "./use-search-mode.ts";
+import { useReasoningEffort } from "./use-reasoning-effort.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
@@ -806,6 +808,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   openDocument.current = openDocumentId;
   const documentFocus = () =>
     openDocument.current ? { openDocumentId: openDocument.current } : {};
+  const { effort: reasoningEffort, setEffort: setReasoningEffort } =
+    useReasoningEffort(effectiveModelId);
+  const changeModel = useCallback(
+    (id: string) => {
+      if (id !== effectiveModelId) setReasoningEffort(null);
+      setModelId(id);
+    },
+    [effectiveModelId, setReasoningEffort],
+  );
 
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
@@ -878,6 +889,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
       workspaceImports?: WorkspaceImports;
+        reasoningEffort,
     }) => {
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
@@ -985,7 +997,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         },
       }),
     onSuccess: async (_result, input) => {
-      if (input.modelId !== undefined) setModelId(input.modelId);
+      if (input.modelId !== undefined) changeModel(input.modelId);
       // Refetch BEFORE bumping the epoch: the retried generation restarts at
       // seq 1, so the new subscription must be seeded from the wiped message
       // (after=0), not from the previous generation's chunk cursor.
@@ -1035,6 +1047,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       checkWorkReady();
       await flushAgentDraft();
       await flushDocuments();
+        reasoningEffort?: ReasoningEffort | null;
     },
     mutationFn: async (
       input: {
@@ -1233,6 +1246,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     running:
       streamingMessage?.generationId != null
         ? { messageId: streamingMessage.id, generationId: streamingMessage.generationId }
+      reasoningEffort,
         : null,
     arrived: stream.steers,
     // What a send carries now; a queued message freezes it.
@@ -1243,6 +1257,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       timeZone: browserTimeZone(),
       ...documentFocus(),
       ...context.sendFields,
+      reasoningEffort,
+      setReasoningEffort,
     }),
     attemptFields: () => work.attemptFields(),
     checkWork: checkWorkReady,
@@ -1384,6 +1400,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         generating
       )
         return false;
+        reasoningEffort,
       if (!(await confirmEdit(activeEditingMessage.id))) return false;
       await mutateQuestionEdit({
         messageId: activeEditingMessage.id,
@@ -1398,6 +1415,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       activeEditingMessage,
       questionResponses,
       effectiveModelId,
+      reasoningEffort,
       editPending,
       questionNeedsRefresh,
       generating,
@@ -1419,6 +1437,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       // Queues behind any upload still in flight, then sends the full ordered
       // replacement set. Omitted ids are released server-side.
       submitEditUploads((attachmentIds) => {
+          reasoningEffort,
         if (!content && attachmentIds.length === 0) return;
         mutateEdit({
           messageId: activeEditingMessage.id,
@@ -1434,6 +1453,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     [
       activeEditingMessage,
+      reasoningEffort,
       confirmEdit,
       editPending,
       editUploadCount,
@@ -1716,10 +1736,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               onResearchEnabledChange: setEditResearchEnabled,
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
+              reasoningEffort,
+              onReasoningEffortChange: setReasoningEffort,
               saveDisabled: editPending || work.readOnly,
               controlsDisabled: editPending,
               modelId: effectiveModelId,
-              onModelChange: setModelId,
+              onModelChange: changeModel,
               searchEnabled,
               onSearchEnabledChange: setSearchEnabled,
               attachments: editUploads,
@@ -1760,6 +1782,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         }
         if (stream.text.length > base.content.length) {
           return { ...live, content: stream.text, status: stream.status };
+      changeModel,
         }
         return live;
       }),
@@ -1774,6 +1797,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       generationDisabled,
       work.readOnly,
       saveQuestionEdit,
+      reasoningEffort,
+      setReasoningEffort,
       // Carries `editSkillIds` and `editContext` in: both are its own
       // dependencies, so picking a skill mid-edit gives this a new identity and
       // the chips refresh. Dropping either from its list strands them here.
@@ -1983,9 +2008,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 textareaDisabled={editPending}
                 controlsDisabled={mutationPending}
                 modelId={effectiveModelId}
-                onModelChange={setModelId}
+                onModelChange={changeModel}
                 searchEnabled={searchEnabled}
                 onSearchEnabledChange={setSearchEnabled}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={setReasoningEffort}
                 context={context}
               />
             </div>
@@ -2013,6 +2040,7 @@ export function NewChatView({
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
   initialSkillId?: string | null;
+  const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   initialPrefill?: string | null;
   onPrefillConsumed?: () => void;
 }) {
@@ -2039,9 +2067,11 @@ export function NewChatView({
     }
     if (!selectedAgent.data || preferredModelApplied.current === selectedAgentId) return;
     preferredModelApplied.current = selectedAgentId;
-    if (modelOverride.current !== selectedAgentId && selectedAgent.data.model?.available)
+    if (modelOverride.current !== selectedAgentId && selectedAgent.data.model?.available) {
+      setReasoningEffort(null);
       setModelId(selectedAgent.data.model.id);
-  }, [selectedAgentId, selectedAgent.data]);
+    }
+  }, [selectedAgentId, selectedAgent.data, setReasoningEffort]);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
   const [mode, setMode] = useState<ConversationMode>("chat");
@@ -2081,6 +2111,7 @@ export function NewChatView({
       const conversation = {
         kind: "new" as const,
         id: conversationId,
+        reasoningEffort,
         mode: input.mode,
       };
       const fields = {
@@ -2221,10 +2252,13 @@ export function NewChatView({
                 ...(workspaceFiles ? { workspaceFiles } : {}),
                 ...(workspaceImports ? { workspaceImports } : {}),
                 mode,
+              if (id !== modelId) setReasoningEffort(null);
               })
             }
             disabled={sendMutation.isPending}
             modelId={modelId}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={setReasoningEffort}
             onModelChange={(id, source) => {
               if (source !== "default") modelOverride.current = selectedAgentId;
               setModelId(id);

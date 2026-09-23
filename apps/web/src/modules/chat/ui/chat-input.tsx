@@ -1,6 +1,7 @@
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import {
+  AiBrain01Icon,
   ArrowUp02Icon,
   Attachment01Icon,
   Book02Icon,
@@ -51,6 +52,8 @@ import {
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
@@ -64,6 +67,17 @@ import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type { ConversationMode } from "../schema.ts";
 import type { MessageReference } from "../references.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
+
+const effortLabels: Record<ReasoningEffort, string> = {
+  none: "Off",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
+};
 
 export const ChatInput = forwardRef<
   HTMLTextAreaElement,
@@ -89,6 +103,8 @@ export const ChatInput = forwardRef<
     onModelChange: (modelId: string, source?: "default") => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
+    reasoningEffort?: ReasoningEffort | null | undefined;
+    onReasoningEffortChange?: ((effort: ReasoningEffort | null) => void) | undefined;
     researchEnabled?: boolean;
     onResearchEnabledChange?: (enabled: boolean) => void;
     /**
@@ -145,6 +161,8 @@ export const ChatInput = forwardRef<
     onModelChange,
     searchEnabled,
     onSearchEnabledChange,
+    reasoningEffort = null,
+    onReasoningEffortChange,
     researchEnabled = false,
     onResearchEnabledChange,
     mode,
@@ -246,6 +264,7 @@ export const ChatInput = forwardRef<
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | "skills" | null>(null);
   const [picker, setPicker] = useState<ContextPickerKind | "skills" | null>(null);
   const { data: parsingAvailability } = useQuery({
@@ -677,6 +696,49 @@ export const ChatInput = forwardRef<
         >
           <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
         </ModelPicker>
+        {onReasoningEffortChange && (selectedModel?.reasoningEfforts?.length ?? 0) > 0 ? (
+          <DropdownMenu open={reasoningMenuOpen} onOpenChange={setReasoningMenuOpen}>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={controlsDisabled}
+                  // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
+                  className="text-muted-foreground hover:text-foreground hover:bg-accent"
+                  aria-label={`Reasoning: ${reasoningEffort ? effortLabels[reasoningEffort] : "Default"}`}
+                />
+              }
+            >
+              <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
+              <span className="max-[420px]:sr-only">
+                {reasoningEffort ? effortLabels[reasoningEffort] : "Default"}
+              </span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start">
+              <DropdownMenuRadioGroup
+                value={reasoningEffort ?? "default"}
+                onValueChange={(chosenEffort) => {
+                  onReasoningEffortChange(
+                    chosenEffort === "default"
+                      ? null
+                      : (selectedModel?.reasoningEfforts?.find(
+                          (effort) => effort === chosenEffort,
+                        ) ?? null),
+                  );
+                  setReasoningMenuOpen(false);
+                }}
+              >
+                <DropdownMenuRadioItem value="default">Default</DropdownMenuRadioItem>
+                {selectedModel?.reasoningEfforts?.map((effort) => (
+                  <DropdownMenuRadioItem key={effort} value={effort}>
+                    {effortLabels[effort]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {onStop && queueDraft ? (
             <Tooltip>

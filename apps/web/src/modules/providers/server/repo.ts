@@ -5,7 +5,13 @@ import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
-import { normalizeModelSettings, type ModelSettings } from "../model-config.ts";
+import {
+  actionableReasoningEfforts,
+  normalizeModelSettings,
+  type ModelSettings,
+  type ReasoningEffort,
+  type ReasoningEffortFormat,
+} from "../model-config.ts";
 import { resolveBaseUrl, type ProviderKind } from "../provider-kinds.ts";
 import { KeyCipher } from "./crypto.ts";
 
@@ -18,6 +24,7 @@ export type ChatModelRow = Pick<
 > & {
   providerName: string;
   isDefault: boolean;
+  reasoningEfforts?: ReasoningEffort[];
 };
 type ProviderRow = typeof providers.$inferSelect;
 /** Provider rows with the ciphertext stripped, safe to send to admin clients. */
@@ -39,7 +46,13 @@ export class ProviderRepo extends Context.Service<
     }): Effect.Effect<PublicProvider>;
     updateProvider(
       providerId: string,
-      patch: Partial<{ name: string; baseUrl: string; apiKey: string; enabled: boolean }>,
+      patch: Partial<{
+        name: string;
+        baseUrl: string;
+        apiKey: string;
+        enabled: boolean;
+        reasoningEffortFormat: ReasoningEffortFormat;
+      }>,
     ): Effect.Effect<void>;
     deleteProvider(providerId: string): Effect.Effect<void>;
     /** Internal: full row incl. decrypted key, for the AI gateway only. */
@@ -202,6 +215,8 @@ export class ProviderRepo extends Context.Service<
               contextLength: models.contextLength,
               capabilities: models.capabilities,
               providerName: providers.name,
+              providerKind: providers.kind,
+              reasoningEffortFormat: providers.reasoningEffortFormat,
             })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
@@ -215,7 +230,16 @@ export class ProviderRepo extends Context.Service<
             )
             .orderBy(asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
-          return markDefaultModel(rows);
+          return markDefaultModel(rows).map(
+            ({ providerKind, reasoningEffortFormat, ...model }) => ({
+              ...model,
+              reasoningEfforts: actionableReasoningEfforts(
+                model.capabilities,
+                providerKind,
+                reasoningEffortFormat,
+              ),
+            }),
+          );
         }),
 
         setDefaultModelOrder: Effect.fn("ProviderRepo.setDefaultModelOrder")(function* (input) {

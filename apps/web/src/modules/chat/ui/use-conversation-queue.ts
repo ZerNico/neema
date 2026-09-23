@@ -11,6 +11,7 @@ import {
   steerQueuedMessage,
 } from "../server/functions.ts";
 import type { ConversationMode } from "../schema.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { AssistantSteer } from "./assistant-body.ts";
 import type { ComposerQueue, EditableQueuedMessage } from "./composer.tsx";
 
@@ -82,6 +83,8 @@ export function useConversationQueue(input: {
   settings: {
     modelId: string | null;
     setModelId: (modelId: string | null) => void;
+    reasoningEffort?: ReasoningEffort | null;
+    setReasoningEffort?: (effort: ReasoningEffort | null, modelId?: string | null) => void;
     setSearchEnabled: (enabled: boolean) => void;
     resetSearchEnabled: () => void;
     seedCollections: (ids: ReadonlyArray<string>) => void;
@@ -156,7 +159,10 @@ export function useConversationQueue(input: {
   // entry needs to start at all. Everything else comes from the server's gate.
   const needsDesktop = input.mode === "work" && !desktop;
   // The composer settings an open edit borrowed, handed back when it ends.
-  const borrowed = useRef<{ modelId: string | null } | null>(null);
+  const borrowed = useRef<{
+    modelId: string | null;
+    reasoningEffort: ReasoningEffort | null;
+  } | null>(null);
 
   return {
     submit: (content, attachmentIds, researchEnabled, skillIds) =>
@@ -196,15 +202,22 @@ export function useConversationQueue(input: {
       onReplace: (entryId, content, attachmentIds, researchEnabled, skillIds) =>
         replace.mutateAsync({ entryId, content, attachmentIds, researchEnabled, skillIds }),
       onEditStart: (entry) => {
-        borrowed.current = { modelId: settings.modelId };
+        borrowed.current = {
+          modelId: settings.modelId,
+          reasoningEffort: settings.reasoningEffort ?? null,
+        };
         const row = input.rows.find((item) => item.id === entry.id);
         if (!row) return;
         settings.setModelId(row.input.modelId);
+        settings.setReasoningEffort?.(row.input.reasoningEffort ?? null, row.input.modelId);
         settings.setSearchEnabled(row.input.searchEnabled);
         settings.seedCollections(row.input.collectionIds ?? []);
       },
       onEditEnd: () => {
-        if (borrowed.current) settings.setModelId(borrowed.current.modelId);
+        if (borrowed.current) {
+          settings.setModelId(borrowed.current.modelId);
+          settings.setReasoningEffort?.(borrowed.current.reasoningEffort, borrowed.current.modelId);
+        }
         borrowed.current = null;
         settings.resetSearchEnabled();
         settings.settleCollections();

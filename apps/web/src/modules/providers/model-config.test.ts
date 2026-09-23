@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { normalizeModelSettings } from "./model-config.ts";
+import { actionableReasoningEfforts, normalizeModelSettings } from "./model-config.ts";
+
+describe("actionableReasoningEfforts", () => {
+  it("offers only configured levels on capable transports", () => {
+    const capabilities = {
+      reasoning: true,
+      reasoningEfforts: ["low", "high"] as const,
+      tools: false,
+      vision: false,
+      files: false,
+    };
+    expect(actionableReasoningEfforts(capabilities, "openrouter", "unsupported")).toEqual([
+      "low",
+      "high",
+    ]);
+    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "flat")).toEqual([
+      "low",
+      "high",
+    ]);
+    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "nested")).toEqual([
+      "low",
+      "high",
+    ]);
+    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "unsupported")).toEqual(
+      [],
+    );
+    expect(
+      actionableReasoningEfforts({ ...capabilities, reasoning: false }, "openrouter", "nested"),
+    ).toEqual([]);
+  });
+});
 
 describe("normalizeModelSettings", () => {
   it("clears embedding-inapplicable capabilities and output pricing", () => {
@@ -26,6 +56,31 @@ describe("normalizeModelSettings", () => {
       access: "groups",
       groupIds: ["g1", "g2"],
     });
+  });
+
+  it("drops effort levels when reasoning is disabled or the model is an embedding", () => {
+    const common = {
+      displayName: "Model",
+      contextLength: null,
+      enabled: true,
+      access: "public" as const,
+      groupIds: [],
+      pricing: null,
+      capabilities: {
+        reasoning: false,
+        reasoningEfforts: ["low", "high"] as ("low" | "high")[],
+        tools: false,
+        vision: false,
+        files: false,
+      },
+    };
+    expect(
+      normalizeModelSettings({ ...common, type: "chat", embeddingDimensions: null }).capabilities,
+    ).toEqual({ reasoning: false, tools: false, vision: false, files: false });
+    expect(
+      normalizeModelSettings({ ...common, type: "embedding", embeddingDimensions: null })
+        .capabilities,
+    ).toEqual({ reasoning: false, tools: false, vision: false, files: false });
   });
 
   it("clears embedding dimensions and group links from public chat models", () => {

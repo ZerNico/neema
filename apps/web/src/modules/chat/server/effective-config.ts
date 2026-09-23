@@ -10,6 +10,7 @@ import { KNOWLEDGE_CONTEXT_LIMITS } from "~/modules/knowledge/server/context.ts"
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { COMPACTION_CONFIG, computeBudget } from "./compaction.ts";
 import type { GenerationConfig } from "./repo.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
 export type KnowledgeMode = "none" | "context" | "retrieval";
 
@@ -116,6 +117,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     searchEnabled: boolean;
     /** Whether `deep_research` is offered to this attempt. */
     researchEnabled: boolean;
+    reasoningEffort?: ReasoningEffort | null;
     /** Folders the sending machine reported; absent when it had none. */
     desktopFolders?: ReadonlyArray<{ name: string; path: string }> | null | undefined;
     desktopCommands?: boolean | undefined;
@@ -170,6 +172,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       knowledgeMode,
       searchEnabled,
       researchEnabled: input.researchEnabled,
+      reasoningEffort: input.reasoningEffort ?? null,
       planEnabled,
       // The column holds names alone: paths stay on the machine that granted
       // them, so a conversation continued elsewhere resolves its own folders.

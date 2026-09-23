@@ -134,6 +134,44 @@ describe("ModelEditDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
+  it("edits allowed reasoning levels as compact multiple choices", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      capabilities: {
+        reasoning: true,
+        reasoningEfforts: ["high"],
+        tools: true,
+        vision: false,
+        files: false,
+      },
+    });
+
+    const high = screen.getByRole("button", { name: "High" });
+    expect(high).toHaveAttribute("aria-pressed", "true");
+    const off = screen.getByRole("button", { name: "Off" });
+    expect(off).toHaveClass("bg-foreground/10");
+    await user.click(off);
+    await user.click(screen.getByRole("button", { name: "Low" }));
+    await user.click(high);
+    expect(high).toHaveAttribute("aria-pressed", "false");
+    expect(high).toHaveTextContent("High");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          capabilities: {
+            reasoning: true,
+            reasoningEfforts: ["none", "low"],
+            tools: true,
+            vision: false,
+            files: false,
+          },
+        }),
+      }),
+    );
+  });
+
   it("shows only embedding settings and submits input-only pricing", async () => {
     renderDialog({
       type: "embedding",

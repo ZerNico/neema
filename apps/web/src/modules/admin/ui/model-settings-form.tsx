@@ -3,6 +3,7 @@ import { useId, useState, type Dispatch, type SetStateAction } from "react";
 import {
   EMPTY_CAPABILITIES,
   MODEL_TYPES,
+  REASONING_EFFORTS,
   normalizeModelSettings,
   type ModelAccess,
   type ModelCapabilities,
@@ -43,6 +44,7 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
+import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 /**
@@ -384,6 +386,43 @@ export function ModelSettingsFields({
             );
           })}
         </div>
+        {draft.type === "chat" && draft.capabilities.reasoning ? (
+          <Field>
+            <FieldTitle>Reasoning effort levels</FieldTitle>
+            <FieldDescription>
+              Choose the levels people can select. Leave empty to use the model’s default.
+            </FieldDescription>
+            <ToggleGroup
+              multiple
+              variant="choice"
+              size="sm"
+              className="flex-wrap"
+              aria-label="Allowed reasoning levels"
+              value={[...(draft.capabilities.reasoningEfforts ?? [])]}
+              onValueChange={(values) =>
+                setDraft((current) => ({
+                  ...current,
+                  capabilities: {
+                    ...current.capabilities,
+                    reasoningEfforts: REASONING_EFFORTS.filter((effort) => values.includes(effort)),
+                  },
+                }))
+              }
+            >
+              {REASONING_EFFORTS.map((effort) => (
+                <ToggleGroupItem key={effort} value={effort}>
+                  {effort === "none"
+                    ? "Off"
+                    : effort === "xhigh"
+                      ? "Extra high"
+                      : effort === "max"
+                        ? "Maximum"
+                        : effort[0]!.toUpperCase() + effort.slice(1)}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Field>
+        ) : null}
       </FieldSet>
 
       <FieldSet compact disabled={disabled}>

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { DefaultModelIds } from "~/modules/providers/default-models.ts";
+import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
 import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
 export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
@@ -17,6 +18,7 @@ export const UpdateProviderInput = Schema.Struct({
   baseUrl: Schema.optionalKey(Schema.String),
   apiKey: Schema.optionalKey(Schema.String),
   enabled: Schema.optionalKey(Schema.Boolean),
+  reasoningEffortFormat: Schema.optionalKey(Schema.Literals(["unsupported", "flat", "nested"])),
 });
 
 export const ProviderIdInput = Schema.Struct({
@@ -39,6 +41,7 @@ const EmbeddingPricingSchema = Schema.Struct({
 const ChatCapabilitiesSchema = Schema.Struct({
   imageOutput: Schema.optionalKey(Schema.Boolean),
   reasoning: Schema.Boolean,
+  reasoningEfforts: Schema.optionalKey(Schema.Array(Schema.Literals(REASONING_EFFORTS))),
   tools: Schema.Boolean,
   vision: Schema.Boolean,
   files: Schema.Boolean,

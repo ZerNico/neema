@@ -1507,6 +1507,7 @@ export class StreamEngine extends Context.Service<
                 .streamChat({
                   imageOutput,
                   modelId: input.modelId,
+                  reasoningEffort: config.reasoningEffort,
                   // Rebuilt every round and always last: the recap has to sit
                   // behind the tool results it competes with. It is budgeted but
                   // never fed back into the continuation transcript.

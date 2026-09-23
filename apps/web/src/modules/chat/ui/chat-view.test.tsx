@@ -959,6 +959,7 @@ describe("ChatView inline question answers", () => {
           conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           messageId: "structured-user",
           modelId: "m1",
+          reasoningEffort: null,
           searchEnabled: false,
           researchEnabled: false,
           timeZone: "Europe/Berlin",
@@ -1457,6 +1458,8 @@ describe("ChatView search mode", () => {
           modelId: "m1",
           content: "hello",
           searchEnabled: false,
+          reasoningEffort: null,
+          researchEnabled: undefined,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
           // Collections are per message, like files: always sent, empty here.
@@ -1511,6 +1514,8 @@ describe("ChatView retry", () => {
           modelId: "m2",
           content: "hello",
           searchEnabled: true,
+          reasoningEffort: null,
+          researchEnabled: undefined,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
           // Collections are per message, like files: always sent, empty here.

@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { Attachment, AttachmentIds } from "~/modules/attachments/schema.ts";
 import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
+import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
 
 // Blank content is allowed when the turn carries attachments; the service
 // rejects the turn that has neither.
@@ -48,6 +49,7 @@ const generationFields = {
   timeZone: TimeZone,
   openDocumentId: OpenDocumentId,
   modelId: Schema.String,
+  reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   content: MessageContent,
   searchEnabled: Schema.Boolean,
   /** Offers `deep_research` to the attempt; the model still chooses. */
@@ -119,6 +121,7 @@ export const AnswerQuestionInput = Schema.Struct({
   callId: Schema.String,
   response: QuestionResponse,
   modelId: Schema.String,
+  reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
   ...desktopSubmissionFields,
@@ -152,6 +155,7 @@ export const ListConversationsInput = Schema.Struct({
 export const QueueMessageInput = Schema.Struct({
   conversationId: Schema.String,
   modelId: Schema.String,
+  reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   content: MessageContent,
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
@@ -235,6 +239,7 @@ export const EditMessageInput = Schema.Union([
     conversationId: Schema.String,
     messageId: Schema.String,
     modelId: Schema.String,
+    reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
     searchEnabled: Schema.Boolean,
     researchEnabled: Schema.Boolean,
     ...desktopSubmissionFields,

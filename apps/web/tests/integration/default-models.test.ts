@@ -154,6 +154,7 @@ describe("default model priority", () => {
             "id",
             "isDefault",
             "providerName",
+            "reasoningEfforts",
           ]),
         );
       }),

@@ -4029,6 +4029,310 @@ describe("retry with a different model", () => {
   }, 60_000);
 });
 
+describe("reasoning effort attempts", () => {
+  it("persists and replays effort, clears it on an unsupported retry model, and rejects invalid sends before writes", async () => {
+    const observed: Array<string | null | undefined> = [];
+    authoringScript = (input) => {
+      observed.push(input.reasoningEffort);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const chat = yield* ChatService;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const providers = yield* ProviderRepo;
+          const engine = yield* StreamEngine;
+          const seed = yield* seedAnswered(textModelId);
+          const base = (yield* providers.getModel(textModelId))!;
+          const reasoningModelId = uuidv7();
+          yield* db.insert(models).values({
+            id: reasoningModelId,
+            providerId: base.providerId,
+            modelKey: `reasoning-${reasoningModelId}`,
+            displayName: "Reasoning test model",
+            type: "chat",
+            capabilities: {
+              reasoning: true,
+              reasoningEfforts: ["low", "high"],
+              tools: false,
+              vision: false,
+              files: false,
+            },
+          });
+          const submission = {
+            userId: seed.userId,
+            conversation: { kind: "existing" as const, id: seed.conversation.id },
+            modelId: reasoningModelId,
+            content: "Explain this.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          };
+          const rejected = yield* chat
+            .sendMessage({ ...submission, reasoningEffort: "max" })
+            .pipe(Effect.flip);
+          const before = yield* repo.listMessages(seed.conversation.id);
+          const sent = yield* chat.sendMessage({ ...submission, reasoningEffort: "high" });
+          yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+          const saved = yield* repo.getGenerationConfig(sent.assistantMessageId);
+          yield* chat.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: sent.assistantMessageId,
+          });
+          yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+          const replayed = yield* repo.getGenerationConfig(sent.assistantMessageId);
+          const branch = yield* repo.cloneConversationPrefix({
+            userId: seed.userId,
+            sourceConversationId: seed.conversation.id,
+            throughMessageId: sent.assistantMessageId,
+          });
+          const branchAnswer = (yield* repo.listMessages(branch.id))
+            .filter((message) => message.role === "assistant")
+            .at(-1)!;
+          const branched = yield* repo.getGenerationConfig(branchAnswer.id);
+          yield* chat.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: sent.assistantMessageId,
+            modelId: visionModelId,
+          });
+          yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+          const switched = yield* repo.getGenerationConfig(sent.assistantMessageId);
+          const userMessage = (yield* repo.listMessages(seed.conversation.id)).find(
+            (message) => message.content === "Explain this.",
+          )!;
+          const edited = yield* chat.editMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: userMessage.id,
+            modelId: reasoningModelId,
+            content: "Explain this again.",
+            searchEnabled: false,
+            researchEnabled: false,
+            reasoningEffort: null,
+            attachmentIds: [],
+          });
+          yield* engine.subscribe(edited.assistantMessageId, 0).pipe(Stream.runDrain);
+          const cleared = yield* repo.getGenerationConfig(edited.assistantMessageId);
+          return { rejected, before, saved, replayed, branched, switched, cleared };
+        }),
+      );
+      expect(result.rejected).toMatchObject({ _tag: "InvalidMessage" });
+      expect(result.before).toHaveLength(2);
+      expect(result.saved.reasoningEffort).toBe("high");
+      expect(result.replayed.reasoningEffort).toBe("high");
+      expect(result.branched.reasoningEffort).toBe("high");
+      expect(result.switched.reasoningEffort).toBeNull();
+      expect(result.cleared.reasoningEffort).toBeNull();
+      expect(observed).toEqual(["high", "high", null, null]);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("inherits an effort for question answers and honors an explicit default", async () => {
+    const observed: Array<string | null | undefined> = [];
+    authoringScript = (input) => {
+      observed.push(input.reasoningEffort);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const chat = yield* ChatService;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const engine = yield* StreamEngine;
+          const seed = yield* seedAnswered(textModelId);
+          const providerId = (yield* (yield* ProviderRepo).getModel(textModelId))!.providerId;
+          const modelId = uuidv7();
+          yield* db.insert(models).values({
+            id: modelId,
+            providerId,
+            modelKey: `reasoning-${modelId}`,
+            displayName: "Reasoning question model",
+            type: "chat",
+            capabilities: {
+              reasoning: true,
+              reasoningEfforts: ["high"],
+              tools: true,
+              vision: false,
+              files: false,
+            },
+          });
+          const sent = yield* chat.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId,
+            content: "Choose a style",
+            attachmentIds: [],
+            searchEnabled: false,
+            researchEnabled: false,
+            reasoningEffort: "high",
+          });
+          yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+          const ask = (messageId: string) =>
+            Effect.gen(function* () {
+              const callId = uuidv7();
+              yield* repo.insertToolCall({
+                id: callId,
+                messageId,
+                turnIndex: 0,
+                callIndex: 0,
+                textOffset: 0,
+                providerCallId: `ask-${callId}`,
+                toolName: "ask_user",
+                arguments: questionParams,
+              });
+              yield* repo.completeToolCall({
+                id: callId,
+                status: "complete",
+                result: { v: 1, outcome: "presented", ...questionParams },
+              });
+              return callId;
+            });
+          const answer = (callId: string, reasoningEffort?: "high" | null) =>
+            chat.sendMessage({
+              userId: seed.userId,
+              conversation: { kind: "existing", id: seed.conversation.id },
+              modelId,
+              questionResponse: { callId, response: { kind: "skip" } },
+              attachmentIds: [],
+              searchEnabled: false,
+              researchEnabled: false,
+              reasoningEffort,
+            });
+          const inherited = yield* answer(yield* ask(sent.assistantMessageId));
+          yield* engine.subscribe(inherited.assistantMessageId, 0).pipe(Stream.runDrain);
+          const inheritedConfig = yield* repo.getGenerationConfig(inherited.assistantMessageId);
+          const cleared = yield* answer(yield* ask(inherited.assistantMessageId), null);
+          yield* engine.subscribe(cleared.assistantMessageId, 0).pipe(Stream.runDrain);
+          const clearedConfig = yield* repo.getGenerationConfig(cleared.assistantMessageId);
+          return { inheritedConfig, clearedConfig };
+        }),
+      );
+      expect(result.inheritedConfig.reasoningEffort).toBe("high");
+      expect(result.clearedConfig.reasoningEffort).toBeNull();
+      expect(observed).toEqual(["high", "high", null]);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("rejects an effort before writing when the provider transport cannot send it", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const seed = yield* seedAnswered(textModelId);
+        const providerId = uuidv7();
+        const modelId = uuidv7();
+        yield* db.execute(sql`insert into providers (id, name, kind, base_url, api_key_ciphertext)
+          values (${providerId}, 'unsupported-effort', 'openai-compatible', 'http://x', 'x')`);
+        yield* db.insert(models).values({
+          id: modelId,
+          providerId,
+          modelKey: `unsupported-${modelId}`,
+          displayName: "Unsupported transport",
+          type: "chat",
+          capabilities: {
+            reasoning: true,
+            reasoningEfforts: ["high"],
+            tools: false,
+            vision: false,
+            files: false,
+          },
+        });
+        const failure = yield* chat
+          .sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId,
+            content: "Explain this",
+            attachmentIds: [],
+            searchEnabled: false,
+            researchEnabled: false,
+            reasoningEffort: "high",
+          })
+          .pipe(Effect.flip);
+        return { failure, messages: yield* repo.listMessages(seed.conversation.id) };
+      }),
+    );
+    expect(result.failure).toMatchObject({ _tag: "InvalidMessage" });
+    expect(result.messages).toHaveLength(2);
+  }, 60_000);
+
+  it("revalidates a queued effort at promotion and falls back to provider default", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const chat = yield* ChatService;
+        const providers = yield* ProviderRepo;
+        const engine = yield* StreamEngine;
+        const seed = yield* seedAnswered(textModelId);
+        const base = (yield* providers.getModel(textModelId))!;
+        const reasoningModelId = uuidv7();
+        const capabilities = {
+          reasoning: true,
+          reasoningEfforts: ["high" as const],
+          tools: false,
+          vision: false,
+          files: false,
+        };
+        yield* db.insert(models).values({
+          id: reasoningModelId,
+          providerId: base.providerId,
+          modelKey: `queued-reasoning-${reasoningModelId}`,
+          displayName: "Queued reasoning model",
+          type: "chat",
+          capabilities,
+        });
+        yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "Queued question",
+          attachmentIds: [],
+          input: {
+            modelId: reasoningModelId,
+            searchEnabled: false,
+            researchEnabled: false,
+            reasoningEffort: "high",
+          },
+        });
+        yield* db
+          .update(models)
+          .set({ capabilities: { ...capabilities, reasoningEfforts: ["low"] } })
+          .where(eq(models.id, reasoningModelId));
+        const dispatched = yield* chat.dispatchQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+        });
+        const assistant = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
+        yield* engine.subscribe(assistant.id, 0).pipe(Stream.runDrain);
+        return {
+          dispatched,
+          entries: yield* repo.listQueue(seed.conversation.id),
+          config: yield* repo.getGenerationConfig(assistant.id),
+        };
+      }),
+    );
+    expect(result.dispatched).toMatchObject({ started: true });
+    expect(result.entries).toHaveLength(0);
+    expect(result.config?.reasoningEffort).toBeNull();
+  }, 60_000);
+});
+
 describe("generated image streaming", () => {
   it("keeps distinct initial and edited image bytes, history, public refs and authenticated reads", async () => {
     const promptStart = streamPrompts.length;

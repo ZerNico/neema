@@ -3,10 +3,32 @@ export const MODEL_TYPES = ["chat", "embedding"] as const;
 export type ModelType = (typeof MODEL_TYPES)[number];
 export type ModelAccess = "public" | "groups";
 
+export const REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export type ReasoningEffortFormat = "unsupported" | "flat" | "nested";
+
+export const actionableReasoningEfforts = (
+  capabilities: ModelCapabilities,
+  providerKind: "openrouter" | "openai-compatible",
+  format: ReasoningEffortFormat,
+): ReasoningEffort[] =>
+  capabilities.reasoning && (providerKind === "openrouter" || format !== "unsupported")
+    ? [...(capabilities.reasoningEfforts ?? [])]
+    : [];
+
 export interface ModelCapabilities {
   /** Native image output; absent on older model records means disabled. */
   imageOutput?: boolean;
   reasoning: boolean;
+  reasoningEfforts?: ReadonlyArray<ReasoningEffort>;
   tools: boolean;
   vision: boolean;
   files: boolean;
@@ -78,10 +100,12 @@ export const normalizeModelSettings = (settings: UnnormalizedModelSettings): Mod
     };
   }
 
+  const { reasoningEfforts: _, ...withoutEfforts } = settings.capabilities;
   return {
     ...settings,
     type: "chat",
     embeddingDimensions: null,
+    capabilities: settings.capabilities.reasoning ? settings.capabilities : withoutEfforts,
     pricing: settings.pricing?.output === null ? null : settings.pricing,
     groupIds,
   };

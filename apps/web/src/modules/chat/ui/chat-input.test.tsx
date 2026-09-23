@@ -1,13 +1,16 @@
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Suspense, useImperativeHandle, useState, type Ref } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInput } from "./chat-input.tsx";
+import type { PickableModel } from "./model-picker.tsx";
 import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { renderToString } from "react-dom/server";
 import { useSearchMode } from "./use-search-mode.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import {
   useAttachmentUploads,
@@ -215,10 +218,12 @@ beforeEach(() => {
 function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
   const [modelId, setModelId] = useState(initialModelId);
   const [searchEnabled, setSearchEnabled] = useState(true);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
   return (
     <>
       <output data-testid="selected-default">{modelId ?? "none"}</output>
       <output data-testid="default-search">{searchEnabled ? "on" : "off"}</output>
+      <output data-testid="selected-effort">{reasoningEffort ?? "default"}</output>
       <button onClick={() => setModelId("text-only")}>Choose Alpha</button>
       <ChatInput
         value=""
@@ -229,13 +234,18 @@ function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
         onModelChange={setModelId}
         searchEnabled={searchEnabled}
         onSearchEnabledChange={setSearchEnabled}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={setReasoningEffort}
       />
     </>
   );
 }
 const renderDefaultProbe = (
   initialModelId: string | null,
-  rows = MODELS.map((entry) => ({ ...entry, isDefault: entry.id === "vision" })),
+  rows: Array<PickableModel & { isDefault: boolean }> = MODELS.map((entry) => ({
+    ...entry,
+    isDefault: entry.id === "vision",
+  })),
 ) => {
   const client = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
@@ -252,6 +262,28 @@ const renderDefaultProbe = (
 };
 
 describe("ChatInput default model", () => {
+  it("offers the model’s reasoning efforts and closes after selection", async () => {
+    const user = userEvent.setup();
+    renderDefaultProbe("vision", [
+      { ...MODELS[0]!, isDefault: false },
+      { ...MODELS[1]!, isDefault: true, reasoningEfforts: ["low", "high", "none"] },
+    ]);
+    await user.click(screen.getByRole("button", { name: "Reasoning: Default" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Default" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Low" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "High" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Off" })).toBeVisible();
+    expect(screen.queryByRole("menuitemradio", { name: "Maximum" })).toBeNull();
+    await user.click(screen.getByRole("menuitemradio", { name: "High" }));
+    expect(screen.getByTestId("selected-effort")).toHaveTextContent("high");
+    const trigger = screen.getByRole("button", { name: "Reasoning: High" });
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Default" }));
+    expect(screen.getByTestId("selected-effort")).toHaveTextContent("default");
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+  });
+
   it.each([null, "removed"])(
     "selects the marked default for %s rather than the first row",
     (initialModelId) => {

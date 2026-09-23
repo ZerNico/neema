@@ -28,6 +28,7 @@ import {
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { modelsQuery, providersQuery } from "./providers-page.tsx";
 import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
+import type { ReasoningEffortFormat } from "~/modules/providers/model-config.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -50,6 +51,13 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
@@ -167,6 +175,18 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">Base URL</span>
             <span className="min-w-0 truncate font-mono text-sm">{provider.baseUrl}</span>
+          </ListRow>
+          <ListRow>
+            <span className="text-muted-foreground w-24 shrink-0 text-sm">Reasoning effort</span>
+            <span className="text-sm">
+              {provider.kind === "openrouter"
+                ? "Nested (OpenRouter)"
+                : provider.reasoningEffortFormat === "unsupported"
+                  ? "Unsupported"
+                  : provider.reasoningEffortFormat === "flat"
+                    ? "Flat"
+                    : "Nested"}
+            </span>
           </ListRow>
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">API key</span>
@@ -423,7 +443,13 @@ function EditProviderDialog({
   open,
   onOpenChange,
 }: {
-  provider: { id: string; name: string; kind: ProviderKind; baseUrl: string };
+  provider: {
+    id: string;
+    name: string;
+    kind: ProviderKind;
+    baseUrl: string;
+    reasoningEffortFormat: ReasoningEffortFormat;
+  };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -434,6 +460,9 @@ function EditProviderDialog({
   const initialBaseUrl = provider.baseUrl === defaultBaseUrl ? "" : provider.baseUrl;
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
+  const [reasoningEffortFormat, setReasoningEffortFormat] = useState(
+    provider.reasoningEffortFormat,
+  );
   // Empty means "keep the current key", since the stored key can't be shown.
   const [apiKey, setApiKey] = useState("");
   const complete = Boolean(name.trim());
@@ -445,6 +474,7 @@ function EditProviderDialog({
           providerId: provider.id,
           name: name.trim(),
           baseUrl: baseUrl.trim(),
+          ...(provider.kind === "openai-compatible" ? { reasoningEffortFormat } : {}),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         },
       }),
@@ -469,6 +499,7 @@ function EditProviderDialog({
           if (save.isPending) return;
           setName(provider.name);
           setBaseUrl(initialBaseUrl);
+          setReasoningEffortFormat(provider.reasoningEffortFormat);
           setApiKey("");
         }
         onOpenChange(next);
@@ -508,6 +539,32 @@ function EditProviderDialog({
                 disabled={save.isPending}
               />
             </Field>
+            {provider.kind === "openai-compatible" ? (
+              <Field>
+                <FieldLabel htmlFor={`${id}-reasoning-format`}>Reasoning effort format</FieldLabel>
+                <Select
+                  value={reasoningEffortFormat}
+                  onValueChange={(value) =>
+                    value && setReasoningEffortFormat(value as ReasoningEffortFormat)
+                  }
+                  items={[
+                    { value: "unsupported", label: "Unsupported" },
+                    { value: "flat", label: "Flat (reasoning_effort)" },
+                    { value: "nested", label: "Nested (reasoning.effort)" },
+                  ]}
+                >
+                  <SelectTrigger id={`${id}-reasoning-format`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unsupported">Unsupported</SelectItem>
+                    <SelectItem value="flat">Flat (reasoning_effort)</SelectItem>
+                    <SelectItem value="nested">Nested (reasoning.effort)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>Choose the request shape this endpoint accepts.</FieldDescription>
+              </Field>
+            ) : null}
             <Field>
               <FieldLabel htmlFor={`${id}-api-key`}>API key</FieldLabel>
               <Input

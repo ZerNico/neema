@@ -17,7 +17,14 @@ import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
-import type { ModelCapabilities, ModelPricing, ModelType } from "../model-config.ts";
+import {
+  REASONING_EFFORTS,
+  type ModelCapabilities,
+  type ModelPricing,
+  type ModelType,
+  type ReasoningEffort,
+  type ReasoningEffortFormat,
+} from "../model-config.ts";
 import { withHermesTools } from "./hermes-tools.ts";
 import { ProviderRepo } from "./repo.ts";
 import { extractThinkTags } from "./think-extractor.ts";
@@ -175,6 +182,13 @@ const ModelsResponse = Schema.Struct({
       name: Schema.optionalKey(Schema.String),
       context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
       supported_parameters: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      reasoning: Schema.optionalKey(
+        Schema.NullOr(
+          Schema.Struct({
+            supported_efforts: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+          }),
+        ),
+      ),
       // OpenRouter: USD per token, as decimal strings. Generic providers omit it.
       pricing: Schema.optionalKey(
         Schema.NullOr(
@@ -304,6 +318,7 @@ export class AiGateway extends Context.Service<
      */
     streamChat(input: {
       imageOutput?: boolean;
+      reasoningEffort?: ReasoningEffort | null;
       modelId: string;
       prompt: Prompt.Prompt;
       toolkit?: Toolkit.WithHandler<any>;
@@ -408,6 +423,7 @@ export class AiGateway extends Context.Service<
 
         return data.flatMap((m): CatalogModel[] => {
           const type = inferType(m.architecture?.output_modalities);
+          const supportedEfforts = m.reasoning?.supported_efforts;
           return type === null
             ? []
             : [
@@ -416,7 +432,19 @@ export class AiGateway extends Context.Service<
                   name: m.name ?? m.id,
                   type,
                   contextLength: m.context_length ?? null,
-                  capabilities: inferCapabilities(m),
+                  capabilities: {
+                    ...inferCapabilities(m),
+                    ...(provider.kind === "openrouter" && (supportedEfforts?.length ?? 0) > 0
+                      ? { reasoning: true }
+                      : {}),
+                    ...(provider.kind === "openrouter" && type === "chat" && supportedEfforts
+                      ? {
+                          reasoningEfforts: REASONING_EFFORTS.filter((effort) =>
+                            supportedEfforts.includes(effort),
+                          ),
+                        }
+                      : {}),
+                  },
                   pricing: catalogPricing(m.pricing),
                 },
               ];
@@ -431,7 +459,7 @@ export class AiGateway extends Context.Service<
       // continuation turns.
       const resolveModel = Effect.fn("AiGateway.resolveModel")(function* (
         modelId: string,
-        config?: { max_tokens?: number },
+        config?: { max_tokens?: number; reasoningEffort?: ReasoningEffort | null },
         imageOutput = false,
       ) {
         const model = yield* repo.getModel(modelId);
@@ -440,8 +468,16 @@ export class AiGateway extends Context.Service<
         if (!provider) return yield* new ModelNotFound({ modelId });
 
         const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
+        const { reasoningEffort, ...requestConfig } = config ?? {};
+        const reasoningFormat: ReasoningEffortFormat =
+          provider.kind === "openrouter" ? "nested" : provider.reasoningEffortFormat;
         const adapter = OpenRouterLanguageModel.model(model.modelKey, {
-          ...config,
+          ...requestConfig,
+          ...(reasoningEffort && reasoningFormat === "nested"
+            ? { reasoning: { effort: reasoningEffort } }
+            : reasoningEffort && reasoningFormat === "flat"
+              ? { reasoning_effort: reasoningEffort }
+              : {}),
           ...(actualImageOutput
             ? { modalities: ["text", "image"] as const }
             : provider.kind === "openrouter"
@@ -525,6 +561,7 @@ export class AiGateway extends Context.Service<
         toolChoice?: "auto" | "none" | "required";
         maxOutputTokens?: number;
         imageOutput?: boolean;
+        reasoningEffort?: ReasoningEffort | null;
       }): Stream.Stream<
         ChatStreamPart,
         ProviderUnreachable | ProviderContextOverflow | ModelNotFound
@@ -538,7 +575,14 @@ export class AiGateway extends Context.Service<
               explicitCache,
             } = yield* resolveModel(
               input.modelId,
-              input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
+              {
+                ...(input.maxOutputTokens === undefined
+                  ? {}
+                  : { max_tokens: input.maxOutputTokens }),
+                ...(input.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: input.reasoningEffort }),
+              },
               input.imageOutput === true,
             );
             const prompt = explicitCache ? withCacheControl(input.prompt) : input.prompt;

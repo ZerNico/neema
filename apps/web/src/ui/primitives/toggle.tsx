@@ -13,6 +13,8 @@ const toggleVariants = cva(
         // item has to read as chosen, not as hovered.
         solid:
           "bg-transparent aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/80 aria-pressed:hover:text-primary-foreground",
+        choice:
+          "bg-foreground/10 text-foreground hover:bg-foreground/15 aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/80 aria-pressed:hover:text-primary-foreground",
       },
       size: {
         default:

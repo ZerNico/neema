@@ -28,6 +28,7 @@ import {
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { projectResearchProgress } from "../research-schema.ts";
 import { createResearchStore, type ResearchStore } from "./research/repo.ts";
 import { researchRuns, researchTasks } from "~/db/schema/research.ts";
@@ -99,6 +100,7 @@ export interface GenerationConfig {
   readonly searchEnabled: boolean;
   /** Whether `deep_research` was offered; the model still chooses. */
   readonly researchEnabled: boolean;
+  readonly reasoningEffort: ReasoningEffort | null;
   readonly planEnabled: boolean;
   /**
    * Names when this attempt could reach a machine; null when it could not.
@@ -119,7 +121,11 @@ export interface DraftSummary {
   name: string;
   messageId: string;
 }
-const draftSummary = (draft: { id: string; settings: unknown; messageId: string }): DraftSummary => ({
+const draftSummary = (draft: {
+  id: string;
+  settings: unknown;
+  messageId: string;
+}): DraftSummary => ({
   id: draft.id,
   name: (draft.settings as { name?: string }).name ?? "",
   messageId: draft.messageId,
@@ -163,6 +169,7 @@ export const PLAIN_GENERATION: GenerationConfig = {
   knowledgeMode: "none",
   searchEnabled: false,
   researchEnabled: false,
+  reasoningEffort: null,
   planEnabled: false,
 };
 
@@ -444,6 +451,7 @@ const toConfig = (
   knowledgeMode: row.knowledgeMode,
   searchEnabled: row.searchEnabled,
   researchEnabled: row.researchEnabled,
+  reasoningEffort: row.reasoningEffort,
   planEnabled: row.planEnabled,
   desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
@@ -550,6 +558,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       planEnabled: config.planEnabled,
       searchEnabled: config.searchEnabled,
       researchEnabled: config.researchEnabled,
+      reasoningEffort: config.reasoningEffort,
       desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
       desktopMachineId: config.desktopMachineId ?? null,
@@ -1378,9 +1387,7 @@ export class ChatRepo extends Context.Service<
                       modelId: input.modelId,
                       title: null,
                       mode: input.conversation.mode,
-                      ...(input.scheduleId !== undefined
-                        ? { scheduleId: input.scheduleId }
-                        : {}),
+                      ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
                     })
                     .returning()
                     .pipe(Effect.orDie);

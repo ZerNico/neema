@@ -85,6 +85,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversation: data.conversation,
           modelId: data.modelId,
+          reasoningEffort: data.reasoningEffort,
           content: data.content,
           researchEnabled: data.researchEnabled,
           searchEnabled: data.searchEnabled,
@@ -166,6 +167,7 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
           reservationId: data.reservationId,
           conversation: data.conversation,
           modelId: data.modelId,
+          reasoningEffort: data.reasoningEffort,
           content: data.content,
           researchEnabled: data.researchEnabled,
           searchEnabled: data.searchEnabled,
@@ -256,6 +258,7 @@ const queueSubmission = (
   attachmentIds: data.attachmentIds,
   input: {
     modelId: data.modelId,
+    ...(data.reasoningEffort !== undefined ? { reasoningEffort: data.reasoningEffort } : {}),
     searchEnabled: data.searchEnabled,
     researchEnabled: data.researchEnabled,
     skillIds: data.skillIds,
@@ -453,6 +456,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           openDocumentId: data.openDocumentId,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
+          reasoningEffort: data.reasoningEffort,
         }),
       ).pipe(
         Effect.catchTags({

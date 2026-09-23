@@ -1,6 +1,13 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { EditMessageInput, RetryMessageInput, SendMessageInput } from "./schema.ts";
+import {
+  ActivateWorkTurnInput,
+  AnswerQuestionInput,
+  EditMessageInput,
+  QueueMessageInput,
+  RetryMessageInput,
+  SendMessageInput,
+} from "./schema.ts";
 
 const generation = {
   modelId: "m1",
@@ -24,6 +31,45 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
   expect(decode(input)).toEqual(input);
   expect(() => decode({ ...input, content: "arbitrary prose" })).toThrow();
   expect(() => decode({ ...input, questionResponse: { kind: "answers", answers: [] } })).toThrow();
+});
+
+it("accepts supported reasoning efforts and defaults across submissions", () => {
+  const id = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
+  const send = { conversation: { kind: "new", id, mode: "chat" }, ...generation };
+  const work = { ...send, reservationId: id, workspaceFiles: ["notes.txt"] };
+  const answer = {
+    conversationId: "c1",
+    callId: "call1",
+    response: { kind: "skip" },
+    modelId: "m1",
+    searchEnabled: false,
+    researchEnabled: false,
+  };
+  const edit = { conversationId: "c1", messageId: "u1", ...generation };
+  const structuredEdit = {
+    conversationId: "c1",
+    messageId: "u1",
+    modelId: "m1",
+    searchEnabled: false,
+    researchEnabled: false,
+    attachmentIds: [],
+    questionResponse: { kind: "skip" },
+  };
+  const queue = { conversationId: "c1", ...generation };
+  for (const [schema, input] of [
+    [SendMessageInput, send],
+    [ActivateWorkTurnInput, work],
+    [AnswerQuestionInput, answer],
+    [EditMessageInput, edit],
+    [EditMessageInput, structuredEdit],
+    [QueueMessageInput, queue],
+  ] as const) {
+    const decode = Schema.decodeUnknownSync(schema);
+    expect(decode(input)).not.toHaveProperty("reasoningEffort");
+    expect(decode({ ...input, reasoningEffort: null })).toHaveProperty("reasoningEffort", null);
+    expect(decode({ ...input, reasoningEffort: "high" })).toHaveProperty("reasoningEffort", "high");
+    expect(() => decode({ ...input, reasoningEffort: "unsupported" })).toThrow();
+  }
 });
 
 for (const [name, schema, input] of [

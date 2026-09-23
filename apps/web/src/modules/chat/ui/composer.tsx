@@ -7,6 +7,7 @@ import { extractReferences, restoreReferences, type MessageReference } from "../
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import {
   useDesktop,
   useDesktopOutdated,
@@ -31,7 +32,11 @@ export interface ComposerHandle {
 
 /** A queued message as the composer reopens it for editing. */
 export interface EditableQueuedMessage extends QueuedMessage {
-  input: { researchEnabled: boolean; skillIds?: ReadonlyArray<string> | undefined };
+  input: {
+    researchEnabled: boolean;
+    reasoningEffort?: ReasoningEffort | null;
+    skillIds?: ReadonlyArray<string> | undefined;
+  };
 }
 
 export interface ComposerQueue {
@@ -80,6 +85,8 @@ interface ComposerProps {
   onModelChange: (modelId: string, source?: "default") => void;
   searchEnabled: boolean;
   onSearchEnabledChange: (enabled: boolean) => void;
+  reasoningEffort?: ReasoningEffort | null | undefined;
+  onReasoningEffortChange?: ((effort: ReasoningEffort | null) => void) | undefined;
   controlsDisabled?: boolean;
   context?: ComposerContext | undefined;
   initialSkillId?: string | null | undefined;
@@ -123,6 +130,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onModelChange,
     searchEnabled,
     onSearchEnabledChange,
+    reasoningEffort,
+    onReasoningEffortChange,
     textareaDisabled,
     controlsDisabled,
     context,
@@ -378,6 +387,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onModelChange={onModelChange}
         searchEnabled={searchEnabled}
         onSearchEnabledChange={onSearchEnabledChange}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={onReasoningEffortChange}
         researchEnabled={activeResearch}
         {...(canResearch ? { onResearchEnabledChange: setResearchEnabled } : {})}
         // Offered only where Work can be honoured: a new chat, in the desktop app.

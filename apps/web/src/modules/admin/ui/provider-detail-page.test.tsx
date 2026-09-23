@@ -28,6 +28,7 @@ vi.mock("./model-combobox.tsx", () => ({
           contextLength: 128_000,
           capabilities: {
             reasoning: true,
+            reasoningEfforts: ["low", "high"],
             tools: true,
             vision: false,
             files: false,
@@ -67,6 +68,27 @@ describe("AddModelDialog", () => {
     await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
     expect(screen.getByLabelText("Type")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add model" })).toBeEnabled();
+  });
+
+  it("prefills catalog effort levels and allows editing the selection", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["admin", "groups"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <AddModelDialog providerId="provider-1" open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
+    expect(screen.getByRole("button", { name: "Low" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Low" }));
+    await user.click(screen.getByRole("button", { name: "Add model" }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    const capabilities = createMock.mock.lastCall?.[0].data.capabilities;
+    expect(
+      capabilities && "reasoningEfforts" in capabilities ? capabilities.reasoningEfforts : null,
+    ).toEqual(["high"]);
   });
 
   it("detects an embedding model's dimensions from the provider and reports failures inline", async () => {

@@ -25,7 +25,13 @@ import {
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
-import { CollectionChip, ReferenceChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
+import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
+import {
+  CollectionChip,
+  ReferenceChip,
+  ContextChip,
+  type ComposerContext,
+} from "./context-picker.tsx";
 import { extractReferences, restoreReferences } from "../references.ts";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
@@ -169,6 +175,8 @@ export interface DisplayMessage {
     modelId: string | null;
     onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
+    reasoningEffort?: ReasoningEffort | null | undefined;
+    onReasoningEffortChange?: ((effort: ReasoningEffort | null) => void) | undefined;
     researchEnabled?: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
     onResearchEnabledChange?: (enabled: boolean) => void;
@@ -299,6 +307,8 @@ function InlineMessageEditor({
         modelId={editState.modelId}
         onModelChange={editState.onModelChange}
         searchEnabled={editState.searchEnabled}
+        reasoningEffort={editState.reasoningEffort}
+        onReasoningEffortChange={editState.onReasoningEffortChange}
         researchEnabled={editState.researchEnabled ?? false}
         onSearchEnabledChange={editState.onSearchEnabledChange}
         {...(editState.onResearchEnabledChange

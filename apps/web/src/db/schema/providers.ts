@@ -3,6 +3,7 @@ import type {
   ModelCapabilities,
   ModelPricing,
   ModelType,
+  ReasoningEffortFormat,
 } from "~/modules/providers/model-config.ts";
 
 export type JsonValue =
@@ -26,6 +27,12 @@ export const providers = pgTable("providers", {
   // AES-256-GCM encrypted with PROVIDER_KEY_SECRET; never returned to clients
   apiKeyCiphertext: text("api_key_ciphertext").notNull(),
   enabled: boolean().notNull().default(true),
+  reasoningEffortFormat: text("reasoning_effort_format", {
+    enum: ["unsupported", "flat", "nested"],
+  })
+    .$type<ReasoningEffortFormat>()
+    .notNull()
+    .default("unsupported"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
