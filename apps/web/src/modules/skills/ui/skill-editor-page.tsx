@@ -108,8 +108,8 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
   const [revision, setRevision] = useState(initial?.revision);
   const [access, setAccess] = useState(false);
   const [updating, setUpdating] = useState(false);
-  // Most people only ever need the form; a skill whose SKILL.md it can't read
-  // opens on its files, and the form stays unavailable until that's fixed.
+  // Most people only ever need the simple form; a skill whose SKILL.md it can't
+  // read opens in advanced mode, and simple stays unavailable until that's fixed.
   const [view, setView] = useState<"form" | "files">(() =>
     canEditSimply(initial?.files ?? NEW_SKILL_FILES) ? "form" : "files",
   );
@@ -277,7 +277,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
       }
     >
       <SegmentedControl
-        aria-label="Edit as"
+        aria-label="Editor mode"
         value={[view === "form" && formAvailable ? "form" : "files"]}
         multiple={false}
         onValueChange={(value) => {
@@ -286,9 +286,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
         className="self-start"
       >
         <SegmentedControlItem value="form" disabled={!formAvailable}>
-          Instructions
+          Simple
         </SegmentedControlItem>
-        <SegmentedControlItem value="files">Files</SegmentedControlItem>
+        <SegmentedControlItem value="files">Advanced</SegmentedControlItem>
       </SegmentedControl>
       {view === "form" && formAvailable ? (
         <SkillSimpleForm
@@ -305,10 +305,6 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           findings={findings}
         />
       )}
-      <p className="text-muted-foreground text-xs">
-        A skill is instructions, not access: files here are stored and read, never run. Anyone you
-        share it with can see its instructions.
-      </p>
       {initial ? (
         <AccessDialog
           resource={{ kind: "skill", id: initial.id }}
