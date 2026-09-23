@@ -12,6 +12,7 @@ import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "~/routes/_app.index.tsx";
 import { sendMessage } from "../server/functions.ts";
+import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
@@ -97,6 +98,21 @@ async function fixture({
     ],
   );
   client.setQueryData(["agents", "list"], []);
+  client.setQueryData(
+    ["schedules"],
+    [
+      {
+        id: "s1",
+        name: "Morning digest",
+        scheduleText: "Every weekday at 07:00",
+        cron: "0 7 * * 1-5",
+        timezone: "UTC",
+        paused: false,
+        nextFireAt: null,
+        lastFiredAt: null,
+      },
+    ],
+  );
   client.setQueryData(["knowledge", "collections"], []);
   client.setQueryData(["skills"], []);
   for (const name of ["web-search", "research", "document-parsing"])
@@ -161,6 +177,21 @@ describe("one-shot new-chat prefill", () => {
     });
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).not.toHaveProperty("authoring");
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).not.toHaveProperty("agentId");
+  });
+
+  it("shows what an edit request is about as a chip and sends the link it came with", async () => {
+    const request = scheduleAuthoringRequest("s1");
+    await fixture({ prefill: request });
+    const textbox = await screen.findByRole("textbox");
+    await waitFor(() =>
+      expect(textbox).toHaveValue(
+        "Help me change this schedule. Ask what I’d like to change, then prepare a draft for me to review before saving.",
+      ),
+    );
+    expect(screen.getByText("Morning digest")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({ content: request });
   });
 
   it("does not reinsert cleared text on refresh, Back/Forward, or remount", async () => {

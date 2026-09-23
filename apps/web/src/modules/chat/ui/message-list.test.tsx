@@ -500,7 +500,10 @@ describe("MessageBubble citations", () => {
 });
 
 describe("MessageBubble actions", () => {
-  const renderPlain = (overrides: Partial<Parameters<typeof MessageBubble>[0]["message"]> = {}) => {
+  const renderPlain = (
+    overrides: Partial<Parameters<typeof MessageBubble>[0]["message"]> = {},
+    seed?: (client: QueryClient) => void,
+  ) => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(
       ["chat-models"],
@@ -525,6 +528,7 @@ describe("MessageBubble actions", () => {
       configured: true,
       enabled: true,
     });
+    seed?.(queryClient);
     return render(
       <QueryClientProvider client={queryClient}>
         <MessageBubble
@@ -675,6 +679,25 @@ describe("MessageBubble actions", () => {
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     screen.getByRole("button", { name: "Retry" }).click();
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("shows what a request is about as a chip and reads the rest as plain words", () => {
+    renderPlain(
+      {
+        role: "user",
+        content: "Help me improve [this agent](/agents/a1). Ask what I’d like to change.",
+      },
+      (client) =>
+        client.setQueryData(
+          ["agents", "list"],
+          [{ id: "a1", name: "Contract reviewer", icon: "robot" }],
+        ),
+    );
+    expect(screen.getByText("Contract reviewer")).toBeVisible();
+    expect(
+      screen.getByText("Help me improve this agent. Ask what I’d like to change."),
+    ).toBeVisible();
+    expect(screen.queryByText(/\/agents\/a1/)).not.toBeInTheDocument();
   });
 
   it("shows retry only when the message offers it", () => {

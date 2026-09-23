@@ -1,6 +1,7 @@
 import {
   Book02Icon,
   BriefcaseIcon,
+  Calendar03Icon,
   Cancel01Icon,
   ChartIcon,
   FolderLibraryIcon,
@@ -16,6 +17,8 @@ import { useState } from "react";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import type { AgentIcon, AgentSummary } from "~/modules/agents/schema.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
+import { schedulesQuery } from "~/modules/schedules/client/queries.ts";
+import type { MessageReference } from "../references.ts";
 import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -327,7 +330,7 @@ export function CollectionPicker({
  * read as one row: an icon tile, a name, and a one-line note underneath.
  */
 export interface ContextChipItem {
-  readonly kind: "agent" | "collection" | "skill";
+  readonly kind: "agent" | "collection" | "schedule" | "skill";
   readonly id: string | null;
   /** Null when the id no longer resolves to something the viewer may read. */
   readonly name: string | null;
@@ -445,7 +448,9 @@ export function ContextChip({
       ? "Agent unavailable"
       : item.kind === "skill"
         ? "Skill unavailable"
-        : "Collection unavailable");
+        : item.kind === "schedule"
+          ? "Schedule unavailable"
+          : "Collection unavailable");
   return (
     <span
       title={label}
@@ -462,7 +467,9 @@ export function ContextChip({
               ? agentIcon(item.icon ?? "robot")
               : item.kind === "skill"
                 ? Book02Icon
-                : FolderLibraryIcon
+                : item.kind === "schedule"
+                  ? Calendar03Icon
+                  : FolderLibraryIcon
           }
           strokeWidth={2}
           className="size-4"
@@ -491,6 +498,38 @@ export function ContextChip({
         </Button>
       ) : null}
     </span>
+  );
+}
+
+/**
+ * The agent or schedule a message is about, by its current name. Until the
+ * list arrives the link's own words stand in; a reference that no longer
+ * resolves says so, the way an unavailable collection does.
+ */
+export function ReferenceChip({
+  reference,
+  onRemove,
+}: {
+  reference: MessageReference;
+  onRemove?: (() => void) | undefined;
+}) {
+  const agents = useQuery({ ...agentsQuery, enabled: reference.kind === "agent" });
+  const schedules = useQuery({ ...schedulesQuery, enabled: reference.kind === "schedule" });
+  const agent = agents.data?.find((candidate) => candidate.id === reference.id);
+  const schedule = schedules.data?.find((candidate) => candidate.id === reference.id);
+  const loaded = reference.kind === "agent" ? agents.data !== undefined : schedules.data !== undefined;
+  const name = agent?.name ?? schedule?.name ?? (loaded ? null : reference.label);
+  return (
+    <ContextChip
+      item={{
+        kind: reference.kind,
+        id: reference.id,
+        name,
+        icon: agent?.icon,
+        note: reference.kind === "agent" ? "Agent" : "Schedule",
+      }}
+      onRemove={onRemove}
+    />
   );
 }
 

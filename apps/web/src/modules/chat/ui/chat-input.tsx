@@ -26,6 +26,7 @@ import {
   CollectionPicker,
   ContextChips,
   ContextChip,
+  ReferenceChip,
   ContextMenuItems,
   MAX_SELECTED_COLLECTIONS,
   collectionStatus,
@@ -62,6 +63,7 @@ import { MotionSwap, useAppReducedMotion } from "~/ui/motion.tsx";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type { ConversationMode } from "../schema.ts";
+import type { MessageReference } from "../references.ts";
 
 export const ChatInput = forwardRef<
   HTMLTextAreaElement,
@@ -106,6 +108,13 @@ export const ChatInput = forwardRef<
           onChange: (ids: string[]) => void;
         }
       | undefined;
+    /** The agent or schedule this message is about, shown as chips. */
+    references?:
+      | {
+          items: readonly MessageReference[];
+          onRemove: (reference: MessageReference) => void;
+        }
+      | undefined;
     placeholder?: string;
     textareaLabel?: string;
     autoFocus?: boolean;
@@ -134,6 +143,7 @@ export const ChatInput = forwardRef<
     workspaceImports,
     context,
     skills,
+    references,
     placeholder = "Message…",
     textareaLabel,
     autoFocus = false,
@@ -329,7 +339,8 @@ export const ChatInput = forwardRef<
       {context?.agentLocked && context.selection.agent ? (
         <AgentBar agent={context.selection.agent} />
       ) : null}
-      {(context?.agentSkillIds && context.agentSkillIds.size > 0) ||
+      {(references && references.items.length > 0) ||
+      (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
       (skills && skills.selectedIds.length > 0) ||
       (attachments && items.length > 0) ||
       (workspaceImports && importItems.length > 0) ||
@@ -337,6 +348,14 @@ export const ChatInput = forwardRef<
         ((context.selection.agent && !context.agentLocked) ||
           context.selection.collectionIds.length > 0)) ? (
         <AttachmentChipRow className="px-3 pt-3">
+          {/* What the message is about comes first. */}
+          {references?.items.map((reference) => (
+            <ReferenceChip
+              key={`${reference.kind}:${reference.id}`}
+              reference={reference}
+              onRemove={controlsDisabled ? undefined : () => references.onRemove(reference)}
+            />
+          ))}
           {[...(context?.agentSkillIds ?? [])]
             .filter((id) => !skills?.selectedIds.includes(id))
             .map((id) => (

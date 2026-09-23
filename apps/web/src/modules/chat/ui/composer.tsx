@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ChatInput } from "./chat-input.tsx";
+import { extractReferences, restoreReferences, type MessageReference } from "../references.ts";
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { ConversationMode } from "../schema.ts";
@@ -115,6 +116,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     initialSkillId ? [initialSkillId] : [],
   );
   const [draft, setDraft] = useState("");
+  // What a prefill links to (an agent or schedule to edit), shown as chips and
+  // written back into the text on send.
+  const [references, setReferences] = useState<MessageReference[]>([]);
   const [researchEnabled, setResearchEnabled] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const touched = useRef(false);
@@ -140,7 +144,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (touched.current) return;
         touched.current = true;
         // A user may have typed into the server-rendered textarea before hydration.
-        setDraft(textareaRef.current?.value || text);
+        const typed = textareaRef.current?.value;
+        if (typed) {
+          setDraft(typed);
+          return;
+        }
+        const prefill = extractReferences(text);
+        setDraft(prefill.text);
+        setReferences(prefill.references);
       },
       focus: () => textareaRef.current?.focus(),
     }),
@@ -150,6 +161,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // Text and selections stay editable while uploads settle; dispatch the current request.
   const requestRef = useRef({
     draft,
+    references,
     researchEnabled,
     skillIds,
     onSend,
@@ -160,6 +172,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   useEffect(() => {
     requestRef.current = {
       draft,
+      references,
       researchEnabled,
       skillIds,
       onSend,
@@ -180,7 +193,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const sendRest = (attachmentIds: ReadonlyArray<string>) => {
         const current = requestRef.current;
         if (submitted.blockedReason || submitted.disabled || !submitted.modelId) return;
-        const content = current.draft.trim();
+        const content = restoreReferences(current.draft.trim(), current.references);
         if (!content && attachmentIds.length === 0 && workspaceFiles.length === 0) return;
         // A plain send keeps the arity older callers were written against;
         // only a work chat's local files add the fifth argument.
@@ -197,6 +210,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         void request.then(
           () => {
             setDraft("");
+            setReferences([]);
             setSkillIds([]);
             setResearchEnabled(false);
             // The message owns them now; dropping the chips must not delete them.
@@ -217,6 +231,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <ChatInput
         ref={textareaRef}
         skills={{ items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds }}
+        references={{
+          items: references,
+          onRemove: (removed) =>
+            setReferences((current) => current.filter((reference) => reference !== removed)),
+        }}
         value={draft}
         onValueChange={(value) => {
           touched.current = true;

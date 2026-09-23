@@ -173,6 +173,10 @@ false`), so a page body is written against data already there. This includes loc
 
 ## Chat-specific pieces
 
+- A message about an agent or schedule carries a Markdown link to its page (`[this schedule](/schedules/<id>)`):
+  that is how the model finds the ID. `modules/chat/references.ts` is the one parser: the composer, the edit
+  box and the sent bubble show a chip plus the link's own words, and the composer puts the link back on send,
+  so the stored text, retry and branch are unchanged.
 - The web-search toggle rests on a default (`useSearchMode(defaultEnabled)`): true in plain chat,
   the installed or selected agent's "web search by default" otherwise. A manual flip is one
   message's opt-in or opt-out and resets on send; picking another agent in a new chat resets it

@@ -25,7 +25,8 @@ import {
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
-import { agentIcon, CollectionChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
+import { agentIcon, CollectionChip, ReferenceChip, ContextChip, type ComposerContext } from "./context-picker.tsx";
+import { extractReferences, restoreReferences } from "../references.ts";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
@@ -270,7 +271,10 @@ function InlineMessageEditor({
 }: {
   editState: NonNullable<DisplayMessage["editState"]>;
 }) {
-  const [draft, setDraft] = useState(editState.initialDraft);
+  // Edited as plain words with chips, like the composer; saved with the links back.
+  const [initial] = useState(() => extractReferences(editState.initialDraft));
+  const [draft, setDraft] = useState(initial.text);
+  const [references, setReferences] = useState(initial.references);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ChatTextarea sizes itself in its child layout effect first. Focus without
@@ -288,7 +292,7 @@ function InlineMessageEditor({
         ref={textareaRef}
         value={draft}
         onValueChange={setDraft}
-        onSubmit={() => editState.onSave(draft)}
+        onSubmit={() => editState.onSave(restoreReferences(draft, references))}
         onCancel={editState.onCancel}
         disabled={editState.saveDisabled}
         controlsDisabled={editState.controlsDisabled}
@@ -303,6 +307,11 @@ function InlineMessageEditor({
         attachments={editState.attachments}
         {...(editState.skills ? { skills: editState.skills } : {})}
         {...(editState.context ? { context: editState.context } : {})}
+        references={{
+          items: references,
+          onRemove: (removed) =>
+            setReferences((current) => current.filter((reference) => reference !== removed)),
+        }}
         placeholder="Edit message…"
         textareaLabel="Edit message"
         submitLabel="Save edit"
@@ -313,6 +322,8 @@ function InlineMessageEditor({
 
 function UserBubble({ message }: { message: DisplayMessage }) {
   const wrapperRef = useEditSwapHeight(message.editState !== undefined);
+  // The stored text keeps its links for the model; people see chips and words.
+  const { text, references } = extractReferences(message.content);
 
   return (
     <div ref={wrapperRef} className="w-full">
@@ -320,11 +331,15 @@ function UserBubble({ message }: { message: DisplayMessage }) {
         <InlineMessageEditor editState={message.editState} />
       ) : (
         <div className="group/user flex w-full flex-col items-end">
-          {(message.attachments && message.attachments.length > 0) ||
+          {references.length > 0 ||
+          (message.attachments && message.attachments.length > 0) ||
           (message.workspaceFiles && message.workspaceFiles.length > 0) ||
           (message.collectionIds && message.collectionIds.length > 0) ||
           (message.skills && message.skills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
+              {references.map((reference) => (
+                <ReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
+              ))}
               {message.skills?.map((skill) => (
                 <ContextChip
                   key={skill.id}
@@ -353,9 +368,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             </AttachmentChipRow>
           ) : null}
           {/* An attachment-only turn has no text bubble to draw. */}
-          {message.content ? (
+          {text ? (
             <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
-              {message.content}
+              {text}
             </div>
           ) : null}
           {message.editedAt ? (
@@ -366,7 +381,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* Hover-revealed on pointer devices; always visible on touch, where
               there is no hover. focus-within keeps them keyboard-reachable. */}
           <MessageActions
-            content={message.content}
+            content={text}
             sources={[]}
             time={message.time}
             timeFirst
