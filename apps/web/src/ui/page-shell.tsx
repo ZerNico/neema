@@ -4,7 +4,7 @@ import { Link, useMatches } from "@tanstack/react-router";
 import type { IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { cardSurfaceClassName } from "~/ui/card.tsx";
-import { Button, buttonVariants } from "~/ui/primitives/button";
+import { Button } from "~/ui/primitives/button";
 import {
   Empty,
   EmptyContent,
@@ -55,14 +55,8 @@ export function SectionShell({
           atRoot ? "flex" : "hidden md:flex",
         )}
       >
-        <div className="flex h-9 items-center gap-1 px-1">
-          <Link
-            to="/"
-            aria-label="Back to chat"
-            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-          >
-            <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
-          </Link>
+        {/* No way back to chat here: the app sidebar is how you leave. */}
+        <div className="flex h-9 items-center px-2.5">
           <span className="text-sm font-medium">{title}</span>
         </div>
         <div className="mt-2 flex flex-col gap-0.5">

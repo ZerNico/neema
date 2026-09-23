@@ -34,6 +34,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSkeleton,
 } from "~/ui/primitives/sidebar";
+import { ClosesOnLink } from "~/ui/sidebar-links.tsx";
 import { cn } from "~/ui/utils";
 
 export function AppSidebar({
@@ -51,77 +52,79 @@ export function AppSidebar({
 
   return (
     <Sidebar>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton render={<Link to="/" />}>
-              <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-6 items-center justify-center rounded-md">
-                <NeemaGlyph className="size-4" />
-              </span>
-              <span className="font-semibold">neema</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
-          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-          New chat
-        </Link>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
-              <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
-              Agents
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
-              <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
-              Knowledge
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={trimmed.startsWith("/schedules")}
-              render={<Link to="/schedules" />}
-            >
-              <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} />
-              Schedules
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={trimmed.startsWith("/skills")}
-              render={<Link to="/skills" />}
-            >
-              <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
-              Skills
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
-              <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
-              Chats
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      {/* Match the chat scroller's soft edge; padding keeps the first and last
+      <ClosesOnLink>
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton render={<Link to="/" />}>
+                <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-6 items-center justify-center rounded-md">
+                  <NeemaGlyph className="size-4" />
+                </span>
+                <span className="font-semibold">neema</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+          <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
+            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+            New chat
+          </Link>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
+                <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
+                Agents
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
+                <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
+                Knowledge
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={trimmed.startsWith("/schedules")}
+                render={<Link to="/schedules" />}
+              >
+                <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} />
+                Schedules
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={trimmed.startsWith("/skills")}
+                render={<Link to="/skills" />}
+              >
+                <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
+                Skills
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
+                <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
+                Chats
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        {/* Match the chat scroller's soft edge; padding keeps the first and last
           items outside the fade when the list is scrolled to either end. */}
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the padding keeps items clear of the mask */}
-      <SidebarContent className="py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
-        {/* The route loader prefetches the first page, so this only shows on
+        {/* oxlint-disable-next-line shadcn/no-restyle -- the padding keeps items clear of the mask */}
+        <SidebarContent className="py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
+          {/* The route loader prefetches the first page, so this only shows on
             a cold cache (e.g. right after sign-out emptied it). */}
-        <Suspense fallback={<ConversationListSkeleton />}>
-          <ConversationList />
-        </Suspense>
-      </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <AccountMenu user={user} impersonating={impersonating} />
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+          <Suspense fallback={<ConversationListSkeleton />}>
+            <ConversationList />
+          </Suspense>
+        </SidebarContent>
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <AccountMenu user={user} impersonating={impersonating} />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      </ClosesOnLink>
     </Sidebar>
   );
 }
