@@ -41,9 +41,9 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
           ordinals: renderedMemory?.ordinals ?? new Map(),
         })
       : undefined;
-  const messages = (allowSave = memoryTools !== undefined): Prompt.MessageEncoded[] => [
+  const messages = (): Prompt.MessageEncoded[] => [
     ...(renderedMemory || memoryTools
-      ? [{ role: "system" as const, content: memorySystemPolicy(allowSave) }]
+      ? [{ role: "system" as const, content: memorySystemPolicy() }]
       : []),
     ...(renderedMemory
       ? [

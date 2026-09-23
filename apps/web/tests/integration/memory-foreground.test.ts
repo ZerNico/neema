@@ -791,7 +791,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls).toHaveLength(1);
     expect(gatewayState.calls[0]?.tools).toEqual([...DOCUMENT_TOOLS, "ask_user", "save_memory"]);
-    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
+    expect(gatewayState.calls[0]?.prompt).toContain("When the save_memory tool is available, call it once");
     expect(gatewayState.calls[0]?.prompt).not.toContain("web_search");
     expect(gatewayState.calls[0]?.prompt).not.toContain("<system-reminder>");
     expect(gatewayState.calls[0]?.prompt).not.toContain("Remember to cite inline");
@@ -953,7 +953,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
       [...DOCUMENT_TOOLS, "web_search", "ask_user", "save_memory"],
     ]);
-    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
+    expect(gatewayState.calls[0]?.prompt).toContain("When the save_memory tool is available, call it once");
   }, 60_000);
 
   it("saves memory after a web search and withdraws it only after its own attempt", async () => {
@@ -977,7 +977,7 @@ describe.sequential("StreamEngine foreground saved memory", () => {
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
     expect(gatewayState.calls[0]?.tools).toContain("save_memory");
-    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
+    expect(gatewayState.calls[0]?.prompt).toContain("When the save_memory tool is available, call it once");
     // The skill is a real pinned selection, not merely an ambient offer: an
     // explicit entry has its root loaded into the prompt up front.
     expect(gatewayState.calls[0]?.prompt).toContain("<skill-guidance");
@@ -990,6 +990,6 @@ describe.sequential("StreamEngine foreground saved memory", () => {
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
       [...DOCUMENT_TOOLS, "ask_user", "save_memory"],
     ]);
-    expect(gatewayState.calls[0]?.prompt).toContain("save_memory once before your final answer");
+    expect(gatewayState.calls[0]?.prompt).toContain("When the save_memory tool is available, call it once");
   }, 60_000);
 });
