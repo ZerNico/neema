@@ -138,10 +138,12 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     onSubmit: async ({ value, formApi }) => {
       try {
         await updateSchedule({ data: { scheduleId, settings: value } });
+        // Confirm before the reset: resetting ends the submit, and in between
+        // the button would show its idle label for a moment.
+        markSaved();
         if (JSON.stringify(formApi.state.values) === JSON.stringify(value))
           formApi.reset(value, { keepDefaultValues: true });
         await invalidate();
-        markSaved();
       } catch (error) {
         toastError("Could not save the schedule.", error);
       }

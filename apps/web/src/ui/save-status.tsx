@@ -38,14 +38,17 @@ export function SaveLabel({
     <span className="grid">
       <span
         aria-hidden={justSaved || undefined}
-        className={cn("col-start-1 row-start-1 text-center", justSaved && "opacity-0")}
+        className={cn(
+          "col-start-1 row-start-1 text-center transition-opacity",
+          justSaved && "opacity-0",
+        )}
       >
         {children}
       </span>
       <span
         aria-hidden={!justSaved || undefined}
         className={cn(
-          "col-start-1 row-start-1 inline-flex items-center justify-center gap-[inherit]",
+          "col-start-1 row-start-1 inline-flex items-center justify-center gap-[inherit] transition-opacity",
           !justSaved && "opacity-0",
         )}
       >

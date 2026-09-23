@@ -137,10 +137,12 @@ function AgentForm({
             data: { agentId: agent.id, expectedRevision: revision.current!, ...settings },
           });
           revision.current = revision.current! + 1;
+          // Confirm before the reset: resetting ends the submit, and in between
+          // the button would show its idle label for a moment.
+          markSaved();
           if (JSON.stringify(formApi.state.values) === JSON.stringify(value))
             formApi.reset(value, { keepDefaultValues: true });
           await onSaved(agent.id);
-          markSaved();
         } else {
           const id = await createAgent({ data: settings });
           await onSaved(id);

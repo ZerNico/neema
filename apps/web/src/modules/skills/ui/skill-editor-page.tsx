@@ -151,12 +151,12 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
         },
       }),
     onSuccess: async (id, submitted) => {
+      // A new skill's own page is the confirmation.
+      if (initial) markSaved();
       setSaved(JSON.stringify(submitted));
       setRevision((current) => (current ?? 0) + 1);
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
-      // A new skill's own page is the confirmation.
-      if (initial) markSaved();
-      else
+      if (!initial)
         await navigate({ to: "/skills/$skillId", params: { skillId: id }, ignoreBlocker: true });
     },
     onError: () =>

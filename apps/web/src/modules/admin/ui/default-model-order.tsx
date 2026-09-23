@@ -59,12 +59,12 @@ export function DefaultModelOrder({
   const save = useMutation({
     mutationFn: (modelIds: string[]) => updateDefaultModelOrder({ data: { modelIds } }),
     onSuccess: async () => {
+      markSaved();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin", "models"] }),
         queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
       ]);
       setDraft(null);
-      markSaved();
     },
     onError: () =>
       toast.error(

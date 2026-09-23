@@ -321,10 +321,10 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       );
     },
     onSuccess: async (saved) => {
-      await invalidateLists(queryClient);
       // A new module's own page is the confirmation.
       if (tool) markSaved();
-      else
+      await invalidateLists(queryClient);
+      if (!tool)
         await navigate({ to: "/admin/custom-tools/$toolId", params: { toolId: saved.id } });
     },
     onError: async (error) => {

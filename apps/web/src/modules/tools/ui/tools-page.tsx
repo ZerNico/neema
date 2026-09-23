@@ -164,8 +164,8 @@ function WebSearchSection() {
         toast.error("Could not save the web search settings.");
         return;
       }
-      form.reset({ ...value, secret: "" });
       markSaved();
+      form.reset({ ...value, secret: "" });
       await invalidate();
     },
   });
@@ -354,8 +354,8 @@ function UrlReaderSection() {
         toast.error("Could not save the URL reader settings.");
         return;
       }
-      form.reset({ perPageCharCap: value.perPageCharCap });
       markSaved();
+      form.reset({ perPageCharCap: value.perPageCharCap });
       await invalidate();
     },
   });

@@ -9,6 +9,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -298,8 +299,9 @@ function DraftActions<S extends Record<string, unknown>>({
   const saved = isSaved(controller);
   const { justSaved, markSaved } = useSaveStatus();
   // The save runs in the controller; the moment it lands is when "saved" turns on.
+  // A layout effect, so the button never paints its idle label in between.
   const wasSaved = useRef(saved);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (saved && !wasSaved.current) markSaved();
     wasSaved.current = saved;
   }, [markSaved, saved]);

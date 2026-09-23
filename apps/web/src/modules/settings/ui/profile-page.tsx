@@ -54,11 +54,13 @@ function ProfileForms({
         toast.error("Could not save the profile.");
         return;
       }
+      // Confirm before the reset: resetting ends the submit, and in between the
+      // button would show its idle label for a moment.
+      markNameSaved();
       queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
         current ? { ...current, name } : current,
       );
       nameForm.reset({ name });
-      markNameSaved();
       // The shell observes this cache, so the patch above updates it immediately;
       // refetch in the background to reconcile with the authoritative session.
       void queryClient.invalidateQueries({
@@ -85,8 +87,8 @@ function ProfileForms({
         });
         return;
       }
-      passwordForm.reset();
       markPasswordSaved();
+      passwordForm.reset();
     },
   });
 

@@ -312,8 +312,8 @@ function DocumentParserSection() {
         toast.error("Could not save the document parsing settings.");
         return;
       }
-      form.reset({ maxChars: value.maxChars, maxPages: value.maxPages });
       markSaved();
+      form.reset({ maxChars: value.maxChars, maxPages: value.maxPages });
       await invalidate();
     },
   });
