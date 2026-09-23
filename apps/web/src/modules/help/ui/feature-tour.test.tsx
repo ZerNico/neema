@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { seenFeaturesQuery } from "../client/queries.ts";
 import { FEATURE_KEYS } from "../features.ts";
+import type { Capabilities } from "~/modules/groups/policy.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { listSeenFeatures, markFeaturesSeen } from "../server/functions.ts";
 import { FeatureTourProvider } from "./feature-tour.tsx";
 import { HelpPage } from "./help-page.tsx";
@@ -33,9 +35,21 @@ vi.stubGlobal(
   vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
 );
 
-const renderTour = (seen: string[], { enabled = true, help = false } = {}) => {
+const renderTour = (
+  seen: string[],
+  {
+    enabled = true,
+    help = false,
+    capabilities = ALL_CAPABILITIES,
+  }: {
+    enabled?: boolean;
+    help?: boolean;
+    capabilities?: Capabilities;
+  } = {},
+) => {
   vi.mocked(listSeenFeatures).mockResolvedValue(seen);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["capabilities"], capabilities);
   render(
     <QueryClientProvider client={client}>
       <FeatureTourProvider enabled={enabled}>
@@ -91,6 +105,32 @@ describe("FeatureTourProvider", () => {
     renderTour([], { enabled: false });
     expect(listSeenFeatures).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("only tours available features and describes shared resources without creation rights", async () => {
+    renderTour([], {
+      help: true,
+      capabilities: {
+        ...ALL_CAPABILITIES,
+        agentsCreate: false,
+        knowledgeUse: false,
+        knowledgeCreate: false,
+        skillsUse: false,
+        skillsCreate: false,
+        schedules: false,
+        memory: false,
+      },
+    });
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeVisible();
+    expect(screen.getByText(/Agents shared with you are ready to use/)).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Knowledge" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Schedules" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Show me" }));
+    expect(screen.getByText("Welcome to neema · 2 of 2")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(markFeaturesSeen).toHaveBeenCalledWith({ data: { keys: ["agents"] } }),
+    );
   });
 
   it("lists every feature on Help and replays the tour without marking anything", async () => {

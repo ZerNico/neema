@@ -110,6 +110,7 @@ import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { prepareCustomTools } from "~/modules/custom-tools/server/tools.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
@@ -142,11 +143,7 @@ import {
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
 } from "./compaction.ts";
-import {
-  buildHistoryMessages,
-  type HistorySteer,
-  type PromptDeps,
-} from "./prompt.ts";
+import { buildHistoryMessages, type HistorySteer, type PromptDeps } from "./prompt.ts";
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -323,6 +320,7 @@ export class StreamEngine extends Context.Service<
       const skillReader = yield* SkillReader;
       const customToolRuntime = yield* CustomToolRuntime;
       const customToolRepo = yield* CustomToolRepo;
+      const policy = yield* FeaturePolicy;
       const attachments = yield* AttachmentRepo;
       const promptDeps: PromptDeps = {
         attachments,
@@ -417,6 +415,14 @@ export class StreamEngine extends Context.Service<
         // The frozen configuration this answer runs with. Dispatch consumes it
         // read-only: identity is decided at turn time, access is rechecked here.
         const config = yield* repo.getGenerationConfig(input.messageId);
+        const permissions = yield* policy.forUser(input.userId);
+        const selectedFeatureUnavailable =
+          (config.agentId && !permissions.agentsUse) ||
+          (config.collectionIds.length && !permissions.knowledgeUse) ||
+          ((config.skills?.length ?? 0) > 0 && !permissions.skillsUse) ||
+          (config.searchEnabled && !permissions.webSearch) ||
+          (config.researchEnabled && (!permissions.deepResearch || !permissions.webSearch)) ||
+          (config.desktopFolders && !permissions.work);
         // Modules are read here rather than stored with the config: a plain
         // chat offers every module the sender may use, an agent narrows that
         // to what it attached, and a disabled, deleted or no-longer-shared
@@ -679,6 +685,8 @@ export class StreamEngine extends Context.Service<
         let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
+          if (selectedFeatureUnavailable)
+            return yield* Effect.fail(new Error("A selected feature is no longer available"));
           const writeGuard = (tx: DbTx) => (fence ? lockGeneration(tx, fence) : Effect.interrupt);
           const authoring = yield* prepareAgentDraftTools({
             services: authoringServices,
@@ -714,13 +722,15 @@ export class StreamEngine extends Context.Service<
           const indexer = createSourceIndexer(priorSources);
           // Every chat model takes tools: the gateway polyfills prompt-based
           // calling for models without native support (`hermes-tools.ts`).
-          const webTools = yield* prepareWebTools({
-            webSearch,
-            urlReader,
-            indexer,
-            authority,
-            requestSearch: input.searchEnabled,
-          });
+          const webTools = permissions.webSearch
+            ? yield* prepareWebTools({
+                webSearch,
+                urlReader,
+                indexer,
+                authority,
+                requestSearch: input.searchEnabled,
+              })
+            : null;
 
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
@@ -737,13 +747,15 @@ export class StreamEngine extends Context.Service<
           // Selected and agent-attached skills are pinned by the attempt; the
           // rest of the reader's library is offered as metadata so the model
           // can find a relevant skill without being told to use it.
-          const skillManifest = [
-            ...(config.skills ?? []),
-            ...(yield* skillReader.catalogue(
-              input.userId,
-              (config.skills ?? []).map((entry) => entry.skillId),
-            )),
-          ];
+          const skillManifest = permissions.skillsUse
+            ? [
+                ...(config.skills ?? []),
+                ...(yield* skillReader.catalogue(
+                  input.userId,
+                  (config.skills ?? []).map((entry) => entry.skillId),
+                )),
+              ]
+            : [];
           const skillTools = skillManifest.length
             ? yield* prepareSkillTools({
                 userId: input.userId,
@@ -770,15 +782,16 @@ export class StreamEngine extends Context.Service<
           };
           // Offered only when the machine that sent this message said a folder
           // was attached, so a browser tab never sees these names.
-          const desktopTools = config.desktopFolders
-            ? prepareDesktopTools({
-                rowIdFor: (providerCallId) =>
-                  Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
-                    Effect.map((row) => row?.rowId),
-                  ),
-                commands: config.desktopCommands ?? false,
-              })
-            : null;
+          const desktopTools =
+            config.desktopFolders && permissions.work
+              ? prepareDesktopTools({
+                  rowIdFor: (providerCallId) =>
+                    Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
+                      Effect.map((row) => row?.rowId),
+                    ),
+                  commands: config.desktopCommands ?? false,
+                })
+              : null;
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
           const planTools = config.planEnabled ? preparePlanTool() : undefined;
@@ -821,7 +834,11 @@ export class StreamEngine extends Context.Service<
           // and answers from the evidence. The run it starts is owned by its
           // tool call and fenced by this generation.
           const researchTool =
-            config.researchEnabled && repo.research && fence
+            permissions.deepResearch &&
+            permissions.webSearch &&
+            config.researchEnabled &&
+            repo.research &&
+            fence
               ? prepareResearchTool({
                   store: repo.research,
                   gateway,
@@ -847,9 +864,9 @@ export class StreamEngine extends Context.Service<
                 })
               : null;
           const commonGroups = [
-            authoring.group,
-            scheduleAuthoring.group,
-            documents.group,
+            ...(permissions.agentsCreate ? [authoring.group] : []),
+            ...(permissions.schedules ? [scheduleAuthoring.group] : []),
+            ...(permissions.documents ? [documents.group] : []),
             ...(researchTool ? [researchTool.group] : []),
             ...(desktopTools ? [desktopTools] : []),
             ...(skillTools ? [skillTools.group] : []),
@@ -1035,9 +1052,9 @@ export class StreamEngine extends Context.Service<
           // and the clock change; being after history keeps the cacheable prefix
           // intact when they do.
           const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
-            ...authoring.messages(),
-            ...scheduleAuthoring.messages(),
-            ...documents.messages(),
+            ...(permissions.agentsCreate ? authoring.messages() : []),
+            ...(permissions.schedules ? scheduleAuthoring.messages() : []),
+            ...(permissions.documents ? documents.messages() : []),
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             runtimeContext,
@@ -1053,8 +1070,12 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
-            { role: "system" as const, content: AGENT_APP_POLICY },
-            { role: "system" as const, content: DOCUMENT_APP_POLICY },
+            ...(permissions.agentsCreate
+              ? [{ role: "system" as const, content: AGENT_APP_POLICY }]
+              : []),
+            ...(permissions.documents
+              ? [{ role: "system" as const, content: DOCUMENT_APP_POLICY }]
+              : []),
             ...(knowledgeSession
               ? [{ role: "system" as const, content: KNOWLEDGE_SYSTEM_HINT }]
               : []),
@@ -1591,26 +1612,27 @@ export class StreamEngine extends Context.Service<
                             : Schema.is(ScheduleDraftToolName)(part.name)
                               ? "schedule-draft"
                               : Schema.is(DocumentToolName)(part.name)
-                              ? "document"
-                              : Schema.is(DesktopToolName)(part.name)
-                                ? "desktop"
-                                : part.name === "save_memory"
-                                  ? "memory"
-                                  : part.name === "ask_user"
-                                    ? "ask"
-                                    : part.name === "update_plan"
-                                      ? "plan"
-                                      : Schema.is(SkillToolName)(part.name)
-                                        ? "skill"
-                                        : Schema.is(KnowledgeToolName)(part.name)
-                                          ? "knowledge"
-                                          : part.name === "deep_research"
-                                            ? "research"
-                                            : part.name === "web_search" || part.name === "read_url"
-                                              ? "web"
-                                              : customToolNames.has(part.name)
-                                                ? "custom"
-                                                : null;
+                                ? "document"
+                                : Schema.is(DesktopToolName)(part.name)
+                                  ? "desktop"
+                                  : part.name === "save_memory"
+                                    ? "memory"
+                                    : part.name === "ask_user"
+                                      ? "ask"
+                                      : part.name === "update_plan"
+                                        ? "plan"
+                                        : Schema.is(SkillToolName)(part.name)
+                                          ? "skill"
+                                          : Schema.is(KnowledgeToolName)(part.name)
+                                            ? "knowledge"
+                                            : part.name === "deep_research"
+                                              ? "research"
+                                              : part.name === "web_search" ||
+                                                  part.name === "read_url"
+                                                ? "web"
+                                                : customToolNames.has(part.name)
+                                                  ? "custom"
+                                                  : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);

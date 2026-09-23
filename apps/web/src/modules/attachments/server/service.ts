@@ -5,6 +5,7 @@ import type { AttachmentKind } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
 import { canAccessAttachment } from "./policy.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { AttachmentRepo, type AttachmentAssociation } from "./repo.ts";
 import { validateAttachment } from "./validation.ts";
 
@@ -61,6 +62,7 @@ export class AttachmentService extends Context.Service<
   static readonly layer = Layer.effect(
     AttachmentService,
     Effect.gen(function* () {
+      const policy = yield* FeaturePolicy;
       const repo = yield* AttachmentRepo;
       const store = yield* BlobStore;
 
@@ -90,6 +92,11 @@ export class AttachmentService extends Context.Service<
         allowedKinds?: ReadonlyArray<AttachmentKind>;
         association?: AttachmentAssociation;
       }) {
+        if (!input.allowedKinds && !(yield* policy.can(input.userId, "attachments")))
+          return yield* new AttachmentRejected({
+            cause: "type",
+            reason: "attachments are unavailable",
+          });
         const validated = yield* validateAttachment({
           fileName: input.fileName,
           declaredMediaType: input.declaredMediaType,

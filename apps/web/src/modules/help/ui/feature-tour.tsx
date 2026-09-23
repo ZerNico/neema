@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { seenFeaturesQuery } from "../client/queries.ts";
-import { FEATURES, unseenFeatures, type Feature } from "../features.ts";
+import { availableFeatures, unseenFeatures, type Feature } from "../features.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { markFeaturesSeen } from "../server/functions.ts";
 import { NeemaGlyph } from "~/ui/brand.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
@@ -42,23 +43,25 @@ export function FeatureTourProvider({
 }) {
   const queryClient = useQueryClient();
   const seen = useQuery({ ...seenFeaturesQuery, enabled });
+  const { data: capabilities } = useQuery({ ...capabilitiesQuery, enabled });
+  const features = capabilities ? availableFeatures(capabilities) : [];
   const [replaying, setReplaying] = useState(false);
   const [step, setStep] = useState(0);
   const mark = useMutation({
     mutationFn: (keys: string[]) => markFeaturesSeen({ data: { keys } }),
   });
-  const unseen = seen.data ? unseenFeatures(seen.data) : [];
+  const unseen = seen.data ? unseenFeatures(seen.data, features) : [];
   const welcome = replaying || seen.data?.length === 0;
   // A first tour opens on a general welcome; a later one goes straight to what's new.
   const steps: Step[] = [
     ...(welcome ? [{ kind: "welcome" } as const] : []),
-    ...(replaying ? FEATURES : unseen).map((feature) => ({ kind: "feature" as const, feature })),
+    ...(replaying ? features : unseen).map((feature) => ({ kind: "feature" as const, feature })),
   ];
   const open = replaying || (enabled && unseen.length > 0);
   const replay = useCallback(() => {
     setStep(0);
     setReplaying(true);
-  }, []);
+  }, [setStep, setReplaying]);
 
   const close = () => {
     if (!replaying && unseen.length > 0) {

@@ -72,7 +72,8 @@ vi.mock("~/server/runtime.ts", async () => {
     },
   };
 });
-const data = { groupId: "g1", userId: "u1", canShare: true };
+const sharing = { agents: true, knowledge: false, skills: true };
+const data = { groupId: "g1", userId: "u1", sharing };
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.setMemberSharing.mockReturnValue(Effect.void);
@@ -94,7 +95,7 @@ describe("updateGroupMemberSharing", () => {
   it("allows admins to update exactly one membership and publishes resource invalidation", async () => {
     mocks.session.mockResolvedValue({ user: { role: "admin" } });
     await updateGroupMemberSharing({ data });
-    expect(mocks.setMemberSharing).toHaveBeenCalledExactlyOnceWith("g1", "u1", true);
+    expect(mocks.setMemberSharing).toHaveBeenCalledExactlyOnceWith("g1", "u1", sharing);
     expect(mocks.publishGlobal).toHaveBeenCalledExactlyOnceWith({ type: "resources.changed" });
   });
   it("maps missing membership to 404 without publishing success", async () => {
@@ -105,13 +106,18 @@ describe("updateGroupMemberSharing", () => {
     await expect(updateGroupMemberSharing({ data })).rejects.toMatchObject({ status: 404 });
     expect(mocks.publishGlobal).not.toHaveBeenCalled();
   });
-  it("requires a member id and a boolean permission", async () => {
+  it("requires a member id and a boolean for every kind", async () => {
     mocks.session.mockResolvedValue({ user: { role: "admin" } });
     await expect(
-      updateGroupMemberSharing({ data: { groupId: "g1", canShare: true } as never }),
+      updateGroupMemberSharing({ data: { groupId: "g1", sharing } as never }),
     ).rejects.toThrow("Invalid input");
     await expect(
-      updateGroupMemberSharing({ data: { ...data, canShare: "true" } as never }),
+      updateGroupMemberSharing({
+        data: { ...data, sharing: { ...sharing, skills: "true" } } as never,
+      }),
+    ).rejects.toThrow("Invalid input");
+    await expect(
+      updateGroupMemberSharing({ data: { ...data, sharing: { agents: true } } as never }),
     ).rejects.toThrow("Invalid input");
     expect(mocks.setMemberSharing).not.toHaveBeenCalled();
   });

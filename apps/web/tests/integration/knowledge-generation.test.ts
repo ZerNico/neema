@@ -36,6 +36,7 @@ import { SearchBackend } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { makeFakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 import { FakeDocumentParser, FakeCustomToolRuntime } from "./unused-services.ts";
@@ -291,7 +292,11 @@ beforeAll(async () => {
     ProviderRepo.layer,
     ToolsRepo.layer,
     ScheduleRepo.layer,
-  ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
+  ).pipe(
+    Layer.provideMerge(AttachmentRepo.layer),
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(InfraLayer),
+  );
   const CoreLayer = Layer.mergeAll(
     FakeGateway,
     ExternalCompletion.layer,

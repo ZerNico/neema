@@ -21,7 +21,7 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   hour (`MIN_FIRE_GAP_MS`). Each fire is a conversation and a model call.
 - `ScheduleService.tick` runs every 30 seconds (`forkScoped` in the app layer, so HMR disposal
   kills it). The claim is one transaction: due rows by database clock (`next_fire_at <=
-  now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its
+now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its
   next fire after now **inside the claim**. That is the catch-up-once rule made structural:
   forty missed fires during downtime collapse into one fire and the cadence resumes from now;
   a one-shot whose next fire is past `endAt` comes out with `nextFireAt = null` and never
@@ -29,6 +29,8 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   ahead would make the scheduler quietly see nothing.
 - The claim already rescheduled, so each fire is `Effect.forkDetach`ed and one slow fire
   cannot hold the tick; the `schedule_runs` row is the record of the attempt, not a reaper.
+  Revoked schedule permission keeps the row but records a `skipped` fire without a chat;
+  future fires resume on regrant, not missed one-shots. See [feature access](feature-policy.md).
 
 ## Fires
 
@@ -56,9 +58,10 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   (`adoptChat`, only while the schedule still wants one, so an edit mid-fire wins).
 - Retained selections are never permissions: `modelId` and `agentId` have no FK. A missing
   model falls back to the user's default chat model at fire time (an unattended missed fire is
-  worse than a different model answering); a deleted agent degrades the fire to a plain chat
-  with the schedule's own collections, skills and toggles. Collections and skills are
-  re-checked at fire and end the run as an `error` row when gone, because losing a selected
+  worse than a different model answering); only a genuinely deleted agent degrades the fire
+  to a plain chat with the schedule's own collections, skills and toggles. A retained agent
+  made inaccessible by policy fails rather than changing the scheduled job. Collections and
+  skills are re-checked at fire and end the run as an `error` row when gone, because losing a selected
   collection failing the turn is the existing chat rule. A fire that never started (no
   available model) records `status: 'error'` with `conversationId: null`.
 - Deleting a schedule keeps its chats: `conversations.schedule_id` is `on delete set null`,
@@ -83,5 +86,5 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   computed from now, and stamps the target/saved receipt in one transaction; `schedule.changed`
   and `draft.changed` publish afterwards. Reload re-snapshots from the live schedule.
 - Sync events: `schedule.changed { scheduleId }` and `schedule.run.changed { scheduleId,
-  runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
+runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
   `["schedule-runs", id]`.

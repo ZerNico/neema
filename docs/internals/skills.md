@@ -28,6 +28,11 @@ A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a
 
 ## Access and authorization
 
+- A reader needs skills Use, the author still needs skills Create, and the ordinary
+  resource ACL must allow the read. Revoking Create suspends that author's skills for
+  everyone without deleting revisions; Create also gates import, update and removal.
+  Built-in authoring entries follow their target feature grant. See
+  [feature access](feature-policy.md).
 - Every new attempt (send, retry, edit, structured answer, branch) resolves current revisions and ACLs inside the attempt transaction, before any destructive reset. Original standalone IDs stay separate from agent dependencies, including overlaps, so removing a skill from an agent leaves an explicit selection intact.
 - Active attempts pin content but recheck access: losing it is sticky and terminal, never a recoverable failed tool result.
 - `SkillRepo.catalogue` adds every readable, non-manual-only skill as an `ambient` manifest entry at dispatch (host turn and investigation alike), on top of the attempt's pinned selections. Ambient entries are metadata-only offers, not authorized as attempt dependencies, so losing access to one never fails a turn, while `readPinned` still checks access per read. The prompt says the descriptions are all the model has and to call `load_skill` when one matches; without that instruction a listed skill simply never gets used.

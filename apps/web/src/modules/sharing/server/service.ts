@@ -4,6 +4,8 @@ import { groups, groupMembers, user } from "~/db/schema/index.ts";
 import { KnowledgeNotAvailable, SharingNotAllowed } from "~/modules/knowledge/errors.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import type { Capability } from "~/modules/groups/policy.ts";
 import { SharingRateLimited } from "../errors.ts";
 import { sharingResources } from "./resources.ts";
 import type { ResourceGrants, SharedResource, ShareRecipient } from "../schema.ts";
@@ -19,6 +21,16 @@ type Change =
   | { action: "revokeUser"; userId: string }
   | { action: "revokeGroup"; groupId: string }
   | { action: "publish"; audience: "private" | "instance" };
+
+// Custom tools are admin-only, so no member column can let one be shared.
+const shareColumn = (kind: SharedResource["kind"]) =>
+  kind === "agent"
+    ? groupMembers.shareAgents
+    : kind === "collection"
+      ? groupMembers.shareKnowledge
+      : kind === "skill"
+        ? groupMembers.shareSkills
+        : null;
 
 /** Shared policy, separate FK-backed grant tables for each resource type. */
 export class SharingService extends Context.Service<
@@ -40,7 +52,17 @@ export class SharingService extends Context.Service<
     SharingService,
     Effect.gen(function* () {
       const db = yield* Db;
+      const policy = yield* FeaturePolicy;
       const bus = yield* SyncBus;
+      const createCapability: Record<Exclude<SharedResource["kind"], "customTool">, Capability> = {
+        agent: "agentsCreate",
+        collection: "knowledgeCreate",
+        skill: "skillsCreate",
+      };
+      const mayManage = (userId: string, resource: SharedResource) =>
+        resource.kind === "customTool"
+          ? Effect.succeed(true)
+          : policy.can(userId, createCapability[resource.kind]);
       // Per-runtime throttle on grant-by-email, bounded even for many accounts.
       // `recipients` deliberately exposes an account directory to any signed-in
       // user, since this is a single-tenant, self-hosted app where colleagues pick
@@ -69,6 +91,8 @@ export class SharingService extends Context.Service<
       };
       return SharingService.of({
         detail: Effect.fn("SharingService.detail")(function* (userId, resource) {
+          if (!(yield* mayManage(userId, resource)))
+            return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
           const [owner] = yield* owned(userId, resource).pipe(Effect.orDie);
           if (!owner) return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
           const [actor] = yield* db
@@ -98,7 +122,7 @@ export class SharingService extends Context.Service<
             .where(
               canPublish
                 ? undefined
-                : sql`exists(select 1 from ${groupMembers} where ${groupMembers.groupId} = ${groups.id} and ${groupMembers.userId} = ${userId} and ${groupMembers.canShare} = true)`,
+                : sql`exists(select 1 from ${groupMembers} where ${groupMembers.groupId} = ${groups.id} and ${groupMembers.userId} = ${userId} and ${shareColumn(resource.kind) ?? sql`false`} = true)`,
             )
             .orderBy(asc(groups.name))
             .limit(200)
@@ -128,9 +152,16 @@ export class SharingService extends Context.Service<
             .pipe(Effect.orDie);
         }),
         change: Effect.fn("SharingService.change")(function* (userId, resource, change) {
+          if (!(yield* mayManage(userId, resource)))
+            return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (
+                  resource.kind !== "customTool" &&
+                  !(yield* policy.can(userId, createCapability[resource.kind], tx))
+                )
+                  return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
                 const [actor] = yield* tx
                   .select({ role: user.role })
                   .from(user)
@@ -213,8 +244,9 @@ export class SharingService extends Context.Service<
                     if (actor.role !== "admin") {
                       // Held through insertion: permission updates and membership deletion
                       // must serialize with this authorization decision.
+                      const column = shareColumn(resource.kind);
                       const [member] = yield* tx
-                        .select({ canShare: groupMembers.canShare })
+                        .select({ canShare: column ?? sql<boolean>`false` })
                         .from(groupMembers)
                         .where(
                           and(

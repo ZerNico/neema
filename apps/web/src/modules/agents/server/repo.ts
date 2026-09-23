@@ -16,6 +16,7 @@ import { agentReadable, collectionReadable } from "~/modules/knowledge/server/ac
 import { skillReadable } from "~/modules/skills/server/access.ts";
 import { Db } from "~/server/db.ts";
 import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
   AGENT_LIMITS,
@@ -33,7 +34,7 @@ export interface StoredAgent {
   customToolIds: ReadonlyArray<string>;
 }
 const owned = (userId: string, agentId: string) =>
-  and(eq(agents.id, agentId), eq(agents.userId, userId));
+  and(eq(agents.id, agentId), eq(agents.userId, userId), capabilityAllowedSql(userId, "agentsCreate"));
 export const summarizeAgent = (
   row: Pick<
     AgentRow,
@@ -107,8 +108,9 @@ export class AgentRepo extends Context.Service<
             const [owner] = yield* tx
               .select({ id: user.id })
               .from(user)
-              .where(eq(user.id, userId))
+              .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "agentsCreate")))
               .for("update");
+            if (!owner) return yield* new AgentRejected({ reason: "agent creation is unavailable" });
             const [count] = yield* tx
               .select({ value: sql<number>`count(*)::int` })
               .from(agents)

@@ -90,9 +90,14 @@ whatever agent the conversation is associated with.
 
 ## Sharing and access
 
-- `group_members.can_share` defaults to false; an owner needs it enabled to create a group
-  grant. The sharing transaction holds that membership row `FOR SHARE` through insertion so
-  disabling/removal serializes with grants. Admins may share to any group or publish
+- Feature access is additive across groups, separate from the ACL on each resource. The
+  recipient needs Use and the creator still needs Create, even for an instance-wide grant;
+  losing Create suspends all of that person's resources without deleting them. See
+  [feature access](feature-policy.md). An agent is never itself a permission.
+- Group sharing is per kind: `group_members.share_agents`, `share_knowledge` and
+  `share_skills` all default to false, and an owner needs the one matching the resource to
+  create a group grant. Allowing one kind never covers another. The sharing transaction holds
+  that membership row `FOR SHARE` through insertion so disabling/removal serializes with grants. Admins may share to any group or publish
   instance-wide, but never another owner's resource.
 - An agent grant never grants its collections or model — checked separately, and losing a
   selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.

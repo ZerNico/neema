@@ -1,17 +1,32 @@
 import { PgClient } from "@effect/sql-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { execSync } from "node:child_process";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { conversations, scheduleRuns, schedules, user } from "~/db/schema/index.ts";
+import {
+  conversations,
+  groupMembers,
+  groups,
+  scheduleRuns,
+  schedules,
+  user,
+} from "~/db/schema/index.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ScheduleFire } from "~/modules/schedules/server/fire.ts";
 import { ScheduleRepo, type ScheduleRow } from "~/modules/schedules/server/repo.ts";
+import { ScheduleService } from "~/modules/schedules/server/service.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
+let databaseUrl: string;
 let runtime: ManagedRuntime.ManagedRuntime<ScheduleRepo | Db, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, ScheduleRepo | Db>) =>
   runtime.runPromise(effect as never) as Promise<A>;
@@ -19,6 +34,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, ScheduleRepo | Db>) =>
 beforeAll(async () => {
   container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const url = container.getConnectionUri();
+  databaseUrl = url;
   execSync("pnpm drizzle-kit migrate", {
     cwd: new URL("../..", import.meta.url).pathname,
     env: { ...process.env, DATABASE_URL: url },
@@ -185,6 +201,149 @@ describe("schedule claims", () => {
   });
 });
 
+describe("schedule capability revocation", () => {
+  it("records a skipped fire without a chat, then fires after a regrant", async () => {
+    let published = Effect.runSync(Deferred.make<void>());
+    let fireCalls = 0;
+    const fakeFire = Layer.effect(
+      ScheduleFire,
+      Effect.gen(function* () {
+        const db = yield* Db;
+        return ScheduleFire.of((row) =>
+          Effect.gen(function* () {
+            fireCalls++;
+            const conversationId = uuidv7();
+            yield* db
+              .insert(conversations)
+              .values({ id: conversationId, userId: row.userId, scheduleId: row.id })
+              .pipe(Effect.orDie);
+            return { conversationId };
+          }),
+        );
+      }),
+    );
+    const fakeBus = Layer.succeed(
+      SyncBus,
+      SyncBus.of({
+        publish: (_userId, event) =>
+          event.type === "schedule.run.changed"
+            ? Deferred.succeed(published, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+      } as SyncBus["Service"]),
+    );
+    const serviceRuntime = ManagedRuntime.make(
+      ScheduleService.layer.pipe(
+        Layer.provideMerge(FeaturePolicy.layer),
+        Layer.provideMerge(fakeFire),
+        Layer.provideMerge(fakeBus),
+        Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
+        Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
+        Layer.provideMerge(Db.layer),
+        Layer.provideMerge(PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 })),
+      ),
+    );
+    try {
+      // Start the service's tick loop before adding a due schedule.
+      await serviceRuntime.runPromise(
+        Effect.gen(function* () {
+          yield* ScheduleService;
+        }),
+      );
+      const { userId, groupId, scheduleId } = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const ownerId = yield* makeUser();
+          const policyGroupId = uuidv7();
+          yield* db.insert(groups).values({
+            id: policyGroupId,
+            name: `schedule-policy-${policyGroupId}`,
+            capabilities: { ...ALL_CAPABILITIES, schedules: false },
+          });
+          yield* db.insert(groupMembers).values({ groupId: policyGroupId, userId: ownerId });
+          const schedule = yield* insert(ownerId, {
+            cron: "* * * * *",
+            nextFireAt: new Date(Date.now() - 60_000),
+          });
+          return { userId: ownerId, groupId: policyGroupId, scheduleId: schedule.id };
+        }),
+      );
+      await serviceRuntime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* ScheduleService;
+          yield* service.tick;
+          yield* Deferred.await(published);
+        }),
+      );
+      const skipped = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const [schedule] = yield* db.select().from(schedules).where(eq(schedules.id, scheduleId));
+          const runs = yield* db
+            .select()
+            .from(scheduleRuns)
+            .where(eq(scheduleRuns.scheduleId, scheduleId));
+          const chats = yield* db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.scheduleId, scheduleId));
+          return { schedule, runs, chats };
+        }),
+      );
+      expect(skipped.schedule!.nextFireAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(skipped.runs).toMatchObject([
+        { status: "skipped", conversationId: null, error: "schedule access is not permitted" },
+      ]);
+      expect(skipped.chats).toEqual([]);
+      expect(fireCalls).toBe(0);
+
+      published = Effect.runSync(Deferred.make<void>());
+      await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db
+            .update(groups)
+            .set({ capabilities: ALL_CAPABILITIES })
+            .where(eq(groups.id, groupId));
+          yield* db
+            .update(schedules)
+            .set({ nextFireAt: new Date(Date.now() - 60_000) })
+            .where(eq(schedules.id, scheduleId));
+        }),
+      );
+      await serviceRuntime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* ScheduleService;
+          yield* service.tick;
+          yield* Deferred.await(published);
+        }),
+      );
+      const restored = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const runs = yield* db
+            .select()
+            .from(scheduleRuns)
+            .where(eq(scheduleRuns.scheduleId, scheduleId));
+          const chats = yield* db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.scheduleId, scheduleId));
+          return { runs, chats };
+        }),
+      );
+      expect(restored.runs).toMatchObject([
+        { status: "skipped", conversationId: null },
+        { status: "started", conversationId: restored.chats[0]?.id },
+      ]);
+      expect(restored.chats).toHaveLength(1);
+      expect(restored.chats[0]?.userId).toBe(userId);
+      expect(fireCalls).toBe(1);
+    } finally {
+      await serviceRuntime.dispose();
+    }
+  });
+});
+
 describe("schedule removal", () => {
   it("cascades the run history with the schedule", async () => {
     const result = await run(
@@ -200,7 +359,7 @@ describe("schedule removal", () => {
           error: "no model",
         });
         yield* repo.remove(userId, row.id);
-        const runs = yield* db.select().from(scheduleRuns);
+        const runs = yield* db.select().from(scheduleRuns).where(eq(scheduleRuns.scheduleId, row.id));
         const [remaining] = yield* db
           .select()
           .from(schedules)

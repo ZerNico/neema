@@ -12,6 +12,7 @@ import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { ErrorState, ListSkeleton, Page } from "~/ui/page-shell.tsx";
@@ -50,13 +51,20 @@ function download(name: string, bytes: Uint8Array | string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function SkillEditorPage({ skillId }: { skillId?: string }) {
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const metadata = useQuery({ ...skillQuery(skillId ?? ""), enabled: !!skillId, retry: false });
   const detail = useQuery({
     ...skillDetailQuery(skillId ?? ""),
-    enabled: !!skillId && metadata.data?.canEdit === true,
+    enabled: !!skillId && metadata.data?.canEdit === true && !!capabilities?.skillsCreate,
     retry: false,
   });
-  if (!skillId) return <OwnerEditor />;
+  if (!skillId && capabilities?.skillsCreate) return <OwnerEditor />;
+  if (!skillId)
+    return (
+      <Page title="New skill" backTo="/skills" backLabel="Skills">
+        <p className="text-muted-foreground text-sm">You can use skills, but cannot create them.</p>
+      </Page>
+    );
   if (metadata.isError || detail.isError)
     return (
       <Page title="Skill" backTo="/skills" backLabel="Skills">
@@ -64,7 +72,7 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
           title="Could not load this skill"
           onRetry={() => {
             void metadata.refetch();
-            if (metadata.data?.canEdit) void detail.refetch();
+            if (metadata.data?.canEdit && capabilities?.skillsCreate) void detail.refetch();
           }}
         />
       </Page>
@@ -75,13 +83,13 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
         <ListSkeleton rows={1} media="none" label="Loading skill" />
       </Page>
     );
-  if (!metadata.data.canEdit)
+  if (!metadata.data.canEdit || !capabilities?.skillsCreate)
     return (
       <Page title={metadata.data.name} backTo="/skills" backLabel="Skills">
         <p className="text-muted-foreground text-sm">{metadata.data.description}</p>
         <p className="text-muted-foreground text-xs">
-          Shared by {metadata.data.ownerName}. You can use this skill, but only its owner can view
-          or edit its files.
+          {metadata.data.ownerName ? `Shared by ${metadata.data.ownerName}. ` : ""}You can use this
+          skill, but cannot edit its files.
         </p>
         <Link to="/" search={{ skill: skillId }} className={buttonVariants({ size: "sm" })}>
           Use in chat
@@ -237,7 +245,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                     files.find((file) => file.path === "SKILL.md")?.content ?? "",
                     "text/markdown",
                   );
-                  toast.info("The download has the main instructions only, not the skill’s other files.");
+                  toast.info(
+                    "The download has the main instructions only, not the skill’s other files.",
+                  );
                 }}
               >
                 <HugeiconsIcon icon={File02Icon} strokeWidth={2} />

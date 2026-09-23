@@ -64,7 +64,12 @@ describe("useSync", () => {
 
   it("discovers late drafts by refreshing both settings and the conversation summary", () => {
     const { invalidate, source } = renderSync();
-    source.emit("sync", { type: "draft.changed", kind: "agent", conversationId: "c1", draftId: "d1" });
+    source.emit("sync", {
+      type: "draft.changed",
+      kind: "agent",
+      conversationId: "c1",
+      draftId: "d1",
+    });
     expect(invalidate.mock.calls).toEqual([
       [{ queryKey: ["drafts", "agent", "d1"] }],
       [{ queryKey: ["conversation", "c1"] }],
@@ -185,11 +190,39 @@ describe("useSync", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["knowledge"] }, { cancelRefetch: false });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agents"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
+    for (const key of [
+      ["capabilities"],
+      ["admin", "group-capabilities"],
+      ["admin", "default-capabilities"],
+      ["schedules"],
+      ["schedule"],
+      ["schedule-runs"],
+      ["documents"],
+      ["memory"],
+      ["custom-tools"],
+      ["skills"],
+    ]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
+    }
     await Promise.resolve();
     await Promise.resolve();
     invalidate.mockClear();
     source.emit("open");
     source.emit("open");
+    for (const key of [
+      ["capabilities"],
+      ["admin", "group-capabilities"],
+      ["admin", "default-capabilities"],
+      ["schedules"],
+      ["schedule"],
+      ["schedule-runs"],
+      ["documents"],
+      ["memory"],
+      ["custom-tools"],
+      ["skills"],
+    ]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
+    }
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["sharing"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "groups"] });

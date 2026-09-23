@@ -10,6 +10,7 @@ import {
 } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 import type {
   CustomToolDependency,
@@ -63,11 +64,14 @@ const summaryColumns = {
  * so attach-time and attempt-time checks cannot drift apart.
  */
 export const customToolUsableBy = (userId: string): SQL => sql`(
+  ${capabilityAllowedSql(userId, "customTools")}
+  and (
   ${customTools.audience} = 'instance'
   or exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')
   or exists(select 1 from ${customToolUserGrants} where ${customToolUserGrants.toolId} = ${customTools.id} and ${customToolUserGrants.userId} = ${userId})
   or exists(select 1 from ${customToolGroupGrants} join ${groupMembers} on ${groupMembers.groupId} = ${customToolGroupGrants.groupId}
     where ${customToolGroupGrants.toolId} = ${customTools.id} and ${groupMembers.userId} = ${userId})
+  )
 )`;
 
 export class CustomToolRepo extends Context.Service<

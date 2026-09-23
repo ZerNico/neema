@@ -13,6 +13,7 @@ import type { SkillSource } from "~/db/schema/skills.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, type ValidatedSkillPackage } from "../package.ts";
@@ -173,6 +174,16 @@ export class SkillRepo extends Context.Service<
         // What the model may discover on its own: readable, current, and not
         // marked manual-only. Nothing here is a dependency of the attempt.
         catalogue: Effect.fn("SkillRepo.catalogue")(function* (userId, exclude) {
+          const [permissions] = yield* db
+            .select({
+              use: capabilityAllowedSql(userId, "skillsUse"),
+              agents: capabilityAllowedSql(userId, "agentsCreate"),
+              schedules: capabilityAllowedSql(userId, "schedules"),
+            })
+            .from(user)
+            .where(eq(user.id, userId))
+            .pipe(Effect.orDie);
+          if (!permissions?.use) return [];
           const rows = yield* db
             .select({ skill: skills, revision: skillRevisions })
             .from(skills)
@@ -190,7 +201,15 @@ export class SkillRepo extends Context.Service<
           // Builtins first: they cost the catalogue nothing and the authoring
           // flows should be discoverable even beside a full library.
           return [
-            ...BUILTIN_SKILLS.filter((skill) => !exclude.includes(skill.id)).map((skill) => ({
+            ...BUILTIN_SKILLS.filter(
+              (skill) =>
+                !exclude.includes(skill.id) &&
+                (skill.id === "builtin:agent-authoring"
+                  ? permissions.agents
+                  : skill.id === "builtin:schedule-authoring"
+                    ? permissions.schedules
+                    : true),
+            ).map((skill) => ({
               skillId: skill.id,
               revisionId: "builtin",
               name: skill.name,
@@ -244,7 +263,7 @@ export class SkillRepo extends Context.Service<
                 eq(skills.revision, skillRevisions.revision),
               ),
             )
-            .where(and(eq(skills.id, skillId), eq(skills.userId, userId), isNull(skills.deletedAt)))
+            .where(and(eq(skills.id, skillId), eq(skills.userId, userId), isNull(skills.deletedAt), capabilityAllowedSql(userId, "skillsCreate")))
             .pipe(Effect.orDie);
           if (!row) return yield* new SkillNotAvailable({ skillId });
           return row.revision;
@@ -274,6 +293,12 @@ export class SkillRepo extends Context.Service<
           return [...rows].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
         }),
         admitSave: Effect.fn("SkillRepo.admitSave")(function* (userId, input) {
+          const [allowed] = yield* db
+            .select({ id: user.id })
+            .from(user)
+            .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
+            .pipe(Effect.orDie);
+          if (!allowed) return yield* new SkillRejected({ reason: "skill creation is unavailable" });
           if (input.skillId) {
             const [current] = yield* db
               .select()
@@ -283,6 +308,7 @@ export class SkillRepo extends Context.Service<
                   eq(skills.id, input.skillId),
                   eq(skills.userId, userId),
                   isNull(skills.deletedAt),
+                  capabilityAllowedSql(userId, "skillsCreate"),
                 ),
               )
               .pipe(Effect.orDie);
@@ -315,11 +341,12 @@ export class SkillRepo extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 // Account lock serializes quota checks, including distinct skill saves.
-                yield* tx
+                const [allowed] = yield* tx
                   .select({ id: user.id })
                   .from(user)
-                  .where(eq(user.id, userId))
+                  .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
                   .for("update");
+                if (!allowed) return yield* new SkillRejected({ reason: "skill creation is unavailable" });
                 const skillId = input.skillId ?? uuidv7();
                 let revision = 1;
                 let previous: Revision | undefined;
@@ -332,6 +359,7 @@ export class SkillRepo extends Context.Service<
                         eq(skills.id, skillId),
                         eq(skills.userId, userId),
                         isNull(skills.deletedAt),
+                        capabilityAllowedSql(userId, "skillsCreate"),
                       ),
                     )
                     .for("update");

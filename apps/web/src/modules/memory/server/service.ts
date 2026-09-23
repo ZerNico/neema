@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   MAX_MEMORY_CONTENT_LENGTH,
   type CreateMemoryOutcome,
@@ -180,6 +181,7 @@ export class MemoryService extends Context.Service<
   static readonly layer = Layer.effect(
     MemoryService,
     Effect.gen(function* () {
+      const policy = yield* FeaturePolicy;
       const repo = yield* MemoryRepo;
       const sync = yield* SyncBus;
       const tools = yield* ToolsRepo;
@@ -192,10 +194,17 @@ export class MemoryService extends Context.Service<
               Effect.logWarning("memory changed but sync publication failed", { userId }),
             ),
           );
+      const requireMemory = Effect.fn("MemoryService.requireMemory")(function* (userId: string) {
+        if (!(yield* policy.can(userId, "memory")))
+          return yield* Effect.die(new Response("Forbidden", { status: 403 }));
+      });
       const withAvailability = Effect.fn("MemoryService.withAvailability")(function* (
+        userId: string,
         preferences: MemoryPreferences,
       ) {
-        const globalEnabled = (yield* tools.getTool("memory"))?.enabled === true;
+        const globalEnabled =
+          (yield* tools.getTool("memory"))?.enabled === true &&
+          (yield* policy.can(userId, "memory"));
         return {
           ...preferences,
           globalEnabled,
@@ -204,16 +213,17 @@ export class MemoryService extends Context.Service<
         } satisfies MemorySettings;
       });
       const getSettings = Effect.fn("MemoryService.getSettings")(function* (userId: string) {
-        return yield* withAvailability(yield* repo.getSettings(userId));
+        return yield* withAvailability(userId, yield* repo.getSettings(userId));
       });
 
       const updateSettings = Effect.fn("MemoryService.updateSettings")(function* (
         userId: string,
         input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
       ) {
+        yield* requireMemory(userId);
         const result = yield* repo.updateSettings(userId, input);
         if (result.changed) yield* publishChanged(userId);
-        return yield* withAvailability(result.preferences);
+        return yield* withAvailability(userId, result.preferences);
       });
 
       const listReferenceable = Effect.fn("MemoryService.listReferenceable")(function* (
@@ -227,6 +237,7 @@ export class MemoryService extends Context.Service<
         userId: string,
         content: string,
       ) {
+        yield* requireMemory(userId);
         const prepared = prepareContent(content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
@@ -240,6 +251,7 @@ export class MemoryService extends Context.Service<
         userId: string,
         input: { memoryId: string; content: string },
       ) {
+        yield* requireMemory(userId);
         const prepared = prepareContent(input.content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
@@ -256,12 +268,14 @@ export class MemoryService extends Context.Service<
         userId: string,
         memoryId: string,
       ) {
+        yield* requireMemory(userId);
         const outcome = yield* repo.delete(userId, memoryId);
         if (changed(outcome)) yield* publishChanged(userId);
         return outcome;
       });
 
       const clear = Effect.fn("MemoryService.clear")(function* (userId: string) {
+        yield* requireMemory(userId);
         const deleted = yield* repo.clear(userId);
         if (deleted > 0) yield* publishChanged(userId);
         return deleted;
@@ -271,6 +285,7 @@ export class MemoryService extends Context.Service<
         userId: string,
         input: SaveModelMemoryInput,
       ) {
+        yield* requireMemory(userId);
         const prepared = prepareContent(input.content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
@@ -283,7 +298,9 @@ export class MemoryService extends Context.Service<
       return MemoryService.of({
         getSettings,
         updateSettings,
-        list: repo.list,
+        list: Effect.fn(function* (userId) {
+          return (yield* policy.can(userId, "memory")) ? yield* repo.list(userId) : [];
+        }),
         listReferenceable,
         createManual,
         updateManual,

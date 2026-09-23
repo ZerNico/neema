@@ -56,6 +56,7 @@ import { FakeBlobStore, FakeDocumentParser, FakeCustomToolRuntime } from "./unus
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -448,6 +449,7 @@ beforeAll(async () => {
     ToolsRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(infra),
   );
   const engine = StreamEngine.layer.pipe(

@@ -4,6 +4,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
 import { KNOWLEDGE_LIMITS, type CollectionSummary, type KnowledgeDocument } from "../schema.ts";
 import { pipelineFingerprint } from "./chunking.ts";
@@ -148,6 +149,7 @@ export class KnowledgeService extends Context.Service<
   static readonly layer = Layer.effect(
     KnowledgeService,
     Effect.gen(function* () {
+      const policy = yield* FeaturePolicy;
       const repo = yield* KnowledgeRepo;
       const space = yield* EmbeddingSpace;
       const parser = yield* DocumentParser;
@@ -166,6 +168,8 @@ export class KnowledgeService extends Context.Service<
         collectionId: string,
         ownerOnly = false,
       ) {
+        if (!(yield* policy.can(userId, ownerOnly ? "knowledgeCreate" : "knowledgeUse")))
+          return yield* new KnowledgeNotAvailable({ resourceId: collectionId });
         const collection = yield* repo.getCollection(userId, collectionId);
         if (!collection || (ownerOnly && !collection.canEdit))
           return yield* new KnowledgeNotAvailable({ resourceId: collectionId });
@@ -249,7 +253,11 @@ export class KnowledgeService extends Context.Service<
       });
 
       return KnowledgeService.of({
-        list: repo.listCollections,
+        list: Effect.fn(function* (userId) {
+          return (yield* policy.can(userId, "knowledgeUse"))
+            ? yield* repo.listCollections(userId)
+            : [];
+        }),
         detail: Effect.fn(function* (userId, collectionId) {
           const collection = yield* available(userId, collectionId);
           const target = yield* space.current();
@@ -258,6 +266,8 @@ export class KnowledgeService extends Context.Service<
           return { collection, documents };
         }),
         create: Effect.fn(function* (userId, input) {
+          if (!(yield* policy.can(userId, "knowledgeCreate")))
+            return yield* new KnowledgeRejected({ reason: "knowledge creation is unavailable" });
           yield* validateIdentity(input);
           const id = yield* repo.createCollection(userId, {
             name: input.name.trim(),
@@ -331,6 +341,8 @@ export class KnowledgeService extends Context.Service<
         addNote: saveNote,
         replaceNote: saveNote,
         retryDocument: Effect.fn(function* (userId, documentId) {
+          if (!(yield* policy.can(userId, "knowledgeCreate")))
+            return yield* new KnowledgeNotAvailable({ resourceId: documentId });
           const collection = yield* repo.documentCollection(userId, documentId);
           if (!collection?.canEdit)
             return yield* new KnowledgeNotAvailable({ resourceId: documentId });
@@ -341,6 +353,8 @@ export class KnowledgeService extends Context.Service<
           yield* changed();
         }),
         removeDocument: Effect.fn(function* (userId, documentId) {
+          if (!(yield* policy.can(userId, "knowledgeCreate")))
+            return yield* new KnowledgeNotAvailable({ resourceId: documentId });
           const collection = yield* repo.documentCollection(userId, documentId);
           if (!collection?.canEdit)
             return yield* new KnowledgeNotAvailable({ resourceId: documentId });
@@ -386,6 +400,8 @@ export class KnowledgeService extends Context.Service<
           return count;
         }),
         manifest: Effect.fn(function* (userId, collectionIds) {
+          if (collectionIds.length && !(yield* policy.can(userId, "knowledgeUse")))
+            return yield* new KnowledgeNotAvailable({ resourceId: collectionIds[0]! });
           const ids = [...new Set(collectionIds)];
           if (ids.length > KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
             return yield* new KnowledgeRejected({
@@ -394,6 +410,8 @@ export class KnowledgeService extends Context.Service<
           return yield* repo.resolveManifest(userId, ids);
         }),
         read: Effect.fn(function* (userId, input) {
+          if (!(yield* policy.can(userId, "knowledgeUse")))
+            return yield* new KnowledgeNotAvailable({ resourceId: input.versionId });
           if (
             !Number.isInteger(input.startOffset) ||
             input.startOffset < 0 ||
@@ -441,6 +459,8 @@ export class KnowledgeService extends Context.Service<
           };
         }),
         readBodies: Effect.fn(function* (userId, references) {
+          if (references.length && !(yield* policy.can(userId, "knowledgeUse")))
+            return yield* new KnowledgeNotAvailable({ resourceId: references[0]!.versionId });
           const bodies = yield* repo.readVersionBodiesForAccess(userId, references);
           const byId = new Map(bodies.map((body) => [body.versionId, body]));
           const result: VersionBody[] = [];
@@ -462,6 +482,8 @@ export class KnowledgeService extends Context.Service<
           return result;
         }),
         download: Effect.fn(function* (userId, reference) {
+          if (!(yield* policy.can(userId, "knowledgeUse")))
+            return yield* new KnowledgeNotAvailable({ resourceId: reference.versionId });
           const version = yield* repo.readVersionForAccess(userId, reference);
           if (!version?.storageKey || !version.fileName || !version.mediaType)
             return yield* new KnowledgeNotAvailable({ resourceId: reference.versionId });

@@ -7,10 +7,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { HugeiconsIcon } from "@hugeicons/react";
 import type { ComponentProps } from "react";
+import type { Capabilities, Capability } from "~/modules/groups/server/policy.ts";
 
 export interface Feature {
   /** Stored once seen; never rename a shipped key, or everyone sees it again. */
   key: string;
+  capability: Capability;
+  createCapability?: Capability;
+  useBody?: string;
   icon: ComponentProps<typeof HugeiconsIcon>["icon"];
   title: string;
   summary: string;
@@ -30,6 +34,10 @@ export interface Feature {
 export const FEATURES: readonly Feature[] = [
   {
     key: "agents",
+    capability: "agentsUse",
+    createCapability: "agentsCreate",
+    useBody:
+      "Pick an agent when you start a chat to use its instructions, documents and tools. Agents shared with you are ready to use without setting one up yourself.",
     icon: Robot01Icon,
     title: "Agents",
     summary: "Helpers set up for one kind of task.",
@@ -41,6 +49,10 @@ export const FEATURES: readonly Feature[] = [
   },
   {
     key: "knowledge",
+    capability: "knowledgeUse",
+    createCapability: "knowledgeCreate",
+    useBody:
+      "Choose a collection shared with you in a chat. The assistant can look things up in its documents and show where each answer came from.",
     icon: FolderLibraryIcon,
     title: "Knowledge",
     summary: "Your documents, ready to use in chats.",
@@ -52,6 +64,10 @@ export const FEATURES: readonly Feature[] = [
   },
   {
     key: "skills",
+    capability: "skillsUse",
+    createCapability: "skillsCreate",
+    useBody:
+      "A skill is a short set of instructions for one kind of job. Choose a skill shared with you in a chat, or let the assistant pick it up when it fits.",
     icon: Book02Icon,
     title: "Skills",
     summary: "Know-how the assistant picks up when it’s needed.",
@@ -62,6 +78,7 @@ export const FEATURES: readonly Feature[] = [
   },
   {
     key: "schedules",
+    capability: "schedules",
     icon: Calendar03Icon,
     title: "Schedules",
     summary: "Tasks that run on their own.",
@@ -72,6 +89,7 @@ export const FEATURES: readonly Feature[] = [
   },
   {
     key: "memory",
+    capability: "memory",
     icon: Brain02Icon,
     title: "Memory",
     summary: "Things the assistant remembers about you.",
@@ -84,8 +102,20 @@ export const FEATURES: readonly Feature[] = [
 
 export const FEATURE_KEYS = FEATURES.map((feature) => feature.key);
 
+export const availableFeatures = (capabilities: Capabilities) =>
+  FEATURES.filter((feature) => capabilities[feature.capability]).map((feature) => ({
+    ...feature,
+    body:
+      feature.createCapability && !capabilities[feature.createCapability]
+        ? (feature.useBody ?? feature.body)
+        : feature.body,
+  }));
+
 /** What a person hasn't been shown yet, in the registry's order. */
-export const unseenFeatures = (seen: readonly string[]) => {
+export const unseenFeatures = (
+  seen: readonly string[],
+  features: readonly Feature[] = FEATURES,
+) => {
   const known = new Set(seen);
-  return FEATURES.filter((feature) => !known.has(feature.key));
+  return features.filter((feature) => !known.has(feature.key));
 };

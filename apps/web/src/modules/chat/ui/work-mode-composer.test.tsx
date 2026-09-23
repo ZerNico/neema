@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FolderStatus } from "@chat/desktop-rpc";
 import { desktopSendFields, type FolderState } from "~/modules/desktop/client/bridge.ts";
 import { Composer } from "./composer.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { ConversationMode } from "../schema.ts";
 
 vi.mock("../server/functions.ts", () => ({
@@ -81,6 +82,7 @@ const client = () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
   queryClient.setQueryData(["chat-models"], [model]);
   queryClient.setQueryData(["tools", "web-search", "availability"], {
     configured: false,

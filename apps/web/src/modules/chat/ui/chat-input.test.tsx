@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { Suspense, useImperativeHandle, useState, type Ref } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInput } from "./chat-input.tsx";
+import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { renderToString } from "react-dom/server";
 import { useSearchMode } from "./use-search-mode.ts";
@@ -133,11 +134,13 @@ const setup = (
     upload?: (file: File) => Promise<Attachment>;
     initialValue?: string;
     parsingEnabled?: boolean;
+    capabilities?: Capabilities;
   } = {},
 ): Harness => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
   });
+  client.setQueryData(["capabilities"], options.capabilities ?? ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], MODELS);
   client.setQueryData(["tools", "web-search", "availability"], {
     configured: false,
@@ -185,6 +188,15 @@ const setup = (
   };
 };
 
+it("hides file entry points and ignores file drops when attachments are unavailable", () => {
+  const harness = setup({ capabilities: { ...ALL_CAPABILITIES, attachments: false } });
+  expect(harness.container.querySelector('input[type="file"]')).toBeNull();
+  expect(screen.getByRole("button", { name: "Add attachment" })).toBeDisabled();
+  const shell = harness.container.firstElementChild!;
+  fireEvent.drop(shell, { dataTransfer: { types: ["Files"], files: [textFile()] } });
+  expect(harness.upload).not.toHaveBeenCalled();
+});
+
 const fileInput = (container: HTMLElement) =>
   container.querySelector<HTMLInputElement>('input[type="file"]')!;
 
@@ -228,6 +240,7 @@ const renderDefaultProbe = (
   const client = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], rows);
   client.setQueryData(["tools", "web-search", "availability"], { configured: true, enabled: true });
   render(
@@ -327,6 +340,7 @@ describe("ChatInput first render", () => {
     "renders the resolved controls before effects: %#",
     ({ id, label, search, configured, empty }) => {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(["capabilities"], ALL_CAPABILITIES);
       client.setQueryData(
         ["chat-models"],
         empty
@@ -380,6 +394,7 @@ it("keeps one focused action button while Send becomes Stop and back", () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], MODELS);
   client.setQueryData(["tools", "web-search", "availability"], {
     configured: false,
@@ -427,6 +442,7 @@ describe("ChatInput search toggle", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
     });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
     client.setQueryData(
       ["chat-models"],
       [{ ...MODELS[0]!, capabilities: { ...MODELS[0]!.capabilities, tools: true } }],
@@ -485,6 +501,7 @@ describe("ChatInput plus menu", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
     client.setQueryData(["chat-models"], MODELS);
     client.setQueryData(["tools", "web-search", "availability"], {
       configured: false,
@@ -889,6 +906,7 @@ describe("queueing behind a live response", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+    queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
     queryClient.setQueryData(["chat-models"], MODELS);
     queryClient.setQueryData(["tools", "web-search", "availability"], {
       configured: false,

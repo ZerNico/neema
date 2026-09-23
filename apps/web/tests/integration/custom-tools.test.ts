@@ -19,6 +19,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
@@ -58,6 +59,7 @@ beforeAll(async () => {
     ProviderRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   runtime = ManagedRuntime.make(
@@ -263,23 +265,26 @@ describe("custom tool modules across attempts", () => {
       Effect.gen(function* () {
         const db = yield* Db;
         const tools = yield* CustomToolRepo;
-        const adminId = yield* makeUser();
+        const authorId = yield* makeUser("admin");
+        const survivingAdminId = yield* makeUser("admin");
         const created = yield* tools.create({
-          slug: `orphan_${adminId.slice(-8)}`,
+          slug: `orphan_${authorId.slice(-8)}`,
           name: "Orphan",
           description: "Outlives its author.",
-          createdBy: adminId,
+          createdBy: authorId,
           build: build("one"),
         });
-        yield* db.delete(user).where(eq(user.id, adminId));
+        yield* db.delete(user).where(eq(user.id, authorId));
         const stored = yield* tools.get(created.id);
-        const resolved = yield* tools.resolveForAttempt(adminId, [created.id]);
-        return { stored, resolved };
+        const resolved = yield* tools.resolveForAttempt(survivingAdminId, [created.id]);
+        const deletedAuthorAccess = yield* tools.resolveForAttempt(authorId, [created.id]);
+        return { stored, resolved, deletedAuthorAccess };
       }),
     );
 
     expect(result.stored).toMatchObject({ createdBy: null, compiled: "compiled one" });
     expect(result.resolved).toMatchObject([{ compiled: "compiled one" }]);
+    expect(result.deletedAuthorAccess).toEqual([]);
   });
 });
 

@@ -90,7 +90,7 @@ export class ScheduleRepo extends Context.Service<
     recordRun(input: {
       scheduleId: string;
       conversationId: string | null;
-      status: "started" | "error";
+      status: "started" | "error" | "skipped";
       error?: string | undefined;
     }): Effect.Effect<RunRow>;
     /**

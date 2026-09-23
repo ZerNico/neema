@@ -3,11 +3,8 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import {
-  ScheduleNotAvailable,
-  ScheduleRejected,
-  type ScheduleRunSummary,
-} from "../schema.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { ScheduleNotAvailable, ScheduleRejected, type ScheduleRunSummary } from "../schema.ts";
 import { isValidTimezone, previewFires, validateCron } from "./cron.ts";
 import { ScheduleFire, type FireOutcome } from "./fire.ts";
 import { ScheduleRepo, toSummary, type ScheduleRow } from "./repo.ts";
@@ -29,10 +26,7 @@ export class ScheduleService extends Context.Service<
       { runs: ScheduleRunSummary[]; nextCursor: { firedAt: Date; id: string } | null },
       ScheduleNotAvailable
     >;
-    create(
-      userId: string,
-      input: unknown,
-    ): Effect.Effect<ScheduleRow, ScheduleRejected>;
+    create(userId: string, input: unknown): Effect.Effect<ScheduleRow, ScheduleRejected>;
     update(
       userId: string,
       scheduleId: string,
@@ -40,7 +34,7 @@ export class ScheduleService extends Context.Service<
     ): Effect.Effect<ScheduleRow, ScheduleNotAvailable | ScheduleRejected>;
     pause(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
     resume(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
-    remove(userId: string, scheduleId: string): Effect.Effect<void>;
+    remove(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
     preview(input: {
       cron: string;
       timezone: string;
@@ -60,6 +54,7 @@ export class ScheduleService extends Context.Service<
     ScheduleService,
     Effect.gen(function* () {
       const db = yield* Db;
+      const policy = yield* FeaturePolicy;
       const repo = yield* ScheduleRepo;
       const providers = yield* ProviderRepo;
       const agents = yield* AgentRepo;
@@ -74,15 +69,27 @@ export class ScheduleService extends Context.Service<
           .pipe(Effect.catchCause(() => Effect.logWarning("schedule run invalidation failed")));
 
       const validate = (userId: string, raw: unknown) =>
-        validateScheduleSettings({ providers, agents }, userId, raw);
+        validateScheduleSettings({ providers, agents, policy }, userId, raw);
 
       const get = Effect.fn("ScheduleService.get")(function* (userId, scheduleId) {
+        if (!(yield* policy.can(userId, "schedules")))
+          return yield* new ScheduleNotAvailable({ scheduleId });
         const row = yield* repo.get(userId, scheduleId);
         if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
         return row;
       });
 
       const fire = Effect.fn("ScheduleService.fire")(function* (row: ScheduleRow) {
+        if (!(yield* policy.can(row.userId, "schedules"))) {
+          const run = yield* repo.recordRun({
+            scheduleId: row.id,
+            conversationId: null,
+            status: "skipped",
+            error: "schedule access is not permitted",
+          });
+          yield* runChanged(row.userId, row.id, run.id);
+          return;
+        }
         const outcome = yield* fireSchedule(row).pipe(
           Effect.catch((error: unknown) =>
             Effect.logError("scheduled fire failed", { scheduleId: row.id, error }).pipe(
@@ -126,45 +133,76 @@ export class ScheduleService extends Context.Service<
 
       return ScheduleService.of({
         list: Effect.fn("ScheduleService.list")(function* (userId) {
+          if (!(yield* policy.can(userId, "schedules"))) return [];
           return (yield* repo.list(userId)).map(toSummary);
         }),
         get,
-        listRuns: Effect.fn("ScheduleService.listRuns")(function* (userId, scheduleId, cursor, limit = 50) {
+        listRuns: Effect.fn("ScheduleService.listRuns")(function* (
+          userId,
+          scheduleId,
+          cursor,
+          limit = 50,
+        ) {
           yield* get(userId, scheduleId);
           return yield* repo.listRuns(userId, scheduleId, cursor, limit);
         }),
         create: Effect.fn("ScheduleService.create")(function* (userId, input) {
+          if (!(yield* policy.can(userId, "schedules")))
+            return yield* new ScheduleRejected({ reason: "schedule creation is unavailable" });
           const settings = yield* validate(userId, input);
           const row = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (!(yield* policy.can(userId, "schedules", tx)))
+                  return yield* new ScheduleRejected({
+                    reason: "schedule creation is unavailable",
+                  });
                 yield* checkScheduleResources(tx, userId, settings);
-                return yield* repo.insert({ userId, ...settings, nextFireAt: firstFireAt(settings) });
+                return yield* repo.insert(
+                  { userId, ...settings, nextFireAt: firstFireAt(settings) },
+                  tx,
+                );
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+              Effect.catchTag("SqlError", Effect.die),
+            );
           yield* changed(userId, row.id);
           return row;
         }),
         update: Effect.fn("ScheduleService.update")(function* (userId, scheduleId, input) {
+          yield* get(userId, scheduleId);
           const settings = yield* validate(userId, input);
           const row = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                yield* get(userId, scheduleId);
+                if (!(yield* policy.can(userId, "schedules", tx)))
+                  return yield* new ScheduleNotAvailable({ scheduleId });
+                if (!(yield* repo.get(userId, scheduleId, tx)))
+                  return yield* new ScheduleNotAvailable({ scheduleId });
                 yield* checkScheduleResources(tx, userId, settings);
-                return yield* repo.update(userId, scheduleId, {
-                  ...settings,
-                  nextFireAt: firstFireAt(settings),
-                });
+                return yield* repo.update(
+                  userId,
+                  scheduleId,
+                  {
+                    ...settings,
+                    nextFireAt: firstFireAt(settings),
+                  },
+                  tx,
+                );
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+              Effect.catchTag("SqlError", Effect.die),
+            );
           if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
           yield* changed(userId, row.id);
           return row;
         }),
         pause: Effect.fn("ScheduleService.pause")(function* (userId, scheduleId) {
+          yield* get(userId, scheduleId);
           const row = yield* repo.update(userId, scheduleId, { paused: true, nextFireAt: null });
           if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
           yield* changed(userId, scheduleId);
@@ -179,6 +217,7 @@ export class ScheduleService extends Context.Service<
           yield* changed(userId, scheduleId);
         }),
         remove: Effect.fn("ScheduleService.remove")(function* (userId, scheduleId) {
+          yield* get(userId, scheduleId);
           yield* repo.remove(userId, scheduleId);
           yield* changed(userId, scheduleId);
         }),

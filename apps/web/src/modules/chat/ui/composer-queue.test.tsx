@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { Composer } from "./composer.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { deleteAttachment, uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
@@ -72,6 +73,7 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(
     ["chat-models"],
     [
@@ -224,6 +226,7 @@ describe("editing a queued message", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
     client.setQueryData(
       ["chat-models"],
       [

@@ -92,11 +92,13 @@ export type ContextPickerKind = "agent" | "collections";
 export function ContextMenuItems({
   selection,
   agentLocked,
+  knowledgeEnabled = true,
   onPick,
   disabled,
 }: {
   selection: ContextSelection;
   agentLocked: boolean;
+  knowledgeEnabled?: boolean;
   onPick: (kind: ContextPickerKind) => void;
   disabled: boolean;
 }) {
@@ -115,13 +117,15 @@ export function ContextMenuItems({
           ) : null}
         </DropdownMenuItem>
       )}
-      <DropdownMenuItem disabled={disabled} onClick={() => onPick("collections")}>
-        <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
-        Knowledge
-        {count > 0 ? (
-          <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">{count}</span>
-        ) : null}
-      </DropdownMenuItem>
+      {knowledgeEnabled ? (
+        <DropdownMenuItem disabled={disabled} onClick={() => onPick("collections")}>
+          <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
+          Knowledge
+          {count > 0 ? (
+            <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">{count}</span>
+          ) : null}
+        </DropdownMenuItem>
+      ) : null}
     </>
   );
 }
@@ -517,7 +521,8 @@ export function ReferenceChip({
   const schedules = useQuery({ ...schedulesQuery, enabled: reference.kind === "schedule" });
   const agent = agents.data?.find((candidate) => candidate.id === reference.id);
   const schedule = schedules.data?.find((candidate) => candidate.id === reference.id);
-  const loaded = reference.kind === "agent" ? agents.data !== undefined : schedules.data !== undefined;
+  const loaded =
+    reference.kind === "agent" ? agents.data !== undefined : schedules.data !== undefined;
   const name = agent?.name ?? schedule?.name ?? (loaded ? null : reference.label);
   return (
     <ContextChip

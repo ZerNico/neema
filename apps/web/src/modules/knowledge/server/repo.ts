@@ -20,6 +20,7 @@ import type { CollectionSummary, KnowledgeDocument, KnowledgePassage } from "../
 import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
 import { collectionReadable } from "./access.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { pipelineFingerprint, type DocumentChunk } from "./chunking.ts";
 import { readEmbeddingTarget, type EmbeddingTarget } from "./embedding-connection.ts";
 
@@ -119,7 +120,11 @@ const latestVersionId = sql`(select v.id from knowledge_document_versions v wher
 const displayedVersionId = sql`coalesce(${knowledgeDocuments.currentVersionId}, ${latestVersionId})`;
 
 const ownedCollection = (userId: string, collectionId: string) =>
-  and(eq(knowledgeCollections.id, collectionId), eq(knowledgeCollections.userId, userId));
+  and(
+    eq(knowledgeCollections.id, collectionId),
+    eq(knowledgeCollections.userId, userId),
+    capabilityAllowedSql(userId, "knowledgeCreate"),
+  );
 
 const readableCollection = (userId: string, collectionId: string) =>
   and(eq(knowledgeCollections.id, collectionId), collectionReadable(userId));
@@ -454,7 +459,7 @@ export class KnowledgeRepo extends Context.Service<
               const [owner] = yield* tx
                 .select({ id: user.id })
                 .from(user)
-                .where(eq(user.id, userId))
+                .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "knowledgeCreate")))
                 .for("update");
               if (!owner) return false;
               const [existing] = yield* tx
@@ -1907,6 +1912,7 @@ export class KnowledgeRepo extends Context.Service<
                     and(
                       eq(knowledgeDocuments.id, documentId),
                       eq(knowledgeCollections.userId, userId),
+                      capabilityAllowedSql(userId, "knowledgeCreate"),
                     ),
                   )
                   .for("update", { of: knowledgeCollections });
@@ -1966,6 +1972,7 @@ export class KnowledgeRepo extends Context.Service<
                     and(
                       eq(knowledgeDocuments.id, documentId),
                       eq(knowledgeCollections.userId, userId),
+                      capabilityAllowedSql(userId, "knowledgeCreate"),
                     ),
                   )
                   .for("update", { of: knowledgeCollections });

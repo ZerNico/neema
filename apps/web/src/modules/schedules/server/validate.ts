@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { conversations, knowledgeCollections, skills } from "~/db/schema/index.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
+import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -27,14 +28,19 @@ export type ValidatedSchedule = Omit<
  * skills are checked separately on the writing transaction.
  */
 export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(function* (
-  deps: { providers: ProviderRepo["Service"]; agents: AgentRepo["Service"] },
+  deps: {
+    providers: ProviderRepo["Service"];
+    agents: AgentRepo["Service"];
+    policy: FeaturePolicy["Service"];
+  },
   userId: string,
   raw: unknown,
 ) {
   const settings = yield* Schema.decodeUnknownEffect(ScheduleSettings)(raw).pipe(
     Effect.mapError(() => new ScheduleRejected({ reason: "invalid schedule settings" })),
   );
-  if (!settings.name.trim()) return yield* new ScheduleRejected({ reason: "name must not be blank" });
+  if (!settings.name.trim())
+    return yield* new ScheduleRejected({ reason: "name must not be blank" });
   if (!settings.prompt.trim())
     return yield* new ScheduleRejected({ reason: "prompt must not be blank" });
   const cronIssue = validateCron(settings.cron, settings.timezone);
@@ -46,6 +52,14 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     return yield* new ScheduleRejected({ reason: "invalid end time" });
   if (settings.modelId && !(yield* deps.providers.isModelAccessible(userId, settings.modelId)))
     return yield* new ScheduleRejected({ reason: "selected model is unavailable" });
+  if (settings.searchEnabled && !(yield* deps.policy.can(userId, "webSearch")))
+    return yield* new ScheduleRejected({ reason: "web search is not permitted" });
+  if (
+    settings.researchEnabled &&
+    (!(yield* deps.policy.can(userId, "deepResearch")) ||
+      !(yield* deps.policy.can(userId, "webSearch")))
+  )
+    return yield* new ScheduleRejected({ reason: "deep research is not permitted" });
   if (settings.agentId) {
     const agent = yield* deps.agents.get(userId, settings.agentId);
     if (!agent || agent.row.userId !== userId)
@@ -95,10 +109,7 @@ export const checkScheduleResources = (
         .select({ id: knowledgeCollections.id })
         .from(knowledgeCollections)
         .where(
-          and(
-            inArray(knowledgeCollections.id, settings.collectionIds),
-            collectionReadable(userId),
-          ),
+          and(inArray(knowledgeCollections.id, settings.collectionIds), collectionReadable(userId)),
         );
       if (available.length !== settings.collectionIds.length)
         return yield* new ScheduleRejected({ reason: "a selected collection is unavailable" });

@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Schema } from "effect";
 import { DraftService, type DraftKindConfig } from "~/modules/drafts/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import {
   EMPTY_AGENT_DRAFT,
@@ -17,9 +18,14 @@ import {
 } from "../draft-schema.ts";
 import { AgentNotAvailable } from "../errors.ts";
 import { AgentRepo } from "./repo.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { storedAgentToDraftSettings } from "./draft-map.ts";
 import { validateAgentSettings } from "./service.ts";
-import { DraftNotAvailable, DraftRejected, type ConversationDraft } from "~/modules/drafts/draft-schema.ts";
+import {
+  DraftNotAvailable,
+  DraftRejected,
+  type ConversationDraft,
+} from "~/modules/drafts/draft-schema.ts";
 
 // The generic store keeps settings opaque; every row this service touches is
 // kind "agent", written only from DraftSettings, so the cast is the decode.
@@ -38,17 +44,21 @@ const agentConfig = (
   // Editing an existing agent starts from its stored settings, so the model
   // and the user review the live configuration, not a blank form.
   initialSettings: (agentId, tx) =>
-    agents.get(userId, agentId, tx).pipe(
-      Effect.map((target) => (target ? storedAgentToDraftSettings(target) : EMPTY_AGENT_DRAFT)),
-    ),
+    agents
+      .get(userId, agentId, tx)
+      .pipe(
+        Effect.map((target) => (target ? storedAgentToDraftSettings(target) : EMPTY_AGENT_DRAFT)),
+      ),
   // The target must be an owned agent; the current revision becomes the
   // draft's optimistic-concurrency baseline for its first save.
   checkTarget: (agentId, tx) =>
-    agents.get(userId, agentId, tx).pipe(
-      Effect.map((target) =>
-        target && target.row.userId === userId ? target.row.configRevision : null,
+    agents
+      .get(userId, agentId, tx)
+      .pipe(
+        Effect.map((target) =>
+          target && target.row.userId === userId ? target.row.configRevision : null,
+        ),
       ),
-    ),
 });
 
 export class AgentDraftService extends Context.Service<
@@ -60,7 +70,11 @@ export class AgentDraftService extends Context.Service<
       userId: string,
       input: OpenAgentDraftInput,
       guard: (tx: never) => Effect.Effect<unknown, E, R>,
-    ): Effect.Effect<OpenAgentDraftResult, DraftNotAvailable | DraftRejected | AgentNotAvailable | E, R>;
+    ): Effect.Effect<
+      OpenAgentDraftResult,
+      DraftNotAvailable | DraftRejected | AgentNotAvailable | E,
+      R
+    >;
     patch<E = never, R = never>(
       userId: string,
       input: PatchAgentDraftInput,
@@ -79,7 +93,10 @@ export class AgentDraftService extends Context.Service<
      * specific draft by name, and a revision that moved underneath does not
      * make destroying it wrong. Saved agents are untouched.
      */
-    discard(userId: string, draftId: string): Effect.Effect<void, DraftNotAvailable | DraftRejected>;
+    discard(
+      userId: string,
+      draftId: string,
+    ): Effect.Effect<void, DraftNotAvailable | DraftRejected>;
   }
 >()("chat/agents/AgentDraftService") {
   static readonly layer = Layer.effect(
@@ -88,17 +105,47 @@ export class AgentDraftService extends Context.Service<
       const db = yield* Db;
       const core: DraftService["Service"] = yield* DraftService;
       const agents = yield* AgentRepo;
+      const policy = yield* FeaturePolicy;
+      const requireAuthoring = (userId: string, tx?: DbTx) =>
+        policy
+          .can(userId, "agentsCreate", tx)
+          .pipe(
+            Effect.flatMap((allowed) =>
+              allowed ? Effect.void : Effect.fail(new DraftNotAvailable({})),
+            ),
+          );
       const providers = yield* ProviderRepo;
       const bus = yield* SyncBus;
       const revisionInput = Schema.decodeUnknownEffect(AgentDraftRevisionInput);
       const config = (userId: string) => agentConfig(agents, userId);
       return AgentDraftService.of({
         get: (userId, draftId) =>
-          core.get(userId, draftId).pipe(Effect.map((draft) => (draft ? asAgent(draft) : null))),
+          policy
+            .can(userId, "agentsCreate")
+            .pipe(
+              Effect.flatMap((allowed) =>
+                allowed
+                  ? core
+                      .get(userId, draftId)
+                      .pipe(Effect.map((draft) => (draft ? asAgent(draft) : null)))
+                  : Effect.succeed(null),
+              ),
+            ),
         list: (userId, conversationId) =>
-          core.list(userId, conversationId, "agent").pipe(Effect.map((rows) => rows.map(asAgent))),
+          policy
+            .can(userId, "agentsCreate")
+            .pipe(
+              Effect.flatMap((allowed) =>
+                allowed
+                  ? core
+                      .list(userId, conversationId, "agent")
+                      .pipe(Effect.map((rows) => rows.map(asAgent)))
+                  : Effect.succeed([]),
+              ),
+            ),
         open: (userId, input, guard) =>
           Effect.gen(function* () {
+            yield* requireAuthoring(userId);
             const parsed = yield* Schema.decodeUnknownEffect(OpenAgentDraftInput)(input, {
               onExcessProperty: "error",
             }).pipe(
@@ -121,6 +168,7 @@ export class AgentDraftService extends Context.Service<
           }),
         patch: (userId, input, guard) =>
           Effect.gen(function* () {
+            yield* requireAuthoring(userId);
             const parsed = yield* Schema.decodeUnknownEffect(PatchAgentDraftInput)(input, {
               onExcessProperty: "error",
             }).pipe(
@@ -135,6 +183,7 @@ export class AgentDraftService extends Context.Service<
             return { outcome: result.outcome, draft: asAgent(result.draft) };
           }),
         save: Effect.fn("AgentDraftService.save")(function* (userId, input) {
+          yield* requireAuthoring(userId);
           const parsed = yield* revisionInput(input).pipe(
             Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft revision" })),
           );
@@ -142,6 +191,7 @@ export class AgentDraftService extends Context.Service<
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* requireAuthoring(userId, tx);
                 const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId));
                 // A newer draft always wins over an older receipt, even if that older
                 // request once succeeded. Never approve contents the user did not see.
@@ -208,18 +258,22 @@ export class AgentDraftService extends Context.Service<
           if (changed) {
             yield* bus
               .publishGlobal({ type: "resources.changed" })
-              .pipe(Effect.catchCause(() => Effect.logWarning("agent resource invalidation failed")));
+              .pipe(
+                Effect.catchCause(() => Effect.logWarning("agent resource invalidation failed")),
+              );
             yield* core.changed(userId, result.draft);
           }
           return result;
         }),
         reload: Effect.fn("AgentDraftService.reload")(function* (userId, input) {
+          yield* requireAuthoring(userId);
           const parsed = yield* revisionInput(input).pipe(
             Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft revision" })),
           );
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* requireAuthoring(userId, tx);
                 const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId));
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };

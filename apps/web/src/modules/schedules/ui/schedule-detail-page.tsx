@@ -47,7 +47,6 @@ const runStamp = (date: Date) => {
   return day === "Today" ? clockLabel(date) : day;
 };
 
-
 const scheduleToSettings = (schedule: {
   name: string;
   scheduleText: string;
@@ -242,8 +241,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 onClick={() => {
                   void confirm({
                     title: `Delete “${schedule.name}”?`,
-                    description:
-                      "No future runs will fire. Its chats stay in your chat list.",
+                    description: "No future runs will fire. Its chats stay in your chat list.",
                     confirmLabel: "Delete schedule",
                   }).then(async (confirmed) => {
                     if (!confirmed) return;
@@ -302,9 +300,12 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                   <span className="min-w-0 flex-1 truncate">
                     {run.conversationId
                       ? (run.conversationTitle ?? "Untitled chat")
-                      : (run.error ?? "Could not run")}
+                      : run.status === "skipped"
+                        ? "Schedule access is not permitted"
+                        : (run.error ?? "Could not run")}
                   </span>
                   {run.status === "error" ? <Badge variant="destructive">Failed</Badge> : null}
+                  {run.status === "skipped" ? <Badge variant="secondary">Skipped</Badge> : null}
                   <time
                     dateTime={new Date(run.firedAt).toISOString()}
                     title={absoluteLabel(new Date(run.firedAt))}

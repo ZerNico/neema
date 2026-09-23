@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { Db } from "~/server/db.ts";
 import {
   CreateDocumentInput,
@@ -83,6 +84,7 @@ export class DocumentService extends Context.Service<
     DocumentService,
     Effect.gen(function* () {
       const db = yield* Db;
+      const policy = yield* FeaturePolicy;
       const documents = yield* DocumentRepo;
       const bus = yield* SyncBus;
       const documentChanged = (
@@ -98,6 +100,16 @@ export class DocumentService extends Context.Service<
           .pipe(Effect.catchCause(() => Effect.logWarning("document invalidation failed")));
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
+      const requireDocuments = (userId: string, tx?: DbTx) =>
+        policy
+          .can(userId, "documents", tx)
+          .pipe(
+            Effect.flatMap((allowed) =>
+              allowed
+                ? Effect.void
+                : Effect.fail(new DocumentRejected({ reason: "documents are unavailable" })),
+            ),
+          );
 
       const create = <E = never, R = never>(
         userId: string,
@@ -111,6 +123,7 @@ export class DocumentService extends Context.Service<
             Effect.gen(function* () {
               // Keep fence failures outside recoverable validation/conflict handling.
               if (guard) yield* guard(tx);
+              yield* requireDocuments(userId, tx);
               yield* documents.lockConversation(tx, userId, parsed.conversationId);
               return yield* documents.create(tx, parsed.conversationId, {
                 title: parsed.title,
@@ -134,6 +147,7 @@ export class DocumentService extends Context.Service<
           const result = yield* transaction((tx) =>
             Effect.gen(function* () {
               if (guard) yield* guard(tx);
+              yield* requireDocuments(userId, tx);
               const document = yield* documents.lock(tx, userId, parsed.documentId);
               const staleRead =
                 parsed.expectedRevision !== undefined &&
@@ -177,6 +191,7 @@ export class DocumentService extends Context.Service<
           const result = yield* transaction((tx) =>
             Effect.gen(function* () {
               if (guard) yield* guard(tx);
+              yield* requireDocuments(userId, tx);
               const document = yield* documents.lock(tx, userId, parsed.documentId);
               if (document.revision !== parsed.expectedRevision)
                 return { outcome: "conflict" as const, document };
@@ -207,8 +222,16 @@ export class DocumentService extends Context.Service<
         });
 
       return DocumentService.of({
-        get: documents.get,
-        list: documents.listForConversation,
+        get: Effect.fn(function* (userId, documentId) {
+          return (yield* policy.can(userId, "documents"))
+            ? yield* documents.get(userId, documentId)
+            : null;
+        }),
+        list: Effect.fn(function* (userId, conversationId) {
+          return (yield* policy.can(userId, "documents"))
+            ? yield* documents.listForConversation(userId, conversationId)
+            : [];
+        }),
         create,
         edit,
         replace,
@@ -220,6 +243,7 @@ export class DocumentService extends Context.Service<
           const parsed = yield* decode(ToggleDocumentTaskInput, "invalid task toggle")(input);
           const result = yield* transaction((tx) =>
             Effect.gen(function* () {
+              yield* requireDocuments(userId, tx);
               const document = yield* documents.lock(tx, userId, parsed.documentId);
               if (
                 parsed.expectedRevision !== undefined &&

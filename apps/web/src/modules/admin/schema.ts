@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { DefaultModelIds } from "~/modules/providers/default-models.ts";
+import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
 export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
 
@@ -112,6 +113,19 @@ export const RenameGroupInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
 });
 
+export const CapabilitiesInput = Schema.Struct(
+  Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, Schema.Boolean])) as Record<
+    (typeof CAPABILITY_KEYS)[number],
+    typeof Schema.Boolean
+  >,
+);
+
+export const UpdateDefaultCapabilitiesInput = Schema.Struct({ capabilities: CapabilitiesInput });
+export const UpdateGroupCapabilitiesInput = Schema.Struct({
+  groupId: Schema.String,
+  capabilities: CapabilitiesInput,
+});
+
 export const GroupIdInput = Schema.Struct({
   groupId: Schema.String,
 });
@@ -123,7 +137,11 @@ export const GroupMemberInput = Schema.Struct({
 
 export const UpdateGroupMemberSharingInput = Schema.Struct({
   ...GroupMemberInput.fields,
-  canShare: Schema.Boolean,
+  sharing: Schema.Struct({
+    agents: Schema.Boolean,
+    knowledge: Schema.Boolean,
+    skills: Schema.Boolean,
+  }),
 });
 
 export const ProbeEmbeddingDimensionsInput = Schema.Struct({

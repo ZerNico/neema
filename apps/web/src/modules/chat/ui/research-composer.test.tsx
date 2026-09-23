@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { ChatInput } from "./chat-input.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 
@@ -40,6 +41,7 @@ function client(available = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
   queryClient.setQueryData(["chat-models"], [model]);
   queryClient.setQueryData(["tools", "web-search", "availability"], {
     configured: true,
@@ -91,6 +93,39 @@ const enableResearch = toggleResearch;
 const disableResearch = toggleResearch;
 
 describe("research composer", () => {
+  it("withholds research when web search is not permitted, even if research is granted", async () => {
+    const cache = client();
+    cache.setQueryData(["capabilities"], { ...ALL_CAPABILITIES, webSearch: false });
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QueryClientProvider client={cache}>
+        <Harness onSend={onSend} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Deep research" })).toBeNull();
+    expect(searchPill()).toBeNull();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], false, []));
+  });
+
+  it("does not submit a selected research mode after web search is revoked", async () => {
+    const cache = client();
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QueryClientProvider client={cache}>
+        <Harness onSend={onSend} />
+      </QueryClientProvider>,
+    );
+    await enableResearch();
+    await act(async () => {
+      cache.setQueryData(["capabilities"], { ...ALL_CAPABILITIES, webSearch: false });
+    });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], false, []));
+  });
+
   it.each([false, true])(
     "preserves locked controls without an optional research handler (research=%s)",
     async (researchEnabled) => {
@@ -187,7 +222,7 @@ describe("research composer", () => {
 
   it("explains disabled research and blocks an already-selected request if availability changes", async () => {
     const cache = client();
-    const onSend = vi.fn();
+    const onSend = vi.fn().mockResolvedValue(undefined);
     render(
       <QueryClientProvider client={cache}>
         <Harness onSend={onSend} />

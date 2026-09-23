@@ -17,6 +17,7 @@ import { CustomToolInstaller } from "~/modules/custom-tools/server/installer.ts"
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
 import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
@@ -63,6 +64,7 @@ const ReposLayer = Layer.mergeAll(
   ProviderRepo.layer,
   ToolsRepo.layer,
   GroupRepo.layer,
+  FeaturePolicy.layer,
   KnowledgeRepo.layer,
   SkillRepo.layer,
   ScheduleRepo.layer,

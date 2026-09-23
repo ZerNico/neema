@@ -9,6 +9,7 @@ import { DraftService, type DraftKindConfig } from "~/modules/drafts/server/serv
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   EMPTY_SCHEDULE_DRAFT,
   OpenScheduleDraftInput,
@@ -89,6 +90,7 @@ export class ScheduleDraftService extends Context.Service<
     ScheduleDraftService,
     Effect.gen(function* () {
       const db = yield* Db;
+      const policy = yield* FeaturePolicy;
       const core: DraftService["Service"] = yield* DraftService;
       const repo = yield* ScheduleRepo;
       const providers = yield* ProviderRepo;
@@ -118,13 +120,33 @@ export class ScheduleDraftService extends Context.Service<
 
       return ScheduleDraftService.of({
         get: (userId, draftId) =>
-          core.get(userId, draftId).pipe(Effect.map((draft) => (draft ? asSchedule(draft) : null))),
+          policy
+            .can(userId, "schedules")
+            .pipe(
+              Effect.flatMap((allowed) =>
+                allowed
+                  ? core
+                      .get(userId, draftId)
+                      .pipe(Effect.map((draft) => (draft ? asSchedule(draft) : null)))
+                  : Effect.succeed(null),
+              ),
+            ),
         list: (userId, conversationId) =>
-          core
-            .list(userId, conversationId, "schedule")
-            .pipe(Effect.map((rows) => rows.map(asSchedule))),
+          policy
+            .can(userId, "schedules")
+            .pipe(
+              Effect.flatMap((allowed) =>
+                allowed
+                  ? core
+                      .list(userId, conversationId, "schedule")
+                      .pipe(Effect.map((rows) => rows.map(asSchedule)))
+                  : Effect.succeed([]),
+              ),
+            ),
         open: (userId, input, guard) =>
           Effect.gen(function* () {
+            if (!(yield* policy.can(userId, "schedules")))
+              return yield* new ScheduleNotAvailable({ scheduleId: "" });
             const parsed = yield* Schema.decodeUnknownEffect(OpenScheduleDraftInput)(input, {
               onExcessProperty: "error",
             }).pipe(
@@ -149,6 +171,8 @@ export class ScheduleDraftService extends Context.Service<
           }),
         patch: (userId, input, guard) =>
           Effect.gen(function* () {
+            if (!(yield* policy.can(userId, "schedules")))
+              return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
             const parsed = yield* Schema.decodeUnknownEffect(PatchScheduleDraftInput)(input, {
               onExcessProperty: "error",
             }).pipe(
@@ -172,6 +196,8 @@ export class ScheduleDraftService extends Context.Service<
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (!(yield* policy.can(userId, "schedules", tx)))
+                  return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
                 const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId));
                 // A newer draft always wins over an older receipt, even if that
                 // older request once succeeded.
@@ -180,7 +206,11 @@ export class ScheduleDraftService extends Context.Service<
                 if (draft.savedDraftRevision === draft.revision && draft.targetId !== null)
                   return { outcome: "saved" as const, draft, scheduleId: draft.targetId };
                 const saved = yield* Effect.gen(function* () {
-                  const settings = yield* validateScheduleSettings({ providers, agents }, userId, draft.settings);
+                  const settings = yield* validateScheduleSettings(
+                    { providers, agents, policy },
+                    userId,
+                    draft.settings,
+                  );
                   yield* checkScheduleResources(tx, userId, settings);
                   if (draft.targetId === null) {
                     const row = yield* repo.insert(
@@ -223,7 +253,10 @@ export class ScheduleDraftService extends Context.Service<
                 return { outcome: "saved" as const, draft: updated, scheduleId: saved.scheduleId };
               }),
             )
-            .pipe(Effect.catchTag("SqlError", Effect.die), Effect.orDie);
+            .pipe(
+              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+              Effect.catchTag("SqlError", Effect.die),
+            );
           if (savedId !== null) {
             yield* changedSchedule(userId, savedId);
             yield* core.changed(userId, result.draft);
@@ -231,12 +264,16 @@ export class ScheduleDraftService extends Context.Service<
           return result;
         }),
         reload: Effect.fn("ScheduleDraftService.reload")(function* (userId, input) {
+          if (!(yield* policy.can(userId, "schedules")))
+            return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
           const parsed = yield* revisionInput(input).pipe(
             Effect.mapError(() => new DraftRejected({ reason: "invalid schedule draft revision" })),
           );
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (!(yield* policy.can(userId, "schedules", tx)))
+                  return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
                 const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId));
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };
@@ -258,7 +295,16 @@ export class ScheduleDraftService extends Context.Service<
           if (result.outcome === "reloaded") yield* core.changed(userId, result.draft);
           return result;
         }),
-        discard: (userId, draftId) => core.discard(userId, draftId).pipe(Effect.asVoid),
+        discard: (userId, draftId) =>
+          policy
+            .can(userId, "schedules")
+            .pipe(
+              Effect.flatMap((allowed) =>
+                allowed
+                  ? core.discard(userId, draftId).pipe(Effect.asVoid)
+                  : Effect.fail(new DraftRejected({ reason: "schedule editing is unavailable" })),
+              ),
+            ),
       });
     }),
   ).pipe(Layer.provide(DraftService.layer), Layer.provideMerge(ScheduleRepo.layer));

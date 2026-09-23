@@ -1,4 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import {
   agentGroupGrants,
   agentUserGrants,
@@ -21,6 +22,9 @@ import {
  */
 export const collectionReadable = (userId: string): SQL =>
   sql`(
+    ${capabilityAllowedSql(userId, "knowledgeUse")}
+    and ${capabilityAllowedSql(knowledgeCollections.userId, "knowledgeCreate")}
+    and (
     ${knowledgeCollections.userId} = ${userId}
     or ${knowledgeCollections.audience} = 'instance'
     or exists (
@@ -35,11 +39,15 @@ export const collectionReadable = (userId: string): SQL =>
       where ${knowledgeCollectionGroupGrants.collectionId} = ${knowledgeCollections.id}
         and ${groupMembers.userId} = ${userId}
     )
+    )
   )`;
 
 /** Same rule for agents. An agent grant never extends to its collections. */
 export const agentReadable = (userId: string): SQL =>
   sql`(
+    ${capabilityAllowedSql(userId, "agentsUse")}
+    and ${capabilityAllowedSql(agents.userId, "agentsCreate")}
+    and (
     ${agents.userId} = ${userId}
     or ${agents.audience} = 'instance'
     or exists (
@@ -52,6 +60,7 @@ export const agentReadable = (userId: string): SQL =>
       join ${groupMembers} on ${groupMembers.groupId} = ${agentGroupGrants.groupId}
       where ${agentGroupGrants.agentId} = ${agents.id}
         and ${groupMembers.userId} = ${userId}
+    )
     )
   )`;
 

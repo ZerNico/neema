@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ChatInput } from "./chat-input.tsx";
 import { extractReferences, restoreReferences, type MessageReference } from "../references.ts";
@@ -147,7 +148,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ? "This is a work chat. Open it in the desktop app to continue."
         : null;
   const sendDisabled = disabled || (working && readOnly);
-  const skills = useQuery(skillsQuery);
+  const { data: capabilities } = useQuery(capabilitiesQuery);
+  const skills = useQuery({ ...skillsQuery, enabled: !!capabilities?.skillsUse });
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     initialSkillId ? [initialSkillId] : [],
   );
@@ -156,6 +158,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // written back into the text on send.
   const [references, setReferences] = useState<MessageReference[]>([]);
   const [researchEnabled, setResearchEnabled] = useState(false);
+  const canResearch = !!capabilities?.deepResearch && !!capabilities.webSearch;
+  const activeResearch = researchEnabled && canResearch;
   // The queued message open for editing. Its row stays in the queue, and its
   // files stay claimed by it, until the replacement commits.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -201,7 +205,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const requestRef = useRef({
     draft,
     references,
-    researchEnabled,
+    researchEnabled: activeResearch,
     skillIds,
     onSend,
     onQueue,
@@ -215,7 +219,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     requestRef.current = {
       draft,
       references,
-      researchEnabled,
+      researchEnabled: activeResearch,
       skillIds,
       onSend,
       onQueue,
@@ -343,7 +347,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       ) : null}
       <ChatInput
         ref={textareaRef}
-        skills={{ items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds }}
+        {...(capabilities?.skillsUse
+          ? { skills: { items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds } }
+          : {})}
         references={{
           items: references,
           onRemove: (removed) =>
@@ -372,16 +378,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onModelChange={onModelChange}
         searchEnabled={searchEnabled}
         onSearchEnabledChange={onSearchEnabledChange}
-        researchEnabled={researchEnabled}
-        onResearchEnabledChange={setResearchEnabled}
+        researchEnabled={activeResearch}
+        {...(canResearch ? { onResearchEnabledChange: setResearchEnabled } : {})}
         // Offered only where Work can be honoured: a new chat, in the desktop app.
-        {...(mode?.kind === "choose" && desktop
+        {...(mode?.kind === "choose" && desktop && capabilities?.work
           ? { mode: { value: mode.value, onChange: mode.onChange } }
           : {})}
         blockedReason={blockedReason}
-        {...(serverAttachments ? { attachments: serverAttachments } : {})}
-        {...(workspaceImports ? { workspaceImports } : {})}
-        {...(context ? { context } : {})}
+        {...(serverAttachments && capabilities?.attachments
+          ? { attachments: serverAttachments }
+          : {})}
+        {...(workspaceImports && capabilities?.work ? { workspaceImports } : {})}
+        {...(context && (capabilities?.agentsUse || capabilities?.knowledgeUse) ? { context } : {})}
       />
       {/* Under the composer and inset, so it reads as part of it. Only a work
           chat has a folder to show, and only the desktop app can show one. */}

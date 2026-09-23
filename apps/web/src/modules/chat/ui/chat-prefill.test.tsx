@@ -11,6 +11,7 @@ import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "~/routes/_app.index.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { sendMessage } from "../server/functions.ts";
 import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
@@ -80,6 +81,7 @@ async function fixture({
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(
     ["chat-models"],
     [

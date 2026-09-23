@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   user,
   skillRevisions,
@@ -103,6 +104,7 @@ beforeAll(async () => {
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
   const repos = Layer.mergeAll(SkillRepo.layer, AttachmentRepo.layer).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(infra),
   );
   const base = Layer.mergeAll(repos, MemoryBlobs, QuietSync);

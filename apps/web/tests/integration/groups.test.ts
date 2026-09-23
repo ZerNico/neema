@@ -13,7 +13,8 @@ import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { modelGroupAccess, models, providers } from "~/db/schema/index.ts";
+import { conversations, modelGroupAccess, models, providers } from "~/db/schema/index.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
@@ -35,6 +36,7 @@ import {
   FakeCustomToolRuntime,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -112,6 +114,7 @@ beforeAll(async () => {
     GroupRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   const EngineLayer = StreamEngine.layer.pipe(
@@ -208,6 +211,8 @@ const visibleIds = Effect.fn("test.visibleIds")(function* (userId: string) {
 
 describe("group management", () => {
   it("defaults sharing off, scopes updates, preserves duplicate adds and resets re-adds", async () => {
+    const none = { agents: false, knowledge: false, skills: false };
+    const skillsOnly = { agents: false, knowledge: false, skills: true };
     await run(
       Effect.gen(function* () {
         const repo = yield* GroupRepo;
@@ -218,45 +223,38 @@ describe("group management", () => {
         yield* repo.addMember(group.id, userId);
         yield* repo.addMember(group.id, other);
         yield* repo.addMember(second.id, userId);
-        expect(yield* repo.listMembers(group.id)).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ userId, role: "user", canShare: false }),
-            expect.objectContaining({ userId: other, role: "admin", canShare: false }),
-          ]),
-        );
-        yield* repo.setMemberSharing(group.id, userId, true);
+        const sharingOf = (groupId: string, member: string) =>
+          repo
+            .listMembers(groupId)
+            .pipe(Effect.map((rows) => rows.find((m) => m.userId === member)?.sharing));
+        expect(yield* sharingOf(group.id, userId)).toEqual(none);
+        expect(yield* sharingOf(group.id, other)).toEqual(none);
+        // Each kind is stored on its own, and a duplicate add keeps it.
+        yield* repo.setMemberSharing(group.id, userId, skillsOnly);
         yield* repo.addMember(group.id, userId);
-        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
-          true,
-        );
-        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === other)?.canShare).toBe(
-          false,
-        );
-        expect((yield* repo.listMembers(second.id))[0]?.canShare).toBe(false);
-        yield* repo.setMemberSharing(group.id, userId, false);
-        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
-          false,
-        );
-        yield* repo.setMemberSharing(group.id, userId, true);
+        expect(yield* sharingOf(group.id, userId)).toEqual(skillsOnly);
+        expect(yield* sharingOf(group.id, other)).toEqual(none);
+        expect(yield* sharingOf(second.id, userId)).toEqual(none);
+        yield* repo.setMemberSharing(group.id, userId, none);
+        expect(yield* sharingOf(group.id, userId)).toEqual(none);
+        yield* repo.setMemberSharing(group.id, userId, skillsOnly);
         yield* repo.removeMember(group.id, userId);
         expect(
-          yield* repo.setMemberSharing(group.id, userId, true).pipe(Effect.flip),
+          yield* repo.setMemberSharing(group.id, userId, skillsOnly).pipe(Effect.flip),
         ).toMatchObject({
           _tag: "GroupMemberNotFound",
           groupId: group.id,
           userId,
         });
         expect(
-          yield* repo.setMemberSharing(uuidv7(), userId, true).pipe(Effect.flip),
+          yield* repo.setMemberSharing(uuidv7(), userId, skillsOnly).pipe(Effect.flip),
         ).toMatchObject({
           _tag: "GroupMemberNotFound",
           userId,
         });
-        expect((yield* repo.listMembers(group.id)).some((m) => m.userId === userId)).toBe(false);
+        expect(yield* sharingOf(group.id, userId)).toBeUndefined();
         yield* repo.addMember(group.id, userId);
-        expect((yield* repo.listMembers(group.id)).find((m) => m.userId === userId)?.canShare).toBe(
-          false,
-        );
+        expect(yield* sharingOf(group.id, userId)).toEqual(none);
       }),
     );
   });
@@ -586,6 +584,112 @@ describe("model visibility", () => {
 });
 
 describe("generation-time enforcement", () => {
+  it("rejects a queued Work message without leaving an entry", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const groups = yield* GroupRepo;
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const userId = yield* makeUser();
+        const modelId = yield* makeModel();
+        const conversation = yield* repo.createConversation({ userId, modelId });
+        yield* db
+          .update(conversations)
+          .set({ mode: "work" })
+          .where(eq(conversations.id, conversation.id));
+        const group = yield* groups.createGroup(`No queued Work ${uuidv7()}`);
+        yield* groups.addMember(group.id, userId);
+        yield* groups.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, work: false });
+        const denied = yield* chat
+          .queueMessage({
+            userId,
+            conversationId: conversation.id,
+            content: "Continue the task",
+            attachmentIds: [],
+            input: { modelId, searchEnabled: false, researchEnabled: false },
+            desktop: { fromDesktop: true, desktopExecutorId: "test-machine" },
+          })
+          .pipe(Effect.flip);
+        return { denied, entries: yield* repo.listQueue(conversation.id) };
+      }),
+    );
+    expect(result.denied).toMatchObject({
+      _tag: "InvalidMessage",
+      reason: "Work is not permitted",
+    });
+    expect(result.entries).toEqual([]);
+  });
+
+  it("rejects a Work reservation before creating a conversation", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const groups = yield* GroupRepo;
+        const chat = yield* ChatService;
+        const userId = yield* makeUser();
+        const group = yield* groups.createGroup(`No Work ${uuidv7()}`);
+        yield* groups.addMember(group.id, userId);
+        yield* groups.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, work: false });
+        const conversationId = uuidv7();
+        const denied = yield* chat
+          .reserveWorkTurn({
+            id: uuidv7(),
+            userId,
+            conversation: { kind: "new", id: conversationId, mode: "work" },
+          })
+          .pipe(Effect.flip);
+        const rows = yield* db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.id, conversationId));
+        return { denied, rows };
+      }),
+    );
+    expect(result.denied).toMatchObject({
+      _tag: "InvalidMessage",
+      reason: "Work is not permitted",
+    });
+    expect(result.rows).toEqual([]);
+  });
+
+  it("rejects forbidden search before creating a turn", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const groups = yield* GroupRepo;
+        const chat = yield* ChatService;
+        const userId = yield* makeUser();
+        const group = yield* groups.createGroup(`No search ${uuidv7()}`);
+        yield* groups.addMember(group.id, userId);
+        yield* groups.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, webSearch: false });
+        const conversationId = uuidv7();
+        const denied = yield* chat
+          .sendMessage({
+            userId,
+            conversation: { kind: "new", id: conversationId, mode: "chat" },
+            modelId: yield* makeModel(),
+            content: "Look this up",
+            searchEnabled: true,
+            researchEnabled: false,
+            attachmentIds: [],
+          })
+          .pipe(Effect.flip);
+        const rows = yield* db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.id, conversationId));
+        return { denied, rows };
+      }),
+    );
+    expect(result.denied).toMatchObject({
+      _tag: "ToolUnavailable",
+      tool: "web_search",
+      reason: "not permitted",
+    });
+    expect(result.rows).toEqual([]);
+  });
+
   it("lets a member send with the shared model, and denies the outsider identically to a missing model", async () => {
     const result = await run(
       Effect.gen(function* () {

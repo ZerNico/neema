@@ -49,6 +49,7 @@ import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -268,6 +269,7 @@ beforeAll(async () => {
     ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   const AppLayer = StreamEngine.layer.pipe(

@@ -33,6 +33,10 @@ import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { Db } from "~/server/db.ts";
+import { agents as savedAgents } from "~/db/schema/index.ts";
+import { eq } from "drizzle-orm";
 import {
   resolveAgentSelection,
   resolveEffectiveGeneration,
@@ -389,12 +393,14 @@ export class ChatService extends Context.Service<
 
 function makeChatService() {
   return Effect.gen(function* () {
+    const db = yield* Db;
     const repo = yield* ChatRepo;
     const providers = yield* ProviderRepo;
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const webSearch = yield* WebSearchExecutor;
     const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
+    const policy = yield* FeaturePolicy;
 
     // Recovers queues a restart or a reaped generation left waiting: the
     // in-process completion hook is gone with the fiber that owned it, and the
@@ -454,6 +460,18 @@ function makeChatService() {
         if (!(yield* providers.isModelAccessible(input.userId, input.modelId))) {
           return yield* new ModelNotFound({ modelId: input.modelId });
         }
+
+        if (input.searchEnabled && !(yield* policy.can(input.userId, "webSearch")))
+          return yield* new ToolUnavailable({ tool: "web_search", reason: "not permitted" });
+        if (input.researchEnabled && !(yield* policy.can(input.userId, "deepResearch")))
+          return yield* new ToolUnavailable({ tool: "deep_research", reason: "not permitted" });
+        if (input.researchEnabled && !(yield* policy.can(input.userId, "webSearch")))
+          return yield* new ToolUnavailable({
+            tool: "deep_research",
+            reason: "web search is not permitted",
+          });
+        if (input.attachmentIds.length && !(yield* policy.can(input.userId, "attachments")))
+          return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentIds[0]! });
 
         // The research toggle only offers the tool, so an instance without
         // search or a reader degrades to not offering it. Refusing the whole
@@ -557,6 +575,8 @@ function makeChatService() {
       ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
         Effect.gen(function* () {
+          const allowedSearch = yield* policy.can(input.userId, "webSearch", tx);
+          const allowedResearch = yield* policy.can(input.userId, "deepResearch", tx);
           const searchEnabled =
             input.attempt === "retry"
               ? continuation
@@ -574,6 +594,14 @@ function makeChatService() {
               : input.attempt === "edit"
                 ? input.researchEnabled
                 : (continuation?.researchEnabled ?? input.researchEnabled);
+          if (searchEnabled && !allowedSearch)
+            return yield* new InvalidMessage({ reason: "web search is not permitted" });
+          if (researchEnabled && (!allowedResearch || !allowedSearch))
+            return yield* new InvalidMessage({ reason: "deep research is not permitted" });
+          if (defaults.mode === "work" && !(yield* policy.can(input.userId, "work", tx)))
+            return yield* new InvalidMessage({ reason: "Work is not permitted" });
+          if ((input.workspaceFiles?.length ?? 0) > 0 && defaults.mode !== "work")
+            return yield* new InvalidMessage({ reason: "workspace files require Work" });
           const desktopFolderEntries =
             defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
               ? input.desktopFolders
@@ -659,6 +687,8 @@ function makeChatService() {
       userId: string;
       conversation: TurnFields["conversation"];
     }) {
+      if (!(yield* policy.can(input.userId, "work")))
+        return yield* new InvalidMessage({ reason: "Work is not permitted" });
       const row = yield* repo.reserveWorkTurn(input);
       return { reservationId: row.id, conversationId: row.conversationId };
     });
@@ -693,6 +723,8 @@ function makeChatService() {
       if (input.content.trim() === "" && input.attachmentIds.length === 0)
         return yield* new InvalidMessage({ reason: "message is empty" });
       const conversation = yield* repo.getConversation(input.userId, input.conversationId);
+      if (conversation.mode === "work" && !(yield* policy.can(input.userId, "work")))
+        return yield* new InvalidMessage({ reason: "Work is not permitted" });
       // Queued Work runs on a machine, so it can only be handed over from one.
       if (conversation.mode === "work" && !input.desktop?.fromDesktop)
         return yield* new WorkDesktopRequired();
@@ -1144,10 +1176,19 @@ function makeChatService() {
       const turn = yield* fire(
         target.kind === "new" ? (input.agentId ?? undefined) : undefined,
       ).pipe(
-        // The agent association is a preference snapshot from when the schedule
-        // was saved; a deleted agent degrades the fire to a plain chat rather
-        // than erroring an unattended schedule.
-        Effect.catchTag("AgentNotAvailable", () => fire(undefined)),
+        // Only deletion may degrade an unattended job to plain chat. A retained
+        // agent made inaccessible by policy must not run under changed settings.
+        Effect.catchTag("AgentNotAvailable", (error) =>
+          Effect.gen(function* () {
+            const [existing] = yield* db
+              .select({ id: savedAgents.id })
+              .from(savedAgents)
+              .where(eq(savedAgents.id, error.agentId))
+              .pipe(Effect.orDie);
+            if (existing) return yield* error;
+            return yield* fire(undefined);
+          }),
+        ),
       );
       return yield* startTurn({
         userId: input.userId,

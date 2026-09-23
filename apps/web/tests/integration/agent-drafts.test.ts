@@ -36,6 +36,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
@@ -78,7 +79,7 @@ beforeAll(async () => {
     KnowledgeRepo.layer,
     ProviderRepo.layer,
     TestBus,
-  ).pipe(Layer.provideMerge(infrastructure));
+  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
   runtime = ManagedRuntime.make(
     Layer.mergeAll(AgentDraftService.layer, AgentService.layer).pipe(
       Layer.provideMerge(Layer.mergeAll(core, DraftService.layer.pipe(Layer.provideMerge(core)))),

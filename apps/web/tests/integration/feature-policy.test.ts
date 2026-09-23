@@ -1,0 +1,201 @@
+import { execSync } from "node:child_process";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { PgClient } from "@effect/sql-pg";
+import { eq, sql } from "drizzle-orm";
+import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { uuidv7 } from "uuidv7";
+import { agents, knowledgeCollections, skills, user } from "~/db/schema/index.ts";
+import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
+import { skillReadable } from "~/modules/skills/server/access.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
+import { capabilityAllowedSql, FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { GroupRepo } from "~/modules/groups/server/repo.ts";
+import { Db } from "~/server/db.ts";
+import { POSTGRES_IMAGE } from "./postgres-image.ts";
+
+let container: StartedPostgreSqlContainer;
+let runtime: ManagedRuntime.ManagedRuntime<Db | GroupRepo | FeaturePolicy, unknown>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+  const url = container.getConnectionUri();
+  execSync("pnpm drizzle-kit migrate", {
+    cwd: new URL("../..", import.meta.url).pathname,
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: "pipe",
+  });
+  const infra = Db.layer.pipe(
+    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
+  );
+  runtime = ManagedRuntime.make(
+    Layer.mergeAll(FeaturePolicy.layer, GroupRepo.layer).pipe(Layer.provideMerge(infra)),
+  );
+}, 180_000);
+
+afterAll(async () => {
+  await runtime?.dispose();
+  await container?.stop();
+});
+
+const run = <A, E>(effect: Effect.Effect<A, E, Db | GroupRepo | FeaturePolicy>) =>
+  runtime.runPromise(effect);
+
+const makeUser = (role: "user" | "admin" = "user") =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const [row] = yield* db
+      .insert(user)
+      .values({
+        id: uuidv7(),
+        name: "Policy test",
+        email: `${uuidv7()}@example.test`,
+        role,
+      })
+      .returning({ id: user.id });
+    return row!.id;
+  });
+
+describe("feature policy", () => {
+  it("uses default only without groups, and admins bypass every restriction", async () => {
+    const [member, admin] = await run(Effect.all([makeUser(), makeUser("admin")]));
+    const restricted = { ...ALL_CAPABILITIES, webSearch: false, work: false };
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(restricted)));
+    const result = await run(
+      FeaturePolicy.use((policy) =>
+        Effect.all([
+          policy.forUser(member),
+          policy.forUser(admin),
+          policy.can(member, "webSearch"),
+        ]),
+      ),
+    );
+    expect(result[0]).toEqual(restricted);
+    expect(result[1]).toEqual(ALL_CAPABILITIES);
+    expect(result[2]).toBe(false);
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
+  });
+
+  it("seeds new groups from the current default and unions only group grants", async () => {
+    const member = await run(makeUser());
+    const defaults = { ...ALL_CAPABILITIES, work: false, webSearch: false };
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(defaults)));
+    const group = await run(GroupRepo.use((repo) => repo.createGroup(`group-${uuidv7()}`)));
+    expect(group.capabilities).toEqual(defaults);
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
+    await run(GroupRepo.use((repo) => repo.addMember(group.id, member)));
+    expect((await run(FeaturePolicy.use((policy) => policy.forUser(member)))).work).toBe(false);
+    const other = await run(GroupRepo.use((repo) => repo.createGroup(`group-${uuidv7()}`)));
+    await run(GroupRepo.use((repo) => repo.addMember(other.id, member)));
+    expect((await run(FeaturePolicy.use((policy) => policy.forUser(member)))).work).toBe(true);
+    await run(GroupRepo.use((repo) => repo.removeMember(other.id, member)));
+    expect((await run(FeaturePolicy.use((policy) => policy.forUser(member)))).work).toBe(false);
+  });
+
+  it("suspends grants for agents, skills and collections when creator loses Create", async () => {
+    const [creator, recipient] = await run(Effect.all([makeUser(), makeUser()]));
+    const agentId = uuidv7();
+    const skillId = uuidv7();
+    const collectionId = uuidv7();
+    await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db
+          .insert(agents)
+          .values({ id: agentId, userId: creator, name: "Shared agent", audience: "instance" });
+        yield* db
+          .insert(skills)
+          .values({
+            id: skillId,
+            userId: creator,
+            name: "Shared skill",
+            description: "",
+            audience: "instance",
+          });
+        yield* db
+          .insert(knowledgeCollections)
+          .values({
+            id: collectionId,
+            userId: creator,
+            name: "Shared collection",
+            audience: "instance",
+          });
+      }),
+    );
+    const readable = () =>
+      run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const [agent] = yield* db
+            .select({ id: agents.id })
+            .from(agents)
+            .where(sql`${agents.id} = ${agentId} and ${agentReadable(recipient)}`);
+          const [skill] = yield* db
+            .select({ id: skills.id })
+            .from(skills)
+            .where(sql`${skills.id} = ${skillId} and ${skillReadable(recipient)}`);
+          const [collection] = yield* db
+            .select({ id: knowledgeCollections.id })
+            .from(knowledgeCollections)
+            .where(
+              sql`${knowledgeCollections.id} = ${collectionId} and ${collectionReadable(recipient)}`,
+            );
+          return [Boolean(agent), Boolean(skill), Boolean(collection)];
+        }),
+      );
+    expect(await readable()).toEqual([true, true, true]);
+    const group = await run(GroupRepo.use((repo) => repo.createGroup(`creator-${uuidv7()}`)));
+    await run(
+      GroupRepo.use((repo) =>
+        repo.updateGroupCapabilities(group.id, {
+          ...ALL_CAPABILITIES,
+          agentsCreate: false,
+          knowledgeCreate: false,
+          skillsCreate: false,
+        }),
+      ),
+    );
+    await run(GroupRepo.use((repo) => repo.addMember(group.id, creator)));
+    expect(await readable()).toEqual([false, false, false]);
+    await run(GroupRepo.use((repo) => repo.removeMember(group.id, creator)));
+    expect(await readable()).toEqual([true, true, true]);
+  });
+
+  it("matches SQL owner predicates and rejects Create without Use", async () => {
+    const member = await run(makeUser());
+    const defaults = { ...ALL_CAPABILITIES, agentsUse: false, agentsCreate: false };
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(defaults)));
+    expect((await run(GroupRepo.use((repo) => repo.getDefaultCapabilities()))).agentsUse).toBe(
+      false,
+    );
+    const [row] = await run(
+      Db.use((db) =>
+        db
+          .select({ allowed: capabilityAllowedSql(user.id, "agentsUse") })
+          .from(user)
+          .where(eq(user.id, member)),
+      ),
+    );
+    expect(row?.allowed).toBe(false);
+    await expect(
+      run(
+        GroupRepo.use((repo) =>
+          repo.updateDefaultCapabilities({
+            ...defaults,
+            agentsCreate: true,
+          }),
+        ),
+      ),
+    ).rejects.toBeDefined();
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
+    const [allowed] = await run(
+      Db.use((db) =>
+        db
+          .select({ allowed: capabilityAllowedSql(sql`${member}`, "agentsUse") })
+          .from(user)
+          .where(eq(user.id, member)),
+      ),
+    );
+    expect(allowed?.allowed).toBe(true);
+  });
+});

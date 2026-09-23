@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentsPage } from "./agents-page.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { deleteAgent } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 
@@ -74,6 +75,7 @@ const agent = (overrides: {
 
 const renderPage = (agents: ReturnType<typeof agent>[]) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["agents", "list"], agents);
   return render(
     <QueryClientProvider client={client}>

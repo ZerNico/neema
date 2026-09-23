@@ -1,10 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { GroupDetailPage } from "./group-detail-page.tsx";
-import { listGroupMembers, updateGroupMemberSharing } from "../server/functions.ts";
+import {
+  getGroupCapabilities,
+  listGroupMembers,
+  updateGroupCapabilities,
+  updateGroupMemberSharing,
+} from "../server/functions.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 
 vi.mock("../server/functions.ts", () => ({
   listGroups: vi.fn(),
@@ -15,6 +21,8 @@ vi.mock("../server/functions.ts", () => ({
   deleteGroup: vi.fn(),
   renameGroup: vi.fn(),
   updateGroupMemberSharing: vi.fn(),
+  getGroupCapabilities: vi.fn(),
+  updateGroupCapabilities: vi.fn(),
 }));
 vi.mock("./users-page.tsx", () => ({
   usersQuery: { queryKey: ["admin", "users"], queryFn: async () => [] },
@@ -28,10 +36,17 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({}),
 }));
 
+const none = { agents: false, knowledge: false, skills: false };
 const members = [
-  { userId: "u1", name: "Alice", email: "alice@example.test", role: "user", canShare: false },
-  { userId: "u2", name: "Bob", email: "bob@example.test", role: "user", canShare: true },
-  { userId: "a1", name: "Admin", email: "admin@example.test", role: "admin", canShare: false },
+  { userId: "u1", name: "Alice", email: "alice@example.test", role: "user", sharing: none },
+  {
+    userId: "u2",
+    name: "Bob",
+    email: "bob@example.test",
+    role: "user",
+    sharing: { agents: true, knowledge: false, skills: true },
+  },
+  { userId: "a1", name: "Ada", email: "ada@example.test", role: "admin", sharing: none },
 ];
 const renderPage = () => {
   const client = new QueryClient({
@@ -39,6 +54,7 @@ const renderPage = () => {
   });
   client.setQueryData(["admin", "groups"], [{ id: "g1", name: "Engineering", memberCount: 3 }]);
   client.setQueryData(["admin", "group-members", "g1"], members);
+  client.setQueryData(["admin", "group-capabilities", "g1"], ALL_CAPABILITIES);
   client.setQueryData(["admin", "users"], []);
   const invalidate = vi.spyOn(client, "invalidateQueries");
   render(
@@ -54,66 +70,87 @@ const renderPage = () => {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(listGroupMembers).mockResolvedValue(members);
+  vi.mocked(getGroupCapabilities).mockResolvedValue(ALL_CAPABILITIES);
+  vi.mocked(updateGroupCapabilities).mockResolvedValue(undefined);
 });
 
-// jsdom applies no stylesheet, so the sr-only span that names each switch stays
-// inline and its accessible name loses the word space a browser derives from
-// blockifying an absolutely positioned element. Match either spelling.
-const shareSwitch = (member: string) =>
-  screen.getByRole("switch", { name: new RegExp(`^Can share into this group\\s?for ${member}$`) });
+const openSharing = (member: string) =>
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Sharing for ${member}:`) }));
 
-describe("GroupDetailPage sharing permissions", () => {
-  it("renders saved per-member permissions and an admin override without a switch", () => {
+describe("GroupDetailPage feature access", () => {
+  it("turning agents off clears both use and create, without changing the defaults", async () => {
     renderPage();
-    expect(shareSwitch("Alice")).not.toBeChecked();
-    expect(shareSwitch("Bob")).toBeChecked();
-    expect(screen.getAllByRole("switch")).toHaveLength(2);
-    expect(screen.getByText("Always allowed, admin")).toBeInTheDocument();
-    expect(screen.getByText(/Disabling it leaves existing shares intact/)).toBeInTheDocument();
-  });
-
-  it("scopes updates to the member and group, disables conflicts and invalidates on success", async () => {
-    let resolve!: () => void;
-    const pending = new Promise<void>((done) => {
-      resolve = done;
-    });
-    vi.mocked(updateGroupMemberSharing).mockReturnValue(pending);
-    const { invalidate } = renderPage();
-    fireEvent.click(shareSwitch("Alice"));
+    const agents = screen.getByRole("group", { name: "Agents" });
+    fireEvent.click(within(agents).getByRole("button", { name: "Off" }));
     await waitFor(() =>
-      expect(updateGroupMemberSharing).toHaveBeenCalledWith({
-        data: { groupId: "g1", userId: "u1", canShare: true },
+      expect(updateGroupCapabilities).toHaveBeenCalledWith({
+        data: {
+          groupId: "g1",
+          capabilities: { ...ALL_CAPABILITIES, agentsUse: false, agentsCreate: false },
+        },
       }),
     );
-    expect(shareSwitch("Alice")).not.toBeChecked();
-    expect(shareSwitch("Alice")).toHaveAttribute("aria-busy", "true");
-    for (const control of screen.getAllByRole("switch"))
-      expect(control).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Remove Alice" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Group actions" })).toBeDisabled();
-    vi.mocked(listGroupMembers).mockResolvedValue(
-      members.map((m) => (m.userId === "u1" ? Object.assign({}, m, { canShare: true }) : m)),
-    );
-    await act(async () => resolve());
-    await waitFor(() => expect(shareSwitch("Alice")).toBeChecked());
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin"] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
   });
 
-  it("preserves the saved value and reports failed updates", async () => {
+  it("shows deep research as unavailable while web search is off", async () => {
+    vi.mocked(getGroupCapabilities).mockResolvedValue({ ...ALL_CAPABILITIES, webSearch: false });
+    const { client } = renderPage();
+    client.setQueryData(["admin", "group-capabilities", "g1"], {
+      ...ALL_CAPABILITIES,
+      webSearch: false,
+    });
+    const research = await screen.findByRole("switch", { name: "Deep research" });
+    await waitFor(() => expect(research).not.toBeChecked());
+    expect(research).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Needs web search.")).toBeInTheDocument();
+  });
+});
+
+describe("GroupDetailPage sharing permissions", () => {
+  it("summarises each member’s sharing, with admins always allowed", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "Sharing for Alice: None" })).toHaveTextContent(
+      "Sharing: None",
+    );
+    expect(screen.getByRole("button", { name: "Sharing for Bob: Agents, Skills" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Sharing for Ada/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
+  });
+
+  it("saves the kinds chosen for one member and refreshes the list", async () => {
+    vi.mocked(updateGroupMemberSharing).mockResolvedValue(undefined);
+    const { invalidate } = renderPage();
+    openSharing("Alice");
+    const dialog = await screen.findByRole("dialog", { name: "Sharing for Alice" });
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Knowledge" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateGroupMemberSharing).toHaveBeenCalledWith({
+        data: {
+          groupId: "g1",
+          userId: "u1",
+          sharing: { agents: false, knowledge: true, skills: false },
+        },
+      }),
+    );
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin"] }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps the dialog open with the choice and reports a failed save", async () => {
     vi.mocked(updateGroupMemberSharing).mockRejectedValue(new Error("failed"));
     const { invalidate } = renderPage();
-    fireEvent.click(shareSwitch("Bob"));
+    openSharing("Bob");
+    const dialog = await screen.findByRole("dialog", { name: "Sharing for Bob" });
+    expect(within(dialog).getByRole("switch", { name: "Agents" })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Agents" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Could not update sharing permission.", {
         description: "Failed.",
       }),
     );
-    expect(updateGroupMemberSharing).toHaveBeenCalledWith({
-      data: { groupId: "g1", userId: "u2", canShare: false },
-    });
-    expect(shareSwitch("Bob")).toBeChecked();
-    expect(shareSwitch("Bob")).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByRole("switch", { name: "Agents" })).not.toBeChecked();
     expect(invalidate).not.toHaveBeenCalled();
   });
 });

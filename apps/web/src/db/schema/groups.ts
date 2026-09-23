@@ -1,4 +1,14 @@
-import { boolean, index, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
+import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts";
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
@@ -10,8 +20,14 @@ import { models } from "./providers.ts";
 export const groups = pgTable("groups", {
   id: text().primaryKey(),
   name: text().notNull().unique(),
+  capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const defaultCapabilities = pgTable("default_capabilities", {
+  id: integer().primaryKey(),
+  capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
 });
 
 export const groupMembers = pgTable(
@@ -23,8 +39,11 @@ export const groupMembers = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // Controls new grants of owned resources; existing grants are unaffected.
-    canShare: boolean("can_share").notNull().default(false),
+    // Whether this member may share their own resources of each kind into the
+    // group. Controls new grants only; existing grants are unaffected.
+    shareAgents: boolean("share_agents").notNull().default(false),
+    shareKnowledge: boolean("share_knowledge").notNull().default(false),
+    shareSkills: boolean("share_skills").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

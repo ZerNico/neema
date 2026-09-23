@@ -223,7 +223,7 @@ uploads settle. Draft text and skill chips stay live through that wait.
 ## Mode is fixed; capabilities are current
 
 `conversations.mode` is `chat | work`, fixed at creation and inherited by a
-branch, along with that chat's permission level. Work needs the desktop app,
+branch, along with that chat's permission level. Work needs the desktop app and a current [Work grant](feature-policy.md),
 not a folder: every work conversation has an app-managed workspace that
 materializes on demand, so ready-empty means the workspace is there and empty,
 never that the chat is unusable. Send, retry, edit and structured

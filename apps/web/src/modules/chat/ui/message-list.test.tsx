@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
@@ -505,6 +506,7 @@ describe("MessageBubble actions", () => {
     seed?: (client: QueryClient) => void,
   ) => {
     const queryClient = new QueryClient();
+    queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
     queryClient.setQueryData(
       ["chat-models"],
       [

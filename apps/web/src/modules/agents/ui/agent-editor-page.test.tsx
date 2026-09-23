@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEditorPage } from "./agent-editor-page.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { deleteAgent, updateAgent } from "../server/functions.ts";
 import type { AgentDetail } from "../schema.ts";
 import { listKnowledgeCollections } from "~/modules/knowledge/server/functions.ts";
@@ -94,6 +95,7 @@ const renderEditor = (
   collections: Array<Record<string, unknown>> | null = [],
 ) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["agents", "detail", agent.id], agent);
   client.setQueryData(["chat-models"], []);
   if (collections !== null) client.setQueryData(["knowledge", "collections"], collections);
@@ -268,7 +270,7 @@ describe("AgentEditorPage", () => {
 
   it("refuses the editor to a recipient", () => {
     renderEditor(detail({ canEdit: false, ownerName: "Dana" }));
-    expect(screen.getByText("This agent isn’t yours to edit")).toBeInTheDocument();
+    expect(screen.getByText("Agent editing isn’t available")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Agent actions" })).not.toBeInTheDocument();
   });
 });

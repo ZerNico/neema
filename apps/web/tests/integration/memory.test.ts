@@ -20,6 +20,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 11).toString("base64");
@@ -104,7 +105,10 @@ beforeAll(async () => {
   const Infra = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
-  const Repos = Layer.mergeAll(MemoryRepo.layer, ToolsRepo.layer).pipe(Layer.provideMerge(Infra));
+  const Repos = Layer.mergeAll(MemoryRepo.layer, ToolsRepo.layer).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(Infra),
+  );
   runtime = ManagedRuntime.make(
     MemoryService.layer.pipe(Layer.provideMerge(Layer.mergeAll(Repos, FakeSync))),
   );

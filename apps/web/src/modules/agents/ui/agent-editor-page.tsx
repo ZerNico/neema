@@ -10,6 +10,7 @@ import { agentQuery } from "../client/queries.ts";
 import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
 import { AgentSettings, AgentResourceIds, type AgentDetail } from "../schema.ts";
 import { createAgent, deleteAgent, updateAgent } from "../server/functions.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AgentSettingsFields } from "./agent-settings-fields.tsx";
 import {
   AgentAuthoringLaunchButton,
@@ -39,7 +40,6 @@ const agentFormValidator = Schema.toStandardSchemaV1(
   }),
 );
 
-
 /**
  * Owner-only editor. Recipients start chats from the agent list instead.
  */
@@ -48,6 +48,7 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const detail = useQuery({ ...agentQuery(agentId ?? ""), enabled: agentId !== null });
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   if (agentId !== null && detail.isError && !detail.data)
     return (
       <Page title="Agent" backTo="/agents" backLabel="Agents">
@@ -65,11 +66,11 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
   // A recipient can use the agent from the list; the editor is the owner's.
   // Showing "not found" rather than a read-only view keeps the page from
   // becoming a way to read instructions the owner did not choose to display.
-  if (agent && !agent.canEdit)
+  if (!capabilities?.agentsCreate || (agent && !agent.canEdit))
     return (
       <Page title="Agent" backTo="/agents" backLabel="Agents">
         <ErrorState
-          title="This agent isn’t yours to edit"
+          title="Agent editing isn’t available"
           description="You can start a chat with it from the Agents list."
         />
       </Page>

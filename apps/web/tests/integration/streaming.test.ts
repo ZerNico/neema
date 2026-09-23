@@ -23,6 +23,8 @@ import {
   conversationDrafts,
   conversations,
   schedules,
+  groups,
+  groupMembers,
   attachmentBlobs,
   attachments,
   messageAttachments,
@@ -70,6 +72,8 @@ import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { FakeDocumentParser, FakeWebSearch, FakeUrlReader } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -279,6 +283,7 @@ beforeAll(async () => {
     ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   const EngineCore = Layer.mergeAll(
@@ -4642,6 +4647,13 @@ describe("local tools on the user's machine", () => {
           const service = yield* ChatService;
           const repo = yield* ChatRepo;
           const db = yield* Db;
+          const groupId = uuidv7();
+          yield* db.insert(groups).values({
+            id: groupId,
+            name: `Work without attachments ${groupId}`,
+            capabilities: { ...ALL_CAPABILITIES, attachments: false },
+          });
+          yield* db.insert(groupMembers).values({ groupId, userId });
           const conversationId = uuidv7();
           const reservationId = uuidv7();
           const conversation = { kind: "new" as const, id: conversationId, mode: "work" as const };

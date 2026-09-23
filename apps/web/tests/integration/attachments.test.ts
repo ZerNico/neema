@@ -34,6 +34,7 @@ import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "attachments-it-"));
@@ -62,6 +63,7 @@ beforeAll(async () => {
   // sits underneath it; AttachmentService adds the storage side.
   const ReposLayer = ChatRepo.layer.pipe(
     Layer.provideMerge(AttachmentRepo.layer),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   const AppLayer = AttachmentService.layer.pipe(

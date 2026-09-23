@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { getAgentSelection } from "~/modules/agents/server/functions.ts";
 import { describe, expect, it, vi } from "vitest";
 import { NewChatView } from "./chat-view.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 vi.mock("../server/functions.ts", () => ({
@@ -74,6 +75,7 @@ const renderNewChat = (
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
   });
+  client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(
     ["chat-models"],
     [

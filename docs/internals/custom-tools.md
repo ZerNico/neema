@@ -142,7 +142,8 @@ installed the attempt resolves `"all"`. A module is shared like an agent or
 skill, through `SharingService` and the same Access dialog: `audience` is
 `instance` (everyone signed in, the default) or `private`, with
 `custom_tool_user_grants` and `custom_tool_group_grants` on top. Admins always
-pass, and any admin may manage a module's access since modules have no owner.
+pass the feature grant, and any admin may manage a module's access since modules have no owner.
+Other senders also need the [custom-tool grant](feature-policy.md) in addition to the module ACL.
 The check (`customToolUsableBy`) runs in SQL at attach time and again on every attempt,
 against the person sending rather than the agent's owner, so a shared agent
 carries no tool to someone it was not shared with: the module drops out of that

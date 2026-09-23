@@ -14,6 +14,7 @@ import { DocumentService } from "~/modules/documents/server/document-service.ts"
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 let container: StartedPostgreSqlContainer;
@@ -48,7 +49,10 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
-  const core = Layer.mergeAll(DocumentRepo.layer, TestBus).pipe(Layer.provideMerge(infrastructure));
+  const core = Layer.mergeAll(DocumentRepo.layer, TestBus).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(infrastructure),
+  );
   runtime = ManagedRuntime.make(DocumentService.layer.pipe(Layer.provideMerge(core)));
 }, 180_000);
 afterAll(async () => {
@@ -432,7 +436,9 @@ describe("ownership, limits and sync", () => {
 
     // Rewinding past that answer deletes the message; the document goes with it
     // rather than surviving as an artifact of a conversation prefix that is gone.
-    await run(Effect.flatMap(Db, (db) => db.delete(messages).where(eq(messages.id, fence.messageId))));
+    await run(
+      Effect.flatMap(Db, (db) => db.delete(messages).where(eq(messages.id, fence.messageId))),
+    );
 
     expect(await get(owner, anchored)).toBeNull();
     expect(await get(owner, loose)).toEqual(loose);

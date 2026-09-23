@@ -41,6 +41,7 @@ import {
   FakeCustomToolRuntime,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
@@ -113,6 +114,7 @@ beforeAll(async () => {
     ScheduleRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
+    Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(InfraLayer),
   );
   const EngineLayer = StreamEngine.layer.pipe(

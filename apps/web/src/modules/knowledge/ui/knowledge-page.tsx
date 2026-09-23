@@ -6,6 +6,7 @@ import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import { knowledgeCollectionsQuery } from "../client/queries.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { CollectionIdentityInput, KNOWLEDGE_LIMITS, type CollectionSummary } from "../schema.ts";
 import { createKnowledgeCollection, updateKnowledgeCollection } from "../server/functions.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
@@ -127,6 +128,7 @@ export function CollectionDialog({
 export function KnowledgePage() {
   const navigate = useNavigate();
   const collections = useQuery(knowledgeCollectionsQuery);
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const [creating, setCreating] = useState(false);
   const rows = collections.data ?? [];
   const own = rows.filter((collection) => collection.canEdit);
@@ -185,10 +187,12 @@ export function KnowledgePage() {
       rootPath="/"
       rootLabel="Chat"
       actions={
-        <Button size="sm" onClick={() => setCreating(true)} disabled={atLimit}>
-          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-          New collection
-        </Button>
+        capabilities?.knowledgeCreate ? (
+          <Button size="sm" onClick={() => setCreating(true)} disabled={atLimit}>
+            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+            New collection
+          </Button>
+        ) : null
       }
     >
       {collections.isError ? (
@@ -204,12 +208,18 @@ export function KnowledgePage() {
         <EmptyState
           icon={FolderLibraryIcon}
           title="No collections yet"
-          description="Keep documents together to use in chats and agents."
+          description={
+            capabilities?.knowledgeCreate
+              ? "Keep documents together to use in chats and agents."
+              : "No collections are shared with you yet."
+          }
           action={
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              New collection
-            </Button>
+            capabilities?.knowledgeCreate ? (
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+                New collection
+              </Button>
+            ) : null
           }
         />
       ) : (
@@ -223,7 +233,7 @@ export function KnowledgePage() {
         </>
       )}
       <CollectionDialog
-        open={creating}
+        open={creating && !!capabilities?.knowledgeCreate}
         onOpenChange={setCreating}
         onCreated={(collectionId) => {
           void navigate({ to: "/knowledge/$collectionId", params: { collectionId } });

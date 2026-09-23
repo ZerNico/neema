@@ -19,6 +19,7 @@ import { Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { knowledgeCollectionQuery } from "../client/queries.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { KNOWLEDGE_LIMITS, type KnowledgeDocument } from "../schema.ts";
 import {
   addKnowledgeNote,
@@ -80,7 +81,6 @@ const NoteForm = Schema.Struct({
     }),
   ),
 });
-
 
 const statusBadge = (document: KnowledgeDocument) => {
   if (document.status === "failed")
@@ -251,6 +251,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const detail = useQuery(knowledgeCollectionQuery(collectionId));
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const [renaming, setRenaming] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [note, setNote] = useState<"new" | KnowledgeDocument | null>(null);
@@ -335,7 +336,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       </Page>
     );
   const { collection, documents } = detail.data;
-  const canEdit = collection.canEdit;
+  const canEdit = collection.canEdit && !!capabilities?.knowledgeCreate;
   const full = documents.length >= KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
   const pickFile = (documentId: string | null) => {
     replacing.current = documentId;

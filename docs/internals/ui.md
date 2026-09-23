@@ -163,6 +163,8 @@ false`), so a page body is written against data already there. This includes loc
 - A concept someone meets in the app (agents, knowledge, skills, schedules, memory) gets an entry in
   `modules/help/features.ts`. That list is the welcome tour, the "New in neema" tour for existing users
   and the Help page at once; seen keys live in `user_seen_features`, so never rename a shipped key.
+  Filter both tours and the page by the effective [feature policy](feature-policy.md): a Use-only
+  reader sees use-oriented copy, and a hidden feature remains unseen for a later grant.
 - One state, one word. A document being prepared says "preparing" in the knowledge pages, the
   collection page and the composer's picker; it used to say "indexing" in one of the three.
 

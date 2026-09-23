@@ -21,10 +21,12 @@ import { CreateSplitButton } from "~/ui/create-split-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { skillsQuery } from "../client/queries.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import type { SkillSummary } from "../schema.ts";
 
 export function SkillsPage() {
   const query = useQuery(skillsQuery);
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const [search, setSearch] = useState("");
   const rows = (query.data ?? []).filter((skill) =>
     `${skill.name} ${skill.description} ${skill.ownerName ?? ""}`
@@ -70,7 +72,7 @@ export function SkillsPage() {
       title="Skills"
       rootPath="/"
       rootLabel="Chat"
-      actions={create}
+      actions={capabilities?.skillsCreate ? create : null}
     >
       {/* Searching an empty library is noise; the empty state says more. */}
       {query.data?.length ? (
@@ -94,8 +96,12 @@ export function SkillsPage() {
         <EmptyState
           icon={Book02Icon}
           title="No skills yet"
-          description="Create a skill or import an editable copy."
-          action={create}
+          description={
+            capabilities?.skillsCreate
+              ? "Create a skill or import an editable copy."
+              : "No skills are shared with you yet."
+          }
+          action={capabilities?.skillsCreate ? create : null}
         />
       ) : null}
       {query.data?.length && rows.length === 0 ? (

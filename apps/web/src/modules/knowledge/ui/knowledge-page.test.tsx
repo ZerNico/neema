@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CollectionPage } from "./collection-page.tsx";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { KnowledgePage } from "./knowledge-page.tsx";
 import {
   deleteKnowledgeDocument,
@@ -95,7 +96,11 @@ const document = (
   ...overrides,
 });
 
-const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const client = () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
+  return queryClient;
+};
 
 const renderDetail = (
   documents: KnowledgeDocument[],

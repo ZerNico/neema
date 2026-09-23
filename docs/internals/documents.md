@@ -4,7 +4,7 @@ Conversation documents are editable Markdown artifacts owned by one conversation
 
 ## Storage and transcript boundary
 
-- `conversation_documents` keeps one current row per document. `revision` is a monotonic concurrency token advanced by every write, including source edits and task toggles; it is not version history. Authorization follows the owning conversation, and a document owned by another account is reported as not found.
+- `conversation_documents` keeps one current row per document. `revision` is a monotonic concurrency token advanced by every write, including source edits and task toggles; it is not version history. Authorization requires both the owning conversation and the person's [document grant](feature-policy.md); a document owned by another account or unavailable under policy is reported as not found.
 - A document records the assistant message that created it. Editing a message before that answer removes the answer and PostgreSQL cascades to its documents. Retrying the creating answer keeps its message id, so the retry transaction explicitly removes its documents before generating again. The confirm dialog names that loss before it happens.
 - Document bodies never enter message text, durable tool arguments/results, chunks or compaction summaries. Document tool rows keep only a bounded activity projection such as id, owning conversation, title, revision and outcome. Continuation parts replace tool content with a pointer to application-provided document context.
 - Branching copies historical tool rows but never copies canonical document rows. Their references therefore render as inert “From another chat” activity in the branch.

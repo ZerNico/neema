@@ -1,7 +1,9 @@
 import { ArrowRight01Icon, PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import { FEATURES } from "../features.ts";
+import { useQuery } from "@tanstack/react-query";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
+import { availableFeatures } from "../features.ts";
 import { useReplayTour } from "./feature-tour.tsx";
 import {
   Card,
@@ -20,6 +22,8 @@ import { Button, buttonVariants } from "~/ui/primitives/button";
  */
 export function HelpPage() {
   const replay = useReplayTour();
+  const { data: capabilities } = useQuery(capabilitiesQuery);
+  const features = capabilities ? availableFeatures(capabilities) : [];
   return (
     <Page
       title="Help"
@@ -33,7 +37,7 @@ export function HelpPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        {FEATURES.map((feature) => (
+        {features.map((feature) => (
           <Card key={feature.key} size="sm">
             <CardHeader>
               <div className="bg-muted text-foreground mb-2 flex size-10 items-center justify-center rounded-2xl">

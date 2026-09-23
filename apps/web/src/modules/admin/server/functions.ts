@@ -8,6 +8,8 @@ import { runtime } from "~/server/runtime.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import {
   CreateGroupInput,
+  UpdateDefaultCapabilitiesInput,
+  UpdateGroupCapabilitiesInput,
   CreateModelInput,
   CreateProviderInput,
   GroupIdInput,
@@ -134,7 +136,7 @@ export const updateGroupMemberSharing = createServerFn({ method: "POST" })
     runtime.runPromise(
       groupChanged(
         Effect.flatMap(GroupRepo, (repo) =>
-          repo.setMemberSharing(data.groupId, data.userId, data.canShare),
+          repo.setMemberSharing(data.groupId, data.userId, data.sharing),
         ),
       ).pipe(
         Effect.catchTag("GroupMemberNotFound", () =>
@@ -189,6 +191,41 @@ export const getGroup = createServerFn({ method: "GET" })
       GroupRepo.use((repo) => repo.getGroup(data.groupId)).pipe(
         Effect.catchTag("GroupNotFound", groupGone),
       ),
+    ),
+  );
+
+export const getGroupCapabilities = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupIdInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      GroupRepo.use((repo) => repo.getGroupCapabilities(data.groupId)).pipe(
+        Effect.catchTag("GroupNotFound", groupGone),
+      ),
+    ),
+  );
+
+export const updateGroupCapabilities = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateGroupCapabilitiesInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      groupChanged(
+        GroupRepo.use((repo) => repo.updateGroupCapabilities(data.groupId, data.capabilities)),
+      ).pipe(Effect.catchTag("GroupNotFound", groupGone)),
+    ),
+  );
+
+export const getDefaultCapabilities = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(GroupRepo.use((repo) => repo.getDefaultCapabilities())));
+
+export const updateDefaultCapabilities = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateDefaultCapabilitiesInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      groupChanged(GroupRepo.use((repo) => repo.updateDefaultCapabilities(data.capabilities))),
     ),
   );
 

@@ -70,7 +70,7 @@ export const scheduleRuns = pgTable(
       onDelete: "cascade",
     }),
     firedAt: timestamp("fired_at", { withTimezone: true }).notNull().defaultNow(),
-    status: text({ enum: ["started", "error"] }).notNull(),
+    status: text({ enum: ["started", "error", "skipped"] }).notNull(),
     error: text(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

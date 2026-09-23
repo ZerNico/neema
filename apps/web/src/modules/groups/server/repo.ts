@@ -3,17 +3,24 @@ import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { GroupMemberNotFound, GroupNameTaken, GroupNotFound } from "../errors.ts";
 import { Db } from "~/server/db.ts";
-import { groupMembers, groups, user } from "~/db/schema/index.ts";
+import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
+import { validCapabilities, type Capabilities } from "../policy.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 
 export type GroupRow = typeof groups.$inferSelect;
 export type GroupWithCount = GroupRow & { memberCount: number };
+/** Which of their own resources a member may share into the group. */
+export interface MemberSharing {
+  agents: boolean;
+  knowledge: boolean;
+  skills: boolean;
+}
 export interface GroupMember {
   userId: string;
   name: string;
   email: string;
   role: string | null;
-  canShare: boolean;
+  sharing: MemberSharing;
 }
 export interface Membership {
   userId: string;
@@ -31,11 +38,18 @@ export class GroupRepo extends Context.Service<
   {
     listGroups(): Effect.Effect<GroupWithCount[]>;
     createGroup(name: string): Effect.Effect<GroupRow, GroupNameTaken>;
+    getGroupCapabilities(groupId: string): Effect.Effect<Capabilities, GroupNotFound>;
+    updateGroupCapabilities(
+      groupId: string,
+      capabilities: Capabilities,
+    ): Effect.Effect<void, GroupNotFound>;
+    getDefaultCapabilities(): Effect.Effect<Capabilities>;
+    updateDefaultCapabilities(capabilities: Capabilities): Effect.Effect<void>;
     renameGroup(groupId: string, name: string): Effect.Effect<void, GroupNotFound | GroupNameTaken>;
     setMemberSharing(
       groupId: string,
       userId: string,
-      canShare: boolean,
+      sharing: MemberSharing,
     ): Effect.Effect<void, GroupMemberNotFound>;
     /** Cascades memberships and model-access links. */
     deleteGroup(groupId: string): Effect.Effect<void>;
@@ -69,17 +83,78 @@ export class GroupRepo extends Context.Service<
         }),
 
         createGroup: Effect.fn("GroupRepo.createGroup")(function* (name) {
-          const rows = yield* db
-            .insert(groups)
-            .values({ id: uuidv7(), name })
-            .returning()
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                // SHARE locks serialize a create with default-policy updates. The
+                // new group always starts with the default committed before it.
+                const [defaults] = yield* tx
+                  .select({ capabilities: defaultCapabilities.capabilities })
+                  .from(defaultCapabilities)
+                  .where(eq(defaultCapabilities.id, 1))
+                  .for("share");
+                if (!defaults) return yield* Effect.die(new Error("Default policy is missing"));
+                const [row] = yield* tx
+                  .insert(groups)
+                  .values({ id: uuidv7(), name, capabilities: defaults.capabilities })
+                  .returning();
+                return row!;
+              }),
+            )
             .pipe(
-              Effect.catchTag("EffectDrizzleQueryError", (error) =>
+              Effect.catch((error) =>
                 isUniqueViolation(error) ? new GroupNameTaken({ name }) : Effect.die(error),
               ),
             );
-          return rows[0]!;
         }),
+
+        getGroupCapabilities: Effect.fn("GroupRepo.getGroupCapabilities")(function* (groupId) {
+          const [row] = yield* db
+            .select({ capabilities: groups.capabilities })
+            .from(groups)
+            .where(eq(groups.id, groupId))
+            .pipe(Effect.orDie);
+          if (!row) return yield* new GroupNotFound({ groupId });
+          return row.capabilities;
+        }),
+
+        updateGroupCapabilities: Effect.fn("GroupRepo.updateGroupCapabilities")(
+          function* (groupId, capabilities) {
+            if (!validCapabilities(capabilities))
+              return yield* Effect.die(new Response("Create requires Use", { status: 400 }));
+            const rows = yield* db
+              .update(groups)
+              .set({ capabilities, updatedAt: new Date() })
+              .where(eq(groups.id, groupId))
+              .returning({ id: groups.id })
+              .pipe(Effect.orDie);
+            if (!rows.length) return yield* new GroupNotFound({ groupId });
+          },
+        ),
+
+        getDefaultCapabilities: Effect.fn("GroupRepo.getDefaultCapabilities")(function* () {
+          const [row] = yield* db
+            .select({ capabilities: defaultCapabilities.capabilities })
+            .from(defaultCapabilities)
+            .where(eq(defaultCapabilities.id, 1))
+            .pipe(Effect.orDie);
+          if (!row) return yield* Effect.die(new Error("Default policy is missing"));
+          return row.capabilities;
+        }),
+
+        updateDefaultCapabilities: Effect.fn("GroupRepo.updateDefaultCapabilities")(
+          function* (capabilities) {
+            if (!validCapabilities(capabilities))
+              return yield* Effect.die(new Response("Create requires Use", { status: 400 }));
+            const rows = yield* db
+              .update(defaultCapabilities)
+              .set({ capabilities })
+              .where(eq(defaultCapabilities.id, 1))
+              .returning({ id: defaultCapabilities.id })
+              .pipe(Effect.orDie);
+            if (!rows.length) return yield* Effect.die(new Error("Default policy is missing"));
+          },
+        ),
 
         renameGroup: Effect.fn("GroupRepo.renameGroup")(function* (groupId, name) {
           const rows = yield* db
@@ -96,10 +171,14 @@ export class GroupRepo extends Context.Service<
         }),
 
         setMemberSharing: Effect.fn("GroupRepo.setMemberSharing")(
-          function* (groupId, userId, canShare) {
+          function* (groupId, userId, sharing) {
             const rows = yield* db
               .update(groupMembers)
-              .set({ canShare })
+              .set({
+                shareAgents: sharing.agents,
+                shareKnowledge: sharing.knowledge,
+                shareSkills: sharing.skills,
+              })
               .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
               .returning({ id: groupMembers.userId })
               .pipe(Effect.orDie);
@@ -123,19 +202,28 @@ export class GroupRepo extends Context.Service<
         }),
 
         listMembers: Effect.fn("GroupRepo.listMembers")(function* (groupId) {
-          return yield* db
+          const rows = yield* db
             .select({
               userId: user.id,
               name: user.name,
               email: user.email,
               role: user.role,
-              canShare: groupMembers.canShare,
+              agents: groupMembers.shareAgents,
+              knowledge: groupMembers.shareKnowledge,
+              skills: groupMembers.shareSkills,
             })
             .from(groupMembers)
             .innerJoin(user, eq(user.id, groupMembers.userId))
             .where(eq(groupMembers.groupId, groupId))
             .orderBy(asc(user.name))
             .pipe(Effect.orDie);
+          return rows.map((row): GroupMember => ({
+            userId: row.userId,
+            name: row.name,
+            email: row.email,
+            role: row.role,
+            sharing: { agents: row.agents, knowledge: row.knowledge, skills: row.skills },
+          }));
         }),
 
         listMemberships: Effect.fn("GroupRepo.listMemberships")(function* () {

@@ -1,14 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GroupsPage } from "./groups-page.tsx";
-import { createGroup } from "../server/functions.ts";
+import {
+  createGroup,
+  getDefaultCapabilities,
+  updateDefaultCapabilities,
+} from "../server/functions.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 
 vi.mock("../server/functions.ts", () => ({
   listGroups: vi.fn(),
   listGroupMemberships: vi.fn(),
   createGroup: vi.fn(),
+  getDefaultCapabilities: vi.fn(),
+  updateDefaultCapabilities: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -39,6 +46,7 @@ const group = (id: string, name: string, memberCount: number) => ({
 const renderPage = (groups: ReturnType<typeof group>[]) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "groups"], groups);
+  client.setQueryData(["admin", "default-capabilities"], ALL_CAPABILITIES);
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={null}>
@@ -50,9 +58,60 @@ const renderPage = (groups: ReturnType<typeof group>[]) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getDefaultCapabilities).mockResolvedValue(ALL_CAPABILITIES);
 });
 
 describe("GroupsPage", () => {
+  it("keeps the fallback policy behind a button and edits it independently of groups", async () => {
+    renderPage([]);
+    expect(screen.queryByRole("group", { name: "Skills" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Default access" }));
+    const skills = await screen.findByRole("group", { name: "Skills" });
+    fireEvent.click(within(skills).getByRole("button", { name: "Use" }));
+    await waitFor(() =>
+      expect(updateDefaultCapabilities).toHaveBeenCalledWith({
+        data: { capabilities: { ...ALL_CAPABILITIES, skillsCreate: false } },
+      }),
+    );
+  });
+
+  it("shows a change at once and keeps the controls usable while it saves", async () => {
+    let finishFirst!: () => void;
+    vi.mocked(updateDefaultCapabilities)
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (finishFirst = resolve)))
+      .mockResolvedValue(undefined);
+    renderPage([]);
+    fireEvent.click(screen.getByRole("button", { name: "Default access" }));
+    const skills = await screen.findByRole("group", { name: "Skills" });
+    const agents = screen.getByRole("group", { name: "Agents" });
+    fireEvent.click(within(skills).getByRole("button", { name: "Use" }));
+    // The first save is still held open here, so this is the local choice.
+    await waitFor(() =>
+      expect(within(skills).getByRole("button", { name: "Use" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    const off = within(agents).getByRole("button", { name: "Off" });
+    expect(off).toBeEnabled();
+    fireEvent.click(off);
+    // The second save waits for the first and carries both changes.
+    expect(updateDefaultCapabilities).toHaveBeenCalledTimes(1);
+    finishFirst();
+    await waitFor(() =>
+      expect(updateDefaultCapabilities).toHaveBeenLastCalledWith({
+        data: {
+          capabilities: {
+            ...ALL_CAPABILITIES,
+            skillsCreate: false,
+            agentsUse: false,
+            agentsCreate: false,
+          },
+        },
+      }),
+    );
+  });
+
   it("lists groups with their member counts, each linking to its detail", async () => {
     renderPage([group("g1", "Engineering", 3), group("g2", "Design", 1)]);
 

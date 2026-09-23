@@ -11,6 +11,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   chatModelsQuery,
@@ -163,15 +164,28 @@ export const ChatInput = forwardRef<
   textareaRef,
 ) {
   const { data: models } = useSuspenseQuery(chatModelsQuery);
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const { data: searchAvailability } = useQuery(webSearchAvailabilityQuery);
   const { data: researchAvailability } = useQuery({
     ...researchAvailabilityQuery,
-    enabled: onResearchEnabledChange !== undefined || researchEnabled,
+    enabled:
+      !!capabilities?.deepResearch &&
+      !!capabilities.webSearch &&
+      (onResearchEnabledChange !== undefined || researchEnabled),
   });
   const researchHintId = useId();
   // Where a dropped file goes: the chat's local workspace inside the desktop
   // app, a server upload everywhere else.
-  const target = workspaceImports ?? attachments;
+  const target =
+    capabilities?.work && workspaceImports
+      ? workspaceImports
+      : capabilities?.attachments
+        ? attachments
+        : undefined;
+  const canChooseAgent = !!capabilities?.agentsUse;
+  const canChooseKnowledge = !!capabilities?.knowledgeUse;
+  const canChooseSkills = !!capabilities?.skillsUse;
+  const canResearch = !!capabilities?.deepResearch && !!capabilities.webSearch;
   const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
   // Queueing owns the primary button only while there is something to queue,
@@ -192,20 +206,26 @@ export const ChatInput = forwardRef<
         ? "Sending after uploads finish"
         : queueDraft
           ? queueLabel
-        : submitLabel;
+          : submitLabel;
   // Everything the "+" menu can offer besides attaching files. Three things key
   // off this: the trigger's label, whether it's enabled, and the menu width.
   // They drifted apart when Skills was added to the menu without being added
   // to any of them, so they read it from one place now.
-  const hasTools = !!context || !!skills || !!onResearchEnabledChange || researchEnabled;
+  const hasTools =
+    (!!context && (canChooseKnowledge || (canChooseAgent && !context.agentLocked))) ||
+    (!!skills && canChooseSkills) ||
+    (canResearch && (!!onResearchEnabledChange || researchEnabled));
   const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
   // "#" offers the same collections the Knowledge popup does, minus the ones
   // already on this message and the agent's own (not the user's to add or
   // remove). Selecting one commits immediately, passing the full list plus
   // the single addition, exactly as the popup's Add button does.
-  const knowledge = useQuery({ ...knowledgeCollectionsQuery, enabled: !!context });
+  const knowledge = useQuery({
+    ...knowledgeCollectionsQuery,
+    enabled: !!context && canChooseKnowledge,
+  });
   const mentionableCollections = useMemo(() => {
-    if (!context || controlsDisabled) return undefined;
+    if (!context || controlsDisabled || !canChooseKnowledge) return undefined;
     const selected = new Set(context.selection.collectionIds);
     if (selected.size >= MAX_SELECTED_COLLECTIONS) return undefined;
     return {
@@ -222,7 +242,7 @@ export const ChatInput = forwardRef<
       onSelect: (id: string) =>
         context.onCollectionsChange([...context.selection.collectionIds, id], [id]),
     };
-  }, [context, controlsDisabled, knowledge.data]);
+  }, [context, controlsDisabled, canChooseKnowledge, knowledge.data]);
   // A context row closes the menu first and opens its popup once the menu is
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
@@ -247,7 +267,10 @@ export const ChatInput = forwardRef<
   // Tools never depend on which model is selected: the gateway polyfills
   // prompt-based calling for models without native support. Only an empty
   // model list hides the toggle, since nothing could be sent anyway.
-  const searchAvailable = (searchAvailability?.enabled ?? false) && selectedModel !== undefined;
+  const searchAvailable =
+    !!capabilities?.webSearch &&
+    (searchAvailability?.enabled ?? false) &&
+    selectedModel !== undefined;
 
   const researchUnavailableReason = !researchAvailability
     ? "Checking research availability…"
@@ -298,7 +321,7 @@ export const ChatInput = forwardRef<
     !!selectedModel &&
     selectedModel.id === modelId &&
     !blocked &&
-    !(researchEnabled && researchUnavailableReason) &&
+    !(researchEnabled && (!canResearch || researchUnavailableReason)) &&
     !blockedReason &&
     !target?.queued &&
     (value.trim() !== "" || usable > 0 || usableImports > 0);
@@ -448,7 +471,7 @@ export const ChatInput = forwardRef<
       <ChatTextarea
         ref={textareaRef}
         skills={
-          skills && !controlsDisabled
+          skills && canChooseSkills && !controlsDisabled
             ? {
                 items: skills.items
                   .filter(
@@ -512,9 +535,7 @@ export const ChatInput = forwardRef<
                       variant="ghost"
                       aria-label={menuLabel}
                       ref={setMenuAnchor}
-                      disabled={
-                        controlsDisabled || (!hasTools && (!target || target.isFull))
-                      }
+                      disabled={controlsDisabled || (!hasTools && (!target || target.isFull))}
                       className="text-muted-foreground"
                     />
                   }
@@ -526,19 +547,22 @@ export const ChatInput = forwardRef<
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start" className={cn(hasTools && "w-64")}>
-            <DropdownMenuItem onClick={pickFiles} disabled={!target || target.isFull}>
-              <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-              {workspaceImports ? "Add files to the workspace" : "Attach files"}
-            </DropdownMenuItem>
-            {context ? (
+            {target ? (
+              <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
+                <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
+                {workspaceImports ? "Add files to the workspace" : "Attach files"}
+              </DropdownMenuItem>
+            ) : null}
+            {context && (canChooseAgent || canChooseKnowledge) ? (
               <ContextMenuItems
                 selection={context.selection}
-                agentLocked={context.agentLocked}
+                agentLocked={context.agentLocked || !canChooseAgent}
+                knowledgeEnabled={canChooseKnowledge}
                 onPick={setPendingPicker}
                 disabled={controlsDisabled}
               />
             ) : null}
-            {skills ? (
+            {skills && canChooseSkills ? (
               <DropdownMenuItem
                 disabled={controlsDisabled}
                 onClick={() => setPendingPicker("skills")}
@@ -552,7 +576,7 @@ export const ChatInput = forwardRef<
                 ) : null}
               </DropdownMenuItem>
             ) : null}
-            {onResearchEnabledChange || researchEnabled ? (
+            {canResearch && (onResearchEnabledChange || researchEnabled) ? (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuCheckboxItem
@@ -575,7 +599,7 @@ export const ChatInput = forwardRef<
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
-        {skills ? (
+        {skills && canChooseSkills ? (
           <SkillPicker
             items={skills.items}
             selectedIds={skills.selectedIds}
@@ -585,7 +609,7 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
           />
         ) : null}
-        {context && !context.agentLocked ? (
+        {context && canChooseAgent && !context.agentLocked ? (
           <AgentPicker
             selection={context.selection}
             onAgentChange={context.onAgentChange}
@@ -594,7 +618,7 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
           />
         ) : null}
-        {context ? (
+        {context && canChooseKnowledge ? (
           <CollectionPicker
             selection={context.selection}
             agentCollectionIds={context.agentCollectionIds}
@@ -604,7 +628,7 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
           />
         ) : null}
-        {mode ? (
+        {mode && capabilities?.work ? (
           <ToggleGroup
             value={[mode.value]}
             onValueChange={(values) => {
@@ -715,10 +739,15 @@ export const ChatInput = forwardRef<
           </Tooltip>
         </div>
       </div>
-      <Disclosure open={(researchEnabled && !!researchUnavailableReason) || !!blockedReason}>
+      <Disclosure
+        open={(researchEnabled && (!canResearch || !!researchUnavailableReason)) || !!blockedReason}
+      >
         <DisclosureContent>
           <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
-            {blockedReason ?? researchUnavailableReason}
+            {blockedReason ??
+              (!canResearch
+                ? "Deep research isn’t available for your account."
+                : researchUnavailableReason)}
           </p>
         </DisclosureContent>
       </Disclosure>

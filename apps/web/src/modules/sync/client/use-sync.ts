@@ -93,9 +93,17 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["documents"] });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
+        void queryClient.invalidateQueries({ queryKey: ["skills"] });
+        void queryClient.invalidateQueries({ queryKey: ["custom-tools"] });
+        void queryClient.invalidateQueries({ queryKey: ["schedules"] });
+        void queryClient.invalidateQueries({ queryKey: ["schedule"] });
+        void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
         void queryClient.invalidateQueries({ queryKey: ["sharing"] });
         void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
         void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
+        void queryClient.invalidateQueries({ queryKey: ["admin", "group-capabilities"] });
+        void queryClient.invalidateQueries({ queryKey: ["admin", "default-capabilities"] });
+        void queryClient.invalidateQueries({ queryKey: ["capabilities"] });
         void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
         void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
       }
@@ -190,10 +198,19 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "group-capabilities"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "default-capabilities"] });
+          void queryClient.invalidateQueries({ queryKey: ["capabilities"] });
           void queryClient.invalidateQueries({ queryKey: ["sharing"] });
           refreshKnowledge();
           void queryClient.invalidateQueries({ queryKey: ["agents"] });
           void queryClient.invalidateQueries({ queryKey: ["skills"] });
+          void queryClient.invalidateQueries({ queryKey: ["custom-tools"] });
+          void queryClient.invalidateQueries({ queryKey: ["schedules"] });
+          void queryClient.invalidateQueries({ queryKey: ["schedule"] });
+          void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
+          void queryClient.invalidateQueries({ queryKey: ["documents"] });
+          void queryClient.invalidateQueries({ queryKey: ["memory"] });
           break;
         case "models.defaults.changed":
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });

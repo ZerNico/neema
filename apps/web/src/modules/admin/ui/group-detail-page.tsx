@@ -22,7 +22,8 @@ import {
   renameGroup,
   updateGroupMemberSharing,
 } from "../server/functions.ts";
-import { groupsQuery, isConflict } from "./groups-page.tsx";
+import { CapabilitySettings, groupsQuery, isConflict } from "./groups-page.tsx";
+import type { GroupMember, MemberSharing } from "~/modules/groups/server/repo.ts";
 import { usersQuery } from "./users-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import {
@@ -36,6 +37,7 @@ import {
 } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
+import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
   Combobox,
@@ -64,6 +66,7 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { toastError } from "~/ui/error-toast.ts";
 
 export const membersQuery = (groupId: string) =>
@@ -86,6 +89,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
   const members = useQuery(membersQuery(groupId));
   const users = useQuery(usersQuery);
   const [renaming, setRenaming] = useState(false);
+  const [sharingFor, setSharingFor] = useState<GroupMember | null>(null);
 
   const group = groups.find((g) => g.id === groupId);
 
@@ -106,13 +110,6 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     mutationFn: (userId: string) => removeGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not remove the member.", error),
-  });
-
-  const sharing = useMutation({
-    mutationFn: ({ userId, canShare }: { userId: string; canShare: boolean }) =>
-      updateGroupMemberSharing({ data: { groupId, userId, canShare } }),
-    onSuccess: invalidate,
-    onError: (error) => toastError("Could not update sharing permission.", error),
   });
 
   const removeWholeGroup = useMutation({
@@ -145,14 +142,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       actions={
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Group actions"
-                disabled={sharing.isPending}
-              />
-            }
+            render={<Button variant="ghost" size="icon-sm" aria-label="Group actions" />}
           >
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
@@ -188,15 +178,11 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         actions={
           <AddMemberPicker
             candidates={candidates}
-            pending={add.isPending || sharing.isPending || remove.isPending}
+            pending={add.isPending || remove.isPending}
             onPick={(userId) => add.mutate(userId)}
           />
         }
       >
-        <p className="text-muted-foreground text-sm">
-          Can share into this group allows members to share their own agents and collections.
-          Disabling it leaves existing shares intact.
-        </p>
         {members.isLoading ? (
           <ListSkeleton media="avatar" label="Loading members" />
         ) : members.isError ? (
@@ -224,33 +210,26 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                   <span className="text-muted-foreground truncate text-xs">{member.email}</span>
                 </div>
                 {member.role === "admin" ? (
-                  <span className="text-muted-foreground text-xs">Always allowed, admin</span>
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge />}>Admin</TooltipTrigger>
+                    <TooltipContent>Admins can share anything into any group.</TooltipContent>
+                  </Tooltip>
                 ) : (
-                  <label className="flex items-center gap-2 text-xs">
-                    Can share into this group<span className="sr-only">for {member.name}</span>
-                    <Switch
-                      checked={member.canShare}
-                      disabled={
-                        sharing.isPending ||
-                        remove.isPending ||
-                        add.isPending ||
-                        removeWholeGroup.isPending
-                      }
-                      aria-busy={
-                        (sharing.isPending && sharing.variables?.userId === member.userId) ||
-                        undefined
-                      }
-                      onCheckedChange={(canShare) =>
-                        sharing.mutate({ userId: member.userId, canShare })
-                      }
-                    />
-                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Sharing for ${member.name}: ${sharingSummary(member.sharing)}`}
+                    disabled={remove.isPending || removeWholeGroup.isPending}
+                    onClick={() => setSharingFor(member)}
+                  >
+                    Sharing: {sharingSummary(member.sharing)}
+                  </Button>
                 )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Remove ${member.name}`}
-                  disabled={remove.isPending || sharing.isPending || removeWholeGroup.isPending}
+                  disabled={remove.isPending || removeWholeGroup.isPending}
                   onClick={async () => {
                     if (
                       await confirm({
@@ -272,6 +251,13 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         )}
       </Section>
 
+      <CapabilitySettings groupId={groupId} />
+      <MemberSharingDialog
+        groupId={groupId}
+        member={sharingFor}
+        onClose={() => setSharingFor(null)}
+        onSaved={invalidate}
+      />
       <RenameGroupDialog
         groupId={groupId}
         currentName={group.name}
@@ -284,6 +270,112 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
 
 // Single-select combobox that ACTS instead of selecting: picking a user adds
 // them and the field resets, ready for the next addition.
+const sharingKinds: ReadonlyArray<{ key: keyof MemberSharing; label: string }> = [
+  { key: "agents", label: "Agents" },
+  { key: "knowledge", label: "Knowledge" },
+  { key: "skills", label: "Skills" },
+];
+
+function sharingSummary(sharing: MemberSharing) {
+  const allowed = sharingKinds.filter((kind) => sharing[kind.key]).map((kind) => kind.label);
+  return allowed.length === sharingKinds.length
+    ? "All"
+    : allowed.length
+      ? allowed.join(", ")
+      : "None";
+}
+
+/** Which of their own resources one member may share into this group. */
+function MemberSharingDialog({
+  groupId,
+  member,
+  onClose,
+  onSaved,
+}: {
+  groupId: string;
+  member: GroupMember | null;
+  onClose: () => void;
+  onSaved: () => Promise<unknown>;
+}) {
+  return (
+    <Dialog open={member !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        {member ? (
+          <MemberSharingForm
+            key={member.userId}
+            groupId={groupId}
+            member={member}
+            onClose={onClose}
+            onSaved={onSaved}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MemberSharingForm({
+  groupId,
+  member,
+  onClose,
+  onSaved,
+}: {
+  groupId: string;
+  member: GroupMember;
+  onClose: () => void;
+  onSaved: () => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState(member.sharing);
+  const save = useMutation({
+    mutationFn: () =>
+      updateGroupMemberSharing({ data: { groupId, userId: member.userId, sharing: draft } }),
+    onSuccess: async () => {
+      await onSaved();
+      onClose();
+    },
+    onError: (error) => toastError("Could not update sharing permission.", error),
+  });
+
+  return (
+    <form
+      className="grid gap-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save.mutate();
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>Sharing for {member.name}</DialogTitle>
+        <DialogDescription>
+          What they may share into this group from their own work. Turning something off leaves what
+          they already shared in place.
+        </DialogDescription>
+      </DialogHeader>
+      <ListCard>
+        {sharingKinds.map((kind) => (
+          <ListRow key={kind.key}>
+            <span className="min-w-0 flex-1 text-sm font-medium">{kind.label}</span>
+            <Switch
+              aria-label={kind.label}
+              checked={draft[kind.key]}
+              disabled={save.isPending}
+              onCheckedChange={(checked) => setDraft({ ...draft, [kind.key]: checked })}
+            />
+          </ListRow>
+        ))}
+      </ListCard>
+      <DialogFooter>
+        <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
+          Cancel
+        </DialogClose>
+        <PendingButton type="submit" pending={save.isPending}>
+          Save
+        </PendingButton>
+      </DialogFooter>
+    </form>
+  );
+}
+
 function AddMemberPicker({
   candidates,
   pending,

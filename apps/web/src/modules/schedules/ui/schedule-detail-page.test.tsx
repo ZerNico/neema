@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { runScheduleNow, updateSchedule } from "../server/functions.ts";
+import { listScheduleRuns, runScheduleNow, updateSchedule } from "../server/functions.ts";
 import { ScheduleDetailPage } from "./schedule-detail-page.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -75,6 +75,28 @@ const renderPage = () => {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(runScheduleNow).mockResolvedValue(undefined as never);
+});
+
+describe("ScheduleDetailPage runs", () => {
+  it("shows policy-skipped runs as non-link rows", async () => {
+    vi.mocked(listScheduleRuns).mockResolvedValue({
+      runs: [
+        {
+          id: "r1",
+          conversationId: null,
+          conversationTitle: null,
+          firedAt: new Date().toISOString(),
+          status: "skipped",
+          error: "schedule access is not permitted",
+        },
+      ],
+      nextCursor: null,
+    });
+    renderPage();
+    expect(await screen.findByText("Skipped")).toBeInTheDocument();
+    expect(screen.getByText("Schedule access is not permitted")).toBeInTheDocument();
+    expect(screen.getByText("Skipped").closest("li")?.querySelector("a")).toBeNull();
+  });
 });
 
 describe("ScheduleDetailPage run now", () => {

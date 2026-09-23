@@ -35,6 +35,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
@@ -223,7 +224,7 @@ beforeAll(async () => {
     AttachmentRepo.layer,
     ToolsRepo.layer,
     ProviderRepo.layer,
-  ).pipe(Layer.provideMerge(InfraLayer));
+  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(InfraLayer));
   const AppLayer = Layer.mergeAll(
     KnowledgeIndexer.layer,
     KnowledgeSearch.layer,
@@ -385,7 +386,11 @@ describe("knowledge access", () => {
         ),
       ),
     };
-    await run(GroupRepo.use((repo) => repo.setMemberSharing(open, member, true)));
+    await run(
+      GroupRepo.use((repo) =>
+        repo.setMemberSharing(open, member, { agents: true, knowledge: true, skills: true }),
+      ),
+    );
     const forMember = await run(
       Effect.flatMap(SharingService, (service) => service.detail(member, resource)),
     );
@@ -3910,7 +3915,11 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       Effect.flatMap(GroupRepo, (repo) => repo.createGroup(`Sharing-${uuidv7()}`)),
     );
     await run(Effect.flatMap(GroupRepo, (repo) => repo.addMember(group.id, member)));
-    await run(Effect.flatMap(GroupRepo, (repo) => repo.setMemberSharing(group.id, member, true)));
+    await run(
+      Effect.flatMap(GroupRepo, (repo) =>
+        repo.setMemberSharing(group.id, member, { agents: true, knowledge: true, skills: true }),
+      ),
+    );
     const denied = await run(
       Effect.flatMap(SharingService, (service) =>
         Effect.result(service.change(owner, resource, { action: "group", groupId: group.id })),
@@ -3924,16 +3933,48 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       ),
     );
     expect(noPermission).toMatchObject({ _tag: "Failure", failure: { _tag: "SharingNotAllowed" } });
+    // Permission is per kind: every other kind allowed still does not cover this one.
+    const ownKind = kind === "agent" ? "agents" : "knowledge";
+    await run(
+      GroupRepo.use((repo) =>
+        repo.setMemberSharing(group.id, owner, {
+          agents: true,
+          knowledge: true,
+          skills: true,
+          [ownKind]: false,
+        }),
+      ),
+    );
+    const otherKindsOnly = await run(
+      SharingService.use((service) =>
+        Effect.result(service.change(owner, resource, { action: "group", groupId: group.id })),
+      ),
+    );
+    expect(otherKindsOnly).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "SharingNotAllowed" },
+    });
+    expect(
+      (await run(SharingService.use((service) => service.detail(owner, resource)))).eligibleGroups,
+    ).not.toContainEqual({ id: group.id, name: group.name });
     const otherGroup = await run(GroupRepo.use((repo) => repo.createGroup(`Isolated-${uuidv7()}`)));
     await run(GroupRepo.use((repo) => repo.addMember(otherGroup.id, owner)));
-    await run(Effect.flatMap(GroupRepo, (repo) => repo.setMemberSharing(group.id, owner, true)));
+    await run(
+      Effect.flatMap(GroupRepo, (repo) =>
+        repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+      ),
+    );
     const isolated = await run(
       SharingService.use((service) =>
         Effect.result(service.change(owner, resource, { action: "group", groupId: otherGroup.id })),
       ),
     );
     expect(isolated).toMatchObject({ _tag: "Failure", failure: { _tag: "SharingNotAllowed" } });
-    await run(GroupRepo.use((repo) => repo.setMemberSharing(group.id, member, false)));
+    await run(
+      GroupRepo.use((repo) =>
+        repo.setMemberSharing(group.id, member, { agents: false, knowledge: false, skills: false }),
+      ),
+    );
     const memberResource = await resourceFor(member);
     const memberDenied = await run(
       SharingService.use((service) =>
@@ -3950,7 +3991,11 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     expect(detail.eligibleGroups).toContainEqual({ id: group.id, name: group.name });
     await change(owner, resource, { action: "group", groupId: group.id });
     expect(await visible(member, resource)).not.toBeNull();
-    await run(Effect.flatMap(GroupRepo, (repo) => repo.setMemberSharing(group.id, owner, false)));
+    await run(
+      Effect.flatMap(GroupRepo, (repo) =>
+        repo.setMemberSharing(group.id, owner, { agents: false, knowledge: false, skills: false }),
+      ),
+    );
     await change(owner, resource, { action: "group", groupId: group.id });
     expect(await visible(member, resource)).not.toBeNull();
     const closed = await run(
@@ -4002,7 +4047,11 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
         run(
           Effect.flatMap(GroupRepo, (repo) =>
             operation === "disable"
-              ? repo.setMemberSharing(group.id, owner, false)
+              ? repo.setMemberSharing(group.id, owner, {
+                  agents: false,
+                  knowledge: false,
+                  skills: false,
+                })
               : repo.removeMember(group.id, owner),
           ),
         );
@@ -4012,7 +4061,11 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       let grant: Promise<void> | undefined;
       let revocation: Promise<void> | undefined;
       try {
-        await run(GroupRepo.use((repo) => repo.setMemberSharing(group.id, owner, true)));
+        await run(
+          GroupRepo.use((repo) =>
+            repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+          ),
+        );
         const first = await resourceFor(owner);
         await controller.query("select pg_advisory_lock(hashtext($1))", [first.id]);
         await controller.query(
@@ -4036,12 +4089,16 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
         await controller.query(`drop function ${trigger}()`);
 
         await run(GroupRepo.use((repo) => repo.addMember(group.id, owner)));
-        await run(GroupRepo.use((repo) => repo.setMemberSharing(group.id, owner, true)));
+        await run(
+          GroupRepo.use((repo) =>
+            repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+          ),
+        );
         const second = await resourceFor(owner);
         await controller.query("begin");
         await controller.query(
           operation === "disable"
-            ? "update group_members set can_share = false where group_id = $1 and user_id = $2"
+            ? `update group_members set ${kind === "agent" ? "share_agents" : "share_knowledge"} = false where group_id = $1 and user_id = $2`
             : "delete from group_members where group_id = $1 and user_id = $2",
           [group.id, owner],
         );

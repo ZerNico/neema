@@ -126,8 +126,10 @@ export const deleteSchedule = createServerFn({ method: "POST" })
   .validator(Schema.toStandardSchemaV1(ScheduleIdInput))
   .handler(({ context, data }) =>
     runtime.runPromise(
-      Effect.flatMap(ScheduleService, (service) =>
-        service.remove(context.session.user.id, data.scheduleId),
+      publicResult(
+        Effect.flatMap(ScheduleService, (service) =>
+          service.remove(context.session.user.id, data.scheduleId),
+        ),
       ),
     ),
   );

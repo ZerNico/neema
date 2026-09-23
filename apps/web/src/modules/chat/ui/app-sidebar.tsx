@@ -8,7 +8,8 @@ import {
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseInfiniteQuery } from "@tanstack/react-query";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
@@ -46,6 +47,7 @@ export function AppSidebar({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const trimmed = pathname.replace(/\/$/, "");
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const onChatsPage = trimmed === "/chats";
   const onAgentsPage = trimmed.startsWith("/agents");
   const onKnowledgePage = trimmed.startsWith("/knowledge");
@@ -69,36 +71,44 @@ export function AppSidebar({
             New chat
           </Link>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
-                <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
-                Agents
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
-                <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
-                Knowledge
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={trimmed.startsWith("/schedules")}
-                render={<Link to="/schedules" />}
-              >
-                <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} />
-                Schedules
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={trimmed.startsWith("/skills")}
-                render={<Link to="/skills" />}
-              >
-                <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
-                Skills
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {capabilities?.agentsUse ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
+                  <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
+                  Agents
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+            {capabilities?.knowledgeUse ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
+                  <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
+                  Knowledge
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+            {capabilities?.schedules ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={trimmed.startsWith("/schedules")}
+                  render={<Link to="/schedules" />}
+                >
+                  <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} />
+                  Schedules
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+            {capabilities?.skillsUse ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={trimmed.startsWith("/skills")}
+                  render={<Link to="/skills" />}
+                >
+                  <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
+                  Skills
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
             <SidebarMenuItem>
               <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
                 <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />

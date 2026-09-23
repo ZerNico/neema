@@ -16,6 +16,7 @@ import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
 import { agentAuthoringRequest } from "../authoring.ts";
 import { deleteAgent } from "../server/functions.ts";
 import { agentIcon } from "~/modules/chat/ui/context-picker.tsx";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -44,6 +45,7 @@ export function AgentsPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const agents = useQuery(agentsQuery);
+  const { data: capabilities } = useQuery(capabilitiesQuery);
   const [sharing, setSharing] = useState<AgentSummary | null>(null);
   const remove = useMutation({
     mutationFn: (agentId: string) => deleteAgent({ data: { agentId } }),
@@ -90,7 +92,7 @@ export function AgentsPage() {
           </Link>
           {/* Editing, sharing and deleting are the owner's; a recipient only
               ever starts a chat. */}
-          {agent.canEdit ? (
+          {agent.canEdit && capabilities?.agentsCreate ? (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -153,7 +155,12 @@ export function AgentsPage() {
     />
   );
   return (
-    <Page title="Agents" rootPath="/" rootLabel="Chat" actions={newAgent}>
+    <Page
+      title="Agents"
+      rootPath="/"
+      rootLabel="Chat"
+      actions={capabilities?.agentsCreate ? newAgent : null}
+    >
       {agents.isError ? (
         <ErrorState
           title="Could not load agents"
@@ -167,8 +174,12 @@ export function AgentsPage() {
         <EmptyState
           icon={Robot01Icon}
           title="No agents yet"
-          description="Create an agent for tasks you return to often."
-          action={newAgent}
+          description={
+            capabilities?.agentsCreate
+              ? "Create an agent for tasks you return to often."
+              : "No agents are shared with you yet."
+          }
+          action={capabilities?.agentsCreate ? newAgent : null}
         />
       ) : (
         <>

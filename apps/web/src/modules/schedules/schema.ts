@@ -49,7 +49,7 @@ export type ScheduleSummary = typeof ScheduleSummary.Type;
 export interface ScheduleRunSummary {
   id: string;
   firedAt: string;
-  status: "started" | "error";
+  status: "started" | "error" | "skipped";
   error: string | null;
   conversationId: string | null;
   conversationTitle: string | null;
