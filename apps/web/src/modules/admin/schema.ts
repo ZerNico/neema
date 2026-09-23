@@ -6,7 +6,7 @@ export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultMod
 export const CreateProviderInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   kind: Schema.Literals(["openrouter", "openai-compatible"]),
-  baseUrl: Schema.String.check(Schema.isMinLength(1)),
+  baseUrl: Schema.optionalKey(Schema.String),
   apiKey: Schema.String.check(Schema.isMinLength(1)),
 });
 

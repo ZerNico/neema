@@ -6,9 +6,8 @@ import { Db } from "~/server/db.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
 import { normalizeModelSettings, type ModelSettings } from "../model-config.ts";
+import { resolveBaseUrl, type ProviderKind } from "../provider-kinds.ts";
 import { KeyCipher } from "./crypto.ts";
-
-export type ProviderKind = "openrouter" | "openai-compatible";
 
 export type ModelRow = typeof models.$inferSelect;
 export type ModelAccess = ModelRow["access"];
@@ -34,7 +33,8 @@ export class ProviderRepo extends Context.Service<
     createProvider(input: {
       name: string;
       kind: ProviderKind;
-      baseUrl: string;
+      /** Blank or absent means the kind's default. */
+      baseUrl?: string;
       apiKey: string;
     }): Effect.Effect<PublicProvider>;
     updateProvider(
@@ -122,7 +122,7 @@ export class ProviderRepo extends Context.Service<
               id: uuidv7(),
               name: input.name,
               kind: input.kind,
-              baseUrl: input.baseUrl,
+              baseUrl: resolveBaseUrl(input.kind, input.baseUrl),
               apiKeyCiphertext,
             })
             .returning()
@@ -131,15 +131,25 @@ export class ProviderRepo extends Context.Service<
         }),
 
         updateProvider: Effect.fn("ProviderRepo.updateProvider")(function* (providerId, patch) {
-          const { apiKey, ...rest } = patch;
+          const { apiKey, baseUrl, ...rest } = patch;
           const apiKeyCiphertext = apiKey ? yield* cipher.encrypt(apiKey) : undefined;
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                // A cleared base URL falls back to the default of the row's kind.
+                let resolved = baseUrl?.trim();
+                if (baseUrl !== undefined && !resolved) {
+                  const [row] = yield* tx
+                    .select({ kind: providers.kind })
+                    .from(providers)
+                    .where(eq(providers.id, providerId));
+                  if (row) resolved = resolveBaseUrl(row.kind, undefined);
+                }
                 yield* tx
                   .update(providers)
                   .set({
                     ...rest,
+                    ...(resolved ? { baseUrl: resolved } : {}),
                     ...(apiKeyCiphertext ? { apiKeyCiphertext } : {}),
                     updatedAt: new Date(),
                   })

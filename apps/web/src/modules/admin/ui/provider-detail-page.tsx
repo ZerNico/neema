@@ -26,7 +26,8 @@ import {
   modelSettingsFromDraft,
 } from "./model-settings-form.tsx";
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
-import { modelsQuery, PROVIDER_PRESETS, providersQuery } from "./providers-page.tsx";
+import { modelsQuery, providersQuery } from "./providers-page.tsx";
+import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -51,6 +52,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/u
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
+import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const id = useId();
@@ -421,17 +423,20 @@ function EditProviderDialog({
   open,
   onOpenChange,
 }: {
-  provider: { id: string; name: string; baseUrl: string };
+  provider: { id: string; name: string; kind: ProviderKind; baseUrl: string };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
+  const defaultBaseUrl = PROVIDER_PRESETS[provider.kind].baseUrl;
+  // The default shows as the placeholder, so a provider on it opens with an empty field.
+  const initialBaseUrl = provider.baseUrl === defaultBaseUrl ? "" : provider.baseUrl;
   const [name, setName] = useState(provider.name);
-  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   // Empty means "keep the current key", since the stored key can't be shown.
   const [apiKey, setApiKey] = useState("");
-  const complete = Boolean(name.trim() && baseUrl.trim());
+  const complete = Boolean(name.trim());
 
   const save = useMutation({
     mutationFn: () =>
@@ -463,7 +468,7 @@ function EditProviderDialog({
         if (!next) {
           if (save.isPending) return;
           setName(provider.name);
-          setBaseUrl(provider.baseUrl);
+          setBaseUrl(initialBaseUrl);
           setApiKey("");
         }
         onOpenChange(next);
@@ -492,11 +497,14 @@ function EditProviderDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-base-url`}>Base URL</FieldLabel>
+              <FieldLabel htmlFor={`${id}-base-url`}>
+                Base URL <OptionalMark />
+              </FieldLabel>
               <Input
                 id={`${id}-base-url`}
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={defaultBaseUrl}
                 disabled={save.isPending}
               />
             </Field>

@@ -7,6 +7,7 @@ import { createProvider, listModels, listProviders } from "../server/functions.t
 import { DefaultModelOrder } from "./default-model-order.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -20,6 +21,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { OptionalMark } from "~/ui/form/app-form.tsx";
 import {
   Select,
   SelectContent,
@@ -37,13 +39,6 @@ export const modelsQuery = queryOptions({
   queryKey: ["admin", "models"],
   queryFn: () => listModels(),
 });
-
-export const PROVIDER_PRESETS = {
-  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  "openai-compatible": { label: "OpenAI-compatible", baseUrl: "" },
-} as const;
-
-type ProviderKind = keyof typeof PROVIDER_PRESETS;
 
 const PROVIDER_KIND_ITEMS = (Object.keys(PROVIDER_PRESETS) as ProviderKind[]).map((value) => ({
   value,
@@ -135,29 +130,19 @@ function AddProviderDialog({
     kind: ProviderKind;
     baseUrl: string;
     apiKey: string;
-  }>({
-    name: "OpenRouter",
-    kind: "openrouter",
-    baseUrl: PROVIDER_PRESETS.openrouter.baseUrl,
-    apiKey: "",
-  });
-  const complete = Boolean(draft.name.trim() && draft.baseUrl.trim() && draft.apiKey.trim());
-  const reset = () =>
-    setDraft({
-      name: "OpenRouter",
-      kind: "openrouter",
-      baseUrl: PROVIDER_PRESETS.openrouter.baseUrl,
-      apiKey: "",
-    });
+  }>({ name: "OpenRouter", kind: "openrouter", baseUrl: "", apiKey: "" });
+  const complete = Boolean(draft.name.trim() && draft.apiKey.trim());
+  const reset = () => setDraft({ name: "OpenRouter", kind: "openrouter", baseUrl: "", apiKey: "" });
 
   const add = useMutation({
     mutationFn: () =>
       createProvider({
         data: {
-          ...draft,
+          kind: draft.kind,
           name: draft.name.trim(),
-          baseUrl: draft.baseUrl.trim(),
           apiKey: draft.apiKey.trim(),
+          // Blank uses the kind's default, which the placeholder shows.
+          ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
         },
       }),
     onSuccess: async (provider) => {
@@ -208,7 +193,6 @@ function AddProviderDialog({
                   setDraft((d) => ({
                     ...d,
                     kind: k,
-                    baseUrl: PROVIDER_PRESETS[k].baseUrl || d.baseUrl,
                     name:
                       d.name === "" || d.name === PROVIDER_PRESETS[d.kind].label
                         ? PROVIDER_PRESETS[k].label
@@ -241,12 +225,14 @@ function AddProviderDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-base-url`}>Base URL</FieldLabel>
+              <FieldLabel htmlFor={`${id}-base-url`}>
+                Base URL <OptionalMark />
+              </FieldLabel>
               <Input
                 id={`${id}-base-url`}
                 value={draft.baseUrl}
                 onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
-                placeholder="https://openrouter.ai/api/v1"
+                placeholder={PROVIDER_PRESETS[draft.kind].baseUrl}
                 disabled={add.isPending}
               />
             </Field>
