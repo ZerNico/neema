@@ -53,6 +53,7 @@ export const useScheduleDraftPanel = (draftId: string) => useDraftPanel("schedul
 export function ScheduleDraftOwner(props: {
   draftIds: ReadonlyArray<string>;
   onGone: (draftId: string) => void;
+  autoOpenIds?: ReadonlySet<string> | undefined;
   children: ReactNode;
   ref?: Ref<ScheduleDraftHandle> | undefined;
 }) {

@@ -1599,7 +1599,7 @@ describe("ChatView agent drafts", () => {
     );
   });
 
-  it("discovers a live tool-created draft without a loader flag or automatic opening", async () => {
+  it("discovers a live tool-created draft without a loader flag and opens it", async () => {
     const { client, container } = renderView();
     expect(getAgentDraft).not.toHaveBeenCalled();
     liveDraft.tools = [toActivity(draftReference())];
@@ -1616,9 +1616,8 @@ describe("ChatView agent drafts", () => {
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
-    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
-    fireEvent.click(widget);
+    // Created by the answer being watched, so its panel opens without a click.
     expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Writer");
     expect(getAgentDraft).toHaveBeenCalledWith({ data: { draftId: "d1" } });
   });

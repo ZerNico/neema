@@ -192,7 +192,9 @@ false`), so a page body is written against data already there. This includes loc
   history state. An edit link names the target, never copies its private instructions or installs
   it as the conversation’s agent.
 - Transcript activity for an editable conversation resource opens its detail; it never owns the
-  editor or auto-opens the panel. `AgentDraftOwner` and `DocumentOwner` mount one controller per
+  editor. A draft or document the answer being watched just created (seen in the live stream, not
+  in what the page loaded with) opens its panel once by itself, never on a phone, where the panel is
+  a sheet over the answer; reloads, sync and old chats only ever open one on click. `AgentDraftOwner` and `DocumentOwner` mount one controller per
   known id at conversation level, above the virtualiser, so a widget scrolling out of view, a
   panel replacement or a removed tool row cannot take local edits with it. Widgets only look the
   controller up by id. Owners refresh only the selected detail and publish only visible entry

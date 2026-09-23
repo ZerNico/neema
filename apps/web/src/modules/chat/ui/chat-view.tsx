@@ -671,6 +671,41 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (activity.family === "document" && activity.result) mine(activity.result);
     return ids;
   }, [conversationId, data.documents, data.toolCalls, stream.tools]);
+  // What the answer being watched just created, as opposed to what the page
+  // loaded with: only these open their panel by themselves. A phone shows the
+  // panel as a sheet over the answer, so it never opens one on its own there.
+  const liveCreated = useMemo(() => {
+    const loaded = new Set([
+      ...data.agentDrafts.map((draft) => draft.id),
+      ...(data.scheduleDrafts ?? []).map((draft) => draft.id),
+      ...(data.documents ?? []).map((document) => document.id),
+    ]);
+    const fresh = {
+      agent: new Set<string>(),
+      schedule: new Set<string>(),
+      document: new Set<string>(),
+    };
+    if (isMobile) return fresh;
+    const add = (target: Set<string>, id: string | undefined, owner: string | undefined) => {
+      if (id && owner === conversationId && !loaded.has(id)) target.add(id);
+    };
+    for (const activity of stream.tools) {
+      if (activity.family === "agent-draft" && activity.result)
+        add(fresh.agent, activity.result.draftId, activity.result.draftConversationId);
+      else if (activity.family === "schedule-draft" && activity.result)
+        add(fresh.schedule, activity.result.draftId, activity.result.draftConversationId);
+      else if (activity.family === "document" && activity.result)
+        add(fresh.document, activity.result.documentId, activity.result.documentConversationId);
+    }
+    return fresh;
+  }, [
+    conversationId,
+    data.agentDrafts,
+    data.documents,
+    data.scheduleDrafts,
+    isMobile,
+    stream.tools,
+  ]);
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
     mutationFn: (permissionLevel: PermissionLevel) =>
@@ -1733,12 +1768,19 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       goneIds={scopedForgottenDocuments}
       locked={documentsLocked}
       onGone={forgetDocument}
+      autoOpenIds={liveCreated.document}
       ref={documents}
     >
-      <AgentDraftOwner draftIds={draftIds} onGone={forgetDraft} ref={agentDraft}>
+      <AgentDraftOwner
+        draftIds={draftIds}
+        onGone={forgetDraft}
+        autoOpenIds={liveCreated.agent}
+        ref={agentDraft}
+      >
       <ScheduleDraftOwner
         draftIds={scheduleDraftIds}
         onGone={forgetScheduleDraft}
+        autoOpenIds={liveCreated.schedule}
         ref={scheduleDraft}
       >
         <div className="flex h-full flex-col">

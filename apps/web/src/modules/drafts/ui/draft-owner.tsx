@@ -99,6 +99,7 @@ export function DraftOwner<S extends Record<string, unknown>>({
   ui,
   draftIds,
   onGone,
+  autoOpenIds,
   children,
   ref,
 }: {
@@ -106,6 +107,8 @@ export function DraftOwner<S extends Record<string, unknown>>({
   draftIds: ReadonlyArray<string>;
   /** The server says this draft no longer exists, so stop listing it. */
   onGone: (draftId: string) => void;
+  /** Drafts the answer being watched just created; their panel opens by itself. */
+  autoOpenIds?: ReadonlySet<string> | undefined;
   children: ReactNode;
   ref?: Ref<DraftHandle> | undefined;
 }) {
@@ -169,6 +172,7 @@ export function DraftOwner<S extends Record<string, unknown>>({
           publish={publish}
           forget={forget}
           onGone={onGone}
+          autoOpen={autoOpenIds?.has(draftId) ?? false}
         />
       ))}
       <Scope value={value}>{children}</Scope>
@@ -182,12 +186,14 @@ function DraftSession<S extends Record<string, unknown>>({
   publish,
   forget,
   onGone,
+  autoOpen,
 }: {
   ui: DraftKindUi<S>;
   draftId: string;
   publish: (draftId: string, session: Session) => void;
   forget: (draftId: string) => void;
   onGone: (draftId: string) => void;
+  autoOpen: boolean;
 }) {
   const controller = ui.useController(draftId);
   const panel = useDetailPanel();
@@ -223,6 +229,14 @@ function DraftSession<S extends Record<string, unknown>>({
   }, [panel, request]);
   useEffect(() => () => panel.closeIfSelected(id), [id, panel]);
   const available = controller.draft !== null;
+  // Opens the panel once, when a draft this answer just created has loaded.
+  // Only live ones are passed in, so reloads and old chats never pop a panel.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current || !available) return;
+    autoOpened.current = true;
+    panel.open(request);
+  }, [autoOpen, available, panel, request]);
   const failed = controller.query.isError || controller.query.data === null;
   const summary = useMemo(
     () => ({
@@ -242,7 +256,18 @@ function DraftSession<S extends Record<string, unknown>>({
           }
         : null,
     }),
-    [available, controller.error, controller.query, failed, id, name, panel, request, selected, status],
+    [
+      available,
+      controller.error,
+      controller.query,
+      failed,
+      id,
+      name,
+      panel,
+      request,
+      selected,
+      status,
+    ],
   );
   const flush = controller.flush;
   useEffect(() => {

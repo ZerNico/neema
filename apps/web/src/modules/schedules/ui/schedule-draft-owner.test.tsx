@@ -112,7 +112,12 @@ const reference = (callId = "first", draftId = "draft-1"): ScheduleDraftToolActi
   status: "complete",
   result: { outcome: "drafted", draftId, draftConversationId: "conversation", revision: 1 },
 });
-const fixture = async ({ open = true, present = true, activities = [reference()] } = {}) => {
+const fixture = async ({
+  open = true,
+  present = true,
+  activities = [reference()],
+  autoOpen = false,
+} = {}) => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -128,7 +133,12 @@ const fixture = async ({ open = true, present = true, activities = [reference()]
         <ConfirmProvider>
           <DetailPanelProvider>
             <main>
-              <ScheduleDraftOwner draftIds={known ? ["draft-1"] : []} onGone={gone} ref={ref}>
+              <ScheduleDraftOwner
+                draftIds={known ? ["draft-1"] : []}
+                onGone={gone}
+                autoOpenIds={autoOpen ? new Set(["draft-1"]) : undefined}
+                ref={ref}
+              >
                 {refs.map((activity) => (
                   <ScheduleDraftActivityBlock key={activity.callId} activity={activity} />
                 ))}
@@ -208,6 +218,19 @@ describe("conversation-owned schedule draft", () => {
     expect(screen.getByLabelText("Time")).toHaveValue("07:00");
     expect(getScheduleDraft).toHaveBeenCalledWith({ data: { draftId: "draft-1" } });
     expect(view.gone).not.toHaveBeenCalled();
+  });
+
+  it("opens a draft the live answer just created, once", async () => {
+    const view = await fixture({ open: false, autoOpen: true });
+    // No click: the panel opens as soon as the new draft has loaded.
+    expect(await screen.findByRole("combobox", { name: "Frequency" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("combobox", { name: "Frequency" })).not.toBeInTheDocument(),
+    );
+    // Later chunks re-render the owner; a closed panel stays closed.
+    view.renderOwner();
+    expect(screen.queryByRole("combobox", { name: "Frequency" })).not.toBeInTheDocument();
   });
 
   it("keeps a branch-copied reference inert", async () => {

@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
   type Ref,
+  useRef,
 } from "react";
 import { useDocument } from "../client/use-document.ts";
 import { listTaskItems } from "../task-items.ts";
@@ -30,6 +31,8 @@ interface DocumentOwnerProps {
   onGone: (documentId: string) => void;
   children: ReactNode;
   ref?: Ref<DocumentOwnerHandle> | undefined;
+  /** Documents the answer being watched just created; their panel opens by itself. */
+  autoOpenIds?: ReadonlySet<string> | undefined;
 }
 interface DocumentPanelEntry {
   title: string | null;
@@ -78,6 +81,7 @@ export function DocumentOwner({
   goneIds = EMPTY_DOCUMENT_IDS,
   locked = false,
   onGone,
+  autoOpenIds,
   children,
   ref,
 }: DocumentOwnerProps) {
@@ -140,6 +144,7 @@ export function DocumentOwner({
           forget={forget}
           onGone={onGone}
           locked={locked}
+          autoOpen={autoOpenIds?.has(documentId) ?? false}
         />
       ))}
       <DocumentPanelContext.Provider value={value}>{children}</DocumentPanelContext.Provider>
@@ -153,12 +158,14 @@ function DocumentSession({
   forget,
   onGone,
   locked,
+  autoOpen,
 }: {
   documentId: string;
   publish: (documentId: string, session: Session) => void;
   forget: (documentId: string) => void;
   onGone: (documentId: string) => void;
   locked: boolean;
+  autoOpen: boolean;
 }) {
   const controller = useDocument(documentId, true, locked);
   const panel = useDetailPanel();
@@ -191,6 +198,14 @@ function DocumentSession({
   }, [panel, request]);
   useEffect(() => () => panel.closeIfSelected(id), [id, panel]);
   const available = controller.document !== null;
+  // Opens the panel once, when a document this answer just created has loaded.
+  // Only live ones are passed in, so reloads and old chats never pop a panel.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current || !available) return;
+    autoOpened.current = true;
+    panel.open(request);
+  }, [autoOpen, available, panel, request]);
   const failed = controller.query.isError || controller.query.data === null;
   const entry = useMemo<DocumentPanelEntry>(
     () => ({
