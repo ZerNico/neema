@@ -1,3 +1,4 @@
+import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import type { DesktopSubmission } from "../schema.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
@@ -72,6 +73,8 @@ export type DesktopFolderRef = DesktopSubmission["desktopFolders"] extends
 // keep the discriminant intact by omitting from the plain fields only.
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
   TurnContent & {
+    /** Integration toggles made in the composer before this chat existed. */
+    integrationChoices?: ReadonlyArray<{ integrationId: string; enabled: boolean }> | undefined;
     searchEnabled: boolean;
     researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null | undefined;
@@ -370,6 +373,7 @@ export class ChatService extends Context.Service<
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
+      integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
       timeZone: string;
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
     }): Effect.Effect<
@@ -435,6 +439,7 @@ function makeChatService() {
     const attachmentService = yield* AttachmentService;
     const agents = yield* AgentRepo;
     const knowledge = yield* KnowledgeRepo;
+    const integrations = yield* IntegrationRepo;
     const documentParser = yield* DocumentParser;
     const gateway = yield* AiGateway;
     const analytics = yield* AnalyticsRepo;
@@ -602,6 +607,11 @@ function makeChatService() {
           workspaceFiles?: ReadonlyArray<string> | undefined;
           /** A queued choice was valid when submitted, but policy may have changed. */
           allowStaleReasoningEffort?: boolean;
+          /**
+           * A schedule fire's up-front consent. Every other attempt, a retry of
+           * a fired answer included, has a person present and passes none.
+           */
+          integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
         } & (
           | {
               attempt: "retry";
@@ -700,6 +710,7 @@ function makeChatService() {
               desktopMachineName,
               // Only a fresh send adds files; retry and edit replay the list.
               workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
+              integrationGrants: input.integrationGrants ?? null,
             };
           }
           const agent = defaults.agent
@@ -711,7 +722,7 @@ function makeChatService() {
                 })
               : yield* new AgentNotAvailable({ agentId: "deleted" })
             : null;
-          return yield* resolveEffectiveGeneration({
+          const resolved = yield* resolveEffectiveGeneration({
             tx,
             userId: input.userId,
             agent,
@@ -733,6 +744,7 @@ function makeChatService() {
             model: input.model,
             searchAvailable: input.searchAvailable,
           });
+          return { ...resolved, integrationGrants: input.integrationGrants ?? null };
         }).pipe(
           Effect.provideService(KnowledgeRepo, knowledge),
           Effect.provideService(AgentRepo, agents),
@@ -1086,6 +1098,15 @@ function makeChatService() {
           : { ...turnFields, content: input.content },
       );
 
+      // Saved before the generation starts, which reads them as it begins.
+      for (const choice of input.integrationChoices ?? [])
+        yield* integrations.setConversationSetting(
+          input.userId,
+          turn.conversation.id,
+          choice.integrationId,
+          { enabled: choice.enabled },
+        );
+
       return yield* startTurn({
         userId: input.userId,
         modelId: input.modelId,
@@ -1179,6 +1200,8 @@ function makeChatService() {
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
+      /** Consent given when the schedule was saved; the fire asks nobody. */
+      integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
       timeZone: string;
       /**
        * A fresh chat, tagged with the schedule and its agent; or an existing
@@ -1232,6 +1255,9 @@ function makeChatService() {
             searchAvailable,
             collectionIds: input.collectionIds,
             skillIds: input.skillIds,
+            // Always set on a fire, empty included: an empty grant list means
+            // this unattended turn is offered no integration at all.
+            integrationGrants: input.integrationGrants ?? [],
           }),
         });
       const turn = yield* fire(

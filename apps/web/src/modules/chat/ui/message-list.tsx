@@ -38,6 +38,7 @@ import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
@@ -596,6 +597,8 @@ const AssistantBody = memo(function AssistantBody({
     if (part.activity.family === "custom") {
       return <CustomToolActivityBlock key={part.key} activity={part.activity} />;
     }
+    if (part.activity.family === "integration")
+      return <IntegrationActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "memory") {
       return <MemoryActivityBlock key={part.key} activity={part.activity} />;
     }

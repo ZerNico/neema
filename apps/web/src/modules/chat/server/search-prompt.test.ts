@@ -10,7 +10,7 @@ import {
 
 const source = (
   index: number,
-  overrides: Partial<Extract<CitableSource, { readonly url: string }>> = {},
+  overrides: Partial<Extract<CitableSource, { readonly kind: "web" }>> = {},
 ): CitableSource => ({
   kind: "web" as const,
   index,

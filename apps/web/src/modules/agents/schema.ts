@@ -36,6 +36,11 @@ export const AgentSettings = Schema.Struct({
   ),
   skillIds: Schema.optional(AgentResourceIds),
   customToolIds: Schema.optional(AgentResourceIds),
+  /**
+   * Services the agent is meant to use. They run with each sender's own
+   * connection; a sender without one simply is not offered them.
+   */
+  integrationIds: Schema.optional(AgentResourceIds),
   collectionIds: Schema.Array(ResourceId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),
@@ -72,4 +77,5 @@ export interface AgentSelectionDetail extends AgentSummary {
   collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
   skills?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
   customTools?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  integrationIds?: ReadonlyArray<string>;
 }

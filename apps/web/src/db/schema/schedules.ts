@@ -33,6 +33,15 @@ export const schedules = pgTable(
     collectionIds: jsonb("collection_ids").$type<string[]>().notNull().default([]),
     skillIds: jsonb("skill_ids").$type<string[]>().notNull().default([]),
     /**
+     * Consent given up front, since nobody is present to approve during a
+     * fire: the most each integration may do. Anything beyond it is refused
+     * to the model, never waited on.
+     */
+    integrationGrants: jsonb("integration_grants")
+      .$type<Array<{ integrationId: string; access: "read" | "write" }>>()
+      .notNull()
+      .default([]),
+    /**
      * `new` fires into a fresh chat each time; `same` keeps using `chatId`, and
      * a null `chatId` means the next fire creates that chat and stores it.
      */

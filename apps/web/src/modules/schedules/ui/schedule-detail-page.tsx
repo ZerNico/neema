@@ -62,6 +62,7 @@ const scheduleToSettings = (schedule: {
   skillIds: string[];
   chatMode: "new" | "same";
   chatId: string | null;
+  integrationGrants: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
 }): ScheduleSettings => ({
   name: schedule.name,
   scheduleText: schedule.scheduleText,
@@ -77,6 +78,7 @@ const scheduleToSettings = (schedule: {
   skillIds: [...schedule.skillIds],
   chatMode: schedule.chatMode,
   chatId: schedule.chatId,
+  integrationGrants: schedule.integrationGrants.map((grant) => ({ ...grant })),
 });
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {

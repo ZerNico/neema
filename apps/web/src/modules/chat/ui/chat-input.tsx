@@ -7,6 +7,7 @@ import {
   Book02Icon,
   Folder01Icon,
   GlobalSearchIcon,
+  PlugSocketIcon,
   PlusSignIcon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
@@ -55,6 +56,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Kbd } from "~/ui/primitives/kbd";
@@ -65,6 +69,9 @@ import * as m from "motion/react-m";
 import { MotionSwap, useAppReducedMotion } from "~/ui/motion.tsx";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import { AddIntegrationDialog } from "~/modules/integrations/ui/add-integration-dialog.tsx";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import type { ConversationMode } from "../schema.ts";
 import type { MessageReference } from "../references.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -132,6 +139,8 @@ export const ChatInput = forwardRef<
           onChange: (ids: string[]) => void;
         }
       | undefined;
+    /** Connected services this chat may use; absent hides the controls (edits). */
+    integrations?: ComposerIntegrations | undefined;
     /** The agent or schedule this message is about, shown as chips. */
     references?:
       | {
@@ -171,6 +180,7 @@ export const ChatInput = forwardRef<
     workspaceImports,
     context,
     skills,
+    integrations,
     references,
     placeholder = "Message…",
     textareaLabel,
@@ -228,10 +238,13 @@ export const ChatInput = forwardRef<
   // off this: the trigger's label, whether it's enabled, and the menu width.
   // They drifted apart when Skills was added to the menu without being added
   // to any of them, so they read it from one place now.
+  const [addingIntegration, setAddingIntegration] = useState(false);
   const hasTools =
     (!!context && (canChooseKnowledge || (canChooseAgent && !context.agentLocked))) ||
     (!!skills && canChooseSkills) ||
-    (canResearch && (!!onResearchEnabledChange || researchEnabled));
+    (canResearch && (!!onResearchEnabledChange || researchEnabled)) ||
+    // Only when there is something to connect or already connected.
+    !!(integrations && (integrations.items.length || integrations.canAdd));
   const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
   // "#" offers the same collections the Knowledge popup does, minus the ones
   // already on this message and the agent's own (not the user's to add or
@@ -504,6 +517,27 @@ export const ChatInput = forwardRef<
             : undefined
         }
         collections={mentionableCollections}
+        integrations={
+          integrations && !controlsDisabled
+            ? {
+                // Turns the service on if needed and names it in the message.
+                // Every connected service is listed, already-on ones too.
+                items: integrations.items.map((item) => ({
+                  id: item.integrationId,
+                  label: item.name,
+                  ...(item.enabled ? { meta: "on" } : {}),
+                  description: item.accountLabel,
+                  search: `${item.integrationId} ${item.name}`,
+                })),
+                onSelect: (id) => {
+                  if (!integrations.items.find((item) => item.integrationId === id)?.enabled)
+                    integrations.setEnabled(id, true);
+                },
+                // Stays in the message, so the model knows which service is meant.
+                insertText: (item) => `@${item.label} `,
+              }
+            : undefined
+        }
         value={value}
         onValueChange={onValueChange}
         onSubmit={submit}
@@ -591,6 +625,36 @@ export const ChatInput = forwardRef<
                 ) : null}
               </DropdownMenuItem>
             ) : null}
+            {integrations && (integrations.items.length || integrations.canAdd) ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger disabled={controlsDisabled}>
+                    <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={2} />
+                    Integrations
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-64">
+                    {integrations.items.map((item) => (
+                      <DropdownMenuCheckboxItem
+                        key={item.integrationId}
+                        checked={item.enabled}
+                        onCheckedChange={(checked) =>
+                          integrations.setEnabled(item.integrationId, checked)
+                        }
+                      >
+                        <IntegrationLogo integrationId={item.integrationId} />
+                        {item.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                    {integrations.items.length ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuItem onClick={() => setAddingIntegration(true)}>
+                      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+                      Add integration…
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </>
+            ) : null}
             {canResearch && (onResearchEnabledChange || researchEnabled) ? (
               <>
                 <DropdownMenuSeparator />
@@ -614,6 +678,9 @@ export const ChatInput = forwardRef<
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {integrations && addingIntegration ? (
+          <AddIntegrationDialog open onOpenChange={setAddingIntegration} chat={integrations} />
+        ) : null}
         {skills && canChooseSkills ? (
           <SkillPicker
             items={skills.items}

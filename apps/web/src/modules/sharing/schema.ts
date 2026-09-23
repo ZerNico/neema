@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const SharedResource = Schema.Struct({
-  kind: Schema.Literals(["agent", "collection", "skill", "customTool"]),
+  kind: Schema.Literals(["agent", "collection", "skill", "customTool", "integration"]),
   id: Id,
 });
 export type SharedResource = typeof SharedResource.Type;

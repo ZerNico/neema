@@ -52,6 +52,7 @@ import {
   schedules,
   usageEvents,
   workTurnReservations,
+  conversationIntegrations,
 } from "~/db/schema/index.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -115,6 +116,11 @@ export interface GenerationConfig {
   readonly desktopMachineName?: string | null;
   /** Workspace files this turn's send claimed; empty for every other attempt. */
   readonly workspaceFiles?: ReadonlyArray<string>;
+  /** A schedule fire's up-front integration consent; null with a person present. */
+  readonly integrationGrants?: ReadonlyArray<{
+    readonly integrationId: string;
+    readonly access: "read" | "write";
+  }> | null;
 }
 export interface DraftSummary {
   id: string;
@@ -458,6 +464,7 @@ const toConfig = (
   desktopMachineId: row.desktopMachineId,
   desktopMachineName: row.desktopMachineName,
   workspaceFiles: row.workspaceFiles,
+  integrationGrants: row.integrationGrants,
 });
 
 const readDefaults = Effect.fn("chat.readDefaults")(function* (
@@ -565,6 +572,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       desktopMachineName: config.desktopMachineName ?? null,
       workspaceFiles: [...(config.workspaceFiles ?? [])],
       collectionIds: [...config.collectionIds],
+      integrationGrants: config.integrationGrants ? [...config.integrationGrants] : null,
     })
     .pipe(Effect.orDie);
   yield* tx.delete(messageSkills).where(eq(messageSkills.messageId, messageId)).pipe(Effect.orDie);
@@ -2062,6 +2070,23 @@ export class ChatRepo extends Context.Service<
                   .returning()
                   .pipe(Effect.orDie);
                 const branch = branchRows[0]!;
+                // A chat's integration choices go with it, like its approval
+                // level. Answers already given to waiting calls do not.
+                const integrationChoices = yield* tx
+                  .select()
+                  .from(conversationIntegrations)
+                  .where(eq(conversationIntegrations.conversationId, source.id))
+                  .pipe(Effect.orDie);
+                if (integrationChoices.length)
+                  yield* tx
+                    .insert(conversationIntegrations)
+                    .values(
+                      integrationChoices.map((choice) => ({
+                        ...choice,
+                        conversationId: branch.id,
+                      })),
+                    )
+                    .pipe(Effect.orDie);
 
                 const clonedIds = new Map(prefix.map((m) => [m.id, uuidv7()] as const));
                 yield* tx

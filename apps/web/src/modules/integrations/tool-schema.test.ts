@@ -1,0 +1,64 @@
+import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
+import { IntegrationToolActivity, projectIntegrationToolResult } from "./tool-schema.ts";
+
+const base = {
+  name: "int_outline__create_document",
+  integrationId: "outline",
+  tool: "create_document",
+  label: "Create an Outline document",
+  access: "write" as const,
+  summary: "“Plan”",
+  sources: [],
+};
+
+describe("integration row projection", () => {
+  it("keeps the page a write produced, never the arguments or body", () => {
+    const activity = projectIntegrationToolResult({
+      ...base,
+      raw: {
+        ok: true,
+        result: {
+          id: "d1",
+          title: "Plan",
+          url: "https://docs.example.com/doc/plan",
+          text: "secret",
+        },
+      },
+      isFailure: false,
+    });
+    expect(activity).toMatchObject({
+      status: "complete",
+      link: { title: "Plan", url: "https://docs.example.com/doc/plan" },
+    });
+    expect(JSON.stringify(activity)).not.toContain("secret");
+    expect(Schema.is(IntegrationToolActivity)(activity)).toBe(true);
+  });
+
+  it("tells a refusal apart from a failure", () => {
+    expect(
+      projectIntegrationToolResult({
+        ...base,
+        raw: { ok: false, refused: true, error: "The user declined this action." },
+        isFailure: false,
+      }),
+    ).toMatchObject({ status: "refused", error: "The user declined this action." });
+    expect(
+      projectIntegrationToolResult({
+        ...base,
+        raw: { ok: false, error: "Outline: boom" },
+        isFailure: false,
+      }),
+    ).toMatchObject({ status: "error", error: "Outline: boom" });
+  });
+
+  it("does not link a page for a read, whose sources already cite it", () => {
+    const activity = projectIntegrationToolResult({
+      ...base,
+      access: "read",
+      raw: { ok: true, result: { title: "Plan", url: "https://docs.example.com/doc/plan" } },
+      isFailure: false,
+    });
+    expect(activity.link).toBeUndefined();
+  });
+});

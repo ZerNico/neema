@@ -8,6 +8,7 @@ export * from "./documents.ts";
 export * from "./drafts.ts";
 export * from "./groups.ts";
 export * from "./help.ts";
+export * from "./integrations.ts";
 export * from "./knowledge.ts";
 export * from "./memory.ts";
 export * from "./oauth.ts";

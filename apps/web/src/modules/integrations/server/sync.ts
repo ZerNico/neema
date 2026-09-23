@@ -1,0 +1,555 @@
+import { alias } from "drizzle-orm/pg-core";
+import { and, count, eq, inArray, isNull, lte, ne, notExists, or, sql } from "drizzle-orm";
+import { Context, Duration, Effect, Layer, Schedule as EffectSchedule, Semaphore } from "effect";
+import { uuidv7 } from "uuidv7";
+import {
+  integrationConnections,
+  knowledgeCollections,
+  knowledgeDocuments,
+  knowledgeSources,
+  type KnowledgeSourceStats,
+} from "~/db/schema/index.ts";
+import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+import { collectionReadable } from "~/modules/knowledge/server/access.ts";
+import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { Db } from "~/server/db.ts";
+import { findIntegration } from "../catalog.ts";
+import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
+import type { BrowseNode, KnowledgeSourceView, SourceRoot } from "../schema.ts";
+import { isSelected, type AdapterFailure } from "./adapter.ts";
+import { IntegrationService } from "./service.ts";
+
+const TICK_INTERVAL = Duration.minutes(1);
+/** How often a source is pulled again; Sync now skips the wait. */
+const SYNC_EVERY = "1 hour";
+/** Long enough for a large tree; a crashed sync is picked up again after it. */
+const LEASE = "30 minutes";
+const BATCH = 5;
+/**
+ * Overlap on the cursor: a page saved while the last listing ran can carry a
+ * change time just before the newest one it returned. Re-listing a few
+ * minutes is free, since an unchanged page is skipped by its stored time.
+ */
+const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
+/** A full listing at least this often, in case a change slipped past the cursor. */
+const FULL_SYNC_EVERY_MS = 24 * 60 * 60 * 1000;
+
+type SourceRow = typeof knowledgeSources.$inferSelect;
+
+const failureText = (error: AdapterFailure | IntegrationNotAvailable) =>
+  error._tag === "IntegrationAuthFailed" || error._tag === "IntegrationNotAvailable"
+    ? "The owner’s connection is missing or needs reconnecting."
+    : error._tag === "IntegrationRejected"
+      ? error.reason
+      : error.message;
+
+export class KnowledgeSourceService extends Context.Service<
+  KnowledgeSourceService,
+  {
+    list(userId: string, collectionId: string): Effect.Effect<ReadonlyArray<KnowledgeSourceView>>;
+    /** Adds a source, or edits one, in a collection the caller owns. */
+    save(
+      userId: string,
+      input: {
+        collectionId: string;
+        integrationId: string;
+        /** Absent adds a source; present edits that one. */
+        sourceId?: string | undefined;
+        root: SourceRoot;
+      },
+    ): Effect.Effect<KnowledgeSourceView, IntegrationRejected | IntegrationNotAvailable>;
+    /** Removes the source and every document it mirrored. */
+    remove(userId: string, sourceId: string): Effect.Effect<boolean>;
+    syncNow(userId: string, sourceId: string): Effect.Effect<boolean>;
+    browse(
+      userId: string,
+      integrationId: string,
+      parentId: string | null,
+    ): Effect.Effect<ReadonlyArray<BrowseNode>, IntegrationRejected | IntegrationNotAvailable>;
+    /** One claim-and-sync pass; the tick loop and tests drive it. */
+    readonly tick: Effect.Effect<void>;
+  }
+>()("chat/integrations/KnowledgeSourceService") {
+  /** Syncs on a timer and whenever a source is saved or asked to sync now. */
+  static readonly layer = Layer.effect(KnowledgeSourceService, make(true));
+  /** No background work: whoever holds it calls `tick`, as the tests do. */
+  static readonly manualLayer = Layer.effect(KnowledgeSourceService, make(false));
+}
+
+function make(background: boolean) {
+  return Effect.gen(function* () {
+    const db = yield* Db;
+    const knowledge = yield* KnowledgeRepo;
+    const integrations = yield* IntegrationService;
+    const bus = yield* SyncBus;
+
+    const changed = bus
+      .publishGlobal({ type: "knowledge.index.changed" })
+      .pipe(Effect.catchCause(() => Effect.void));
+
+    const ownedCollection = (userId: string, collectionId: string) =>
+      db
+        .select({ id: knowledgeCollections.id })
+        .from(knowledgeCollections)
+        .where(
+          and(eq(knowledgeCollections.id, collectionId), eq(knowledgeCollections.userId, userId)),
+        )
+        .pipe(
+          Effect.orDie,
+          Effect.map((rows) => rows.length > 0),
+        );
+
+    const toView = (row: SourceRow, connected: boolean, canEdit: boolean): KnowledgeSourceView => ({
+      id: row.id,
+      canEdit,
+      collectionId: row.collectionId,
+      integrationId: row.integrationId,
+      root: row.root,
+      status: row.status,
+      lastError: row.lastError,
+      lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+      stats: row.stats,
+      connected,
+    });
+
+    const list = Effect.fn("KnowledgeSourceService.list")(function* (
+      userId: string,
+      collectionId: string,
+    ) {
+      // Anyone who can read the collection sees where its pages come from;
+      // only the owner changes that.
+      const rows = yield* db
+        .select({
+          source: knowledgeSources,
+          status: integrationConnections.status,
+          owner: knowledgeCollections.userId,
+        })
+        .from(knowledgeSources)
+        .innerJoin(knowledgeCollections, eq(knowledgeCollections.id, knowledgeSources.collectionId))
+        // The owner's current connection, whichever row that is today.
+        .leftJoin(
+          integrationConnections,
+          and(
+            eq(integrationConnections.userId, knowledgeCollections.userId),
+            eq(integrationConnections.integrationId, knowledgeSources.integrationId),
+          ),
+        )
+        .where(and(eq(knowledgeSources.collectionId, collectionId), collectionReadable(userId)))
+        .pipe(Effect.orDie);
+      return rows.map((row) => toView(row.source, row.status === "active", row.owner === userId));
+    });
+
+    /** Mirrors one claimed source. Every outcome ends in `finish`. */
+    const run = Effect.fn("KnowledgeSourceService.run")(function* (source: SourceRow) {
+      const finish = (fields: {
+        status: "idle" | "error";
+        lastError: string | null;
+        stats?: KnowledgeSourceStats;
+        cursor?: Date | null;
+        fullSyncedAt?: Date;
+        oversized?: Record<string, string>;
+      }) =>
+        db
+          .update(knowledgeSources)
+          .set({
+            ...fields,
+            ...(fields.status === "idle" ? { lastSyncedAt: new Date() } : {}),
+            leaseToken: null,
+            leaseUntil: null,
+            updatedAt: new Date(),
+          })
+          // A lease lost to a slower copy of this run must not overwrite it.
+          .where(
+            and(
+              eq(knowledgeSources.id, source.id),
+              eq(knowledgeSources.leaseToken, source.leaseToken ?? ""),
+            ),
+          )
+          .pipe(Effect.orDie);
+
+      const [collection] = yield* db
+        .select({ userId: knowledgeCollections.userId })
+        .from(knowledgeCollections)
+        .where(eq(knowledgeCollections.id, source.collectionId))
+        .pipe(Effect.orDie);
+      if (!collection) return yield* finish({ status: "error", lastError: null });
+      const owner = collection.userId;
+      // Always the owner's own connection as it is now; never anyone else's.
+      let connectionId: string | null = null;
+      const outcome = yield* Effect.gen(function* () {
+        const session = yield* integrations.session(owner, source.integrationId);
+        connectionId = session.connectionId;
+        const adapter = session.adapter.knowledge;
+        if (!adapter)
+          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+        // Incremental only with a cursor and a full listing within the day; a
+        // selection edit clears the cursor, since newly picked pages need text.
+        const since =
+          source.cursor &&
+          source.fullSyncedAt &&
+          Date.now() - source.fullSyncedAt.getTime() < FULL_SYNC_EVERY_MS
+            ? new Date(source.cursor.getTime() - CURSOR_OVERLAP_MS)
+            : null;
+        const listed = yield* adapter.enumerate(session, [source.root.nodeId], since);
+        let cursor = source.cursor;
+        for (const document of listed.documents)
+          if (document.updatedAt && (!cursor || document.updatedAt > cursor))
+            cursor = document.updatedAt;
+        const remote = listed.documents.filter((document) => isSelected(document, [source.root]));
+        const existing = yield* db
+          .select({
+            id: knowledgeDocuments.id,
+            externalId: knowledgeDocuments.externalId,
+            externalUpdatedAt: knowledgeDocuments.externalUpdatedAt,
+          })
+          .from(knowledgeDocuments)
+          .where(eq(knowledgeDocuments.sourceId, source.id))
+          .pipe(Effect.orDie);
+        const byExternal = new Map(existing.map((row) => [row.externalId, row]));
+        // Pages another source of this collection already mirrors, so two
+        // overlapping sources never index one page twice. Whoever had it
+        // first keeps it; if that source lets go, this one takes it next time.
+        const claimedElsewhere = new Set(
+          (yield* db
+            .select({ externalId: knowledgeDocuments.externalId })
+            .from(knowledgeDocuments)
+            .innerJoin(knowledgeSources, eq(knowledgeSources.id, knowledgeDocuments.sourceId))
+            .where(
+              and(
+                eq(knowledgeDocuments.collectionId, source.collectionId),
+                eq(knowledgeSources.integrationId, source.integrationId),
+                ne(knowledgeDocuments.sourceId, source.id),
+              ),
+            )
+            .pipe(Effect.orDie)).map((row) => row.externalId),
+        );
+        // Room left in the collection: a page that could not be stored anyway
+        // is counted, not downloaded, until space frees up.
+        const [stored] = yield* db
+          .select({ total: count() })
+          .from(knowledgeDocuments)
+          .where(eq(knowledgeDocuments.collectionId, source.collectionId))
+          .pipe(Effect.orDie);
+        let room = KNOWLEDGE_LIMITS.maxDocumentsPerCollection - Number(stored?.total ?? 0);
+        const oversized: Record<string, string> = {};
+        const stats: KnowledgeSourceStats = {
+          synced: 0,
+          tooLarge: 0,
+          overLimit: 0,
+          elsewhere: 0,
+        };
+        const wanted = new Set<string>();
+        for (const document of remote) {
+          const current = byExternal.get(document.externalId);
+          if (!current && claimedElsewhere.has(document.externalId)) {
+            stats.elsewhere = (stats.elsewhere ?? 0) + 1;
+            continue;
+          }
+          wanted.add(document.externalId);
+          // Stored and not changed since: no text crosses the wire at all.
+          if (
+            current &&
+            (document.updatedAt === null ||
+              (current.externalUpdatedAt &&
+                current.externalUpdatedAt.getTime() >= document.updatedAt.getTime()))
+          ) {
+            stats.synced++;
+            continue;
+          }
+          if (!current) {
+            const known = source.oversized[document.externalId];
+            if (
+              known &&
+              (document.updatedAt === null || document.updatedAt.getTime() <= Date.parse(known))
+            ) {
+              oversized[document.externalId] = known;
+              stats.tooLarge++;
+              continue;
+            }
+            if (room <= 0) {
+              stats.overLimit++;
+              continue;
+            }
+          }
+          // Not stored yet but not in the change listing (moved into the
+          // selection, say): fetched on its own.
+          const fetched =
+            document.markdown === undefined || document.updatedAt === null
+              ? yield* adapter.fetch(session, document.externalId)
+              : null;
+          const body = document.markdown ?? fetched?.markdown ?? "";
+          const updatedAt = document.updatedAt ?? fetched?.updatedAt ?? new Date(0);
+          const title =
+            document.title.trim().slice(0, KNOWLEDGE_LIMITS.maxNameLength) || "Untitled";
+          // An empty page still publishes something to find by its title.
+          const content = body.trim() ? body : `# ${title}`;
+          if (content.length > KNOWLEDGE_LIMITS.maxNoteChars) {
+            if (!current) oversized[document.externalId] = updatedAt.toISOString();
+            stats.tooLarge++;
+            continue;
+          }
+          // The knowledge pipeline versions, dedupes and indexes it; an
+          // unchanged body reuses the latest version.
+          const saved = current
+            ? yield* knowledge.replaceNoteDocument(owner, {
+                collectionId: source.collectionId,
+                documentId: current.id,
+                title,
+                content,
+              })
+            : yield* knowledge.addNoteDocument(owner, {
+                collectionId: source.collectionId,
+                title,
+                content,
+              });
+          if (!saved) {
+            stats.overLimit++;
+            continue;
+          }
+          if (!current) room--;
+          yield* db
+            .update(knowledgeDocuments)
+            .set({
+              sourceId: source.id,
+              externalId: document.externalId,
+              externalUrl: document.url,
+              externalUpdatedAt: updatedAt,
+            })
+            .where(eq(knowledgeDocuments.id, saved.documentId))
+            .pipe(Effect.orDie);
+          stats.synced++;
+        }
+        // Deleted, archived or unpublished at the source, moved out of the
+        // selection, or under a root that is gone: the index follows.
+        for (const row of existing)
+          if (row.externalId && !wanted.has(row.externalId))
+            yield* knowledge.deleteDocument(owner, row.id);
+        const gone = listed.missing.includes(source.root.nodeId) ? [`“${source.root.title}”`] : [];
+        return { stats, gone, cursor, oversized, full: since === null };
+      }).pipe(
+        Effect.map((result) => ({ ok: true as const, ...result })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+      );
+      if (outcome.ok)
+        yield* finish({
+          cursor: outcome.cursor,
+          oversized: outcome.oversized,
+          ...(outcome.full ? { fullSyncedAt: new Date() } : {}),
+          ...(outcome.gone.length
+            ? {
+                status: "error",
+                lastError: `${outcome.gone.join(", ")} can no longer be found or opened, so ${outcome.gone.length === 1 ? "its pages were" : "their pages were"} removed. Edit the selection to drop ${outcome.gone.length === 1 ? "it" : "them"}.`,
+                stats: outcome.stats,
+              }
+            : { status: "idle" as const, lastError: null, stats: outcome.stats }),
+        });
+      else {
+        if (outcome.error._tag === "IntegrationAuthFailed" && connectionId)
+          yield* integrations.reportAuthFailure({ userId: owner, connectionId });
+        yield* finish({ status: "error", lastError: failureText(outcome.error) });
+      }
+      yield* changed;
+    });
+
+    const claim = db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const sibling = alias(knowledgeSources, "sibling");
+          const candidates = yield* tx
+            .select({ id: knowledgeSources.id, collectionId: knowledgeSources.collectionId })
+            .from(knowledgeSources)
+            .where(
+              and(
+                lte(knowledgeSources.nextSyncAt, sql`now()`),
+                or(
+                  isNull(knowledgeSources.leaseUntil),
+                  lte(knowledgeSources.leaseUntil, sql`now()`),
+                ),
+                // One sync per collection at a time: overlapping sources decide
+                // who keeps a shared page by what is already stored.
+                notExists(
+                  tx
+                    .select({ id: sibling.id })
+                    .from(sibling)
+                    .where(
+                      and(
+                        eq(sibling.collectionId, knowledgeSources.collectionId),
+                        ne(sibling.id, knowledgeSources.id),
+                        sql`${sibling.leaseUntil} > now()`,
+                      ),
+                    ),
+                ),
+              ),
+            )
+            .orderBy(knowledgeSources.createdAt)
+            .limit(BATCH)
+            .for("update", { of: knowledgeSources, skipLocked: true });
+          const seen = new Set<string>();
+          const due = candidates.filter((row) => {
+            if (seen.has(row.collectionId)) return false;
+            seen.add(row.collectionId);
+            return true;
+          });
+          if (due.length === 0) return [];
+          const token = uuidv7();
+          // Rescheduled inside the claim, like schedules: downtime collapses
+          // into one sync, never a backlog of them.
+          return yield* tx
+            .update(knowledgeSources)
+            .set({
+              status: "syncing",
+              leaseToken: token,
+              leaseUntil: sql`now() + ${LEASE}::interval`,
+              nextSyncAt: sql`now() + ${SYNC_EVERY}::interval`,
+            })
+            .where(
+              inArray(
+                knowledgeSources.id,
+                due.map((row) => row.id),
+              ),
+            )
+            .returning();
+        }),
+      )
+      .pipe(Effect.orDie);
+
+    // Claims take turns: "one source per collection" is checked against
+    // committed leases, which two concurrent claims (the timer and a save's
+    // kick) cannot see of each other.
+    const claimTurn = yield* Semaphore.make(1);
+    // Claimed sources sync side by side and the pass waits for them.
+    const tick: Effect.Effect<void> = Effect.gen(function* () {
+      const claimed = yield* claimTurn.withPermits(1)(claim);
+      if (claimed.length) yield* changed;
+      yield* Effect.forEach(
+        claimed,
+        (source) =>
+          run(source).pipe(
+            Effect.catchCause((cause) => Effect.logError("knowledge source sync failed", cause)),
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+    });
+    const kick = background ? Effect.forkDetach(tick).pipe(Effect.asVoid) : Effect.void;
+
+    if (background)
+      yield* tick.pipe(
+        Effect.catchCause((cause) => Effect.logError("knowledge source tick failed", cause)),
+        Effect.repeat(EffectSchedule.spaced(TICK_INTERVAL)),
+        Effect.forkScoped,
+      );
+
+    const ownedSource = (userId: string, sourceId: string) =>
+      db
+        .select({ source: knowledgeSources })
+        .from(knowledgeSources)
+        .innerJoin(knowledgeCollections, eq(knowledgeCollections.id, knowledgeSources.collectionId))
+        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeCollections.userId, userId)))
+        .pipe(
+          Effect.orDie,
+          Effect.map((rows) => rows[0]?.source ?? null),
+        );
+
+    return KnowledgeSourceService.of({
+      list,
+
+      save: Effect.fn("KnowledgeSourceService.save")(function* (userId, input) {
+        if (!findIntegration(input.integrationId)?.knowledgeSource)
+          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+        if (!(yield* ownedCollection(userId, input.collectionId)))
+          return yield* new IntegrationRejected({
+            reason: "Only the collection’s owner can sync into it.",
+          });
+        // Saving needs a working connection now; later syncs look it up again.
+        yield* integrations.session(userId, input.integrationId);
+        const root = { ...input.root, rules: [...input.root.rules] };
+        const [row] = input.sourceId
+          ? yield* db
+              .update(knowledgeSources)
+              .set({
+                root,
+                // A new selection starts from a full listing.
+                cursor: null,
+                // Database clock, like the claim that compares against it.
+                nextSyncAt: sql`now()`,
+                lastError: null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(knowledgeSources.id, input.sourceId),
+                  eq(knowledgeSources.collectionId, input.collectionId),
+                  eq(knowledgeSources.integrationId, input.integrationId),
+                ),
+              )
+              .returning()
+              .pipe(Effect.orDie)
+          : yield* db
+              .insert(knowledgeSources)
+              .values({
+                id: uuidv7(),
+                collectionId: input.collectionId,
+                integrationId: input.integrationId,
+                root,
+                nextSyncAt: sql`now()`,
+              })
+              .returning()
+              .pipe(Effect.orDie);
+        if (!row)
+          return yield* new IntegrationRejected({ reason: "That source no longer exists." });
+        yield* kick;
+        return toView(row, true, true);
+      }),
+
+      remove: Effect.fn("KnowledgeSourceService.remove")(function* (userId, sourceId) {
+        const source = yield* ownedSource(userId, sourceId);
+        if (!source) return false;
+        // Through the knowledge repo, one document at a time, so each goes
+        // the way a manual delete would; the source row then goes last.
+        const documents = yield* db
+          .select({ id: knowledgeDocuments.id })
+          .from(knowledgeDocuments)
+          .where(eq(knowledgeDocuments.sourceId, sourceId))
+          .pipe(Effect.orDie);
+        for (const document of documents) yield* knowledge.deleteDocument(userId, document.id);
+        yield* db
+          .delete(knowledgeSources)
+          .where(eq(knowledgeSources.id, sourceId))
+          .pipe(Effect.orDie);
+        yield* changed;
+        return true;
+      }),
+
+      syncNow: Effect.fn("KnowledgeSourceService.syncNow")(function* (userId, sourceId) {
+        const source = yield* ownedSource(userId, sourceId);
+        if (!source) return false;
+        yield* db
+          .update(knowledgeSources)
+          .set({ nextSyncAt: sql`now()` })
+          .where(eq(knowledgeSources.id, sourceId))
+          .pipe(Effect.orDie);
+        yield* kick;
+        return true;
+      }),
+
+      browse: Effect.fn("KnowledgeSourceService.browse")(
+        function* (userId, integrationId, parentId) {
+          const session = yield* integrations.session(userId, integrationId);
+          const adapter = session.adapter.knowledge;
+          if (!adapter)
+            return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+          return yield* adapter
+            .browse(session, parentId)
+            .pipe(
+              Effect.catch((error: AdapterFailure) =>
+                Effect.fail(new IntegrationRejected({ reason: failureText(error) })),
+              ),
+            );
+        },
+      ),
+
+      tick,
+    });
+  });
+}

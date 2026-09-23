@@ -70,6 +70,13 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("models.defaults.changed"),
   }),
+  // A connection, its preferences, or (globally) an integration's setup changed.
+  Schema.Struct({ type: Schema.Literal("integrations.changed") }),
+  // An integration call started or stopped waiting for the user's decision.
+  Schema.Struct({
+    type: Schema.Literal("integration.approval.changed"),
+    conversationId: Schema.String,
+  }),
   // The id is a random per-ticket handle, never the code or its hash, so a
   // tab showing that code can react without the event revealing anything.
   Schema.Struct({

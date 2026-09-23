@@ -1,5 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { FakeCustomToolRuntime } from "./unused-services.ts";
+import { FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
@@ -282,6 +282,7 @@ beforeAll(async () => {
         FakeBlobStore,
         FakeDocumentParser,
         FakeCustomToolRuntime,
+        NoIntegrations,
         FakeMemoryService,
         ExternalCompletion.layer,
         SyncBus.layer,

@@ -60,10 +60,15 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   model falls back to the user's default chat model at fire time (an unattended missed fire is
   worse than a different model answering); only a genuinely deleted agent degrades the fire
   to a plain chat with the schedule's own collections, skills and toggles. A retained agent
-  made inaccessible by policy fails rather than changing the scheduled job. Collections and
-  skills are re-checked at fire and end the run as an `error` row when gone, because losing a selected
-  collection failing the turn is the existing chat rule. A fire that never started (no
+  made inaccessible by policy fails rather than changing the scheduled job. Collections,
+  skills and granted integration connections are re-checked at fire and end the run as an
+  `error` row when gone, because losing a selected collection failing the turn is the
+  existing chat rule. A fire that never started (no
   available model) records `status: 'error'` with `conversationId: null`.
+- Nobody is present to approve during a fire, so integrations are consented to up front:
+  `integration_grants` caps each one at read or read and write, and a fire is offered
+  exactly those, refusing rather than asking for anything more. Only the editor writes
+  grants; see [integrations](integrations.md#schedules-decide-in-advance).
 - Deleting a schedule keeps its chats: `conversations.schedule_id` is `on delete set null`,
   since they sit in the sidebar like any other chat. The run history goes with the schedule;
   an in-flight fire finishes in its chat. Pause and resume touch only `paused`

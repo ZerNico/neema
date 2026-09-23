@@ -11,6 +11,8 @@ import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { AGENT_ICONS } from "~/modules/chat/ui/context-picker.tsx";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
+import { INTEGRATIONS } from "~/modules/integrations/catalog.ts";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import { ResourcePicker } from "~/ui/resource-picker.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/schema.ts";
@@ -389,6 +391,42 @@ export const AgentSettingsFields = withForm({
                   />
                   <FieldError errors={field.state.meta.errors} />
                 </div>
+              );
+            }}
+          </form.Field>
+        </Section>
+        <Section
+          title="Integrations"
+          description="Services this agent uses by default. Each person uses their own connected account; someone who hasn’t connected one simply won’t have it."
+        >
+          <form.Field name="integrationIds">
+            {(field) => {
+              const ids = field.state.value ?? [];
+              return (
+                <ListCard>
+                  {INTEGRATIONS.map((integration) => (
+                    <ListRow key={integration.id}>
+                      <IntegrationLogo integrationId={integration.id} variant="tile" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{integration.name}</p>
+                        <p className="text-muted-foreground truncate text-xs">
+                          {integration.description}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={ids.includes(integration.id)}
+                        aria-label={`Use ${integration.name}`}
+                        onCheckedChange={(checked) =>
+                          field.handleChange(
+                            checked
+                              ? [...ids, integration.id]
+                              : ids.filter((id) => id !== integration.id),
+                          )
+                        }
+                      />
+                    </ListRow>
+                  ))}
+                </ListCard>
               );
             }}
           </form.Field>

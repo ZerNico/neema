@@ -103,6 +103,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           agentId: data.agentId,
           collectionIds: data.collectionIds,
           skillIds: data.skillIds,
+          integrationChoices: data.integrationChoices,
         }),
       ).pipe(
         Effect.catchTags({
@@ -185,6 +186,7 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
           agentId: data.agentId,
           collectionIds: data.collectionIds,
           skillIds: data.skillIds,
+          integrationChoices: data.integrationChoices,
         }),
       ).pipe(
         Effect.catchTags({

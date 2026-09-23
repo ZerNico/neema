@@ -11,6 +11,8 @@ export const CHAT_INPUT_SHELL_CLASS = cn(
 export interface TextareaMentions {
   items: readonly MentionItem[];
   onSelect: (id: string) => void;
+  /** Keep the mention in the text as this, rather than deleting the token. */
+  insertText?: ((item: MentionItem) => string) | undefined;
 }
 
 export const ChatTextarea = forwardRef<
@@ -29,6 +31,8 @@ export const ChatTextarea = forwardRef<
     skills?: TextareaMentions | undefined;
     /** Typed as `#name`. */
     collections?: TextareaMentions | undefined;
+    /** Typed as `@name`: turns a connected service on for this chat. */
+    integrations?: TextareaMentions | undefined;
   }
 >(function ChatTextarea(
   {
@@ -43,6 +47,7 @@ export const ChatTextarea = forwardRef<
     className,
     skills,
     collections,
+    integrations,
   },
   forwardedRef,
 ) {
@@ -53,6 +58,7 @@ export const ChatTextarea = forwardRef<
   const mentions = useTextareaMentions(textareaRef, value, onValueChange, [
     ...(skills ? [{ trigger: "/", label: "Local skills", ...skills }] : []),
     ...(collections ? [{ trigger: "#", label: "Knowledge collections", ...collections }] : []),
+    ...(integrations ? [{ trigger: "@", label: "Integrations", ...integrations }] : []),
   ]);
 
   // The controlled value is the resize trigger, not a value read by the effect.

@@ -4,6 +4,7 @@ import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
+import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
 
@@ -26,9 +27,17 @@ function DocumentCitationChip({ source }: { source: DocumentSource }) {
 function CitationPreview({ source, onClick }: { source: ToolSource; onClick?: () => void }) {
   const document = source.kind === "document";
   const label = source.title?.trim() || (document ? "Document" : hostOf(source.url));
-  const location = document ? documentLocationLabel(source) : hostOf(source.url);
+  const location = document
+    ? documentLocationLabel(source)
+    : source.kind === "integration"
+      ? integrationName(source.integrationId)
+      : hostOf(source.url);
+  // A connected service's page sits behind the user's sign-in, so its logo
+  // stands in for a favicon the server could not fetch anyway.
   const icon = document ? (
     <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-3" aria-hidden />
+  ) : source.kind === "integration" ? (
+    <IntegrationLogo integrationId={source.integrationId} className="size-3" />
   ) : (
     <Favicon url={source.url} className="size-3" />
   );

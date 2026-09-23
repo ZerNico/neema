@@ -40,6 +40,8 @@ the whole input again on every turn.
 
 - The composer's search and research toggles change the tool list, and so the whole
   prefix, for that turn. The tools offered are the toggle's meaning; keeping disabled tools
-  on offer was judged not worth it for a rarely flipped switch.
+  on offer was judged not worth it for a rarely flipped switch. Integration toggles do the
+  same, which is why they stick per chat rather than resetting per message: flipping one
+  recaches once, not on every send. See [integrations](integrations.md).
 - A saved memory changes the memory block ahead of history in every chat. Switching model,
   editing a custom tool or skill, and compaction summaries are rarer and accepted.

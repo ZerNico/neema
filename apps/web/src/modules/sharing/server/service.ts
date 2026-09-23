@@ -54,15 +54,19 @@ export class SharingService extends Context.Service<
       const db = yield* Db;
       const policy = yield* FeaturePolicy;
       const bus = yield* SyncBus;
-      const createCapability: Record<Exclude<SharedResource["kind"], "customTool">, Capability> = {
+      // Custom tools and integrations are admin-managed; no member capability applies.
+      const createCapability: Record<SharedResource["kind"], Capability | null> = {
         agent: "agentsCreate",
         collection: "knowledgeCreate",
         skill: "skillsCreate",
+        customTool: null,
+        integration: null,
       };
       const mayManage = (userId: string, resource: SharedResource) =>
-        resource.kind === "customTool"
-          ? Effect.succeed(true)
-          : policy.can(userId, createCapability[resource.kind]);
+        Effect.suspend(() => {
+          const capability = createCapability[resource.kind];
+          return capability ? policy.can(userId, capability) : Effect.succeed(true);
+        });
       // Per-runtime throttle on grant-by-email, bounded even for many accounts.
       // `recipients` deliberately exposes an account directory to any signed-in
       // user, since this is a single-tenant, self-hosted app where colleagues pick
@@ -157,10 +161,8 @@ export class SharingService extends Context.Service<
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                if (
-                  resource.kind !== "customTool" &&
-                  !(yield* policy.can(userId, createCapability[resource.kind], tx))
-                )
+                const capability = createCapability[resource.kind];
+                if (capability && !(yield* policy.can(userId, capability, tx)))
                   return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
                 const [actor] = yield* tx
                   .select({ role: user.role })

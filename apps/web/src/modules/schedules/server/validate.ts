@@ -1,6 +1,13 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import { conversations, knowledgeCollections, skills } from "~/db/schema/index.ts";
+import {
+  conversations,
+  integrationConfigs,
+  integrationConnections,
+  knowledgeCollections,
+  skills,
+} from "~/db/schema/index.ts";
+import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -12,8 +19,10 @@ import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
 
 export type ValidatedSchedule = Omit<
   ScheduleSettings,
-  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId"
+  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId" | "integrationGrants"
 > & {
+  /** Absent keeps what is saved; see ScheduleSettings. */
+  integrationGrants?: Array<{ integrationId: string; access: "read" | "write" }>;
   endAt: Date | null;
   collectionIds: string[];
   skillIds: string[];
@@ -65,14 +74,24 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     if (!agent || agent.row.userId !== userId)
       return yield* new ScheduleRejected({ reason: "selected agent is unavailable" });
   }
+  const { integrationGrants, ...fields } = settings;
   const validated: ValidatedSchedule = {
-    ...settings,
+    ...fields,
     name: settings.name.trim(),
     endAt,
     collectionIds: [...new Set(settings.collectionIds)],
     skillIds: [...new Set(settings.skillIds)],
     chatMode: settings.chatMode ?? "new",
     chatId: settings.chatMode === "same" ? (settings.chatId ?? null) : null,
+    ...(integrationGrants
+      ? {
+          integrationGrants: [
+            ...new Map(
+              integrationGrants.map((grant) => [grant.integrationId, { ...grant }]),
+            ).values(),
+          ],
+        }
+      : {}),
   };
   return validated;
 });
@@ -81,9 +100,30 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
 export const checkScheduleResources = (
   tx: DbTx,
   userId: string,
-  settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds" | "chatId">,
+  settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds" | "chatId" | "integrationGrants">,
 ) =>
   Effect.gen(function* () {
+    // A grant needs the person's own working connection now, the way a
+    // collection needs to be readable; a fire rechecks it.
+    for (const grant of settings.integrationGrants ?? []) {
+      const [connection] = yield* tx
+        .select({ status: integrationConnections.status })
+        .from(integrationConnections)
+        .innerJoin(integrationConfigs, eq(integrationConfigs.id, integrationConnections.integrationId))
+        .where(
+          and(
+            eq(integrationConnections.userId, userId),
+            eq(integrationConnections.integrationId, grant.integrationId),
+            eq(integrationConfigs.enabled, true),
+            integrationUsableBy(userId),
+          ),
+        )
+        .limit(1);
+      if (connection?.status !== "active")
+        return yield* new ScheduleRejected({
+          reason: "connect the integration in Settings before letting a schedule use it",
+        });
+    }
     // A chosen chat must be the owner's and a plain chat: a work chat needs
     // the desktop app, which an unattended fire never has.
     if (settings.chatId) {

@@ -140,6 +140,7 @@ describe("AgentEditorPage", () => {
           collectionIds: [],
           skillIds: [],
           customToolIds: [],
+          integrationIds: [],
         },
       }),
     );

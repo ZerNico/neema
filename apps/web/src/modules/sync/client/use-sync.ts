@@ -211,10 +211,18 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
           void queryClient.invalidateQueries({ queryKey: ["documents"] });
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
+          void queryClient.invalidateQueries({ queryKey: ["integrations"] });
           break;
         case "models.defaults.changed":
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
+          break;
+        case "integrations.changed":
+          void queryClient.invalidateQueries({ queryKey: ["integrations"] });
+          void queryClient.invalidateQueries({ queryKey: ["admin", "integrations"] });
+          break;
+        case "integration.approval.changed":
+          void queryClient.invalidateQueries({ queryKey: ["integration-approvals"] });
           break;
         case "memory.changed":
         case "memory.policy.changed":

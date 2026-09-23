@@ -96,6 +96,82 @@ export const knowledgeCollectionGroupGrants = pgTable(
   ],
 );
 
+/** A choice on one page under a root, overriding what it would inherit. */
+export interface KnowledgeSourceRule {
+  nodeId: string;
+  title: string;
+  mode: "include" | "exclude";
+}
+
+/**
+ * The part of the service a source mirrors: a top-level container or any page
+ * in it. `all` takes everything under it, `selected` only what a rule includes;
+ * either way the nearest rule on a page or its ancestors wins, so pages added
+ * later follow their parent.
+ */
+export interface KnowledgeSourceRoot {
+  nodeId: string;
+  title: string;
+  mode: "all" | "selected";
+  rules: KnowledgeSourceRule[];
+}
+
+export interface KnowledgeSourceStats {
+  synced: number;
+  /** Over the note size limit, so never published. */
+  tooLarge: number;
+  /** Past the collection's document limit. */
+  overLimit: number;
+  /** Already mirrored into this collection by another source. */
+  elsewhere?: number;
+}
+
+/**
+ * A subtree of an integration mirrored into a collection. The sync runs as the
+ * collection owner with whatever connection the owner has at that moment, so
+ * disconnecting pauses it and reconnecting resumes it, so readers of a shared
+ * collection see what the owner could see and chose. A lost connection keeps
+ * the documents already synced and records the error.
+ */
+export const knowledgeSources = pgTable(
+  "knowledge_sources",
+  {
+    id: text().primaryKey(),
+    collectionId: text("collection_id")
+      .notNull()
+      .references(() => knowledgeCollections.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    root: jsonb().$type<KnowledgeSourceRoot>().notNull(),
+    status: text({ enum: ["idle", "syncing", "error"] })
+      .notNull()
+      .default("idle"),
+    lastError: text("last_error"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /**
+     * The newest change time the service reported, in its own clock, so the
+     * next sync can ask only for what changed since. Null means list in full.
+     */
+    cursor: timestamp({ withTimezone: true }),
+    /** A full listing still runs daily, in case a change slipped past the cursor. */
+    fullSyncedAt: timestamp("full_synced_at", { withTimezone: true }),
+    /**
+     * Pages too large to store, with the change time they had then, so an
+     * unchanged one is not downloaded again on every sync.
+     */
+    oversized: jsonb().$type<Record<string, string>>().notNull().default({}),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }).notNull().defaultNow(),
+    stats: jsonb().$type<KnowledgeSourceStats>(),
+    leaseToken: text("lease_token"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("knowledge_sources_collection_idx").on(t.collectionId),
+    index("knowledge_sources_due_idx").on(t.nextSyncAt),
+  ],
+);
+
 export const knowledgeDocuments = pgTable(
   "knowledge_documents",
   {
@@ -112,12 +188,21 @@ export const knowledgeDocuments = pgTable(
       (): AnyPgColumn => knowledgeDocumentVersions.id,
       { onDelete: "set null" },
     ),
+    // Set for a document a source mirrors: read-only here, and removed with
+    // the source or when the remote document leaves its selection.
+    sourceId: text("source_id").references((): AnyPgColumn => knowledgeSources.id, {
+      onDelete: "cascade",
+    }),
+    externalId: text("external_id"),
+    externalUrl: text("external_url"),
+    externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("knowledge_documents_collection_idx").on(t.collectionId),
     index("knowledge_documents_current_version_idx").on(t.currentVersionId),
+    uniqueIndex("knowledge_documents_source_external_idx").on(t.sourceId, t.externalId),
   ],
 );
 

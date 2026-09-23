@@ -1,5 +1,7 @@
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
 import { ChatService } from "~/modules/chat/server/service.ts";
+import { findIntegration } from "~/modules/integrations/catalog.ts";
+import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
 
 export interface FireOutcome {
@@ -27,6 +29,7 @@ export class ScheduleFire extends Context.Service<
     ScheduleFire,
     Effect.gen(function* () {
       const chat = yield* ChatService;
+      const integrations = yield* IntegrationService;
       const repo = yield* ScheduleRepo;
       const turn = (row: ScheduleRow, target: { conversationId: string } | null) =>
         chat.runScheduledTurn({
@@ -39,6 +42,7 @@ export class ScheduleFire extends Context.Service<
           researchEnabled: row.researchEnabled,
           collectionIds: row.collectionIds,
           skillIds: row.skillIds,
+          integrationGrants: row.integrationGrants,
           timeZone: row.timezone,
           target: target ? { kind: "existing", ...target } : { kind: "new" },
         });
@@ -61,54 +65,75 @@ export class ScheduleFire extends Context.Service<
               Effect.catchTag("ConversationNotFound", () => fresh(row)),
             )
           : fresh(row);
+      // A granted integration that cannot be used ends the run with a reason,
+      // like a lost collection, rather than answering without it unannounced.
+      const grantsUsable = (row: ScheduleRow) =>
+        Effect.forEach(row.integrationGrants, (grant) =>
+          integrations.session(row.userId, grant.integrationId).pipe(Effect.asVoid),
+        );
       const fire: ScheduleFire["Service"] = (row) =>
-        start(row).pipe(
-          Effect.map((started): FireOutcome => ({ conversationId: started.conversationId })),
-          Effect.catchTags({
-            // An unattended fire explains itself on the run row instead of
-            // failing the schedule: most causes (model gone, instance without
-            // search) may fix themselves before the next fire.
-            ModelNotFound: () =>
-              Effect.succeed<FireOutcome>({ conversationId: null, error: "no available model" }),
-            ToolUnavailable: () =>
-              Effect.succeed<FireOutcome>({
-                conversationId: null,
-                error: "web search is unavailable",
-              }),
-            InvalidMessage: (error) =>
-              Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
-            KnowledgeNotAvailable: () =>
-              Effect.succeed<FireOutcome>({
-                conversationId: null,
-                error: "a selected collection is unavailable",
-              }),
-            KnowledgeRejected: (error) =>
-              Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
-            SkillNotAvailable: () =>
-              Effect.succeed<FireOutcome>({
-                conversationId: null,
-                error: "a selected skill is unavailable",
-              }),
-            SkillRejected: (error) =>
-              Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
-            ConversationBusy: () =>
-              Effect.succeed<FireOutcome>({
-                conversationId: null,
-                error: "skipped: the chat was still answering",
-              }),
-          }),
-          // The remaining failures are composer-path errors a scheduled turn
-          // never produces (no question, no desktop), but an unattended fire
-          // must still end as a run row, not a defect.
-          Effect.catch((error) =>
-            Effect.logWarning("scheduled turn rejected", { scheduleId: row.id, error }).pipe(
-              Effect.as<FireOutcome>({
-                conversationId: null,
-                error: "the scheduled message could not be sent",
+        grantsUsable(row)
+          .pipe(
+            Effect.andThen(() => start(row)),
+            Effect.catchTag("IntegrationNotAvailable", (error) =>
+              Effect.fail({
+                _tag: "GrantUnavailable" as const,
+                integrationId: error.integrationId,
               }),
             ),
-          ),
-        );
+          )
+          .pipe(
+            Effect.map((started): FireOutcome => ({ conversationId: started.conversationId })),
+            Effect.catchTags({
+              // An unattended fire explains itself on the run row instead of
+              // failing the schedule: most causes (model gone, instance without
+              // search) may fix themselves before the next fire.
+              ModelNotFound: () =>
+                Effect.succeed<FireOutcome>({ conversationId: null, error: "no available model" }),
+              ToolUnavailable: () =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: "web search is unavailable",
+                }),
+              InvalidMessage: (error) =>
+                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+              KnowledgeNotAvailable: () =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: "a selected collection is unavailable",
+                }),
+              KnowledgeRejected: (error) =>
+                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+              SkillNotAvailable: () =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: "a selected skill is unavailable",
+                }),
+              SkillRejected: (error) =>
+                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+              ConversationBusy: () =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: "skipped: the chat was still answering",
+                }),
+              GrantUnavailable: (error) =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: `${findIntegration(error.integrationId)?.name ?? error.integrationId} is not connected or needs reconnecting`,
+                }),
+            }),
+            // The remaining failures are composer-path errors a scheduled turn
+            // never produces (no question, no desktop), but an unattended fire
+            // must still end as a run row, not a defect.
+            Effect.catch((error) =>
+              Effect.logWarning("scheduled turn rejected", { scheduleId: row.id, error }).pipe(
+                Effect.as<FireOutcome>({
+                  conversationId: null,
+                  error: "the scheduled message could not be sent",
+                }),
+              ),
+            ),
+          );
       return fire;
     }),
   );

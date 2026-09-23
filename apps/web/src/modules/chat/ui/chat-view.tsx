@@ -1,3 +1,7 @@
+import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import { findIntegration } from "~/modules/integrations/catalog.ts";
+import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
+import { IntegrationToolActivity as StoredIntegrationActivity } from "~/modules/integrations/tool-schema.ts";
 import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
 import {
   ScheduleDraftOwner,
@@ -24,7 +28,7 @@ import {
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
 import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
-import { applyFileChunk } from "../client/use-message-stream.ts";
+import { applyFileChunk, integrationActivityFromRow } from "../client/use-message-stream.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
@@ -348,6 +352,40 @@ export function toActivity(row: {
       status: row.status,
       ...(outcome ? { outcome } : {}),
       ...(reason ? { reason } : {}),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+
+  const integrationCall = parseIntegrationToolName(row.toolName);
+  if (integrationCall) {
+    // Also ahead of the web fallback. A finished row carries its own
+    // projection; a running one (reload mid-answer) is named from the manifest.
+    const stored = Option.getOrNull(
+      Schema.decodeUnknownOption(StoredIntegrationActivity)(row.result),
+    );
+    if (stored)
+      return {
+        ...integrationActivityFromRow(row.id, stored),
+        ...position,
+        turnIndex: row.turnIndex,
+        callIndex: row.callIndex,
+      };
+    const tool = findIntegration(integrationCall.integrationId)?.tools.find(
+      (entry) => entry.name === integrationCall.tool,
+    );
+    return {
+      family: "integration",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      integrationId: integrationCall.integrationId,
+      tool: integrationCall.tool,
+      label: tool?.label ?? integrationCall.tool,
+      access: tool?.access ?? "read",
+      summary: null,
       ...(row.error ? { error: row.error.message } : {}),
     };
   }
@@ -823,6 +861,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     reset: resetSearchEnabled,
   } = useSearchMode(data.agent?.searchEnabled ?? true);
   const context = useContextSelection({ mode: "installed", agent: data.agent });
+  const integrations = useChatIntegrations(conversationId);
   const editContext = useContextSelection({ mode: "installed", agent: data.agent });
   // The composer loads the same list inside itself; the editor is a second
   // consumer, and one shared query key means one fetch.
@@ -1952,6 +1991,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 <Composer
                   ref={composer}
                   conversationId={conversationId}
+                  integrations={integrations}
                   folder={folder}
                   readOnly={work.readOnly}
                   mode={{ kind: "fixed", value: data.conversation.mode }}
@@ -2071,6 +2111,8 @@ export function NewChatView({
   // and every desktop capability already name the durable workspace path.
   const [conversationId] = useState(uuidv7);
   const work = useWorkGate(conversationId, mode === "work");
+  // Held locally until the first message creates the chat and carries them.
+  const integrations = useChatIntegrations(null);
   const folder = work.folder;
   const isMobile = useIsMobile();
   useEffect(() => {
@@ -2115,6 +2157,7 @@ export function NewChatView({
         researchEnabled: input.researchEnabled,
         skillIds: [...(input.skillIds ?? [])],
         ...context.sendFields,
+        ...integrations.sendFields,
       };
       if (input.workspaceImports && input.workspaceFiles?.length)
         return sendReservedWorkspaceTurn({
@@ -2225,6 +2268,7 @@ export function NewChatView({
           <Composer
             initialSkillId={initialSkillId}
             conversationId={conversationId}
+            integrations={integrations}
             folder={folder}
             readOnly={work.readOnly}
             mode={{ kind: "choose", value: mode, onChange: setMode }}

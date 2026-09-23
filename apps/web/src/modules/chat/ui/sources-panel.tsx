@@ -5,6 +5,7 @@ import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
 import { useCallback } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
+import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { useDetailPanel } from "~/ui/detail-panel";
 
@@ -19,9 +20,15 @@ function SourceRow({ source }: { source: ToolSource }) {
         className="group flex flex-col gap-1.5"
       >
         <div className="flex items-center gap-2">
-          <Favicon url={source.url} className="size-4" />
+          {source.kind === "integration" ? (
+            <IntegrationLogo integrationId={source.integrationId} />
+          ) : (
+            <Favicon url={source.url} className="size-4" />
+          )}
           <span className="text-muted-foreground min-w-0 truncate text-xs">
-            {hostOf(source.url)}
+            {source.kind === "integration"
+              ? integrationName(source.integrationId)
+              : hostOf(source.url)}
           </span>
         </div>
         <p className="group-hover:text-primary text-sm leading-snug font-medium transition-colors">

@@ -28,6 +28,16 @@ export const ScheduleSettings = Schema.Struct({
    */
   chatMode: Schema.optionalKey(Schema.Literals(["new", "same"])),
   chatId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  /**
+   * The most each integration may do during a fire, granted here because
+   * nobody is present to approve then. Only the editor sets it; a draft
+   * written in chat leaves it out, which keeps what is saved.
+   */
+  integrationGrants: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ integrationId: ResourceId, access: Schema.Literals(["read", "write"]) }),
+    ).check(Schema.isMaxLength(10)),
+  ),
 });
 export type ScheduleSettings = typeof ScheduleSettings.Type;
 

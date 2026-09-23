@@ -33,6 +33,7 @@ export const EMPTY_AGENT_DRAFT: DraftSettings = {
   collectionIds: [],
   skillIds: [],
   customToolIds: [],
+  integrationIds: [],
 };
 export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   name: agent.name,
@@ -46,6 +47,7 @@ export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   collectionIds: agent.collections.map(({ id }) => id),
   skillIds: (agent.skills ?? []).map(({ id }) => id),
   customToolIds: (agent.customTools ?? []).map(({ id }) => id),
+  integrationIds: [...(agent.integrationIds ?? [])],
 });
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));

@@ -12,6 +12,7 @@ import {
   knowledgeDocuments,
   knowledgeEmbeddingJobs,
   user,
+  knowledgeSources,
 } from "~/db/schema/index.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -81,9 +82,19 @@ const toDocument = (
     jobStatus: string | null;
     jobSpaceId: string | null;
     jobConnectionRevision: string | null;
+    sourceIntegrationId?: string | null;
   },
   target: Pick<EmbeddingTarget, "spaceId" | "connectionRevision"> | null,
 ): KnowledgeDocument => ({
+  ...(row.sourceId && row.sourceIntegrationId
+    ? {
+        source: {
+          sourceId: row.sourceId,
+          integrationId: row.sourceIntegrationId,
+          url: row.externalUrl,
+        },
+      }
+    : {}),
   id: row.id,
   collectionId: row.collectionId,
   title: row.title,
@@ -350,7 +361,7 @@ export class KnowledgeRepo extends Context.Service<
     documentCollection(
       userId: string,
       documentId: string,
-    ): Effect.Effect<{ collectionId: string; canEdit: boolean } | null>;
+    ): Effect.Effect<{ collectionId: string; canEdit: boolean; synced: boolean } | null>;
     readVersionForAccess(
       userId: string,
       reference: { collectionId: string; documentId: string; versionId: string },
@@ -573,12 +584,14 @@ export class KnowledgeRepo extends Context.Service<
             jobStatus: knowledgeEmbeddingJobs.status,
             jobSpaceId: knowledgeEmbeddingJobs.spaceId,
             jobConnectionRevision: knowledgeEmbeddingJobs.connectionRevision,
+            sourceIntegrationId: knowledgeSources.integrationId,
           })
           .from(knowledgeDocuments)
           .innerJoin(
             knowledgeCollections,
             eq(knowledgeCollections.id, knowledgeDocuments.collectionId),
           )
+          .leftJoin(knowledgeSources, eq(knowledgeSources.id, knowledgeDocuments.sourceId))
           .leftJoin(knowledgeDocumentVersions, eq(knowledgeDocumentVersions.id, displayedVersionId))
           .leftJoin(latestVersion, eq(latestVersion.id, latestVersionId))
           .leftJoin(
@@ -598,6 +611,7 @@ export class KnowledgeRepo extends Context.Service<
               jobStatus: row.jobStatus,
               jobSpaceId: row.jobSpaceId,
               jobConnectionRevision: row.jobConnectionRevision,
+              sourceIntegrationId: row.sourceIntegrationId,
             },
             target,
           ),
@@ -2039,6 +2053,7 @@ export class KnowledgeRepo extends Context.Service<
             .select({
               collectionId: knowledgeCollections.id,
               canEdit: sql<boolean>`${knowledgeCollections.userId} = ${userId}`,
+              synced: sql<boolean>`${knowledgeDocuments.sourceId} is not null`,
             })
             .from(knowledgeDocuments)
             .innerJoin(

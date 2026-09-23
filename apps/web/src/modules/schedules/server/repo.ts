@@ -44,6 +44,7 @@ export class ScheduleRepo extends Context.Service<
         skillIds: string[];
         chatMode: "new" | "same";
         chatId: string | null;
+        integrationGrants?: Array<{ integrationId: string; access: "read" | "write" }>;
         nextFireAt: Date | null;
       },
       tx?: DbTx,
@@ -74,6 +75,7 @@ export class ScheduleRepo extends Context.Service<
           | "researchEnabled"
           | "collectionIds"
           | "skillIds"
+          | "integrationGrants"
           | "chatMode"
           | "chatId"
           | "paused"

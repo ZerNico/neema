@@ -30,6 +30,7 @@ const ui: DraftKindUi<DraftSettings> = {
     collectionIds: "Collections",
     skillIds: "Skills",
     customToolIds: "Custom tools",
+    integrationIds: "Integrations",
   },
   Fields: AgentSettingsFields,
   targetLink: (agentId) => (

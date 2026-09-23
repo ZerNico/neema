@@ -1,3 +1,4 @@
+import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -117,6 +118,8 @@ interface ComposerProps {
    * desktop app uses it; anything else uploads to the server.
    */
   conversationId?: string | undefined;
+  /** This chat's connected services; the view owns them so a send can carry them. */
+  integrations?: ComposerIntegrations | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -141,6 +144,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     folder = null,
     readOnly = false,
     conversationId,
+    integrations,
   },
   ref,
 ) {
@@ -401,6 +405,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           : {})}
         {...(workspaceImports && capabilities?.work ? { workspaceImports } : {})}
         {...(context && (capabilities?.agentsUse || capabilities?.knowledgeUse) ? { context } : {})}
+        {...(integrations ? { integrations } : {})}
       />
       {/* Under the composer and inset, so it reads as part of it. Only a work
           chat has a folder to show, and only the desktop app can show one. */}

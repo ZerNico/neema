@@ -67,6 +67,15 @@ const generationFields = {
   collectionIds: Schema.optionalKey(
     Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
   ),
+  /**
+   * Integration toggles made before the chat existed. An existing chat saves
+   * each toggle as it happens, so this only matters for a first message.
+   */
+  integrationChoices: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ integrationId: ResourceId, enabled: Schema.Boolean })).check(
+      Schema.isMaxLength(20),
+    ),
+  ),
 };
 
 export const ConversationMode = Schema.Literals(["chat", "work"]);

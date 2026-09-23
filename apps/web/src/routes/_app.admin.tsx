@@ -7,6 +7,7 @@ import {
   UserGroupIcon,
   UserMultipleIcon,
   WrenchIcon,
+  PlugSocketIcon,
 } from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { SectionShell } from "~/ui/page-shell.tsx";
@@ -41,6 +42,12 @@ function AdminLayout() {
           label: "Custom tools",
           icon: CodeIcon,
           matchPrefix: "/admin/custom-tools",
+        },
+        {
+          to: "/admin/integrations",
+          label: "Integrations",
+          icon: PlugSocketIcon,
+          matchPrefix: "/admin/integrations",
         },
         {
           to: "/admin/documents",

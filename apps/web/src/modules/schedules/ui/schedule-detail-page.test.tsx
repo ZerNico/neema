@@ -56,6 +56,7 @@ const schedule = {
   skillIds: [],
   chatMode: "new" as const,
   chatId: null,
+  integrationGrants: [],
   paused: false,
 };
 

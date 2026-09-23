@@ -31,6 +31,11 @@ export interface MentionSource {
   label: string;
   items: readonly MentionItem[];
   onSelect: (id: string) => void;
+  /**
+   * What replaces the typed token. Absent deletes it, for mentions that only
+   * attach something; text keeps the mention in the message itself.
+   */
+  insertText?: ((item: MentionItem) => string) | undefined;
 }
 
 const MAX_RESULTS = 8;
@@ -168,11 +173,20 @@ export function useTextareaMentions(
     if (!textarea || !token || !source || !item) return;
     textarea.focus();
     textarea.setSelectionRange(token.start, token.end);
+    const inserted = source.insertText?.(item) ?? "";
+    // A trailing space is only added where the text does not already have one;
+    // either way the caret lands past that space, where no token can reopen.
+    const spaced = /\s/.test(textarea.value.charAt(token.end));
+    const text = spaced ? inserted.replace(/\s+$/, "") : inserted;
+    const caret = token.start + text.length + (spaced && inserted !== text ? 1 : 0);
     // Native editing command keeps the browser undo transaction where supported.
     const removed =
-      typeof document.execCommand === "function" && document.execCommand("delete", false);
+      typeof document.execCommand === "function" &&
+      (text
+        ? document.execCommand("insertText", false, text)
+        : document.execCommand("delete", false));
     if (!removed) {
-      textarea.setRangeText("", token.start, token.end, "end");
+      textarea.setRangeText(text, token.start, token.end, "end");
       // setRangeText edits the DOM behind React's back, so its value tracker
       // holds the pre-accept string. Retyping "#" after accepting "#" recreates
       // that string, compares equal, and is swallowed: the character lands in
@@ -185,7 +199,7 @@ export function useTextareaMentions(
     setDismissed({ signature, value });
     requestAnimationFrame(() => {
       textarea.focus();
-      textarea.setSelectionRange(token.start, token.start);
+      textarea.setSelectionRange(caret, caret);
       syncSelection();
     });
   };

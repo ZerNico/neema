@@ -6,6 +6,9 @@ import {
   customToolGroupGrants,
   customTools,
   customToolUserGrants,
+  integrationConfigs,
+  integrationGroupGrants,
+  integrationUserGrants,
   knowledgeCollections,
   knowledgeCollectionUserGrants,
   knowledgeCollectionGroupGrants,
@@ -55,6 +58,16 @@ export const sharingResources = {
     userResourceId: customToolUserGrants.toolId,
     groupGrants: customToolGroupGrants,
     groupResourceId: customToolGroupGrants.toolId,
+    available: sql`true`,
+    managedBy: (userId: string) =>
+      sql`exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')`,
+  },
+  integration: {
+    table: integrationConfigs,
+    userGrants: integrationUserGrants,
+    userResourceId: integrationUserGrants.integrationId,
+    groupGrants: integrationGroupGrants,
+    groupResourceId: integrationGroupGrants.integrationId,
     available: sql`true`,
     managedBy: (userId: string) =>
       sql`exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')`,

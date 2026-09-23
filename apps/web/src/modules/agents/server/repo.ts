@@ -1,3 +1,4 @@
+import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -10,6 +11,7 @@ import {
   skills,
   knowledgeCollections,
   user,
+  agentIntegrations,
 } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
@@ -32,6 +34,7 @@ export interface StoredAgent {
   collectionIds: ReadonlyArray<string>;
   skillIds?: ReadonlyArray<string>;
   customToolIds: ReadonlyArray<string>;
+  integrationIds: ReadonlyArray<string>;
 }
 const owned = (userId: string, agentId: string) =>
   and(
@@ -123,7 +126,15 @@ export class AgentRepo extends Context.Service<
             if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
               return yield* new AgentRejected({ reason: "agent limit reached" });
           }
-          const { collectionIds, skillIds = [], customToolIds = [], ...settings } = input;
+          const {
+            collectionIds,
+            skillIds = [],
+            customToolIds = [],
+            integrationIds = [],
+            ...settings
+          } = input;
+          if (integrationIds.some((integrationId) => !findIntegration(integrationId)))
+            return yield* new AgentRejected({ reason: "a selected integration does not exist" });
           if (skillIds.length) {
             const available = yield* tx
               .select({ id: skills.id })
@@ -168,6 +179,7 @@ export class AgentRepo extends Context.Service<
             yield* tx.delete(agentCollections).where(eq(agentCollections.agentId, id));
             yield* tx.delete(agentSkills).where(eq(agentSkills.agentId, id));
             yield* tx.delete(agentCustomTools).where(eq(agentCustomTools.agentId, id));
+            yield* tx.delete(agentIntegrations).where(eq(agentIntegrations.agentId, id));
           } else {
             yield* tx.insert(agents).values({ id, userId, ...values });
           }
@@ -187,6 +199,14 @@ export class AgentRepo extends Context.Service<
             yield* tx
               .insert(agentCustomTools)
               .values(customToolIds.map((toolId, position) => ({ agentId: id, toolId, position })));
+          if (integrationIds.length)
+            yield* tx.insert(agentIntegrations).values(
+              integrationIds.map((integrationId, position) => ({
+                agentId: id,
+                integrationId,
+                position,
+              })),
+            );
           return { agentId: id, configRevision: update ? update.expectedRevision + 1 : 1 };
         }).pipe(Effect.catchTag("EffectDrizzleQueryError", Effect.die));
       });
@@ -245,6 +265,9 @@ export class AgentRepo extends Context.Service<
               customToolIds: sql<
                 string[]
               >`array(select act.tool_id from agent_custom_tools act where act.agent_id = ${agents.id} order by act.position)`,
+              integrationIds: sql<
+                string[]
+              >`array(select ai.integration_id from agent_integrations ai where ai.agent_id = ${agents.id} order by ai.position)`,
               collectionIds: sql<
                 string[]
               >`array(select ac.collection_id from agent_collections ac where ac.agent_id = ${agents.id} order by ac.position)`,

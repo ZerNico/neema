@@ -18,6 +18,8 @@ import {
   type ScheduleDraftActivityResult,
 } from "~/modules/schedules/tool-schema.ts";
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
+import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
+import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
 import { AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 import { SteerChunkEnvelope } from "../schema.ts";
 import type { AssistantSteer } from "../ui/assistant-body.ts";
@@ -147,8 +149,22 @@ export interface CustomToolActivity extends ToolActivityBase {
   fileIds?: ReadonlyArray<string>;
 }
 
+/** One call into a connected service; a declined or unpermitted call is `refused`. */
+export interface IntegrationToolActivity extends ToolActivityBase {
+  family: "integration";
+  integrationId: string;
+  tool: string;
+  label: string;
+  access: "read" | "write" | "destructive";
+  summary: string | null;
+  refused?: boolean;
+  link?: { title: string; url: string };
+  sources?: ReadonlyArray<IntegrationSource>;
+}
+
 export type ToolActivity =
   | AgentDraftToolActivity
+  | IntegrationToolActivity
   | ScheduleDraftToolActivity
   | CustomToolActivity
   | DocumentToolActivity
@@ -299,6 +315,7 @@ export function applyToolChunk(
     e.family !== "agent-draft" &&
     e.family !== "schedule-draft" &&
     e.family !== "custom" &&
+    e.family !== "integration" &&
     e.family !== "document" &&
     e.family !== "web" &&
     e.family !== "memory" &&
@@ -387,6 +404,36 @@ export function applyToolChunk(
           }
         : {}),
     };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "integration") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(IntegrationToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const previous = existing?.family === "integration" ? existing : undefined;
+    const next: IntegrationToolActivity =
+      parsed.phase === "start"
+        ? {
+            family: "integration",
+            ...position,
+            callId: parsed.callId,
+            name: parsed.name,
+            turnIndex: parsed.turnIndex,
+            callIndex: parsed.callIndex,
+            status: "running",
+            integrationId: parsed.integrationId,
+            tool: parsed.tool,
+            label: parsed.label,
+            access: parsed.access,
+            summary: parsed.summary,
+          }
+        : {
+            ...integrationActivityFromRow(parsed.callId, parsed.activity),
+            ...position,
+            turnIndex: previous?.turnIndex ?? 0,
+            callIndex: previous?.callIndex ?? tools.length,
+          };
     return index === -1
       ? [...tools, next]
       : tools.map((activity, i) => (i === index ? next : activity));
@@ -1026,3 +1073,23 @@ export function useMessageStream(
     status: state.status === "complete" && !drained ? ("streaming" as const) : state.status,
   };
 }
+
+/** A finished integration row, live or reloaded; both read the same projection. */
+export const integrationActivityFromRow = (
+  callId: string,
+  activity: import("~/modules/integrations/tool-schema.ts").IntegrationToolActivity,
+): IntegrationToolActivity => ({
+  family: "integration",
+  callId,
+  name: activity.name,
+  status: activity.status === "complete" ? "complete" : "error",
+  integrationId: activity.integrationId,
+  tool: activity.tool,
+  label: activity.label,
+  access: activity.access,
+  summary: activity.summary,
+  ...(activity.status === "refused" ? { refused: true } : {}),
+  ...(activity.error ? { error: activity.error } : {}),
+  ...(activity.link ? { link: activity.link } : {}),
+  ...(activity.sources?.length ? { sources: activity.sources } : {}),
+});

@@ -2,6 +2,7 @@ import {
   Analytics01Icon,
   Brain02Icon,
   ComputerIcon,
+  PlugSocketIcon,
   UserCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
@@ -28,6 +29,12 @@ function SettingsLayout() {
           label: "Memory",
           icon: Brain02Icon,
           matchPrefix: "/settings/memory",
+        },
+        {
+          to: "/settings/integrations",
+          label: "Integrations",
+          icon: PlugSocketIcon,
+          matchPrefix: "/settings/integrations",
         },
         {
           to: "/settings/devices",

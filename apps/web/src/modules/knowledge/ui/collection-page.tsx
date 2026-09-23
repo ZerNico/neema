@@ -1,3 +1,10 @@
+import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
+import {
+  KnowledgeSourcesSection,
+  SourcePickerDialog,
+  useSyncableIntegrations,
+  type SourceTarget,
+} from "~/modules/integrations/ui/knowledge-sources-section.tsx";
 import { DocumentSourcePanel } from "./document-source-panel.tsx";
 import { useDetailPanel } from "~/ui/detail-panel.tsx";
 import {
@@ -8,6 +15,7 @@ import {
   MoreHorizontalIcon,
   NoteIcon,
   PencilEdit02Icon,
+  PlusSignIcon,
   RefreshIcon,
   UserGroupIcon,
   Upload04Icon,
@@ -255,6 +263,8 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const [renaming, setRenaming] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [note, setNote] = useState<"new" | KnowledgeDocument | null>(null);
+  const [syncing, setSyncing] = useState<SourceTarget | null>(null);
+  const syncable = useSyncableIntegrations();
   const fileInput = useRef<HTMLInputElement>(null);
   const replacing = useRef<string | null>(null);
   // Same depth-counted drag tracking as the composer: dragenter/dragleave fire
@@ -338,6 +348,10 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const { collection, documents } = detail.data;
   const canEdit = collection.canEdit && !!capabilities?.knowledgeCreate;
   const full = documents.length >= KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
+  // Synced pages are listed under their source, not one row each here; they
+  // still count toward the collection's limit.
+  const ownDocuments = documents.filter((document) => !document.source);
+  const syncedDocuments = documents.filter((document) => document.source);
   const pickFile = (documentId: string | null) => {
     replacing.current = documentId;
     fileInput.current?.click();
@@ -440,7 +454,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       >
         <Section
           title="Documents"
-          description={`${documents.length} of ${KNOWLEDGE_LIMITS.maxDocumentsPerCollection}`}
+          description={`${documents.length} of ${KNOWLEDGE_LIMITS.maxDocumentsPerCollection}${syncedDocuments.length ? `, ${syncedDocuments.length} synced` : ""}`}
           actions={
             canEdit ? (
               <>
@@ -462,31 +476,42 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                     event.target.value = "";
                   }}
                 />
-                <Button size="sm" variant="outline" onClick={() => setNote("new")} disabled={full}>
-                  <HugeiconsIcon icon={NoteIcon} strokeWidth={2} data-icon="inline-start" />
-                  Add note
-                </Button>
-                <PendingButton
-                  size="sm"
-                  pending={upload.isPending}
-                  disabled={full}
-                  onClick={() => pickFile(null)}
-                >
-                  {/* The spinner takes the icon's place rather than sitting
-                      beside it, so the button keeps its width. */}
-                  {upload.isPending ? null : (
-                    <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} data-icon="inline-start" />
-                  )}
-                  Upload
-                </PendingButton>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={<PendingButton size="sm" pending={upload.isPending} disabled={full} />}
+                  >
+                    <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+                    Add
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => pickFile(null)}>
+                      <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} />
+                      Upload files
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setNote("new")}>
+                      <HugeiconsIcon icon={NoteIcon} strokeWidth={2} />
+                      Write a note
+                    </DropdownMenuItem>
+                    {syncable.length > 0 ? <DropdownMenuSeparator /> : null}
+                    {syncable.map((integration) => (
+                      <DropdownMenuItem
+                        key={integration.id}
+                        onClick={() => setSyncing({ integrationId: integration.id })}
+                      >
+                        <IntegrationLogo integrationId={integration.id} />
+                        Sync from {integrationName(integration.id)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             ) : undefined
           }
         >
-          {documents.length === 0 ? (
+          {ownDocuments.length === 0 ? (
             <EmptyState
               icon={FolderLibraryIcon}
-              title="No documents yet"
+              title={syncedDocuments.length ? "No files or notes yet" : "No documents yet"}
               description={
                 canEdit
                   ? "Add documents or notes to use in chats."
@@ -495,15 +520,19 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
             />
           ) : (
             <ListCard>
-              {documents.map((document) => (
+              {ownDocuments.map((document) => (
                 <ListRow key={document.id} className="flex-wrap">
-                  <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-                    <HugeiconsIcon
-                      icon={document.kind === "note" ? NoteIcon : File01Icon}
-                      strokeWidth={2}
-                      className="size-4"
-                    />
-                  </div>
+                  {document.source ? (
+                    <IntegrationLogo integrationId={document.source.integrationId} variant="tile" />
+                  ) : (
+                    <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+                      <HugeiconsIcon
+                        icon={document.kind === "note" ? NoteIcon : File01Icon}
+                        strokeWidth={2}
+                        className="size-4"
+                      />
+                    </div>
+                  )}
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{document.title}</span>
                     <span className="text-muted-foreground truncate text-xs">
@@ -584,7 +613,17 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                       Read note
                     </Button>
                   ) : null}
-                  {canEdit ? (
+                  {document.source?.url ? (
+                    <a
+                      href={document.source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={buttonVariants({ size: "sm", variant: "ghost" })}
+                    >
+                      Open in {integrationName(document.source.integrationId)}
+                    </a>
+                  ) : null}
+                  {canEdit && !document.source ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
@@ -651,6 +690,20 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
           </span>
         </m.div>
       </div>
+      <KnowledgeSourcesSection
+          collectionId={collectionId}
+        documents={syncedDocuments}
+        onEdit={setSyncing}
+      />
+      {canEdit && syncing ? (
+        <SourcePickerDialog
+          key={syncing.sourceId ?? syncing.integrationId}
+          collectionId={collectionId}
+          target={syncing}
+          open
+          onOpenChange={(open) => !open && setSyncing(null)}
+        />
+      ) : null}
       {canEdit ? (
         <>
           <CollectionDialog open={renaming} onOpenChange={setRenaming} collection={collection} />

@@ -79,6 +79,14 @@ export const KnowledgeDocument = Schema.Struct({
     }),
   ),
   updatedAt: Schema.String,
+  /** Set when a knowledge source mirrors it: read-only here, edited at the source. */
+  source: Schema.optionalKey(
+    Schema.Struct({
+      sourceId: Schema.String,
+      integrationId: Schema.String,
+      url: Schema.NullOr(Schema.String),
+    }),
+  ),
 });
 export type KnowledgeDocument = typeof KnowledgeDocument.Type;
 

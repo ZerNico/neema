@@ -35,5 +35,18 @@ export const DocumentSource = Schema.Struct({
 }).check(Schema.makeFilter((source) => source.endOffset > source.startOffset));
 export type DocumentSource = typeof DocumentSource.Type;
 
-export const Source = Schema.Union([DocumentSource, WebSource]);
+/**
+ * A page in a connected service. It carries a link for the reader but, unlike
+ * a web source, grants no authority to fetch it: the page sits behind the
+ * user's own credentials, and `read_url` would only reach its sign-in page.
+ */
+export const IntegrationSource = Schema.Struct({
+  ...sourceFields,
+  kind: Schema.Literals(["integration"]),
+  integrationId: Schema.String.check(Schema.isMaxLength(32)),
+  url: Schema.String,
+});
+export type IntegrationSource = typeof IntegrationSource.Type;
+
+export const Source = Schema.Union([DocumentSource, WebSource, IntegrationSource]);
 export type Source = typeof Source.Type;

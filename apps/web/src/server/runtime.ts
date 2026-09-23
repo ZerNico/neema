@@ -18,6 +18,10 @@ import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
+import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
+import { IntegrationService } from "~/modules/integrations/server/service.ts";
+import { KnowledgeSourceService } from "~/modules/integrations/server/sync.ts";
 import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
 import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
@@ -65,6 +69,7 @@ const ReposLayer = Layer.mergeAll(
   ToolsRepo.layer,
   GroupRepo.layer,
   FeaturePolicy.layer,
+  IntegrationRepo.layer,
   KnowledgeRepo.layer,
   SkillRepo.layer,
   ScheduleRepo.layer,
@@ -89,6 +94,8 @@ const CoreLayer = Layer.mergeAll(
   AttachmentService.layer,
   DocumentParser.layer,
   DraftService.layer,
+  IntegrationService.layer,
+  IntegrationApprovals.layer,
 ).pipe(Layer.provideMerge(SyncBus.layer), Layer.provideMerge(ReposLayer));
 // Knowledge indexing sits above the gateway and the parser: it embeds through
 // one and extracts through the other.
@@ -96,6 +103,7 @@ const KnowledgeLayer = Layer.mergeAll(
   KnowledgeIndexer.workers.pipe(Layer.provideMerge(KnowledgeIndexer.layer)),
   KnowledgeSearch.layer,
   KnowledgeService.layer,
+  KnowledgeSourceService.layer,
   AgentService.layer,
   AgentDraftService.layer,
   SharingService.layer,

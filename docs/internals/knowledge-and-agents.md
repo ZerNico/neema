@@ -101,6 +101,8 @@ whatever agent the conversation is associated with.
   instance-wide, but never another owner's resource.
 - An agent grant never grants its collections or model — checked separately, and losing a
   selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
+  An agent's integrations likewise grant nothing: each sender uses their own connection, and
+  a sender without one is simply not offered the tools.
   Agent instructions enter the prompt as a user-role block after application policies.
 
 ## Collections and documents
@@ -130,6 +132,11 @@ whatever agent the conversation is associated with.
   where the token started, so retyping the trigger rebuilds a byte-identical signature and a
   signature-only dismissal check kept the list closed. Both together show as one symptom: add a
   collection, remove the chip, type `#` again, nothing happens.
+
+- A collection can also mirror part of a connected service through a knowledge source.
+  Its documents are ordinary note versions marked with their source and are read-only here;
+  the sync, its ownership and its sharing consequence are in
+  [integrations](integrations.md#knowledge-sources).
 
 ## Retrieval and direct context
 

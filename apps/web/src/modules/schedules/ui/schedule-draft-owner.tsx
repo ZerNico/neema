@@ -31,6 +31,7 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
     researchEnabled: "Deep research",
     collectionIds: "Collections",
     skillIds: "Skills",
+    integrationGrants: "Integrations",
     chatMode: "Chat",
     chatId: "Chat",
   },

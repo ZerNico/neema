@@ -7,6 +7,7 @@ export const storedAgentToDraftSettings = ({
   collectionIds,
   skillIds,
   customToolIds,
+  integrationIds,
 }: StoredAgent): DraftSettings => ({
   name: row.name,
   description: row.description,
@@ -19,4 +20,5 @@ export const storedAgentToDraftSettings = ({
   collectionIds,
   skillIds: skillIds ?? [],
   customToolIds,
+  integrationIds,
 });

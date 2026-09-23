@@ -195,4 +195,11 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    * collections themselves.
    */
   collectionIds: jsonb("collection_ids").$type<string[]>().notNull().default([]),
+  /**
+   * Set only on a schedule fire: the integrations it may use and how far,
+   * decided before anybody could be asked. Null means a person is present
+   * and the chat's own integration choices and approvals apply.
+   */
+  integrationGrants:
+    jsonb("integration_grants").$type<Array<{ integrationId: string; access: "read" | "write" }>>(),
 });

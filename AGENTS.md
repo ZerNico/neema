@@ -53,6 +53,10 @@ edit the wrong thing.
   tool-call row carries the display name it needs. A function may return files;
   they become attachments of the answer. Workers contain hangs, not authority: code is
   trusted and has the server’s filesystem, environment, network and process access.
+- **integration / connection / source**: an integration is a service the code ships an
+  adapter for (Outline), set up by an admin. A connection is one person's credentials for
+  it, never shared; chats, agents and schedules use the sender's own. A knowledge source
+  mirrors part of an integration into a collection as the collection owner.
 - **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
   permission. `ambient` skills are offered automatically; explicit ones are pinned.
 - **memory**: a saved user fact the model may reference or write. One save attempt
@@ -108,7 +112,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  schedule-draft, document, desktop, custom.
+  schedule-draft, document, desktop, custom, integration.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -202,6 +206,9 @@ skipped one on purpose.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
   model, the `custom_` prefix contract, current module bundles and worker
   containment.
+- `docs/internals/integrations.md`: connected services. Manifest and adapter, per-person
+  connections and token refresh, OAuth bound to the starting browser, consent levels,
+  schedule grants, knowledge sources.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
   boundary, queued files as a second owner kind, and why only a desktop app can
   start queued Work.

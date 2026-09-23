@@ -1,3 +1,4 @@
+import { IntegrationApprovalNotifier } from "~/modules/integrations/ui/integration-approval-notifier.tsx";
 import {
   DesktopWorkProvider,
   WorkAttention,
@@ -78,6 +79,7 @@ function AuthenticatedLayout({
                       <HeaderSlot />
                       <WorkAttention />
                     </AppHeader>
+                    <IntegrationApprovalNotifier />
                     <WorkConnectionNotice />
                     {/* The detail rail is a sibling of the content, not an overlay:
                 opening it shrinks the chat column instead of covering it. */}

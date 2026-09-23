@@ -5,6 +5,7 @@ import { sourceIdentity, type SourceReference } from "../sources.ts";
 export interface SourceIndexer {
   indexFor(url: string): number;
   indexForDocument(location: DocumentLocation): number;
+  indexForIntegration(integrationId: string, url: string): number;
 }
 
 export const createSourceIndexer = (
@@ -27,5 +28,7 @@ export const createSourceIndexer = (
   return {
     indexFor: (url) => allocate({ kind: "web", url }),
     indexForDocument: (location) => allocate({ ...location, kind: "document" }),
+    indexForIntegration: (integrationId, url) =>
+      allocate({ kind: "integration", integrationId, url }),
   };
 };

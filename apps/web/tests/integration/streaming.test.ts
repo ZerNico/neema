@@ -41,6 +41,7 @@ import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import {
   CustomToolRuntime,
   type CustomToolRunResult,
@@ -70,7 +71,12 @@ import { askUserTool } from "~/modules/tools/server/ask-user.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { FakeDocumentParser, FakeWebSearch, FakeUrlReader } from "./unused-services.ts";
+import {
+  FakeDocumentParser,
+  FakeWebSearch,
+  FakeUrlReader,
+  NoIntegrations,
+} from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
@@ -276,6 +282,7 @@ beforeAll(async () => {
   const ReposLayer = Layer.mergeAll(
     AnalyticsRepo.layer,
     CustomToolRepo.layer,
+    IntegrationRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     KnowledgeRepo.layer,
@@ -299,6 +306,7 @@ beforeAll(async () => {
         customToolRun ? customToolRun(input) : Effect.die("no custom tool calls in these tests"),
     }),
     FakeMemoryService,
+    NoIntegrations,
     ExternalCompletion.layer,
     SyncBus.layer,
     Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(

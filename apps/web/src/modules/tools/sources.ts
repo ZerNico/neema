@@ -1,11 +1,20 @@
-import type { DocumentLocation, DocumentSource, Source, WebSource } from "./source-schema.ts";
+import type {
+  DocumentLocation,
+  DocumentSource,
+  IntegrationSource,
+  Source,
+  WebSource,
+} from "./source-schema.ts";
 
 export const isDocumentSource = (source: Source): source is DocumentSource =>
   source.kind === "document";
 export const isWebSource = (source: Source): source is WebSource => source.kind === "web";
+export const isIntegrationSource = (source: Source): source is IntegrationSource =>
+  source.kind === "integration";
 
 export type SourceReference =
   | { readonly url: string; readonly kind: "web" }
+  | { readonly url: string; readonly kind: "integration"; readonly integrationId: string }
   | (DocumentLocation & { readonly kind: "document" });
 
 export function documentSourceTarget(source: DocumentLocation): string {
@@ -37,6 +46,8 @@ export function sourceIdentity(source: SourceReference): string {
       source.startOffset,
       source.endOffset,
     ]);
+  if (source.kind === "integration")
+    return JSON.stringify(["integration", source.integrationId, source.url]);
   let normalized = source.url;
   try {
     const url = new URL(source.url);

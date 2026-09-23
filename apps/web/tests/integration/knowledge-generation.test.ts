@@ -13,6 +13,7 @@ import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.t
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -39,7 +40,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { makeFakeMemoryService } from "./fake-memory.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
-import { FakeDocumentParser, FakeCustomToolRuntime } from "./unused-services.ts";
+import { FakeDocumentParser, FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
 
@@ -285,6 +286,7 @@ beforeAll(async () => {
     SkillRepo.layer,
     AnalyticsRepo.layer,
     CustomToolRepo.layer,
+    IntegrationRepo.layer,
     AgentRepo.layer,
     ChatRepo.layer,
     GroupRepo.layer,
@@ -309,6 +311,7 @@ beforeAll(async () => {
     MemoryBlobStore,
     FakeDocumentParser,
     FakeCustomToolRuntime,
+    NoIntegrations,
     makeFakeMemoryService({ autoSave: true }),
   ).pipe(Layer.provideMerge(ReposLayer));
   const KnowledgeLayer = Layer.mergeAll(

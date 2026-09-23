@@ -11,6 +11,9 @@ import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts
 import type { CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
+import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
+import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
+import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
 import { ScheduleChatField } from "./schedule-chat-field.tsx";
@@ -39,6 +42,7 @@ export const ScheduleSettingsFields = withForm({
     const models = modelsQuery.data ?? [];
     const collections = useQuery(knowledgeCollectionsQuery);
     const skills = useQuery(skillsQuery);
+    const integrations = useQuery(myIntegrationsQuery);
     const selectedModel = (id: string | null) => models.find((model) => model.id === id) ?? null;
     const [skillPickerOpen, setSkillPickerOpen] = useState(false);
     const [skillAnchor, setSkillAnchor] = useState<HTMLButtonElement | null>(null);
@@ -297,6 +301,73 @@ export const ScheduleSettingsFields = withForm({
                   ) : null}
                   <FieldError errors={field.state.meta.errors} />
                 </div>
+              );
+            }}
+          </form.Field>
+        </Section>
+        <Section
+          title="Integrations"
+          description="Nobody is there to approve during a run, so decide now how far each connected service may go. Anything more is refused, not asked."
+        >
+          <form.Field name="integrationGrants">
+            {(field) => {
+              const grants = field.state.value ?? [];
+              const connected = (integrations.data ?? []).filter(
+                (integration) =>
+                  integration.connection?.status === "active" ||
+                  grants.some((grant) => grant.integrationId === integration.id),
+              );
+              if (connected.length === 0)
+                return (
+                  <p className="text-muted-foreground text-sm">
+                    Connect a service in Settings → Integrations to let runs use it.
+                  </p>
+                );
+              return (
+                <ListCard>
+                  {connected.map((integration) => {
+                    const grant = grants.find((entry) => entry.integrationId === integration.id);
+                    const value = grant?.access ?? "none";
+                    return (
+                      <ListRow key={integration.id}>
+                        <IntegrationLogo integrationId={integration.id} variant="tile" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {integrationName(integration.id)}
+                          </p>
+                          <p className="text-muted-foreground truncate text-xs">
+                            {integration.connection?.status === "active"
+                              ? integration.connection.accountLabel
+                              : "Not connected: runs will fail until you reconnect."}
+                          </p>
+                        </div>
+                        <ToggleGroup
+                          value={[value]}
+                          onValueChange={(values) => {
+                            const next = values.at(-1);
+                            const rest = grants.filter(
+                              (entry) => entry.integrationId !== integration.id,
+                            );
+                            if (next === "read" || next === "write")
+                              field.handleChange([
+                                ...rest,
+                                { integrationId: integration.id, access: next },
+                              ]);
+                            else if (next === "none") field.handleChange(rest);
+                          }}
+                          variant="outline"
+                          size="sm"
+                          spacing={0}
+                          aria-label={`${integrationName(integration.id)} during runs`}
+                        >
+                          <ToggleGroupItem value="none">Off</ToggleGroupItem>
+                          <ToggleGroupItem value="read">Read</ToggleGroupItem>
+                          <ToggleGroupItem value="write">Read and write</ToggleGroupItem>
+                        </ToggleGroup>
+                      </ListRow>
+                    );
+                  })}
+                </ListCard>
               );
             }}
           </form.Field>

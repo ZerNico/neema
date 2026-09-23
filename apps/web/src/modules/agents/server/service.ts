@@ -57,6 +57,7 @@ export const validateAgentSettings = Effect.fn(function* (
     collectionIds: [...new Set(settings.collectionIds)],
     skillIds: [...new Set(settings.skillIds ?? [])],
     customToolIds: [...new Set(settings.customToolIds ?? [])],
+    integrationIds: [...new Set(settings.integrationIds ?? [])],
   };
 });
 
@@ -103,11 +104,8 @@ export class AgentService extends Context.Service<
         agentId: string,
         ownerOnly: boolean,
       ) {
-        const { row, ownerName, collectionIds, skillIds, customToolIds } = yield* available(
-          userId,
-          agentId,
-          ownerOnly,
-        );
+        const { row, ownerName, collectionIds, skillIds, customToolIds, integrationIds } =
+          yield* available(userId, agentId, ownerOnly);
         const model = row.modelId
           ? ((yield* modelFor(providers, userId, row.modelId)) ?? {
               id: row.modelId,
@@ -158,6 +156,7 @@ export class AgentService extends Context.Service<
             collections,
             skills,
             customTools,
+            integrationIds,
           } satisfies AgentSelectionDetail,
         };
       });

@@ -90,7 +90,10 @@ export class KnowledgeService extends Context.Service<
       userId: string,
       documentId: string,
     ): Effect.Effect<void, KnowledgeNotAvailable | KnowledgeRejected>;
-    removeDocument(userId: string, documentId: string): Effect.Effect<void, KnowledgeNotAvailable>;
+    removeDocument(
+      userId: string,
+      documentId: string,
+    ): Effect.Effect<void, KnowledgeNotAvailable | KnowledgeRejected>;
     reindex(
       userId: string,
       collectionId: string,
@@ -186,6 +189,16 @@ export class KnowledgeService extends Context.Service<
                   "enter a name of 1–120 characters and a description of at most 500 characters",
               }),
             );
+      // A mirrored document changes at its source; an edit here would be
+      // overwritten by the next sync, and a delete would come straight back.
+      const notSynced = Effect.fn(function* (userId: string, documentId: string) {
+        const document = yield* repo.documentCollection(userId, documentId);
+        if (document?.synced)
+          return yield* new KnowledgeRejected({
+            reason:
+              "this document is synced from an integration; change it there or edit the source's selection",
+          });
+      });
       const saveNote = Effect.fn(function* (
         userId: string,
         input: { collectionId: string; documentId?: string; title: string; content: string },
@@ -205,6 +218,7 @@ export class KnowledgeService extends Context.Service<
               "enter a title of 1–120 characters and a nonempty note of at most 200,000 characters",
           });
         const normalized = { ...input, title: input.title.trim() };
+        if (input.documentId) yield* notSynced(userId, input.documentId);
         const document = input.documentId
           ? yield* repo.replaceNoteDocument(userId, { ...normalized, documentId: input.documentId })
           : yield* repo.addNoteDocument(userId, normalized);
@@ -301,6 +315,7 @@ export class KnowledgeService extends Context.Service<
             const document = yield* repo.documentCollection(userId, input.documentId);
             if (!document?.canEdit || document.collectionId !== input.collectionId)
               return yield* new KnowledgeNotAvailable({ resourceId: input.documentId });
+            yield* notSynced(userId, input.documentId);
           }
           const upload = yield* attachments.upload({
             userId,
@@ -358,6 +373,7 @@ export class KnowledgeService extends Context.Service<
           const collection = yield* repo.documentCollection(userId, documentId);
           if (!collection?.canEdit)
             return yield* new KnowledgeNotAvailable({ resourceId: documentId });
+          yield* notSynced(userId, documentId);
           yield* attachments.deleteBlobs(yield* repo.deleteDocument(userId, documentId));
           yield* changed();
         }),

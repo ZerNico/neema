@@ -31,6 +31,7 @@ import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
+import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -52,7 +53,12 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchBackend, SearchBackendError } from "~/modules/tools/server/search.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { FakeBlobStore, FakeDocumentParser, FakeCustomToolRuntime } from "./unused-services.ts";
+import {
+  FakeBlobStore,
+  FakeDocumentParser,
+  FakeCustomToolRuntime,
+  NoIntegrations,
+} from "./unused-services.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
@@ -440,6 +446,7 @@ beforeAll(async () => {
   const repos = Layer.mergeAll(
     AnalyticsRepo.layer,
     CustomToolRepo.layer,
+    IntegrationRepo.layer,
     AgentRepo.layer,
     ScheduleRepo.layer,
     ChatRepo.layer,
@@ -462,6 +469,7 @@ beforeAll(async () => {
         FakeBlobStore,
         FakeDocumentParser,
         FakeCustomToolRuntime,
+        NoIntegrations,
         MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
         ExternalCompletion.layer,
         SyncBus.layer,
