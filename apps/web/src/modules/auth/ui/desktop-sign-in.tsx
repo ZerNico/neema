@@ -17,6 +17,7 @@ import { Button, buttonVariants } from "~/ui/primitives/button";
 import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { cn } from "~/ui/utils";
+import { AuthScreen } from "./auth-screen.tsx";
 
 /**
  * Session storage rather than state: the verifier must survive a reload of
@@ -106,7 +107,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
     challenge === null ? null : `${window.location.origin}${desktopSignInPath(challenge)}`;
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
@@ -169,6 +170,6 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
           ) : null}
         </CardContent>
       </Card>
-    </div>
+    </AuthScreen>
   );
 }

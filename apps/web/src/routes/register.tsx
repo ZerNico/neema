@@ -10,6 +10,7 @@ import { buttonVariants } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
+import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 
 const RegisterSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1, { message: "Enter your name." })),
@@ -52,7 +53,7 @@ function RegisterPage() {
   });
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Create account</CardTitle>
@@ -96,6 +97,6 @@ function RegisterPage() {
           </p>
         </CardFooter>
       </Card>
-    </div>
+    </AuthScreen>
   );
 }

@@ -12,6 +12,7 @@ import { buttonVariants } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
+import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 
 const LoginSchema = Schema.Struct({
   email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
@@ -58,7 +59,7 @@ function LoginForm() {
   });
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
@@ -99,6 +100,6 @@ function LoginForm() {
           </p>
         </CardFooter>
       </Card>
-    </div>
+    </AuthScreen>
   );
 }

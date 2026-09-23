@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "~/ui/primitives/avatar";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
+import { AuthScreen } from "./auth-screen.tsx";
 
 export const DESKTOP_SIGN_IN_SCHEME_URL = "chat-desktop://sign-in";
 
@@ -38,7 +39,7 @@ export function DesktopSignInPage({
   const ticket = mint.data;
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Sign in to neema Desktop</CardTitle>
@@ -110,6 +111,6 @@ export function DesktopSignInPage({
           </CardFooter>
         )}
       </Card>
-    </div>
+    </AuthScreen>
   );
 }

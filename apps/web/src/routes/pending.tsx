@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { approvalStatusQuery, authClient } from "~/modules/auth/client.ts";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
+import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 
 export const Route = createFileRoute("/pending")({
   beforeLoad: async ({ context }) => {
@@ -25,7 +26,7 @@ function PendingPage() {
   const rejected = status === "rejected";
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>{rejected ? "Account declined" : "Waiting for approval"}</CardTitle>
@@ -53,6 +54,6 @@ function PendingPage() {
           </Button>
         </CardFooter>
       </Card>
-    </div>
+    </AuthScreen>
   );
 }

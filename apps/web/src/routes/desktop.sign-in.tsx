@@ -4,6 +4,7 @@ import { desktopSignInPath, DesktopSignInPage } from "~/modules/auth/ui/desktop-
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
+import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -37,7 +38,7 @@ function DesktopSignInRoute() {
   const inShell = useDesktop() !== null;
   if (inShell)
     return (
-      <div className="flex min-h-svh items-center justify-center p-4">
+      <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
             <CardTitle>Sign in to neema Desktop</CardTitle>
@@ -46,7 +47,7 @@ function DesktopSignInRoute() {
             <p className="text-muted-foreground text-sm">Open this page in your browser.</p>
           </CardContent>
         </Card>
-      </div>
+      </AuthScreen>
     );
   return <DesktopSignInPage user={user} challenge={challenge} />;
 }
