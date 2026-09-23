@@ -234,9 +234,11 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
     @apply bg-background text-foreground font-sans antialiased;
   }
   /* Tailwind v4 dropped cursor: pointer on buttons; shadcn's `init --pointer`
-     restores it for anything that acts like a button. */
+     restores it for anything that acts like a button. Base UI renders a switch
+     as a span, so it needs its own selector. */
   button:not(:disabled),
-  [role="button"]:not(:disabled) {
+  [role="button"]:not(:disabled),
+  [role="switch"]:not([data-disabled]) {
     cursor: pointer;
   }
 
