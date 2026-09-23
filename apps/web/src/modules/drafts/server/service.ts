@@ -30,6 +30,8 @@ export interface DraftKindConfig<S> {
 
 export interface OpenDraftInput {
   conversationId: string;
+  /** The answer whose tool call opens it; rewinding that answer removes the draft. */
+  createdByMessageId: string;
   targetId?: string | undefined;
   changes?: Record<string, unknown> | undefined;
 }
@@ -170,6 +172,7 @@ export class DraftService extends Context.Service<
                       tx,
                       userId,
                       input.conversationId,
+                      input.createdByMessageId,
                       config.kind,
                       { ...base, ...input.changes },
                       targetId,

@@ -32,6 +32,7 @@ export class DraftRepo extends Context.Service<
       tx: DbTx,
       userId: string,
       conversationId: string,
+      createdByMessageId: string,
       kind: DraftKind,
       settings: unknown,
       targetId: string | null,
@@ -77,13 +78,23 @@ export class DraftRepo extends Context.Service<
       return DraftRepo.of({
         lockConversation,
         initialize: Effect.fn("DraftRepo.initialize")(
-          function* (tx, userId, conversationId, kind, settings, targetId, targetRevision) {
+          function* (
+            tx,
+            userId,
+            conversationId,
+            createdByMessageId,
+            kind,
+            settings,
+            targetId,
+            targetRevision,
+          ) {
             yield* lockConversation(tx, userId, conversationId);
             const [row] = yield* tx
               .insert(conversationDrafts)
               .values({
                 id: uuidv7(),
                 conversationId,
+                createdByMessageId,
                 kind,
                 settings: settings as DraftRow["settings"],
                 targetId,

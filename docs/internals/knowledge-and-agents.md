@@ -45,7 +45,11 @@ whatever agent the conversation is associated with.
   draft already holding it, and an untargeted call reuses an empty unedited draft, so a
   repeated call cannot litter the chat. Anything else is a second resource and gets its own
   draft — reusing one draft for a second target is how a save silently overwrote the first.
-  Only the user discards a draft, from the panel. The shortcut only seeds an unsent request;
+  A draft belongs to the answer whose tool call opened it (`created_by_message_id`, cascading),
+  exactly like a conversation document: rewinding that answer by retry or edit removes it, and
+  the confirmation names it first. Otherwise only the user discards a draft, from the panel. A
+  draft that outlived its answer dangled under the transcript and stayed in the model's
+  trailing data with nothing introducing it. The shortcut only seeds an unsent request;
   see [UI ownership](ui.md#chat-specific-pieces).
 - `draftId` is optional on the update/read tools while a chat has one draft of that kind,
   and required once it has several; omitting it then returns `invalid` naming each draft.
@@ -82,7 +86,7 @@ whatever agent the conversation is associated with.
   is what keeps a branch-copied row inert. A call that did not update the draft stores the
   handler's own sentence (schema paths, fixed messages) on the tool row for debugging; the
   transcript shows only the label. Branches copy historical references, not draft state or save
-  authority. Retry/edit can erase tool rows without deleting the canonical draft.
+  authority.
 
 ## Sharing and access
 

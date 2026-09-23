@@ -165,6 +165,8 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
   services: ScheduleAuthoringServices;
   userId: string;
   conversationId: string;
+  /** The answer being generated; a draft this attempt opens belongs to it. */
+  messageId: string;
   /** The model answering this attempt, so "same as this chat" is resolvable. */
   currentModelId?: string | undefined;
   writeGuard: (tx: DbTx) => Effect.Effect<unknown>;
@@ -264,7 +266,11 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     const result = yield* drafts
       .open(
         input.userId,
-        { conversationId: input.conversationId, ...decoded.value },
+        {
+          conversationId: input.conversationId,
+          createdByMessageId: input.messageId,
+          ...decoded.value,
+        },
         input.writeGuard,
       )
       .pipe(

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PROTOCOL_VERSION, type BridgeReply } from "@chat/desktop-rpc";
 import type { ConversationMode } from "../schema.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Suspense, type ReactNode } from "react";
+import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { AskUserBlock } from "./ask-user-block.tsx";
@@ -134,13 +134,7 @@ vi.mock("@tanstack/react-router", () => ({
 // The list itself is covered by message-list.test; here it only has to expose
 // what the view wired onto each row.
 vi.mock("./virtual-message-list.tsx", () => ({
-  VirtualMessageList: ({
-    messages,
-    footer,
-  }: {
-    messages: ReadonlyArray<Record<string, unknown>>;
-    footer?: ReactNode;
-  }) => (
+  VirtualMessageList: ({ messages }: { messages: ReadonlyArray<Record<string, unknown>> }) => (
     <div>
       {messages.map((message) => (
         <div
@@ -267,7 +261,6 @@ vi.mock("./virtual-message-list.tsx", () => ({
           ) : null}
         </div>
       ))}
-      {footer ? <div data-testid="message-footer">{footer}</div> : null}
     </div>
   ),
 }));
@@ -420,7 +413,7 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     searchEnabled: boolean;
     available: boolean;
   } | null,
-  agentDrafts: [] as ReadonlyArray<{ id: string; name: string }>,
+  agentDrafts: [] as ReadonlyArray<{ id: string; name: string; messageId: string }>,
   documents: [] as ReadonlyArray<{ id: string; title: string }>,
   collectionIds: [] as string[],
   generations: [] as Array<{
@@ -1616,17 +1609,18 @@ describe("ChatView agent drafts", () => {
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
-    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
     // Created by the answer being watched, so its panel opens without a click.
     expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Writer");
     expect(getAgentDraft).toHaveBeenCalledWith({ data: { draftId: "d1" } });
   });
 
-  it("discovers a draft from sync-refreshed loader metadata and offers inline recovery", async () => {
-    renderView();
+  it("discovers a draft from sync-refreshed loader metadata and places it in its answer", async () => {
+    const { container } = renderView();
     expect(getAgentDraft).not.toHaveBeenCalled();
     conversationMock.mockResolvedValueOnce(
-      payload(null, { agentDrafts: [{ id: "d1", name: "Writer" }] }) as never,
+      payload(null, {
+        agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }],
+      }) as never,
     );
     act(() =>
       FakeEventSource.instances.at(-1)!.emit("sync", {
@@ -1637,33 +1631,34 @@ describe("ChatView agent drafts", () => {
       }),
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
-    expect(screen.getByTestId("message-footer")).toContainElement(widget);
+    expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
   });
 
-  it("retains the same editor through retry when every tool reference disappears", async () => {
-    const { client } = renderView(null, { toolCalls: [draftReference()] });
+  it("names the draft a retry deletes and drops its editor once it is gone", async () => {
+    const withDraft = {
+      toolCalls: [draftReference()],
+      agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }],
+    };
+    renderView(null, withDraft);
     fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
-    const name = await screen.findByRole("textbox", { name: "Name" });
-    fireEvent.change(name, { target: { value: "My writer" } });
+    expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Writer");
     retryMock.mockResolvedValueOnce({} as never);
-    // Deliberately omit even the loader summary: a stale reload must not orphan a known draft.
     conversationMock.mockResolvedValueOnce(payload(null) as never);
     fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+    // The last answer normally retries without asking; losing a draft asks.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("The agent draft “Writer” will also be deleted.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(retryMock).toHaveBeenCalled());
-    const footer = await screen.findByTestId("message-footer");
-    expect(
-      within(footer).getByRole("button", { name: "Open agent draft: My writer" }),
-    ).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Name" })).toBe(name);
-    expect(name).toHaveValue("My writer");
-    expect(client.getQueryData(["drafts", "agent", "d1"])).toMatchObject({
-      settings: { name: "My writer" },
-    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Open agent draft/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
   });
 
   it("keeps copied references historical even after the branch gets its own draft", async () => {
-    const { client } = renderView(
+    const { client, container } = renderView(
       { conversationId: "original", title: "Original" },
       { toolCalls: [draftReference("original", "other-draft")] },
     );
@@ -1674,13 +1669,13 @@ describe("ChatView agent drafts", () => {
         ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
         payload(null, {
           toolCalls: [draftReference("original", "other-draft")],
-          agentDrafts: [{ id: "d1", name: "Writer" }],
+          agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }],
         }),
       ),
     );
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(screen.getAllByRole("button", { name: /Open agent draft/ })).toHaveLength(1);
-    expect(screen.getByTestId("message-footer")).toContainElement(widget);
+    expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.getByText("From another chat")).toBeVisible();
     expect(getAgentDraft).not.toHaveBeenCalledWith({ data: { conversationId: "original" } });
   });
@@ -1692,7 +1687,11 @@ describe("ChatView agent drafts", () => {
         action === "answer edit"
           ? resolvedPayload()
           : payload(null, action === "answer" ? { toolCalls: [askRow] } : {});
-      const withDraft = { ...start, agentDrafts: [{ id: "d1", name: "Writer" }] };
+      // Opened by an earlier answer, so no rewind here deletes it.
+      const withDraft = {
+        ...start,
+        agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-earlier" }],
+      };
       renderView(null, withDraft);
       conversationMock.mockResolvedValue(withDraft as never);
       sendMock.mockResolvedValueOnce({} as never);
@@ -1742,7 +1741,7 @@ describe("ChatView agent drafts", () => {
   );
 
   it("blocks send when persistence fails, without discarding local settings", async () => {
-    renderView(null, { agentDrafts: [{ id: "d1", name: "Writer" }] });
+    renderView(null, { agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }] });
     fireEvent.click(await screen.findByRole("button", { name: "Open agent draft: Writer" }));
     vi.mocked(patchAgentDraft).mockRejectedValue(new Error("Offline"));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
@@ -1757,7 +1756,7 @@ describe("ChatView agent drafts", () => {
   it("never waits for a pending draft autosave before stopping generation", async () => {
     liveDraft.status = "streaming";
     renderView(null, {
-      agentDrafts: [{ id: "d1", name: "Writer" }],
+      agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }],
       messages: [
         message("m-user", "user", "u1"),
         { ...message("m-answer", "assistant", ""), status: "streaming" },
@@ -1872,7 +1871,6 @@ describe("ChatView documents", () => {
     const widget = await screen.findByRole("button", { name: "Open document: Trip plan" });
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.queryByRole("textbox", { name: "Document source" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
     fireEvent.click(widget);
     fireEvent.click(await screen.findByRole("button", { name: "Source" }));
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
@@ -1891,7 +1889,6 @@ describe("ChatView documents", () => {
     const answer = container.querySelector('[data-message-id="m-answer"]')!;
     expect(answer).toContainElement(transcript);
     expect(answer).toContainElement(legacy);
-    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
     expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-1" } });
     expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-2" } });
   });
@@ -1993,7 +1990,6 @@ describe("ChatView documents", () => {
         screen.queryByRole("button", { name: "Open document: Trip plan" }),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
   });
 
   it("keeps branch-copied references inert beside documents owned by this conversation", async () => {
@@ -2015,7 +2011,6 @@ describe("ChatView documents", () => {
     const widget = await screen.findByRole("button", { name: "Open document: Trip plan" });
     expect(screen.getAllByRole("button", { name: /Open document/ })).toHaveLength(1);
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
-    expect(screen.queryByTestId("message-footer")).not.toBeInTheDocument();
     expect(screen.getByText("From another chat")).toBeVisible();
     expect(getDocument).not.toHaveBeenCalledWith({ data: { documentId: "other-document" } });
   });

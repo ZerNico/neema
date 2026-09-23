@@ -124,7 +124,14 @@ const initialize = (userId: string, targetId: string | null = null) =>
       return yield* db.transaction((tx) =>
         Effect.gen(function* () {
           const conversationId = uuidv7();
+          const messageId = uuidv7();
           yield* tx.insert(conversations).values({ id: conversationId, userId });
+          yield* tx.insert(messages).values({
+            id: messageId,
+            conversationId,
+            role: "assistant",
+            status: "complete",
+          });
           const revision =
             targetId === null
               ? null
@@ -148,6 +155,7 @@ const initialize = (userId: string, targetId: string | null = null) =>
               tx,
               userId,
               conversationId,
+              messageId,
               "agent",
               settings,
               targetId,
@@ -277,8 +285,10 @@ describe("tool-created agent drafts", () => {
   ) =>
     run(
       Effect.flatMap(AgentDraftService, (service) =>
-        service.open(owner, { conversationId: fence.conversationId, ...input }, (tx) =>
-          lockGeneration(tx, fence),
+        service.open(
+          owner,
+          { conversationId: fence.conversationId, createdByMessageId: fence.messageId, ...input },
+          (tx) => lockGeneration(tx, fence),
         ),
       ),
     );
@@ -402,6 +412,7 @@ describe("tool-created agent drafts", () => {
               userId,
               {
                 conversationId: fence.conversationId,
+                createdByMessageId: fence.messageId,
                 ...(target ? { agentId: target } : {}),
               },
               (tx) => lockGeneration(tx, fence),
@@ -445,6 +456,7 @@ describe("tool-created agent drafts", () => {
               owner,
               {
                 conversationId: fence.conversationId,
+                createdByMessageId: fence.messageId,
                 changes: { name: "Too late" },
               },
               (tx) => lockGeneration(tx, fence),
@@ -478,8 +490,20 @@ describe("persistent agent drafts", () => {
         return yield* (yield* Db)
           .transaction((tx) =>
             Effect.gen(function* () {
+              const answer = uuidv7();
               yield* tx.insert(conversations).values({ id: rolledBack, userId: owner });
-              yield* repo.initialize(tx, owner, rolledBack, "agent", EMPTY_AGENT_DRAFT, null);
+              yield* tx
+                .insert(messages)
+                .values({ id: answer, conversationId: rolledBack, role: "assistant" });
+              yield* repo.initialize(
+                tx,
+                owner,
+                rolledBack,
+                answer,
+                "agent",
+                EMPTY_AGENT_DRAFT,
+                null,
+              );
               return yield* Effect.fail("rollback");
             }),
           )

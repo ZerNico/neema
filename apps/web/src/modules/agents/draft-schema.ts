@@ -58,6 +58,7 @@ export type AgentDraftRevisionInput = typeof AgentDraftRevisionInput.Type;
 /** Opening is per conversation; the draft it resolves to may already exist. */
 export const OpenAgentDraftInput = Schema.Struct({
   conversationId: ResourceId,
+  createdByMessageId: ResourceId,
   agentId: Schema.optionalKey(ResourceId),
   changes: Schema.optionalKey(AgentDraftPatch),
 });

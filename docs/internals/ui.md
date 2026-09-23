@@ -213,9 +213,10 @@ false`), so a page body is written against data already there. This includes loc
   clean source adopts a remote revision, while dirty source shows **Keep mine** and **Take theirs**.
   Document task ticks patch their own source line optimistically and serialize behind source saves.
   A document panel is read-only while its assistant answer is generating. Flush every owned editor
-  before send, structured answer, retry, edit, branch or save, never Stop. A document belongs to its
-  creating answer, so rewinding that answer removes it; its rich card stays at the creating tool
-  call's text offset, never in a transcript footer. The manual agent editor similarly pins its dirty
+  before send, structured answer, retry, edit, branch or save, never Stop. A document or draft
+  belongs to its creating answer, so rewinding that answer removes it; its card stays at the
+  creating tool call's text offset, or at the end of that answer while no tool row names it yet,
+  and the transcript has no footer. The manual agent editor similarly pins its dirty
   baseline rather than treating a background refetch as permission to overwrite newer settings.
 - Upload-queued composer sends sample in two moments, on purpose. What the person decided by
   pressing Submit (`onSend`, the research offer, the blocked/disabled state, the model) is frozen at the

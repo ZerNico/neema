@@ -109,6 +109,7 @@ export class AgentDraftService extends Context.Service<
               config(userId),
               {
                 conversationId: parsed.conversationId,
+                createdByMessageId: parsed.createdByMessageId,
                 ...(parsed.agentId !== undefined ? { targetId: parsed.agentId } : {}),
                 ...(parsed.changes !== undefined ? { changes: parsed.changes } : {}),
               },

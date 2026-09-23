@@ -1,7 +1,7 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
@@ -19,11 +19,9 @@ export function VirtualMessageList({
   messages,
   /** Monotonically growing signal (e.g. streamed text length) to follow. */
   followKey,
-  footer,
 }: {
   messages: DisplayMessage[];
   followKey: number;
-  footer?: ReactNode;
 }) {
   "use no memo";
 
@@ -31,7 +29,7 @@ export function VirtualMessageList({
   const [atBottom, setAtBottom] = useState(true);
   // Whether auto-follow is engaged; detaches when the user scrolls up.
   const pinnedRef = useRef(true);
-  const count = messages.length + (footer ? 1 : 0);
+  const count = messages.length;
 
   // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual exposes a mutable imperative instance
   const virtualizer = useVirtualizer({
@@ -44,7 +42,7 @@ export function VirtualMessageList({
     // way to the bottom.
     initialOffset: () => count * ESTIMATED_MESSAGE_HEIGHT,
     overscan: 6,
-    getItemKey: (index) => messages[index]?.id ?? "message-list-footer",
+    getItemKey: (index) => messages[index]!.id,
     anchorTo: "end",
     scrollEndThreshold: BOTTOM_THRESHOLD,
     useAnimationFrameWithResizeObserver: true,
@@ -122,11 +120,7 @@ export function VirtualMessageList({
               className="absolute left-0 w-full px-4 py-2"
               style={{ top: item.start }}
             >
-              {item.index < messages.length ? (
-                <MessageBubble message={messages[item.index]!} />
-              ) : (
-                footer
-              )}
+              <MessageBubble message={messages[item.index]!} />
             </div>
           ))}
         </div>

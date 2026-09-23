@@ -137,6 +137,7 @@ export class ScheduleDraftService extends Context.Service<
               config(userId),
               {
                 conversationId: parsed.conversationId,
+                createdByMessageId: parsed.createdByMessageId,
                 ...(parsed.scheduleId !== undefined ? { targetId: parsed.scheduleId } : {}),
                 ...(parsed.changes !== undefined ? { changes: parsed.changes } : {}),
               },

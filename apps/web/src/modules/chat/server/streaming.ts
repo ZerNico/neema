@@ -621,6 +621,7 @@ export class StreamEngine extends Context.Service<
             services: authoringServices,
             userId: input.userId,
             conversationId: input.conversationId,
+            messageId: input.messageId,
             currentModelId: input.modelId,
             writeGuard,
           });
@@ -628,6 +629,7 @@ export class StreamEngine extends Context.Service<
             services: scheduleAuthoringServices,
             userId: input.userId,
             conversationId: input.conversationId,
+            messageId: input.messageId,
             currentModelId: input.modelId,
             writeGuard,
           });

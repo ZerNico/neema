@@ -78,7 +78,18 @@ describe("agent drafts migrate onto the generic draft store", () => {
           yield* db.execute(
             `insert into conversation_agent_drafts
                (id, conversation_id, settings, revision, target_agent_id, target_revision, saved_draft_revision)
-             values ('d1', 'c1', '{"name":"Writer","instructions":"Keep it short"}', 3, 'agent-9', 2, 3)` as never,
+             values ('d1', 'c1', '{"name":"Writer","instructions":"Keep it short"}', 3, 'agent-9', 2, 3),
+                    ('d2', 'c1', '{"name":"Left behind"}', 1, null, null, null)` as never,
+          );
+          // d1 was opened by an answer still in the chat; d2's answer was rewound.
+          yield* db.execute(
+            `insert into messages (id, conversation_id, role) values ('m1', 'c1', 'assistant')` as never,
+          );
+          yield* db.execute(
+            `insert into message_tool_calls
+               (id, message_id, turn_index, call_index, provider_call_id, tool_name, arguments, result, status)
+             values ('t1', 'm1', 0, 0, 'p1', 'draft_agent', '{}',
+                     '{"outcome":"drafted","draftId":"d1","draftConversationId":"c1"}', 'complete')` as never,
           );
         }),
       );
@@ -99,6 +110,7 @@ describe("agent drafts migrate onto the generic draft store", () => {
           targetId: "agent-9",
           targetRevision: 2,
           savedDraftRevision: 3,
+          createdByMessageId: "m1",
         }),
       ]);
     } finally {

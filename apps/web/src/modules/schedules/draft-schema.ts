@@ -41,6 +41,7 @@ export type ScheduleDraftRevisionInput = typeof ScheduleDraftRevisionInput.Type;
 /** Opening is per conversation; the draft it resolves to may already exist. */
 export const OpenScheduleDraftInput = Schema.Struct({
   conversationId: ResourceId,
+  createdByMessageId: ResourceId,
   scheduleId: Schema.optionalKey(ResourceId),
   changes: Schema.optionalKey(ScheduleDraftPatch),
 });

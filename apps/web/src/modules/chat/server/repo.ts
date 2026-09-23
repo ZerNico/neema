@@ -108,15 +108,29 @@ export interface GenerationConfig {
   /** Workspace files this turn's send claimed; empty for every other attempt. */
   readonly workspaceFiles?: ReadonlyArray<string>;
 }
+export interface DraftSummary {
+  id: string;
+  name: string;
+  messageId: string;
+}
+const draftSummary = (draft: { id: string; settings: unknown; messageId: string }): DraftSummary => ({
+  id: draft.id,
+  name: (draft.settings as { name?: string }).name ?? "",
+  messageId: draft.messageId,
+});
+
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
   /** Fixed at creation. Read by the resolver, which refuses a work send without a folder. */
   readonly mode?: "chat" | "work";
-  /** Every draft this conversation owns, oldest first. Names are already public. */
-  readonly agentDrafts?: ReadonlyArray<{ id: string; name: string }>;
+  /**
+   * Every draft this conversation owns, oldest first. Names are already public;
+   * the creating answer lets a rewind confirmation name what it removes.
+   */
+  readonly agentDrafts?: ReadonlyArray<DraftSummary>;
   /** Schedule drafts the conversation owns, discovered the same way. */
-  readonly scheduleDrafts?: ReadonlyArray<{ id: string; name: string }>;
+  readonly scheduleDrafts?: ReadonlyArray<DraftSummary>;
   /** Mutable chat documents stay out of history; the loader carries summaries only. */
   readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
 }
@@ -371,7 +385,12 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationAgents.conversationId, conversationId))
     .pipe(Effect.orDie);
   const drafts = yield* tx
-    .select({ id: conversationDrafts.id, kind: conversationDrafts.kind, settings: conversationDrafts.settings })
+    .select({
+      id: conversationDrafts.id,
+      kind: conversationDrafts.kind,
+      settings: conversationDrafts.settings,
+      messageId: conversationDrafts.createdByMessageId,
+    })
     .from(conversationDrafts)
     .where(eq(conversationDrafts.conversationId, conversationId))
     .orderBy(asc(conversationDrafts.id))
@@ -395,12 +414,8 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .pipe(Effect.orDie);
   return {
     agent: agent ? { agentId: agent.agentId } : null,
-    agentDrafts: drafts
-      .filter((draft) => draft.kind === "agent")
-      .map((draft) => ({ id: draft.id, name: (draft.settings as { name?: string }).name ?? "" })),
-    scheduleDrafts: drafts
-      .filter((draft) => draft.kind === "schedule")
-      .map((draft) => ({ id: draft.id, name: (draft.settings as { name?: string }).name ?? "" })),
+    agentDrafts: drafts.filter((draft) => draft.kind === "agent").map(draftSummary),
+    scheduleDrafts: drafts.filter((draft) => draft.kind === "schedule").map(draftSummary),
     documents,
     mode: conversation?.mode ?? "chat",
   } satisfies ConversationDefaults;
@@ -2295,11 +2310,15 @@ export class ChatRepo extends Context.Service<
                   .pipe(Effect.orDie);
                 // This answer is being generated again, so what it produced goes
                 // with it. Messages that are deleted outright take their
-                // documents through the foreign key instead; retry keeps the row
-                // id, so the document has to be removed explicitly.
+                // documents and drafts through the foreign key instead; retry
+                // keeps the row id, so those have to be removed explicitly.
                 yield* tx
                   .delete(conversationDocuments)
                   .where(eq(conversationDocuments.createdByMessageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .delete(conversationDrafts)
+                  .where(eq(conversationDrafts.createdByMessageId, input.messageId))
                   .pipe(Effect.orDie);
                 yield* tx
                   .delete(messageCompactionEvents)

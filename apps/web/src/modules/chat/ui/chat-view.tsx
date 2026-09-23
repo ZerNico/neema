@@ -5,8 +5,6 @@ import {
 } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
-import { AgentDraftWidget } from "./agent-draft-activity-block.tsx";
-import { ScheduleDraftWidget } from "./schedule-draft-activity-block.tsx";
 import {
   DocumentToolName,
   documentResultOk,
@@ -448,64 +446,70 @@ function toCompactionActivity(row: {
 }
 
 /**
- * Puts back a document whose `create_document` row a rewind deleted. It goes at
- * the end of the answer that made it, so a document is always part of the
- * conversation rather than a widget hanging under the whole transcript.
+ * " The document “Plan” will also be deleted." for one casualty; counts per
+ * kind for several. Empty when a rewind takes nothing of the sort.
  */
-function placeStrandedDocuments({
-  messages,
-  conversationId,
-  documentIds,
-  shown,
-  summaries,
-}: {
-  messages: DisplayMessage[];
-  conversationId: string;
-  documentIds: ReadonlyArray<string>;
-  shown: ReadonlySet<string>;
-  summaries: ReadonlyArray<{ id: string; title: string; messageId?: string | null }>;
-}): DisplayMessage[] {
-  const stranded = documentIds.filter((documentId) => !shown.has(documentId));
+function lossSentence(items: ReadonlyArray<{ noun: string; name: string }>) {
+  if (items.length === 0) return "";
+  if (items.length === 1) {
+    const [item] = items;
+    return item!.name
+      ? ` The ${item!.noun} “${item!.name}” will also be deleted.`
+      : ` An untitled ${item!.noun} will also be deleted.`;
+  }
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item.noun, (counts.get(item.noun) ?? 0) + 1);
+  const parts = [...counts].map(([noun, count]) => `${count} ${noun}${count === 1 ? "" : "s"}`);
+  const list =
+    parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  return ` ${list} will also be deleted.`;
+}
+
+/** Something the transcript should show a card for, but no tool row names yet. */
+interface Stranded {
+  /** The answer that created it, when known. */
+  messageId: string | null | undefined;
+  activity: (message: DisplayMessage, index: number) => ToolActivity;
+}
+
+/**
+ * Puts a card with no tool row of its own at the end of the answer that made
+ * it: a document whose `create_document` row predates the column, or a draft
+ * the loader reports before the tool rows arrive. Never under the transcript,
+ * where it would read as belonging to the whole chat.
+ */
+function placeStranded(messages: DisplayMessage[], stranded: ReadonlyArray<Stranded>) {
   if (stranded.length === 0) return messages;
-  const summary = new Map(summaries.map((document) => [document.id, document]));
   const answers = messages.filter((message) => message.role === "assistant");
   const fallback = answers.at(-1)?.id;
-  const byMessage = new Map<string, string[]>();
-  for (const documentId of stranded) {
-    const anchor = summary.get(documentId)?.messageId;
+  const byMessage = new Map<string, Stranded[]>();
+  for (const item of stranded) {
+    const anchor = item.messageId;
     const host = anchor && answers.some((message) => message.id === anchor) ? anchor : fallback;
     if (!host) continue;
     const list = byMessage.get(host);
-    if (list) list.push(documentId);
-    else byMessage.set(host, [documentId]);
+    if (list) list.push(item);
+    else byMessage.set(host, [item]);
   }
   if (byMessage.size === 0) return messages;
   return messages.map((message) => {
-    const ids = byMessage.get(message.id);
-    if (!ids) return message;
+    const items = byMessage.get(message.id);
+    if (!items) return message;
     return {
       ...message,
       toolActivities: [
         ...message.toolActivities,
-        ...ids.map((documentId, index): ToolActivity => ({
-          family: "document",
-          callId: `document:${documentId}`,
-          name: "create_document",
-          status: "complete",
-          turnIndex: Number.MAX_SAFE_INTEGER,
-          callIndex: index,
-          textOffset: message.content.length,
-          result: {
-            outcome: "created",
-            documentId,
-            documentConversationId: conversationId,
-            ...(summary.get(documentId)?.title ? { title: summary.get(documentId)!.title } : {}),
-          },
-        })),
+        ...items.map((item, index) => item.activity(message, index)),
       ],
     };
   });
 }
+
+/** The ids a family's rows already show, so only the rest need placing. */
+const shownIds = (
+  messages: DisplayMessage[],
+  pick: (activity: ToolActivity) => string | undefined,
+) => new Set(messages.flatMap((message) => message.toolActivities.flatMap((a) => pick(a) ?? [])));
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const agentDraft = useRef<AgentDraftHandle>(null);
@@ -725,50 +729,36 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ),
     [desktopApprovals],
   );
-  // Retry/edit can remove every reference before the refreshed loader sees the
-  // retained draft, so ids accumulate while this conversation is mounted. A
-  // discarded draft is removed again: nothing on the server can reintroduce it.
-  const [remembered, setRemembered] = useState<{
+  // A draft goes with the answer that opened it, like a document, so the loader
+  // summary plus live results are the whole truth. A discarded one is held out
+  // until the refreshed loader and tool rows stop naming it.
+  const [forgottenDrafts, setForgottenDrafts] = useState<{
     conversationId: string;
     ids: ReadonlySet<string>;
-    scheduleIds: ReadonlySet<string>;
-  }>({ conversationId, ids: new Set(), scheduleIds: new Set() });
-  const scoped = remembered.conversationId === conversationId ? remembered.ids : new Set<string>();
-  const scopedSchedule =
-    remembered.conversationId === conversationId ? remembered.scheduleIds : new Set<string>();
+  }>({ conversationId, ids: new Set() });
+  const scopedForgottenDrafts =
+    forgottenDrafts.conversationId === conversationId ? forgottenDrafts.ids : new Set<string>();
   const draftIds = useMemo(
-    () => [...new Set([...scoped, ...discoveredDrafts])].sort(),
-    [discoveredDrafts, scoped],
+    () => [...discoveredDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).sort(),
+    [discoveredDrafts, scopedForgottenDrafts],
   );
   const scheduleDraftIds = useMemo(
-    () => [...new Set([...scopedSchedule, ...discoveredScheduleDrafts])].sort(),
-    [discoveredScheduleDrafts, scopedSchedule],
+    () =>
+      [...discoveredScheduleDrafts]
+        .filter((draftId) => !scopedForgottenDrafts.has(draftId))
+        .sort(),
+    [discoveredScheduleDrafts, scopedForgottenDrafts],
   );
-  if (
-    draftIds.length !== scoped.size ||
-    scheduleDraftIds.length !== scopedSchedule.size ||
-    remembered.conversationId !== conversationId
-  )
-    setRemembered({
-      conversationId,
-      ids: new Set(draftIds),
-      scheduleIds: new Set(scheduleDraftIds),
-    });
+  // Draft ids are UUIDs, so one set serves both kinds.
   const forgetDraft = useCallback(
     (draftId: string) =>
-      setRemembered((current) => {
-        const ids = new Set(current.ids);
-        return ids.delete(draftId) ? { ...current, ids } : current;
+      setForgottenDrafts((current) => {
+        const ids =
+          current.conversationId === conversationId ? new Set(current.ids) : new Set<string>();
+        ids.add(draftId);
+        return { conversationId, ids };
       }),
-    [],
-  );
-  const forgetScheduleDraft = useCallback(
-    (draftId: string) =>
-      setRemembered((current) => {
-        const ids = new Set(current.scheduleIds);
-        return ids.delete(draftId) ? { ...current, scheduleIds: ids } : current;
-      }),
-    [],
+    [conversationId],
   );
   const hasAgentDraft = draftIds.length > 0;
   const hasScheduleDraft = scheduleDraftIds.length > 0;
@@ -1156,8 +1146,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   // oxlint-enable react-hooks/exhaustive-deps
   const tailMessageId = data.messages.at(-1)?.id;
 
-  // A rewind takes the documents those answers created with it, so the dialog
-  // names them: a checklist someone has been ticking is not a silent casualty.
+  // A rewind takes the documents and drafts those answers created with it, so
+  // the dialog names them: a checklist someone has been ticking, or settings
+  // someone has been adjusting, is not a silent casualty.
   const documentLoss = useCallback(
     (fromMessageId: string, inclusive: boolean) => {
       const index = data.messages.findIndex((message) => message.id === fromMessageId);
@@ -1165,15 +1156,21 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       const removed = new Set(
         data.messages.slice(inclusive ? index : index + 1).map((message) => message.id),
       );
-      const titles = (data.documents ?? [])
-        .filter((document) => document.messageId && removed.has(document.messageId))
-        .map((document) => document.title);
-      if (titles.length === 0) return "";
-      return titles.length === 1
-        ? ` The document “${titles[0]}” will also be deleted.`
-        : ` ${titles.length} documents will also be deleted.`;
+      const lost = <T extends { messageId: string | null }>(items: ReadonlyArray<T> | undefined) =>
+        (items ?? []).filter((item) => item.messageId && removed.has(item.messageId));
+      return lossSentence([
+        ...lost(data.documents).map((document) => ({
+          noun: "document",
+          name: document.title,
+        })),
+        ...lost(data.agentDrafts).map((draft) => ({ noun: "agent draft", name: draft.name })),
+        ...lost(data.scheduleDrafts).map((draft) => ({
+          noun: "schedule draft",
+          name: draft.name,
+        })),
+      ]);
     },
-    [data.documents, data.messages],
+    [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts],
   );
 
   const retry = useCallback(
@@ -1711,56 +1708,80 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     ],
   );
 
-  // Drafts with no transcript row of their own: a retry can delete the tool call
-  // that introduced one, and the draft itself survives that.
-  const shown = new Set(
-    display.flatMap((message) =>
-      message.toolActivities.flatMap((activity) =>
-        activity.family === "agent-draft" &&
-        activity.result?.draftId &&
-        activity.result.draftConversationId === conversationId
-          ? [activity.result.draftId]
-          : [],
-      ),
+  // A card lives on the tool row that made it. Only what no row names yet is
+  // placed by hand, in its own answer.
+  const mine = (id: string | undefined, owner: string | undefined) =>
+    id && owner === conversationId ? id : undefined;
+  const shownAgentDrafts = shownIds(display, (activity) =>
+    activity.family === "agent-draft"
+      ? mine(activity.result?.draftId, activity.result?.draftConversationId)
+      : undefined,
+  );
+  const shownScheduleDrafts = shownIds(display, (activity) =>
+    activity.family === "schedule-draft"
+      ? mine(activity.result?.draftId, activity.result?.draftConversationId)
+      : undefined,
+  );
+  const shownDocuments = shownIds(display, (activity) =>
+    activity.family === "document" && activity.name === "create_document"
+      ? mine(activity.result?.documentId, activity.result?.documentConversationId)
+      : undefined,
+  );
+  const origin = new Map(
+    [...data.agentDrafts, ...(data.scheduleDrafts ?? []), ...(data.documents ?? [])].map(
+      (item) => [item.id, item],
     ),
   );
-  const orphaned = draftIds.filter((draftId) => !shown.has(draftId));
-  const shownScheduleDrafts = new Set(
-    display.flatMap((message) =>
-      message.toolActivities.flatMap((activity) =>
-        activity.family === "schedule-draft" &&
-        activity.result?.draftId &&
-        activity.result.draftConversationId === conversationId
-          ? [activity.result.draftId]
-          : [],
-      ),
-    ),
-  );
-  const orphanedScheduleDrafts = scheduleDraftIds.filter(
-    (draftId) => !shownScheduleDrafts.has(draftId),
-  );
-  // A document card lives on the create_document call that made it, at that
-  // call's place in the answer. Only a document whose creating row a rewind
-  // removed needs placing, and its own answer is where it belongs.
-  const shownDocuments = new Set(
-    display.flatMap((message) =>
-      message.toolActivities.flatMap((activity) =>
-        activity.family === "document" &&
-        activity.name === "create_document" &&
-        activity.result?.documentId &&
-        activity.result.documentConversationId === conversationId
-          ? [activity.result.documentId]
-          : [],
-      ),
-    ),
-  );
-  const withDocuments = placeStrandedDocuments({
-    messages: display,
-    conversationId,
-    documentIds,
-    shown: shownDocuments,
-    summaries: data.documents ?? [],
+  const placed = (message: DisplayMessage, index: number, id: string) => ({
+    status: "complete" as const,
+    callId: `placed:${id}`,
+    turnIndex: Number.MAX_SAFE_INTEGER,
+    callIndex: index,
+    textOffset: message.content.length,
   });
+  const withPlacedCards = placeStranded(display, [
+    ...draftIds
+      .filter((draftId) => !shownAgentDrafts.has(draftId))
+      .map((draftId) => ({
+        messageId: origin.get(draftId)?.messageId,
+        activity: (message: DisplayMessage, index: number): ToolActivity => ({
+          ...placed(message, index, draftId),
+          family: "agent-draft",
+          name: "draft_agent",
+          result: { outcome: "drafted", draftId, draftConversationId: conversationId },
+        }),
+      })),
+    ...scheduleDraftIds
+      .filter((draftId) => !shownScheduleDrafts.has(draftId))
+      .map((draftId) => ({
+        messageId: origin.get(draftId)?.messageId,
+        activity: (message: DisplayMessage, index: number): ToolActivity => ({
+          ...placed(message, index, draftId),
+          family: "schedule-draft",
+          name: "draft_schedule",
+          result: { outcome: "drafted", draftId, draftConversationId: conversationId },
+        }),
+      })),
+    ...documentIds
+      .filter((documentId) => !shownDocuments.has(documentId))
+      .map((documentId) => {
+        const title = (origin.get(documentId) as { title?: string } | undefined)?.title;
+        return {
+          messageId: origin.get(documentId)?.messageId,
+          activity: (message: DisplayMessage, index: number): ToolActivity => ({
+            ...placed(message, index, documentId),
+            family: "document",
+            name: "create_document",
+            result: {
+              outcome: "created",
+              documentId,
+              documentConversationId: conversationId,
+              ...(title ? { title } : {}),
+            },
+          }),
+        };
+      }),
+  ]);
 
   return (
     <DocumentOwner
@@ -1779,7 +1800,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       >
       <ScheduleDraftOwner
         draftIds={scheduleDraftIds}
-        onGone={forgetScheduleDraft}
+        onGone={forgetDraft}
         autoOpenIds={liveCreated.schedule}
         ref={scheduleDraft}
       >
@@ -1833,20 +1854,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               workspaceRoot={folder?.status?.workspace.path ?? null}
             >
               <VirtualMessageList
-                messages={withDocuments}
+                messages={withPlacedCards}
                 followKey={stream.lastSeq}
-                footer={
-                  orphaned.length || orphanedScheduleDrafts.length ? (
-                    <div className="flex flex-col">
-                      {orphaned.map((draftId) => (
-                        <AgentDraftWidget key={draftId} draftId={draftId} />
-                      ))}
-                      {orphanedScheduleDrafts.map((draftId) => (
-                        <ScheduleDraftWidget key={draftId} draftId={draftId} />
-                      ))}
-                    </div>
-                  ) : null
-                }
               />
             </LocalFileConversationProvider>
           </div>

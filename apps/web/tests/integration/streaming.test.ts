@@ -19,6 +19,7 @@ import { uuidv7 } from "uuidv7";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { eq, sql } from "drizzle-orm";
 import {
+  conversationDrafts,
   conversations,
   schedules,
   attachmentBlobs,
@@ -611,8 +612,11 @@ describe("conversational agent authoring", () => {
             }),
           ),
         );
+        // Retrying the answer that opened the draft takes the draft with it, like
+        // a document: nothing in the transcript would introduce it any more. The
+        // agent it already saved is a resource of its own and stays.
         authoringScript = (input) => {
-          expect(JSON.stringify(input.prompt)).toContain("PRIVATE_LATER_DRAFT");
+          expect(JSON.stringify(input.prompt)).not.toContain("PRIVATE_LATER_DRAFT");
           return reply();
         };
         await runtime.runPromise(
@@ -629,41 +633,91 @@ describe("conversational agent authoring", () => {
           loadConversationDetail(seed.userId, conversationId),
         );
         expect(retried.toolCalls).toHaveLength(0);
-        expect(retried.agentDrafts).toHaveLength(1);
-        const sent = await runtime.runPromise(
-          ChatService.use((service) =>
-            service.sendMessage({
-              userId: seed.userId,
-              conversation: { kind: "existing", id: conversationId },
-              modelId: textModelId,
-              content: "Keep working with my changes.",
-              searchEnabled: false,
-              researchEnabled: false,
-              attachmentIds: [],
-            }),
-          ),
-        );
-        await collectDraftTurn(sent.assistantMessageId);
-        const edited = await runtime.runPromise(
-          ChatService.use((service) =>
-            service.editMessage({
-              userId: seed.userId,
-              conversationId,
-              messageId: detail.messages[0]!.id,
-              modelId: textModelId,
-              content: "Let’s refine the agent.",
-              searchEnabled: false,
-              researchEnabled: false,
-              attachmentIds: [],
-            }),
-          ),
-        );
-        await collectDraftTurn(edited.assistantMessageId);
+        expect(retried.agentDrafts).toEqual([]);
+        expect(
+          await runtime.runPromise(AgentRepo.use((repo) => repo.get(seed.userId, targetId))),
+        ).toMatchObject({ row: { configRevision: 2 } });
       } finally {
         authoringScript = null;
       }
     },
   );
+
+  it("removes a draft with the answer that opened it when an earlier message is edited", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const conversationId = seed.conversation.id;
+    const turn = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    const edit = (messageId: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.editMessage({
+            userId: seed.userId,
+            conversationId,
+            messageId,
+            modelId: textModelId,
+            content: "Something else.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    const drafts = () =>
+      runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select()
+            .from(conversationDrafts)
+            .where(eq(conversationDrafts.conversationId, conversationId)),
+        ),
+      );
+    let round = 0;
+    authoringScript = (input) =>
+      ++round === 1
+        ? authoringTool(input, "draft_schedule", { changes: { name: "Morning digest" } })
+        : reply();
+    try {
+      const first = await turn("Draft me a morning digest.");
+      await collectDraftTurn(first.assistantMessageId);
+      const [draft] = await drafts();
+      expect(draft).toMatchObject({
+        kind: "schedule",
+        settings: { name: "Morning digest" },
+        createdByMessageId: first.assistantMessageId,
+      });
+      const second = await turn("Thanks.");
+      await collectDraftTurn(second.assistantMessageId);
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      expect(detail.scheduleDrafts).toEqual([
+        { id: draft!.id, name: "Morning digest", messageId: first.assistantMessageId },
+      ]);
+
+      // Editing the later message rewinds only past its own answer.
+      const later = await edit(detail.messages[2]!.id);
+      await collectDraftTurn(later.assistantMessageId);
+      expect((await drafts()).map((row) => row.id)).toEqual([draft!.id]);
+
+      // Editing the message that led to the draft rewinds the answer that opened it.
+      const earlier = await edit(detail.messages[0]!.id);
+      await collectDraftTurn(earlier.assistantMessageId);
+      expect(await drafts()).toEqual([]);
+    } finally {
+      authoringScript = null;
+    }
+  });
 
   it.each([false, true])(
     "refreshes and budgets a direct edit before the next provider call (small context: %s)",
@@ -770,6 +824,7 @@ describe("conversational agent authoring", () => {
           seed.userId,
           {
             conversationId: seed.conversation.id,
+            createdByMessageId: seed.assistant.id,
             changes: { name: "Before clarification" },
           },
           () => Effect.void,
@@ -2732,9 +2787,9 @@ describe("scheduled turns", () => {
     );
     expect(result.conversation?.scheduleId).toBeTypeOf("string");
     // Listed like any chat, and marked as a schedule's.
-    expect(
-      result.listed.conversations.find((c) => c.id === result.conversation!.id),
-    ).toMatchObject({ scheduled: true });
+    expect(result.listed.conversations.find((c) => c.id === result.conversation!.id)).toMatchObject(
+      { scheduled: true },
+    );
     expect(result.answer).toMatchObject({
       status: "complete",
       content: "alpha beta gamma delta epsilon",
