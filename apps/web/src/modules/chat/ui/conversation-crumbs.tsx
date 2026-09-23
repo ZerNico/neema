@@ -9,6 +9,7 @@ import { HeaderContent } from "~/ui/header-slot.tsx";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { agentIcon } from "./context-picker.tsx";
+import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
 
 interface ScheduleOrigin {
   scheduleId: string;
@@ -25,20 +26,26 @@ const tagClassName = "max-w-48 shrink";
  * chrome rather than above the first message or in the composer.
  */
 export function ConversationCrumbs({
+  conversationId,
   title,
   schedule,
   branchedFrom,
   agent,
 }: {
+  conversationId: string;
   title: string | null;
   agent: { id: string | null; name: string | null; icon?: string } | null | undefined;
   schedule: ScheduleOrigin | null | undefined;
   branchedFrom: { conversationId: string; title: string | null } | null | undefined;
 }) {
+  // Its own registry, not the sidebar's: each surface plays the reveal once.
+  const [registry] = useState(createTitleRevealRegistry);
   return (
     <HeaderContent>
       <div className="flex min-w-0 items-center gap-2">
-        <h1 className="truncate text-sm">{title ?? "New chat…"}</h1>
+        <h1 className="flex min-w-0 text-sm">
+          <ConversationTitle conversationId={conversationId} title={title} registry={registry} />
+        </h1>
         {agent ? <AgentTag agent={agent} /> : null}
         {schedule ? <ScheduleTag schedule={schedule} /> : null}
         {branchedFrom ? (

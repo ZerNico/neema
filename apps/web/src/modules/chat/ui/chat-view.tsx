@@ -1890,6 +1890,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       >
         <div className="flex h-full flex-col">
           <ConversationCrumbs
+            conversationId={conversationId}
             title={data.conversation.title}
             schedule={data.schedule}
             branchedFrom={data.branchedFrom}

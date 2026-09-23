@@ -26,6 +26,7 @@ const renderCrumbs = (props: Partial<Parameters<typeof ConversationCrumbs>[0]>) 
           <HeaderSlot />
         </header>
         <ConversationCrumbs
+          conversationId="c1"
           title="Weekly digest"
           schedule={null}
           branchedFrom={null}
@@ -41,6 +42,11 @@ describe("ConversationCrumbs", () => {
     renderCrumbs({});
     const header = screen.getByRole("banner");
     expect(header).toHaveTextContent(/^Weekly digest$/);
+  });
+
+  it("shows an untitled chat as pending, like the sidebar", () => {
+    renderCrumbs({ title: null });
+    expect(screen.getByLabelText("Generating title")).toHaveTextContent("New chat…");
   });
 
   it("tags the installed agent without linking to its owner's editor", () => {
