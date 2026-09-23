@@ -5,6 +5,7 @@ import {
 } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
+import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import {
   DocumentToolName,
   documentResultOk,
@@ -28,10 +29,9 @@ import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
-import { Calendar03Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { conversationQuery } from "../client/queries.ts";
@@ -1899,44 +1899,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         ref={scheduleDraft}
       >
         <div className="flex h-full flex-col">
-          {data.schedule ? (
-            // Same geometry as the branch banner: provenance of the whole
-            // conversation, not of any one message.
-            <div className="[scrollbar-gutter:stable_both-edges]">
-              <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
-                <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-3.5 shrink-0" />
-                <span className="shrink-0">
-                  {data.schedule.runsHere ? "Schedule running here:" : "Scheduled run of"}
-                </span>
-                <Link
-                  to="/schedules/$scheduleId"
-                  params={{ scheduleId: data.schedule.scheduleId }}
-                  className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
-                >
-                  {data.schedule.name}
-                </Link>
-              </div>
-            </div>
-          ) : null}
+          <ConversationCrumbs
+            title={data.conversation.title}
+            schedule={data.schedule}
+            branchedFrom={data.branchedFrom}
+          />
           {foreignMachine ? (
             <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
-          ) : null}
-          {data.branchedFrom ? (
-            // Outside the scroller, on the message column's geometry: lineage is a
-            // property of the conversation, not of its first message.
-            <div className="[scrollbar-gutter:stable_both-edges]">
-              <div className="text-muted-foreground mx-auto flex w-full max-w-3xl items-center gap-1.5 px-4 pb-2 pt-1 text-xs">
-                <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-3.5 shrink-0" />
-                <span className="shrink-0">Branched from</span>
-                <Link
-                  to="/chat/$conversationId"
-                  params={{ conversationId: data.branchedFrom.conversationId }}
-                  className="hover:text-foreground min-w-0 truncate underline underline-offset-2"
-                >
-                  {data.branchedFrom.title ?? "New chat…"}
-                </Link>
-              </div>
-            </div>
           ) : null}
           <div className="min-h-0 flex-1">
             {/* lastSeq covers tool-activity-only updates too */}

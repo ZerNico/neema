@@ -23,6 +23,7 @@ import {
   stopGeneration,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { EMPTY_AGENT_DRAFT, type AgentDraft } from "~/modules/agents/draft-schema.ts";
@@ -533,10 +534,13 @@ const renderView = (
         <AppMotionProvider>
           <ConfirmProvider>
             <DetailPanelProvider>
-              <Suspense fallback={null}>
-                <ChatView conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7" />
-              </Suspense>
-              <DetailPanelRail />
+              <HeaderSlotProvider>
+                <HeaderSlot />
+                <Suspense fallback={null}>
+                  <ChatView conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7" />
+                </Suspense>
+                <DetailPanelRail />
+              </HeaderSlotProvider>
             </DetailPanelProvider>
           </ConfirmProvider>
         </AppMotionProvider>
@@ -2167,13 +2171,13 @@ describe("ChatView branching", () => {
     renderView({ conversationId: "c0", title: "Root chat" });
 
     expect(screen.getByText("Branched from")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "Root chat" });
+    const link = screen.getByRole("link", { name: /^Branched from\s?Root chat$/ });
     expect(link).toHaveAttribute("data-conversation-id", "c0");
   });
 
   it("names a source whose title has not resolved yet like the sidebar does", () => {
     renderView({ conversationId: "c0", title: null });
-    expect(screen.getByRole("link", { name: "New chat…" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Branched from\s?New chat…$/ })).toBeInTheDocument();
   });
 
   it("shows no lineage chip for a conversation that was started fresh", () => {

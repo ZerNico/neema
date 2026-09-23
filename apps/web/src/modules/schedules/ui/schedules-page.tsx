@@ -8,25 +8,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { scheduleAuthoringRequest } from "../authoring.ts";
-import { cadenceText, parseCadence } from "../cadence.ts";
 import { schedulesQuery } from "../client/queries.ts";
-import type { ScheduleSummary } from "../schema.ts";
-import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
+import { cadenceLabel, nextFireLabel } from "./schedule-labels.ts";
 import { CreateSplitButton } from "~/ui/create-split-button.tsx";
 import { EmptyState, ErrorState, ListCard, ListRow, ListSkeleton, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
-
-// A paused schedule already carries its badge; the line just drops the next run.
-const nextFireLabel = (schedule: ScheduleSummary) => {
-  if (schedule.paused) return null;
-  if (!schedule.nextFireAt) return "No upcoming run";
-  const next = new Date(schedule.nextFireAt);
-  return next.getTime() <= Date.now() ? "Due now" : `Next run ${relativeAgeLabel(next)}`;
-};
-
-/** Named from the cron when the picker can read it, so a long day list stays one line. */
-const cadenceLabel = (schedule: ScheduleSummary) =>
-  cadenceText(parseCadence(schedule.cron), true) ?? schedule.scheduleText;
 
 export function SchedulesPage() {
   const schedules = useQuery(schedulesQuery);
