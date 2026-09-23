@@ -150,7 +150,9 @@ describe("AskUserBlock", () => {
         answers: [{ selected: [1], custom: "" }],
       }),
     );
-    expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument(),
+    );
   });
 
   it("makes custom text and options mutually exclusive for single selection", () => {
