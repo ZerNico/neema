@@ -379,7 +379,13 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     messages: (): Prompt.MessageEncoded[] =>
       known.length
         ? [
-            { role: "system", content: SCHEDULE_AUTHORING_POLICY },
+            // User role, like the runtime context: providers that hoist system
+            // messages would otherwise fold this into the cached system block
+            // the moment a draft appears.
+            {
+              role: "user",
+              content: `<application-policy>\n${SCHEDULE_AUTHORING_POLICY}\n</application-policy>`,
+            },
             {
               role: "assistant",
               content:

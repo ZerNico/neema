@@ -478,7 +478,13 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
     messages: (): Prompt.MessageEncoded[] =>
       known.length || inspected.size
         ? [
-            { role: "system", content: AGENT_AUTHORING_POLICY },
+            // User role, like the runtime context: providers that hoist system
+            // messages would otherwise fold this into the cached system block
+            // the moment a draft appears.
+            {
+              role: "user",
+              content: `<application-policy>\n${AGENT_AUTHORING_POLICY}\n</application-policy>`,
+            },
             {
               role: "assistant",
               content:

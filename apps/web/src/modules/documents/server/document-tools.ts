@@ -522,7 +522,13 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       if (!known.length) return [];
       const current = focused();
       return [
-        { role: "system", content: DOCUMENT_POLICY },
+        // User role, like the runtime context: providers that hoist system
+        // messages would otherwise fold this into the cached system block the
+        // moment a document appears.
+        {
+          role: "user",
+          content: `<application-policy>\n${DOCUMENT_POLICY}\n</application-policy>`,
+        },
         {
           role: "assistant",
           content:

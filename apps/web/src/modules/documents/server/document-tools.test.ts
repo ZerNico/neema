@@ -154,7 +154,8 @@ describe("document tools trailing data", () => {
     expect(created).toMatchObject({ outcome: "created", title: "Plan", revision: 1 });
     expect(JSON.stringify(created)).not.toContain("# Plan");
     const messages = tools.messages();
-    expect(messages[0]).toMatchObject({ role: "system" });
+    // Never system role: a hoisting provider would fold it into the cached system block.
+    expect(messages[0]).toMatchObject({ role: "user" });
     expect(String(messages[0]!.content)).toContain("DATA TO EDIT");
     expect(data(messages)).toEqual({
       focused: {
