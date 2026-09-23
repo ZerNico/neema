@@ -11,6 +11,7 @@ import {
   AiGateway,
   ProviderContextOverflow,
   ProviderUnreachable,
+  cacheAnchor,
   catalogPricing,
   inferType,
   isContextOverflow,
@@ -127,6 +128,7 @@ const repoWith = (
   imageOutput = false,
   kind = "openai-compatible",
   vision = false,
+  modelKey = "vendor/model",
 ) =>
   Layer.succeed(ProviderRepo)(
     ProviderRepo.of(
@@ -136,11 +138,16 @@ const repoWith = (
           Effect.succeed({
             id: "m1",
             providerId: "p1",
-            modelKey: "vendor/model",
+            modelKey,
             capabilities: { reasoning: false, tools, vision, files: false, imageOutput },
           }),
         getProviderWithKey: () =>
-          Effect.succeed({ id: "p1", apiKey: "sk-test", baseUrl: "https://provider.test/v1", kind }),
+          Effect.succeed({
+            id: "p1",
+            apiKey: "sk-test",
+            baseUrl: "https://provider.test/v1",
+            kind,
+          }),
       }),
     ),
   );
@@ -187,6 +194,62 @@ describe("provider prompt ordering", () => {
         });
       }),
   );
+});
+
+describe("prompt cache points", () => {
+  const prompt = Prompt.make([
+    cacheAnchor({ role: "system", content: "Stable policy" }),
+    { role: "user", content: "Earlier question" },
+    { role: "assistant", content: "Earlier answer" },
+    cacheAnchor({ role: "user", content: "Current question" }),
+    { role: "user", content: "Per-request data" },
+  ]);
+  const send = (kind: string, modelKey: string) =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ content: "ok" }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt })),
+      ).pipe(
+        Effect.provide(
+          GatewayLayer.pipe(Layer.provide(repoWith(true, false, kind, false, modelKey))),
+        ),
+      );
+      return JSON.stringify(recorded[0]?.body);
+    });
+
+  it.effect("marks the anchored messages for Claude on OpenRouter, and nothing after them", () =>
+    Effect.gen(function* () {
+      const body = JSON.parse(yield* send("openrouter", "anthropic/claude-sonnet-5")) as {
+        messages: Array<{ content: unknown }>;
+      };
+      const marked = body.messages.map((message) =>
+        JSON.stringify(message).includes("cache_control"),
+      );
+      expect(marked).toEqual([true, false, false, true, false]);
+      expect(body.messages[3]).toEqual({
+        role: "user",
+        content: [{ type: "text", text: "Current question", cache_control: { type: "ephemeral" } }],
+      });
+    }),
+  );
+
+  for (const [kind, modelKey] of [
+    ["openrouter", "openai/gpt-5.6"],
+    ["openai-compatible", "anthropic/claude-sonnet-5"],
+    ["openai-compatible", "cc/claude-sonnet-5"],
+  ] as const)
+    it.effect(`sends no cache points to ${modelKey} on ${kind}, which caches by itself`, () =>
+      Effect.gen(function* () {
+        const body = yield* send(kind, modelKey);
+        expect(body).not.toContain("cache_control");
+        expect(body).not.toContain("anchor");
+      }),
+    );
 });
 
 describe("side generations", () => {

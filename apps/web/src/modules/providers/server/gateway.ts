@@ -11,7 +11,7 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { AiError, LanguageModel, type Prompt, Response, type Toolkit } from "effect/unstable/ai";
+import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
@@ -117,6 +117,41 @@ export type ChatStreamPart = Response.AnyPart;
 
 // Sensitivity follows the outgoing input, not only the requested output mode.
 // The adapter also restores reasoning details from tool-call/reasoning parts.
+/**
+ * Marks where a prompt's stable part ends, so a provider that caches only at
+ * explicit points can cache everything up to it. Inert everywhere else: the
+ * adapter reads only its own `openrouter` options.
+ */
+export const cacheAnchor = <M extends Prompt.MessageEncoded>(message: M): M => ({
+  ...message,
+  options: { ...message.options, cache: { anchor: true } },
+});
+
+// Claude caches only at explicit points; OpenAI, Gemini, DeepSeek, Grok and
+// local servers cache a stable prefix by themselves. A relay such as 9router
+// discards client markers and places its own.
+const explicitCacheModel = (providerKind: string, modelKey: string) =>
+  providerKind === "openrouter" && modelKey.startsWith("anthropic/");
+
+const withCacheControl = (prompt: Prompt.Prompt): Prompt.Prompt =>
+  Prompt.fromMessages(
+    prompt.content.map((message) =>
+      (message.role === "user" || message.role === "system") &&
+      (message.options["cache"] as { anchor?: unknown } | null | undefined)?.anchor === true
+        ? Prompt.makeMessage(message.role, {
+            ...message,
+            options: {
+              ...message.options,
+              openrouter: {
+                ...(message.options["openrouter"] as object | null | undefined),
+                cacheControl: { type: "ephemeral" },
+              },
+            },
+          } as never)
+        : message,
+    ),
+  );
+
 const hasSensitivePrompt = (prompt: Prompt.Prompt): boolean =>
   prompt.content.some(
     (message) =>
@@ -425,7 +460,12 @@ export class AiGateway extends Context.Service<
         // Hermes polyfill sits between the adapter and the toolkit loop:
         // adapter → hermes → think extraction (in streamChat/generateText).
         const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
-        return { providerId: model.providerId, layer, imageOutput: actualImageOutput };
+        return {
+          providerId: model.providerId,
+          layer,
+          imageOutput: actualImageOutput,
+          explicitCache: explicitCacheModel(provider.kind, model.modelKey),
+        };
       });
 
       // One place decides which provider rejections are recoverable, so chat
@@ -495,19 +535,21 @@ export class AiGateway extends Context.Service<
               providerId,
               layer: modelLayer,
               imageOutput,
+              explicitCache,
             } = yield* resolveModel(
               input.modelId,
               input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
               input.imageOutput === true,
             );
+            const prompt = explicitCache ? withCacheControl(input.prompt) : input.prompt;
 
             const parts = input.toolkit
               ? LanguageModel.streamText({
-                  prompt: input.prompt,
+                  prompt,
                   toolkit: input.toolkit,
                   toolChoice: input.toolChoice ?? "auto",
                 })
-              : LanguageModel.streamText({ prompt: input.prompt });
+              : LanguageModel.streamText({ prompt });
 
             // Always-on extractor: models emitting raw <think> blocks in text
             // (R1 distills, QwQ, local models) still feed the reasoning track.

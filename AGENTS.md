@@ -199,6 +199,8 @@ skipped one on purpose.
   containment.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
+- `docs/internals/prompt-caching.md`: what must stay byte-stable before history,
+  cache anchors and which providers need them.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking

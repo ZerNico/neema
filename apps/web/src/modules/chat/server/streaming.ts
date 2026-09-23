@@ -79,7 +79,11 @@ import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analyti
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
-import { AiGateway, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
+import {
+  AiGateway,
+  ProviderContextOverflow,
+  cacheAnchor,
+} from "~/modules/providers/server/gateway.ts";
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import {
@@ -1219,9 +1223,16 @@ export class StreamEngine extends Context.Service<
                 : [historyMessages[index]!]),
             ]);
           }
-          const buildBaseTranscript = () =>
-            Prompt.make([
-              ...fixedPrefix,
+          // Two anchors mark where the stable part ends: after the last system
+          // message, and after retained history. Everything later is rebuilt
+          // per request. The gateway turns them into cache points for providers
+          // that cache only where told to.
+          const lastSystem = fixedPrefix.map((message) => message.role).lastIndexOf("system");
+          const buildBaseTranscript = () => {
+            const stable = [
+              ...fixedPrefix.map((message, index) =>
+                index === lastSystem ? cacheAnchor(message) : message,
+              ),
               ...compaction.injectedMessages,
               ...historyMessages
                 .slice(compaction.startIndex)
@@ -1229,8 +1240,15 @@ export class StreamEngine extends Context.Service<
                   (message, index) =>
                     retainedHistory.get(index + compaction.startIndex) ?? [message],
                 ),
+            ];
+            const last = stable.length - 1;
+            return Prompt.make([
+              ...stable.map((message, index) =>
+                index === last && index > lastSystem ? cacheAnchor(message) : message,
+              ),
               ...trailingContext(),
             ]);
+          };
           let activeSummary: string | null = null;
           let activeRounds: ReadonlyArray<ActiveRound> = [];
           const buildTranscript = () =>
