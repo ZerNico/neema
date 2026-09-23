@@ -40,7 +40,7 @@ import {
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
-import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
+import { earlierSkillMessage, prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
@@ -847,6 +847,47 @@ export class StreamEngine extends Context.Service<
                 })
               : message;
           });
+          // A skill an earlier answer loaded replays just before that answer
+          // (first retained load only), so its text caches with the history
+          // instead of reloading into trailing context every turn. A pinned
+          // skill's synthetic row is no load: it is re-pinned each attempt.
+          const skillLoads = new Map<string, string[]>();
+          const seenSkills = new Set<string>();
+          for (const message of skillTools ? historySuffix : []) {
+            for (const call of priorToolCalls) {
+              if (
+                call.messageId !== message.id ||
+                call.toolName !== "load_skill" ||
+                call.status !== "complete" ||
+                call.providerCallId.startsWith("skill-context:")
+              )
+                continue;
+              const skillId = (call.result as { skillId?: unknown } | null)?.skillId;
+              if (typeof skillId !== "string" || seenSkills.has(skillId)) continue;
+              seenSkills.add(skillId);
+              skillLoads.set(message.id, [...(skillLoads.get(message.id) ?? []), skillId]);
+            }
+          }
+          const skillRoots = skillTools
+            ? yield* skillTools.readEarlier([...seenSkills])
+            : new Map<string, string>();
+          const skillReplay = (message: { id: string }) =>
+            (skillLoads.get(message.id) ?? []).flatMap((skillId) => {
+              const root = skillRoots.get(skillId);
+              return root === undefined ? [] : [earlierSkillMessage(skillId, root)];
+            });
+          // Compaction drops whole history groups, replays included, so the
+          // session is told which replayed skills the retained history holds.
+          const syncEarlierSkills = (startIndex: number) =>
+            skillTools?.setEarlier(
+              new Set(
+                historySuffix
+                  .slice(startIndex)
+                  .flatMap((message) =>
+                    (skillLoads.get(message.id) ?? []).filter((skillId) => skillRoots.has(skillId)),
+                  ),
+              ),
+            );
           // Keyed off web tools, not any toolkit: memory must not preserve
           // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
@@ -858,8 +899,9 @@ export class StreamEngine extends Context.Service<
           const historyGroups: Array<ReadonlyArray<Prompt.MessageEncoded>> = [];
           for (let index = 0; index < historySuffix.length; index++) {
             const message = historySuffix[index]!;
-            historyGroups.push(
-              message.assistantOutput?.files.length || message.providerReplay?.turns.length
+            historyGroups.push([
+              ...skillReplay(message),
+              ...(message.assistantOutput?.files.length || message.providerReplay?.turns.length
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
@@ -878,8 +920,8 @@ export class StreamEngine extends Context.Service<
                         : {}),
                     },
                   )
-                : [historyMessages[index]!],
-            );
+                : [historyMessages[index]!]),
+            ]);
           }
           const sourcesByIndex = new Map(priorSources.map((source) => [source.index, source]));
           const recapSources = () => {
@@ -984,6 +1026,8 @@ export class StreamEngine extends Context.Service<
           // Synchronously, before a single token streams: a summary written
           // after the answer would be a summary of the wrong prompt. Failure
           // here (nothing left to drop) finalizes the message as an error.
+          // Budgeted as if all history were kept, then narrowed to what was.
+          syncEarlierSkills(0);
           let compaction: CompactionDecision = yield* prepareCompactedHistory(
             { gateway, repo, providers, analytics },
             {
@@ -1006,6 +1050,7 @@ export class StreamEngine extends Context.Service<
               onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
             },
           );
+          syncEarlierSkills(compaction.startIndex);
 
           // Selected knowledge, decided against the exact rendered prompt: the
           // turn-time mode is a ceiling ("context" may still downgrade to
@@ -1026,7 +1071,7 @@ export class StreamEngine extends Context.Service<
               baseMessages: [
                 ...fixedPrefix,
                 ...compaction.injectedMessages,
-                ...historyMessages.slice(compaction.startIndex),
+                ...historyGroups.slice(compaction.startIndex).flat(),
                 ...historyBudgetTail(false),
               ],
               toolSchemaTokens,
@@ -1143,9 +1188,9 @@ export class StreamEngine extends Context.Service<
           const loadedBytes = new Map<string, Uint8Array>();
           for (let index = compaction.startIndex; index < historySuffix.length; index++) {
             const message = historySuffix[index]!;
-            retainedHistory.set(
-              index,
-              message.assistantOutput?.files.length || message.providerReplay?.turns.length
+            retainedHistory.set(index, [
+              ...skillReplay(message),
+              ...(message.assistantOutput?.files.length || message.providerReplay?.turns.length
                 ? yield* buildHistoryMessages(
                     { ...promptDeps, chat: repo },
                     {
@@ -1165,8 +1210,8 @@ export class StreamEngine extends Context.Service<
                       expandAssistantTurns: true,
                     },
                   )
-                : [historyMessages[index]!],
-            );
+                : [historyMessages[index]!]),
+            ]);
           }
           const buildBaseTranscript = () =>
             Prompt.make([
@@ -1315,6 +1360,7 @@ export class StreamEngine extends Context.Service<
                   inputBudget: requestBudget,
                 });
               compaction = { ...compaction, ...shrunk, mode: "truncated" };
+              syncEarlierSkills(compaction.startIndex);
               transcript = buildTranscript();
               yield* recordHardTruncation(turn);
             }
@@ -2378,6 +2424,7 @@ export class StreamEngine extends Context.Service<
                     if (!shrunk) return yield* Effect.fail(error);
 
                     compaction = { ...compaction, ...shrunk, mode: "truncated" };
+                    syncEarlierSkills(compaction.startIndex);
                     transcript = buildTranscript();
                     if (turn === 0) {
                       estimatedFirstInputTokens = estimateRequestPrompt(!toolRoundsLeft);

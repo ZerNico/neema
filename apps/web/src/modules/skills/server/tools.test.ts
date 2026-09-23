@@ -4,7 +4,7 @@ import { SkillNotAvailable } from "../errors.ts";
 import type { SkillManifestEntry } from "../schema.ts";
 import { projectSkillToolResult, SkillActivity, SKILL_ACTIVITY_LIMITS } from "../tool-schema.ts";
 import { SKILL_LIMITS } from "../package.ts";
-import { prepareSkillTools } from "./tools.ts";
+import { earlierSkillMessage, prepareSkillTools } from "./tools.ts";
 import { SkillReader } from "./reader.ts";
 const entry: SkillManifestEntry = {
   skillId: "one",
@@ -309,5 +309,57 @@ describe("agent-attached skills", () => {
     const loaded = await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
     expect(loaded.ok).toBe(false);
     expect(loaded.error).toMatch(/not in this attempt's automatic catalogue/);
+  });
+});
+
+describe("skills an earlier answer loaded", () => {
+  const library: SkillManifestEntry = { ...entry, explicit: false, ambient: true };
+
+  it("reads only what this attempt could load itself, skipping pinned and unavailable ones", async () => {
+    const pinned = await setup([entry]).prepare;
+    expect(await Effect.runPromise(pinned.readEarlier(["one", "gone"]))).toEqual(new Map());
+    const control = setup([library]);
+    const session = await control.prepare;
+    expect(await Effect.runPromise(session.readEarlier(["one"]))).toEqual(
+      new Map([["one", "PRIVATE ROOT INSTRUCTIONS"]]),
+    );
+    control.denyReads();
+    expect(await Effect.runPromise(session.readEarlier(["one"]))).toEqual(new Map());
+    // A replay that cannot be read is simply absent; the attempt still runs.
+    await Effect.runPromise(session.authorize());
+  });
+
+  it("treats a replayed skill as loaded without repeating its text", async () => {
+    const session = await setup([library]).prepare;
+    session.setEarlier(new Set(["one"]));
+    const prompt = JSON.stringify(session.messages());
+    expect(prompt).toContain("Already loaded earlier in this conversation");
+    expect(prompt).not.toContain("PRIVATE ROOT INSTRUCTIONS");
+    expect(prompt).not.toMatch(/Available skills: \[\{/);
+    const loaded = await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+    expect(loaded).toMatchObject({ ok: true, content: "" });
+    expect(JSON.stringify(session.messages())).not.toContain("PRIVATE ROOT INSTRUCTIONS");
+    const read = await Effect.runPromise(
+      session.group.handlers.read_skill_file({
+        skillId: "one",
+        path: "references/notes.md",
+        offset: 0,
+      }),
+    );
+    expect(read.ok).toBe(true);
+    // Once compaction drops the replay, the skill is offered again.
+    session.setEarlier(new Set());
+    expect(JSON.stringify(session.messages())).not.toContain("Already loaded earlier");
+    await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
+    expect(JSON.stringify(session.messages())).toContain("PRIVATE ROOT INSTRUCTIONS");
+  });
+
+  it("renders a replay from its inputs alone, so history stays byte-identical", () => {
+    const message = earlierSkillMessage("one", "PRIVATE ROOT INSTRUCTIONS");
+    expect(message).toEqual(earlierSkillMessage("one", "PRIVATE ROOT INSTRUCTIONS"));
+    expect(message.role).toBe("user");
+    expect(message.content).toContain(
+      '<skill-guidance id="one">\nPRIVATE ROOT INSTRUCTIONS\n</skill-guidance>',
+    );
   });
 });

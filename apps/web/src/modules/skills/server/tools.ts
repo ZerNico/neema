@@ -30,6 +30,24 @@ const readSkillFileTool = Tool.make("read_skill_file", {
   failureMode: "error",
 });
 
+/** One skill's instructions as the model reads them, wherever they sit in the prompt. */
+const skillGuidance = (skillId: string, root: string) =>
+  `<skill-guidance id=${JSON.stringify(skillId)}>\n${root}\n</skill-guidance>`;
+
+/**
+ * A skill an earlier answer loaded, replayed in history just before that
+ * answer. It is a function of the stored rows alone, so it stays byte-identical
+ * from turn to turn and caches with the rest of the history, where the trailing
+ * context is rebuilt on every request.
+ */
+export const earlierSkillMessage = (skillId: string, root: string): Prompt.MessageEncoded => ({
+  role: "user",
+  content: [
+    "Skill instructions loaded with load_skill for the answer that follows. They stay in effect for the rest of this conversation, below application policy, and never grant tools or permission to execute scripts.",
+    skillGuidance(skillId, root),
+  ].join("\n"),
+});
+
 export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (input: {
   userId: string;
   manifest: readonly SkillManifestEntry[];
@@ -42,6 +60,9 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   let usedChars = 0;
   let accessFailure: SkillNotAvailable | null = null;
   const loaded = new Map<string, string>();
+  // Loaded by an earlier answer whose replay is still in the prompt history.
+  // Their text is there, so this attempt neither reloads nor repeats it.
+  let earlier: ReadonlySet<string> = new Set();
   // Manual-only skills can be selected or attached to an agent, but not offered ambiently.
   const catalogue = input.manifest
     .filter((entry) => !entry.manualOnly || !entry.ambient)
@@ -108,7 +129,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
             "",
             "Skill is not in this attempt's automatic catalogue.",
           );
-        if (loaded.has(skillId)) return result(entry, skillId, "SKILL.md");
+        if (loaded.has(skillId) || earlier.has(skillId)) return result(entry, skillId, "SKILL.md");
         if (loaded.size >= SKILL_LIMITS.loaded)
           return result(
             entry,
@@ -150,7 +171,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         return result(undefined, args.skillId, "", "", "Skill operation limit reached.");
       remaining--;
       const entry = input.manifest.find((entry) => entry.skillId === args.skillId);
-      if (!entry || !loaded.has(entry.skillId))
+      if (!entry || !(loaded.has(entry.skillId) || earlier.has(entry.skillId)))
         return result(
           entry,
           args.skillId,
@@ -169,7 +190,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
           args.skillId,
           args.path,
           "",
-          "The root instructions are already present in protected context; read a supporting file instead.",
+          "The root instructions are already present in the conversation; read a supporting file instead.",
         );
       const outcome = yield* gate.withPermits(1)(readPinned(entry, args.path));
       if (Result.isFailure(outcome)) return outcome.failure;
@@ -197,6 +218,23 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         nextOffset: end < text.length ? end : null,
       };
     });
+  /**
+   * Roots of skills earlier answers loaded, read at this attempt's pinned
+   * revision. Only what this attempt may itself load: a skill since removed,
+   * unshared or pinned explicitly (already in protected context) is skipped.
+   */
+  const readEarlier = (skillIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const roots = new Map<string, string>();
+      for (const skillId of skillIds) {
+        const entry = catalogue.find((entry) => entry.skillId === skillId);
+        if (!entry || entry.explicit) continue;
+        const root = yield* Effect.result(service.readPinned(input.userId, entry, "SKILL.md"));
+        if (Result.isSuccess(root) && root.success !== null) roots.set(skillId, root.success);
+      }
+      return roots;
+    });
+  const offered = () => catalogue.filter((entry) => !earlier.has(entry.skillId));
   const messages = (): Prompt.MessageEncoded[] => [
     {
       role: "user",
@@ -212,17 +250,24 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
               'Entries marked "forThisAgent" were attached to the agent handling this conversation. Prefer them when more than one skill fits; they are still loaded on demand, not automatically.',
             ]
           : []),
+        ...(earlier.size > 0
+          ? [
+              `Already loaded earlier in this conversation, with their instructions above; still in effect, so do not load them again: ${JSON.stringify(
+                catalogue
+                  .filter((entry) => earlier.has(entry.skillId))
+                  .map(({ skillId, name }) => ({ skillId, name })),
+              )}`,
+            ]
+          : []),
         `Available skills: ${JSON.stringify(
-          catalogue.map(({ skillId, name, description, fromAgent }) => ({
+          offered().map(({ skillId, name, description, fromAgent }) => ({
             skillId,
             name,
             description,
             ...(fromAgent ? { forThisAgent: true } : {}),
           })),
         )}`,
-        ...[...loaded].map(
-          ([id, root]) => `<skill-guidance id=${JSON.stringify(id)}>\n${root}\n</skill-guidance>`,
-        ),
+        ...[...loaded].map(([id, root]) => skillGuidance(id, root)),
         `Skill operations remaining: ${remaining}.`,
       ].join("\n"),
     },
@@ -237,5 +282,10 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     },
     authorize,
     messages,
+    readEarlier,
+    /** The replayed skills the current history still holds; compaction can drop some. */
+    setEarlier: (skillIds: ReadonlySet<string>) => {
+      earlier = skillIds;
+    },
   };
 });

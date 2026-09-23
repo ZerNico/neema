@@ -37,7 +37,9 @@ A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a
 
 ## Runtime bounds
 
-- `load_skill`/`read_skill_file` are bounded (20 catalogue entries, 5 loaded, 32 shared operations, 2 concurrent reads, exact UTF-16 continuations). Roots enter protected context once and are never duplicated into tool output; required instructions that don't fit are refused, never truncated.
+- `load_skill`/`read_skill_file` are bounded (20 catalogue entries, 5 loaded, 32 shared operations, 2 concurrent reads, exact UTF-16 continuations). A root loaded in this attempt, and every pinned root, enters protected trailing context once and is never duplicated into tool output; required instructions that don't fit are refused, never truncated.
+- A load outlives its attempt without living in the trailing context. On later turns the first retained `load_skill` row for a skill replays that root as a user-role message just before the answer that loaded it, and the session reports the skill as already loaded. The trailing context is rebuilt on every request and sits after a growing history, so a root kept there is never cached; one replayed from stored rows is byte-identical each turn and caches with the history. Without either, the catalogue told the model the skill was unloaded and every turn paid a reload round trip.
+- The replay belongs to its answer's history group, so compaction and overflow repair drop the two together, after which the skill is offered again; a rewind deletes the row and so the replay. It reads the current attempt's pinned revision and only for skills that attempt could load itself: removed or unshared skills vanish, an edited one changes its replay once, and a pinned skill is already in protected context.
 - Research workers share one session, budget and semaphore for `load_skill`/`read_skill_file` across all tasks in a run.
 - `projectSkillToolResult` is the only path to durable rows and SSE, and every displayed field is length-bounded (`SKILL_ACTIVITY_LIMITS`): an activity row is a label, never a transport for package text. Envelopes require `family: "skill"`; there is no missing-family inference.
 

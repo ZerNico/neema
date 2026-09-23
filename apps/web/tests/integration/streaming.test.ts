@@ -58,6 +58,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { SCHEDULE_AUTHORING_SKILL } from "~/modules/skills/bundled/index.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
 import { askUserTool } from "~/modules/tools/server/ask-user.ts";
@@ -714,6 +715,68 @@ describe("conversational agent authoring", () => {
       const earlier = await edit(detail.messages[0]!.id);
       await collectDraftTurn(earlier.assistantMessageId);
       expect(await drafts()).toEqual([]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("replays a skill where an earlier answer loaded it, identical on every later turn", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const turn = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    const root = SCHEDULE_AUTHORING_SKILL.root;
+    const occurrences = (input: GatewayInput) =>
+      JSON.stringify(input.prompt).split(JSON.stringify(root).slice(1, 80)).length - 1;
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return prompts.length === 1
+        ? authoringTool(input, "load_skill", { skillId: SCHEDULE_AUTHORING_SKILL.id })
+        : reply();
+    };
+    try {
+      for (const content of ["Set up a morning digest.", "Weekdays only.", "Thanks."]) {
+        const sent = await turn(content);
+        await collectDraftTurn(sent.assistantMessageId);
+      }
+      // One load, then two turns that answer straight away.
+      expect(prompts).toHaveLength(4);
+      const [, loadedNow, later, latest] = prompts;
+      // In the loading attempt the text is trailing context, once.
+      expect(occurrences(loadedNow!)).toBe(1);
+      for (const input of [later!, latest!]) {
+        expect(occurrences(input)).toBe(1);
+        expect(JSON.stringify(input.prompt)).toContain(
+          "Already loaded earlier in this conversation",
+        );
+      }
+      // The replay sits in history, before the answer that loaded it, and
+      // everything up to that answer is byte-identical from turn to turn: the
+      // prefix a provider cache can reuse.
+      const content = (input: GatewayInput) => input.prompt.content;
+      const replayAt = content(later!).findIndex((message) =>
+        JSON.stringify(message).includes("Skill instructions loaded with load_skill"),
+      );
+      expect(replayAt).toBeGreaterThan(0);
+      const answerAt = content(later!).findIndex(
+        (message, index) => index > replayAt && message.role === "assistant",
+      );
+      expect(answerAt).toBeGreaterThan(replayAt);
+      expect(JSON.stringify(content(latest!).slice(0, answerAt + 1))).toBe(
+        JSON.stringify(content(later!).slice(0, answerAt + 1)),
+      );
     } finally {
       authoringScript = null;
     }
