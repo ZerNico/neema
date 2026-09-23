@@ -171,8 +171,8 @@ describe("ProfilePage", () => {
     changePasswordMock.mockResolvedValue({ error: null } as never);
     await user.type(screen.getByLabelText("Current password"), "old-secret");
     await user.type(screen.getByLabelText("New password"), "long-enough-secret{Enter}");
-    expect(await screen.findByRole("status")).toHaveTextContent("Password updated.");
+    // The button itself confirms, for a moment, in place of its label.
+    expect(await screen.findByRole("button", { name: "Password updated" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update password" })).toBeInTheDocument();
   });
 });

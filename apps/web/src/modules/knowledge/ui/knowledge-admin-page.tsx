@@ -31,6 +31,7 @@ import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -295,6 +296,7 @@ function DocumentParserSection() {
     onError: (error) => toastError("Could not update document parsing.", error),
   });
 
+  const { justSaved, markSaved } = useSaveStatus();
   const form = useAppForm({
     defaultValues: {
       maxChars: String(config.maxChars ?? 120000),
@@ -311,6 +313,7 @@ function DocumentParserSection() {
         return;
       }
       form.reset({ maxChars: value.maxChars, maxPages: value.maxPages });
+      markSaved();
       await invalidate();
     },
   });
@@ -385,8 +388,11 @@ function DocumentParserSection() {
             </div>
             <div className="flex gap-2">
               <form.AppForm>
-                <form.SubmitButton size="sm">Save</form.SubmitButton>
+                <form.SubmitButton size="sm">
+                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                </form.SubmitButton>
               </form.AppForm>
+              <SaveStatus justSaved={justSaved} />
             </div>
           </form>
         </ListRow>

@@ -17,6 +17,7 @@ import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import {
   Dialog,
   DialogClose,
@@ -237,6 +238,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [sharing, setSharing] = useState(false);
+  const { justSaved, markSaved } = useSaveStatus();
 
   const [name, setName] = useState(tool?.name ?? "");
   const [nameTouched, setNameTouched] = useState(false);
@@ -320,8 +322,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     },
     onSuccess: async (saved) => {
       await invalidateLists(queryClient);
-      toast.success(tool ? "Module saved." : "Module created.");
-      if (!tool)
+      // A new module's own page is the confirmation.
+      if (tool) markSaved();
+      else
         await navigate({ to: "/admin/custom-tools/$toolId", params: { toolId: saved.id } });
     },
     onError: async (error) => {
@@ -404,9 +407,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       backLabel="Custom tools"
       actions={
         <>
-          {dirty && !save.isSuccess ? (
-            <span className="text-muted-foreground text-xs">Unsaved changes</span>
-          ) : null}
+          <SaveStatus justSaved={justSaved} />
           {tool ? (
             <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
               <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
@@ -465,7 +466,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             onClick={() => save.mutate()}
             disabled={!canSave || (!!tool && !dirty)}
           >
-            {tool ? "Save changes" : "Create module"}
+            <SaveLabel justSaved={justSaved}>{tool ? "Save changes" : "Create module"}</SaveLabel>
           </PendingButton>
         </>
       }

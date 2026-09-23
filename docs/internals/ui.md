@@ -80,8 +80,7 @@ false`), so a page body is written against data already there. This includes loc
   bare `null` or `animate-pulse` div.
 - Where the primary action lives depends on how long the page is. A long editor (agent, skill, custom
   tool: several sections, a code or package workspace, scrolls) puts Save in `Page.actions` at the
-  top-right, beside the record's own controls (Enabled, Access, the overflow menu) and an "Unsaved
-  changes" hint, disabled until dirty; the reader may be editing anywhere on the page and Save has to be
+  top-right, beside the record's own controls (Enabled, Access, the overflow menu), disabled until dirty; the reader may be editing anywhere on the page and Save has to be
   findable without hunting. A short form that fits on screen (profile, password, tool settings, model
   order) puts Save in `FormActions` (`page-shell.tsx`), the row under its fields, since reading
   top-to-bottom ends there. Skip `FormActions` and a submit button that's a direct child of a `flex-col`
@@ -92,10 +91,18 @@ false`), so a page body is written against data already there. This includes loc
 
 ## Buttons and pending state
 
-- A pending button keeps its label; a spinner slides in ahead of the text, never replacing it. Exactly two
+- A pending button never changes size: its label fades out in place and a spinner sits over it, so
+  neither it nor its neighbours move (a spinner sliding in ahead of the text made the button grow, and
+  its animated padding jittered). The label only goes transparent, so it still names the button. Exactly two
   ways to write one — `PendingButton` (`src/ui/pending-button.tsx`) for a plain mutation, `form.SubmitButton`
   for TanStack Form, which renders through `PendingButton` so the two can't drift. `aria-busy` is always
   `x || undefined` — absent when idle, never `aria-busy="false"`.
+- Saving in place confirms in place, inside the button: `SaveLabel` (`src/ui/save-status.tsx`) turns the
+  label into "✓ Saved" for a moment, both labels sharing one grid cell so the width never changes, and
+  `SaveStatus` beside it says the same to screen readers. There is no separate "Unsaved changes" text: an
+  enabled Save already says it, and text appearing in the header row moved everything. A toast is for a
+  result that lands elsewhere or later (a run started, an import, access changed), and a created item's
+  own page is its confirmation.
 - A dropdown item is the exception: it closes on activation, so it can't carry a spinner and `disabled` is
   the pending signal, unless it sets `closeOnClick={false}` to stay open (account menu). `Spinner` is
   `role="status"` on its own — pass `aria-hidden` where a control already has a label or `aria-busy`, or

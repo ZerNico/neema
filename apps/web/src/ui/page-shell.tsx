@@ -155,11 +155,18 @@ export function Page({
             </Link>
           )}
           {/* min-h-8 is the height of the sm actions, so a page without them
-              keeps its title and body on the same lines as one with them. */}
-          <div className="flex min-h-8 flex-wrap items-center justify-between gap-4">
-            <h1 className="min-w-0 break-words text-lg font-medium">{title}</h1>
+              keeps its title and body on the same lines as one with them. The
+              title truncates rather than wraps, and from sm up the actions keep
+              its line, so a long name never pushes the buttons around. */}
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:flex-nowrap">
+            <h1
+              className="min-w-40 flex-1 truncate text-lg font-medium"
+              title={typeof title === "string" ? title : undefined}
+            >
+              {title}
+            </h1>
             {actions ? (
-              <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>
+              <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
             ) : null}
           </div>
           {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}

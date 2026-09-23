@@ -229,7 +229,9 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(updateUrlReaderTool).toHaveBeenCalledWith({ data: { perPageCharCap: 15000 } }),
     );
-    expect(saveButtons()[1]).toHaveTextContent("Save");
+    // The URL reader's own button confirms; the web search one is untouched.
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expect(saveButtons()).toHaveLength(1);
   });
 
   it("keeps the Test connection label while testing and colours the result", async () => {
@@ -245,7 +247,9 @@ describe("ToolsPage", () => {
     expect(test).toHaveTextContent("Test connection");
 
     pending.resolve({ ok: true, resultCount: 3, latencyMs: 42 });
-    const status = await screen.findByRole("status");
+    const status = (await screen.findByText("Connection ok, 3 results in 42ms.")).closest(
+      '[role="status"]',
+    );
     expect(status).toHaveTextContent("Connection ok, 3 results in 42ms.");
     expect(status).toHaveClass("text-success");
   });

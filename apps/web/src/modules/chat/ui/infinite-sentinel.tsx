@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Button } from "~/ui/primitives/button";
-import { Spinner } from "~/ui/primitives/spinner";
+import { PendingButton } from "~/ui/pending-button.tsx";
 
 /**
  * Bottom-of-list loader for an infinite query. The button is the real
@@ -43,17 +42,15 @@ export function InfiniteSentinel({
 
   return (
     <div ref={ref} className={className}>
-      <Button
+      <PendingButton
         variant="ghost"
         size="sm"
         className="text-muted-foreground w-full"
         onClick={onLoadMore}
-        disabled={isFetching}
-        aria-busy={isFetching || undefined}
+        pending={isFetching}
       >
-        {isFetching ? <Spinner data-icon="inline-start" aria-hidden /> : null}
-        {isFetching ? "Loading more" : "Load more"}
-      </Button>
+        Load more
+      </PendingButton>
     </div>
   );
 }

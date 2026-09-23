@@ -400,7 +400,8 @@ describe("conversation-owned agent draft", () => {
       }),
     );
     expect(await screen.findByText("Agent saved")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeVisible();
+    // The button confirms in place, and waits for the next edit.
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
   });
 
   it("blocks dependent actions and navigation after failed draft persistence without losing input", async () => {

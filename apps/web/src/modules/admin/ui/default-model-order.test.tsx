@@ -94,7 +94,8 @@ describe("DefaultModelOrder", () => {
     expect(names()).toEqual(["Alpha · Provider", "Beta · Provider"]);
     await user.click(button("Save"));
     await waitFor(() => expect(saveMock).toHaveBeenCalledWith({ data: { modelIds: ["a", "b"] } }));
-    await waitFor(() => expect(button("Save")).not.toHaveAttribute("aria-busy", "true"));
+    // The button confirms in place once the save lands.
+    expect(await screen.findByRole("button", { name: "Saved" })).not.toHaveAttribute("aria-busy");
     expect(names()).toEqual(["Alpha · Provider", "Beta · Provider"]);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
   });
@@ -109,7 +110,7 @@ describe("DefaultModelOrder", () => {
     fireEvent.click(button("Clear order"));
     fireEvent.click(button("Save"));
     await waitFor(() => expect(saveMock).toHaveBeenCalledWith({ data: { modelIds: [] } }));
-    await waitFor(() => expect(button("Save")).not.toHaveAttribute("aria-busy", "true"));
+    expect(await screen.findByRole("button", { name: "Saved" })).not.toHaveAttribute("aria-busy");
     expect(names()).toEqual([]);
   });
 

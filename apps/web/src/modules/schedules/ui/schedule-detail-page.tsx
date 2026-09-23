@@ -26,6 +26,7 @@ import { absoluteLabel, clockLabel, dayLabel } from "~/modules/chat/ui/timestamp
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { ErrorState, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
@@ -140,13 +141,14 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         if (JSON.stringify(formApi.state.values) === JSON.stringify(value))
           formApi.reset(value, { keepDefaultValues: true });
         await invalidate();
-        toast.success("Schedule saved.");
+        markSaved();
       } catch (error) {
         toastError("Could not save the schedule.", error);
       }
     },
   });
   const dirty = useStore(form.store, (state) => state.isDirty);
+  const { justSaved, markSaved } = useSaveStatus();
   const submitting = useStore(form.store, (state) => state.isSubmitting);
   // Same guard as the agent and skill editors; a successful save resets the
   // form, so `dirty` is also "not yet saved".
@@ -168,7 +170,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       backLabel="Schedules"
       actions={
         <>
-          {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
+          <SaveStatus justSaved={justSaved} />
           <Button
             size="sm"
             variant="outline"
@@ -236,7 +238,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           </DropdownMenu>
           <form.AppForm>
             <form.SubmitButton size="sm" form={formId} disabled={!dirty}>
-              Save changes
+              <SaveLabel justSaved={justSaved}>Save changes</SaveLabel>
             </form.SubmitButton>
           </form.AppForm>
         </>

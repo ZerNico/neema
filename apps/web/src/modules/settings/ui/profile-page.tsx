@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { FieldError } from "~/ui/primitives/field";
@@ -22,7 +23,7 @@ const PasswordSchema = Schema.Struct({
   ),
 });
 
-type PasswordStatus = { kind: "success" | "error"; message: string };
+type PasswordStatus = { kind: "error"; message: string };
 
 export function ProfilePage() {
   // The same session the app shell already resolved, not a second read of it:
@@ -41,6 +42,8 @@ function ProfileForms({
   const queryClient = useQueryClient();
   const [passwordStatus, setPasswordStatus] = useState<PasswordStatus | null>(null);
 
+  const { justSaved: nameJustSaved, markSaved: markNameSaved } = useSaveStatus();
+  const { justSaved: passwordJustSaved, markSaved: markPasswordSaved } = useSaveStatus();
   const nameForm = useAppForm({
     defaultValues: { name: user.name },
     validators: { onSubmit: Schema.toStandardSchemaV1(NameSchema) },
@@ -55,6 +58,7 @@ function ProfileForms({
         current ? { ...current, name } : current,
       );
       nameForm.reset({ name });
+      markNameSaved();
       // The shell observes this cache, so the patch above updates it immediately;
       // refetch in the background to reconcile with the authoritative session.
       void queryClient.invalidateQueries({
@@ -82,10 +86,7 @@ function ProfileForms({
         return;
       }
       passwordForm.reset();
-      setPasswordStatus({
-        kind: "success",
-        message: "Password updated. Other sessions were signed out.",
-      });
+      markPasswordSaved();
     },
   });
 
@@ -118,9 +119,12 @@ function ProfileForms({
                 <FormActions>
                   <nameForm.Subscribe selector={(s) => s.isDefaultValue}>
                     {(unchanged) => (
-                      <nameForm.SubmitButton size="sm" disabled={unchanged}>
-                        Save
-                      </nameForm.SubmitButton>
+                      <>
+                        <nameForm.SubmitButton size="sm" disabled={unchanged}>
+                          <SaveLabel justSaved={nameJustSaved}>Save</SaveLabel>
+                        </nameForm.SubmitButton>
+                        <SaveStatus justSaved={nameJustSaved} />
+                      </>
                     )}
                   </nameForm.Subscribe>
                 </FormActions>
@@ -153,6 +157,7 @@ function ProfileForms({
                 {(field) => (
                   <field.TextField
                     label="New password"
+                    description="Changing it signs you out on your other devices."
                     type="password"
                     autoComplete="new-password"
                   />
@@ -161,14 +166,14 @@ function ProfileForms({
               {passwordStatus?.kind === "error" ? (
                 <FieldError>{passwordStatus.message}</FieldError>
               ) : null}
-              {passwordStatus?.kind === "success" ? (
-                <p role="status" className="text-muted-foreground text-sm">
-                  {passwordStatus.message}
-                </p>
-              ) : null}
               <passwordForm.AppForm>
                 <FormActions>
-                  <passwordForm.SubmitButton size="sm">Update password</passwordForm.SubmitButton>
+                  <passwordForm.SubmitButton size="sm">
+                    <SaveLabel justSaved={passwordJustSaved} savedLabel="Password updated">
+                      Update password
+                    </SaveLabel>
+                  </passwordForm.SubmitButton>
+                  <SaveStatus justSaved={passwordJustSaved} savedLabel="Password updated" />
                 </FormActions>
               </passwordForm.AppForm>
             </form>

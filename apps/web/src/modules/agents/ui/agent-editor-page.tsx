@@ -17,6 +17,7 @@ import {
 } from "./agent-authoring-launch.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { ErrorState, Page } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
@@ -139,7 +140,7 @@ function AgentForm({
           if (JSON.stringify(formApi.state.values) === JSON.stringify(value))
             formApi.reset(value, { keepDefaultValues: true });
           await onSaved(agent.id);
-          toast.success("Agent saved.");
+          markSaved();
         } else {
           const id = await createAgent({ data: settings });
           await onSaved(id);
@@ -154,6 +155,7 @@ function AgentForm({
     (state) => state.isDirty && !!agent && agent.configRevision !== revision.current,
   );
   const dirty = useStore(form.store, (state) => state.isDirty);
+  const { justSaved, markSaved } = useSaveStatus();
   const submitting = useStore(form.store, (state) => state.isSubmitting);
   // A save resets the form on success, so `dirty` is also "not yet saved".
   useBlocker({
@@ -181,7 +183,7 @@ function AgentForm({
       backLabel="Agents"
       actions={
         <>
-          {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
+          <SaveStatus justSaved={justSaved} />
           {agent ? (
             <>
               <Link
@@ -222,7 +224,7 @@ function AgentForm({
           )}
           <form.AppForm>
             <form.SubmitButton size="sm" form={formId} disabled={!!agent && !dirty}>
-              {agent ? "Save changes" : "Create agent"}
+              <SaveLabel justSaved={justSaved}>{agent ? "Save changes" : "Create agent"}</SaveLabel>
             </form.SubmitButton>
           </form.AppForm>
         </>

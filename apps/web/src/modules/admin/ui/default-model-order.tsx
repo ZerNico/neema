@@ -12,6 +12,7 @@ import { MAX_DEFAULT_MODELS } from "~/modules/providers/default-models.ts";
 import type { ModelRow, PublicProvider } from "~/modules/providers/server/repo.ts";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { FormActions, ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -54,6 +55,7 @@ export function DefaultModelOrder({
   }));
   const selectedCandidate = available.some((model) => model.id === candidate) ? candidate : null;
 
+  const { justSaved, markSaved } = useSaveStatus();
   const save = useMutation({
     mutationFn: (modelIds: string[]) => updateDefaultModelOrder({ data: { modelIds } }),
     onSuccess: async () => {
@@ -62,6 +64,7 @@ export function DefaultModelOrder({
         queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
       ]);
       setDraft(null);
+      markSaved();
     },
     onError: () =>
       toast.error(
@@ -177,7 +180,7 @@ export function DefaultModelOrder({
           disabled={!dirty || !valid}
           onClick={() => save.mutate([...order])}
         >
-          Save
+          <SaveLabel justSaved={justSaved}>Save</SaveLabel>
         </PendingButton>
         <Button
           size="sm"
@@ -198,6 +201,7 @@ export function DefaultModelOrder({
         >
           Clear order
         </Button>
+        <SaveStatus justSaved={justSaved} />
       </FormActions>
     </Section>
   );

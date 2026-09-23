@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
@@ -138,6 +139,7 @@ function WebSearchSection() {
     onError: (error) => toastError("Could not test the connection.", error),
   });
 
+  const { justSaved, markSaved } = useSaveStatus();
   const form = useAppForm({
     defaultValues: {
       baseUrl: config.baseUrl ?? "",
@@ -163,6 +165,7 @@ function WebSearchSection() {
         return;
       }
       form.reset({ ...value, secret: "" });
+      markSaved();
       await invalidate();
     },
   });
@@ -296,8 +299,11 @@ function WebSearchSection() {
             ) : null}
             <FormActions>
               <form.AppForm>
-                <form.SubmitButton size="sm">Save</form.SubmitButton>
+                <form.SubmitButton size="sm">
+                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                </form.SubmitButton>
               </form.AppForm>
+              <SaveStatus justSaved={justSaved} />
               <form.Subscribe selector={(s) => [s.values.baseUrl, s.values.secret] as const}>
                 {([baseUrl, secret]) => (
                   <PendingButton
@@ -337,6 +343,7 @@ function UrlReaderSection() {
     onError: (error) => toastError("Could not update the URL reader.", error),
   });
 
+  const { justSaved, markSaved } = useSaveStatus();
   const form = useAppForm({
     defaultValues: { perPageCharCap: String(config.perPageCharCap ?? 12000) },
     validators: { onSubmit: Schema.toStandardSchemaV1(UrlReaderForm) },
@@ -348,6 +355,7 @@ function UrlReaderSection() {
         return;
       }
       form.reset({ perPageCharCap: value.perPageCharCap });
+      markSaved();
       await invalidate();
     },
   });
@@ -405,8 +413,11 @@ function UrlReaderSection() {
             </div>
             <FormActions>
               <form.AppForm>
-                <form.SubmitButton size="sm">Save</form.SubmitButton>
+                <form.SubmitButton size="sm">
+                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                </form.SubmitButton>
               </form.AppForm>
+              <SaveStatus justSaved={justSaved} />
             </FormActions>
           </form>
         </ListRow>

@@ -13,6 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { ErrorState, ListSkeleton, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
@@ -114,6 +115,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
   );
   const formAvailable = canEditSimply(files);
   const dirty = JSON.stringify(files) !== saved;
+  const { justSaved, markSaved } = useSaveStatus();
   useBlocker({
     shouldBlockFn: async () =>
       dirty &&
@@ -152,8 +154,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
       setSaved(JSON.stringify(submitted));
       setRevision((current) => (current ?? 0) + 1);
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
-      toast.success("Skill saved.");
-      if (!initial)
+      // A new skill's own page is the confirmation.
+      if (initial) markSaved();
+      else
         await navigate({ to: "/skills/$skillId", params: { skillId: id }, ignoreBlocker: true });
     },
     onError: () =>
@@ -180,7 +183,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           setRevision(nextRevision);
           setUpdating(false);
           void queryClient.invalidateQueries({ queryKey: ["skills"] });
-          toast.success("Skill updated.");
+          markSaved();
         }}
       />
     );
@@ -191,7 +194,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
       backLabel="Skills"
       actions={
         <>
-          {dirty ? <span className="text-muted-foreground text-xs">Unsaved changes</span> : null}
+          <SaveStatus justSaved={justSaved} />
           {initial ? (
             <Button size="sm" variant="outline" onClick={() => setAccess(true)}>
               <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
@@ -268,7 +271,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
             disabled={!validation.value || (!!initial && !dirty)}
             onClick={() => save.mutate(files.map((file) => ({ ...file })))}
           >
-            {initial ? "Save changes" : "Create skill"}
+            <SaveLabel justSaved={justSaved}>{initial ? "Save changes" : "Create skill"}</SaveLabel>
           </PendingButton>
         </>
       }

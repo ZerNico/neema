@@ -1,20 +1,22 @@
 import { useBlocker } from "@tanstack/react-router";
 import {
-  createContext,
   type Context,
   type FunctionComponent,
+  type ReactNode,
+  type Ref,
+  createContext,
   useCallback,
   useContext,
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
-  type ReactNode,
-  type Ref,
 } from "react";
 import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 import { ErrorState, FormActions, ListSkeleton } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -268,6 +270,14 @@ function DraftActions<S extends Record<string, unknown>>({
   controller: DraftController<S>;
   formId: string;
 }) {
+  const saved = isSaved(controller);
+  const { justSaved, markSaved } = useSaveStatus();
+  // The save runs in the controller; the moment it lands is when "saved" turns on.
+  const wasSaved = useRef(saved);
+  useEffect(() => {
+    if (saved && !wasSaved.current) markSaved();
+    wasSaved.current = saved;
+  }, [markSaved, saved]);
   const draft = controller.draft;
   if (!draft) return null;
   const target = draft.targetId;
@@ -279,10 +289,13 @@ function DraftActions<S extends Record<string, unknown>>({
           form={id}
           size="sm"
           pending={controller.saving}
-          disabled={controller.reloading || controller.conflicts.length > 0}
+          disabled={controller.reloading || controller.conflicts.length > 0 || saved}
         >
-          {target ? "Save changes" : `Create ${ui.noun}`}
+          <SaveLabel justSaved={justSaved}>
+            {target ? "Save changes" : `Create ${ui.noun}`}
+          </SaveLabel>
         </PendingButton>
+        <SaveStatus justSaved={justSaved} />
         {target ? ui.targetActions?.(target) : null}
       </FormActions>
       <p className="text-muted-foreground text-xs">

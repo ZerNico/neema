@@ -121,6 +121,11 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// The page's own save confirmation is a status too; these tests mean the other one.
+const otherStatus = () =>
+  screen.queryAllByRole("status").find((element) => element.dataset.slot !== "save-status") ??
+  null;
+
 describe("CustomToolEditorPage", () => {
   it("derives the identifier from the name until it is edited, and gates Check on it", async () => {
     const user = userEvent.setup();
@@ -203,15 +208,15 @@ describe("CustomToolEditorPage", () => {
     );
     renderEditor();
     await user.type(screen.getByLabelText("Name"), "Weather");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(otherStatus()).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Verify" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Expected a package name");
-    expect(screen.getByRole("status")).toHaveTextContent("1 problem");
+    expect(otherStatus()).toHaveTextContent("1 problem");
 
     await user.click(screen.getByRole("button", { name: "Verify" }));
     const list = await screen.findByRole("alert");
-    expect(screen.getByRole("status")).toHaveTextContent("2 problems");
+    expect(otherStatus()).toHaveTextContent("2 problems");
     expect(within(list).getByRole("button", { name: "4:3" })).toBeInTheDocument();
     expect(list).toHaveTextContent("TS2322: Type 'A' is not assignable. Detail line.");
     expect(within(list).getByRole("button", { name: "9:1" })).toBeInTheDocument();
@@ -244,12 +249,12 @@ describe("CustomToolEditorPage", () => {
     expect(slug).toBeEnabled();
     expect(screen.getByLabelText("Name")).toHaveValue("Weather lookup");
     // A stored module is already verified, so Debug is ready without a fresh Verify.
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(otherStatus()).toBeNull();
     expect(screen.getByRole("button", { name: "Debug" })).toBeEnabled();
-    // The hint tracks edits; Save itself stays available.
-    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    // Save waits for an edit, which is how unsaved changes show.
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Weather lookup 2" } });
-    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
   });
 
   it("renames a stored module, sending the new identifier with the version it loaded", async () => {
@@ -257,10 +262,10 @@ describe("CustomToolEditorPage", () => {
     vi.mocked(saveCustomTool).mockResolvedValue(detail({ slug: "weather" }) as never);
     renderEditor(detail());
     const slug = screen.getByLabelText("Identifier");
-    // A rename alone is a change: the hint and the leave guard have to see it.
-    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    // A rename alone is a change: Save and the leave guard have to see it.
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     fireEvent.change(slug, { target: { value: "weather" } });
-    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(saveCustomTool).toHaveBeenCalled());

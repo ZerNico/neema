@@ -64,7 +64,6 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
-import { Spinner } from "~/ui/primitives/spinner";
 import { toastError } from "~/ui/error-toast.ts";
 
 export const membersQuery = (groupId: string) =>
@@ -310,11 +309,7 @@ function AddMemberPicker({
       }}
       autoHighlight
     >
-      <ComboboxTrigger
-        render={<Button size="sm" aria-busy={pending || undefined} />}
-        disabled={disabled}
-      >
-        {pending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+      <ComboboxTrigger render={<PendingButton size="sm" pending={pending} />} disabled={disabled}>
         Add member
       </ComboboxTrigger>
       <ComboboxContent side="bottom" align="end" className="w-72 min-w-72">

@@ -33,7 +33,7 @@ import {
 } from "~/ui/primitives/field";
 import { FieldSet } from "~/ui/field-set.tsx";
 import { MODEL_DESCRIPTION_MAX } from "../schema.ts";
-import { Button } from "~/ui/primitives/button";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Input } from "~/ui/primitives/input";
 import {
   Select,
@@ -42,7 +42,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
 
 /**
@@ -288,11 +287,10 @@ export function ModelSettingsFields({
                   aria-invalid={dimensionsInvalid}
                 />
                 {onDetectDimensions ? (
-                  <Button
+                  <PendingButton
+                    pending={detecting}
                     type="button"
                     variant="outline"
-                    disabled={disabled || detecting}
-                    aria-busy={detecting || undefined}
                     onClick={() => {
                       setDetecting(true);
                       setDetectError(null);
@@ -311,9 +309,8 @@ export function ModelSettingsFields({
                         .finally(() => setDetecting(false));
                     }}
                   >
-                    {detecting ? <Spinner data-icon="inline-start" aria-hidden /> : null}
                     Detect
-                  </Button>
+                  </PendingButton>
                 ) : null}
               </div>
               {detectError ? <FieldError>{detectError}</FieldError> : null}
