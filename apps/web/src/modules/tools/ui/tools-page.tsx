@@ -5,7 +5,7 @@ import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "~/ui/confirm.tsx";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { OptionalMark, useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -217,7 +217,9 @@ function WebSearchSection() {
             <form.Field name="secret">
               {(field) => (
                 <Field>
-                  <FieldLabel htmlFor={field.name}>Bearer secret</FieldLabel>
+                  <FieldLabel htmlFor={field.name}>
+                    Bearer secret <OptionalMark />
+                  </FieldLabel>
                   <div className="flex gap-2">
                     <Input
                       id={field.name}

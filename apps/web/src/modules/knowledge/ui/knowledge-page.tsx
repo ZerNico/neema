@@ -104,7 +104,7 @@ export function CollectionDialog({
             {(field) => <field.TextField label="Name" placeholder="Contracts" />}
           </form.AppField>
           <form.AppField name="description">
-            {(field) => <field.TextareaField label="Description" rows={2} />}
+            {(field) => <field.TextareaField label="Description" optional rows={2} />}
           </form.AppField>
           <form.AppForm>
             <DialogFooter>

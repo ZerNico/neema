@@ -143,6 +143,11 @@ false`), so a page body is written against data already there. This includes loc
   field with a label usually needs no helper. Where helper text only repeats the label, the
   icon, or the control beside it, delete it rather than shortening it — `EmptyState`'s
   `description` is optional for exactly this reason.
+- A field someone may leave empty says so in its label with `OptionalMark` (or `optional` on
+  the app-form fields); required fields carry no mark, since they are the common case. Only a
+  text input the submit does not need is optional: a select, a switch or a number with a
+  default always has a value. Say what empty means in the placeholder (the default it falls
+  back to), not in a helper line saying "Optional."
 - Name what the reader can act on, not the part that failed. "Provider", "stream", "context",
   "run", "instance", "generation attempt", "indexing", "embeddings" are internals: they
   describe machinery nobody using the app can do anything about. `generation-failure.ts` is

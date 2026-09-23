@@ -137,7 +137,7 @@ describe("OAuthPage", () => {
     await pick(user, "Type", "Microsoft");
     await user.type(screen.getByLabelText("Client ID"), "entra-client");
     await user.type(screen.getByLabelText("Client secret"), "entra-secret");
-    await user.type(screen.getByLabelText("Tenant ID"), "contoso");
+    await user.type(screen.getByLabelText("Tenant ID (optional)"), "contoso");
     await user.click(submit(dialog, "Add provider"));
 
     await waitFor(() => expect(saveBuiltin).toHaveBeenCalled());

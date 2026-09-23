@@ -8,14 +8,24 @@ import { Textarea } from "~/ui/primitives/textarea";
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();
 
+/**
+ * Marks an optional field inside its label, so it is part of the accessible name. Required
+ * fields carry no mark: most fields are required, so marking the exceptions is quieter.
+ */
+export function OptionalMark() {
+  return <span className="text-muted-foreground font-normal">(optional)</span>;
+}
+
 function TextField({
   label,
+  optional = false,
   description,
   type = "text",
   placeholder,
   autoComplete,
 }: {
   label: string;
+  optional?: boolean;
   description?: string;
   type?: string;
   placeholder?: string;
@@ -25,7 +35,15 @@ function TextField({
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
   return (
     <Field data-invalid={showError || undefined}>
-      <FieldLabel htmlFor={field.name}>{label}</FieldLabel>
+      <FieldLabel htmlFor={field.name}>
+        {label}
+        {optional ? (
+          <>
+            {" "}
+            <OptionalMark />
+          </>
+        ) : null}
+      </FieldLabel>
       <Input
         id={field.name}
         name={field.name}
@@ -51,12 +69,14 @@ function TextField({
 
 function TextareaField({
   label,
+  optional = false,
   description,
   placeholder,
   rows = 4,
   disabled = false,
 }: {
   label: string;
+  optional?: boolean;
   description?: string;
   placeholder?: string;
   rows?: number;
@@ -66,7 +86,15 @@ function TextareaField({
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
   return (
     <Field data-invalid={showError || undefined}>
-      <FieldLabel htmlFor={field.name}>{label}</FieldLabel>
+      <FieldLabel htmlFor={field.name}>
+        {label}
+        {optional ? (
+          <>
+            {" "}
+            <OptionalMark />
+          </>
+        ) : null}
+      </FieldLabel>
       <Textarea
         id={field.name}
         name={field.name}

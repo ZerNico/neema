@@ -85,11 +85,11 @@ describe("AddModelDialog", () => {
     probeMock.mockResolvedValueOnce({ ok: false, error: "the model did not return an embedding" });
     await user.click(screen.getByRole("button", { name: "Detect" }));
     expect(await screen.findByText("the model did not return an embedding")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dimensions")).toHaveValue(null);
+    expect(screen.getByLabelText("Dimensions (optional)")).toHaveValue(null);
 
     probeMock.mockResolvedValueOnce({ ok: true, dimensions: 4096 });
     await user.click(screen.getByRole("button", { name: "Detect" }));
-    await waitFor(() => expect(screen.getByLabelText("Dimensions")).toHaveValue(4096));
+    await waitFor(() => expect(screen.getByLabelText("Dimensions (optional)")).toHaveValue(4096));
     expect(probeMock).toHaveBeenLastCalledWith({
       data: { providerId: "provider-1", modelKey: "catalog-model" },
     });
@@ -116,8 +116,8 @@ describe("AddModelDialog", () => {
     expect(screen.queryByRole("option", { name: "Audio" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("option", { name: "Embedding" }));
 
-    expect(screen.getByLabelText("Max input tokens")).toHaveValue(128_000);
-    expect(screen.getByLabelText("Dimensions")).toBeInTheDocument();
+    expect(screen.getByLabelText("Max input tokens (optional)")).toHaveValue(128_000);
+    expect(screen.getByLabelText("Dimensions (optional)")).toBeInTheDocument();
     expect(screen.getByLabelText("Input $/1M")).toHaveValue("1");
     expect(screen.queryByLabelText("Output $/1M")).not.toBeInTheDocument();
     expect(screen.queryByText("Tool calling")).not.toBeInTheDocument();

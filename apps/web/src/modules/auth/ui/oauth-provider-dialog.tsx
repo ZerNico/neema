@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
+import { OptionalMark } from "~/ui/form/app-form.tsx";
 import { findBuiltin, OIDC_DEFAULT_SCOPES, type OAuthBuiltin } from "../oauth.ts";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
@@ -279,7 +280,9 @@ export function OAuthProviderDialog({
 
             {builtin?.field ? (
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-extra`}>{builtin.field.label}</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-extra`}>
+                  {builtin.field.label} <OptionalMark />
+                </FieldLabel>
                 <Input
                   id={`${fieldId}-extra`}
                   value={draft.extra}
@@ -292,7 +295,9 @@ export function OAuthProviderDialog({
 
             {builtin ? null : (
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-scopes`}>Scopes</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-scopes`}>
+                  Scopes <OptionalMark />
+                </FieldLabel>
                 <Input
                   id={`${fieldId}-scopes`}
                   value={draft.scopes}

@@ -71,6 +71,7 @@ import { TEMPLATE_SOURCE } from "../template.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 export const customToolQuery = (toolId: string) =>
   queryOptions({
@@ -516,7 +517,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
           </Field>
         </div>
         <Field data-invalid={identity.description || undefined}>
-          <FieldLabel htmlFor={`${id}-description`}>Description</FieldLabel>
+          <FieldLabel htmlFor={`${id}-description`}>
+            Description <OptionalMark />
+          </FieldLabel>
           <Textarea
             id={`${id}-description`}
             value={description}
@@ -527,9 +530,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
           />
           {identity.description ? (
             <FieldError errors={[{ message: identity.description }]} />
-          ) : (
-            <FieldDescription>Optional.</FieldDescription>
-          )}
+          ) : null}
         </Field>
       </Section>
 

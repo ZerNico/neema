@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
+import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 /**
  * Sentence-case labels for the type enum wherever it is shown to a person
@@ -236,7 +237,9 @@ export function ModelSettingsFields({
           </Field>
           {draft.type === "chat" ? (
             <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${id}-description`}>Description (optional)</FieldLabel>
+              <FieldLabel htmlFor={`${id}-description`}>
+                Description <OptionalMark />
+              </FieldLabel>
               <Input
                 id={`${id}-description`}
                 value={draft.description}
@@ -256,7 +259,7 @@ export function ModelSettingsFields({
           )}
           <Field data-invalid={contextInvalid}>
             <FieldLabel htmlFor={`${id}-context-length`}>
-              {draft.type === "chat" ? "Context length" : "Max input tokens"}
+              {draft.type === "chat" ? "Context length" : "Max input tokens"} <OptionalMark />
             </FieldLabel>
             <Input
               id={`${id}-context-length`}
@@ -274,7 +277,9 @@ export function ModelSettingsFields({
           </Field>
           {draft.type === "embedding" ? (
             <Field data-invalid={dimensionsInvalid}>
-              <FieldLabel htmlFor={`${id}-embedding-dimensions`}>Dimensions</FieldLabel>
+              <FieldLabel htmlFor={`${id}-embedding-dimensions`}>
+                Dimensions <OptionalMark />
+              </FieldLabel>
               <div className="flex gap-2">
                 <Input
                   id={`${id}-embedding-dimensions`}
@@ -382,7 +387,9 @@ export function ModelSettingsFields({
       </FieldSet>
 
       <FieldSet compact disabled={disabled}>
-        <FieldLegend variant="label">Pricing</FieldLegend>
+        <FieldLegend variant="label">
+          Pricing <OptionalMark />
+        </FieldLegend>
         <FieldDescription>
           USD per 1M tokens, used when the provider doesn’t report a cost.
         </FieldDescription>

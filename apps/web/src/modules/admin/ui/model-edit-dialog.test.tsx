@@ -94,7 +94,7 @@ describe("ModelEditDialog", () => {
 
     expect(await screen.findByLabelText("Display name")).toHaveValue("Tiny Chat");
     expect(screen.getByLabelText("Model ID")).toHaveValue("anthropic/tiny-chat");
-    expect(screen.getByLabelText("Context length")).toHaveValue(128_000);
+    expect(screen.getByLabelText("Context length (optional)")).toHaveValue(128_000);
     expect(screen.getByLabelText("Input $/1M")).toHaveValue("2.5");
     expect(screen.getByLabelText("Output $/1M")).toHaveValue("10");
     expect(screen.getByText("Engineering")).toBeInTheDocument();
@@ -102,7 +102,7 @@ describe("ModelEditDialog", () => {
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Tiny Chat Plus" },
     });
-    fireEvent.change(screen.getByLabelText("Context length"), {
+    fireEvent.change(screen.getByLabelText("Context length (optional)"), {
       target: { value: "200000" },
     });
     fireEvent.change(screen.getByLabelText("Input $/1M"), { target: { value: "3" } });
@@ -142,13 +142,13 @@ describe("ModelEditDialog", () => {
       pricing: { input: 0.02, output: null },
     });
 
-    expect(await screen.findByLabelText("Max input tokens")).toHaveValue(128_000);
-    expect(screen.getByLabelText("Dimensions")).toHaveValue(1536);
+    expect(await screen.findByLabelText("Max input tokens (optional)")).toHaveValue(128_000);
+    expect(screen.getByLabelText("Dimensions (optional)")).toHaveValue(1536);
     expect(screen.getByRole("switch", { name: "Image input" })).toBeChecked();
     expect(screen.queryByText("Tool calling")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Output $/1M")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Dimensions"), { target: { value: "3072" } });
+    fireEvent.change(screen.getByLabelText("Dimensions (optional)"), { target: { value: "3072" } });
     fireEvent.change(screen.getByLabelText("Input $/1M"), { target: { value: "0.03" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -195,7 +195,9 @@ describe("ModelEditDialog", () => {
   it("clears unknown numbers and refuses partial pricing or an invalid context length", async () => {
     const { unmount } = renderDialog();
 
-    fireEvent.change(await screen.findByLabelText("Context length"), { target: { value: "" } });
+    fireEvent.change(await screen.findByLabelText("Context length (optional)"), {
+      target: { value: "" },
+    });
     fireEvent.change(screen.getByLabelText("Input $/1M"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Output $/1M"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -217,7 +219,7 @@ describe("ModelEditDialog", () => {
     fireEvent.change(screen.getByLabelText("Input $/1M"), {
       target: { value: "2.5" },
     });
-    fireEvent.change(screen.getByLabelText("Context length"), {
+    fireEvent.change(screen.getByLabelText("Context length (optional)"), {
       target: { value: "1.5" },
     });
     expect(save).toBeDisabled();

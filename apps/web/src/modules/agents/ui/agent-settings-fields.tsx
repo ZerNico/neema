@@ -59,7 +59,8 @@ export const AgentSettingsFields = withForm({
           <form.AppField name="description">
             {(field) => (
               <field.TextField
-                label="Description (optional)"
+                label="Description"
+                optional
                 placeholder="What this agent is for, in one line."
               />
             )}
