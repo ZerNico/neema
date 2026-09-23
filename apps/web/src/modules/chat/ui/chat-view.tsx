@@ -232,11 +232,7 @@ export function toActivity(row: {
       turnIndex: row.turnIndex,
       callIndex: row.callIndex,
       status:
-        row.status === "running"
-          ? "running"
-          : scheduleDraftResultOk(result)
-            ? "complete"
-            : "error",
+        row.status === "running" ? "running" : scheduleDraftResultOk(result) ? "complete" : "error",
       ...(row.status === "running" ? {} : { result }),
       ...(row.error ? { error: row.error.message } : {}),
     };
@@ -752,9 +748,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   );
   const scheduleDraftIds = useMemo(
     () =>
-      [...discoveredScheduleDrafts]
-        .filter((draftId) => !scopedForgottenDrafts.has(draftId))
-        .sort(),
+      [...discoveredScheduleDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).sort(),
     [discoveredScheduleDrafts, scopedForgottenDrafts],
   );
   // Draft ids are UUIDs, so one set serves both kinds.
@@ -808,6 +802,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   openDocument.current = openDocumentId;
   const documentFocus = () =>
     openDocument.current ? { openDocumentId: openDocument.current } : {};
+
+  const questionResponses = useMemo(
+    () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
+    [data.messages, data.toolCalls, data.attachments],
+  );
+  const effectiveModelId = modelId ?? data.conversation.modelId;
   const { effort: reasoningEffort, setEffort: setReasoningEffort } =
     useReasoningEffort(effectiveModelId);
   const changeModel = useCallback(
@@ -817,12 +817,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     [effectiveModelId, setReasoningEffort],
   );
-
-  const questionResponses = useMemo(
-    () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
-    [data.messages, data.toolCalls, data.attachments],
-  );
-  const effectiveModelId = modelId ?? data.conversation.modelId;
   const {
     enabled: searchEnabled,
     setEnabled: setSearchEnabled,
@@ -889,13 +883,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
       workspaceImports?: WorkspaceImports;
-        reasoningEffort,
     }) => {
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
         modelId: effectiveModelId!,
         content: input.content,
         searchEnabled,
+        reasoningEffort,
         timeZone: browserTimeZone(),
         ...documentFocus(),
         attachmentIds: input.attachmentIds,
@@ -1047,13 +1041,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       checkWorkReady();
       await flushAgentDraft();
       await flushDocuments();
-        reasoningEffort?: ReasoningEffort | null;
     },
     mutationFn: async (
       input: {
         messageId: string;
         modelId: string;
         searchEnabled: boolean;
+        reasoningEffort?: ReasoningEffort | null;
         researchEnabled?: boolean;
         attachmentIds: ReadonlyArray<string>;
         skillIds?: ReadonlyArray<string>;
@@ -1246,25 +1240,25 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     running:
       streamingMessage?.generationId != null
         ? { messageId: streamingMessage.id, generationId: streamingMessage.generationId }
-      reasoningEffort,
         : null,
     arrived: stream.steers,
     // What a send carries now; a queued message freezes it.
     submission: async () => ({
       modelId: effectiveModelId!,
       searchEnabled,
+      reasoningEffort,
       ...(await work.attemptFields()),
       timeZone: browserTimeZone(),
       ...documentFocus(),
       ...context.sendFields,
-      reasoningEffort,
-      setReasoningEffort,
     }),
     attemptFields: () => work.attemptFields(),
     checkWork: checkWorkReady,
     settings: {
       modelId,
       setModelId,
+      reasoningEffort,
+      setReasoningEffort,
       setSearchEnabled,
       resetSearchEnabled,
       seedCollections: context.seed,
@@ -1400,13 +1394,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         generating
       )
         return false;
-        reasoningEffort,
       if (!(await confirmEdit(activeEditingMessage.id))) return false;
       await mutateQuestionEdit({
         messageId: activeEditingMessage.id,
         questionResponse,
         modelId: effectiveModelId,
         searchEnabled,
+        reasoningEffort,
         attachmentIds: [],
       });
       return true;
@@ -1415,13 +1409,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       activeEditingMessage,
       questionResponses,
       effectiveModelId,
-      reasoningEffort,
       editPending,
       questionNeedsRefresh,
       generating,
       confirmEdit,
       mutateQuestionEdit,
       searchEnabled,
+      reasoningEffort,
     ],
   );
 
@@ -1437,13 +1431,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       // Queues behind any upload still in flight, then sends the full ordered
       // replacement set. Omitted ids are released server-side.
       submitEditUploads((attachmentIds) => {
-          reasoningEffort,
         if (!content && attachmentIds.length === 0) return;
         mutateEdit({
           messageId: activeEditingMessage.id,
           content,
           modelId: effectiveModelId,
           searchEnabled,
+          reasoningEffort,
           researchEnabled: editResearchEnabled,
           attachmentIds,
           skillIds: editSkillIds,
@@ -1453,13 +1447,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     },
     [
       activeEditingMessage,
-      reasoningEffort,
       confirmEdit,
       editPending,
       editUploadCount,
       effectiveModelId,
       mutateEdit,
       searchEnabled,
+      reasoningEffort,
       editResearchEnabled,
       submitEditUploads,
       editSkillIds,
@@ -1736,14 +1730,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               onResearchEnabledChange: setEditResearchEnabled,
               onSave: (draft) => void saveEdit(draft),
               onCancel: closeEdit,
-              reasoningEffort,
-              onReasoningEffortChange: setReasoningEffort,
               saveDisabled: editPending || work.readOnly,
               controlsDisabled: editPending,
               modelId: effectiveModelId,
               onModelChange: changeModel,
               searchEnabled,
               onSearchEnabledChange: setSearchEnabled,
+              reasoningEffort,
+              onReasoningEffortChange: setReasoningEffort,
               attachments: editUploads,
               skills: {
                 items: editableSkills.data ?? [],
@@ -1782,13 +1776,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         }
         if (stream.text.length > base.content.length) {
           return { ...live, content: stream.text, status: stream.status };
-      changeModel,
         }
         return live;
       }),
     [
       activeEditingMessage,
       baseDisplay,
+      changeModel,
       closeEdit,
       editPending,
       editUploads,
@@ -1797,14 +1791,14 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       generationDisabled,
       work.readOnly,
       saveQuestionEdit,
-      reasoningEffort,
-      setReasoningEffort,
       // Carries `editSkillIds` and `editContext` in: both are its own
       // dependencies, so picking a skill mid-edit gives this a new identity and
       // the chips refresh. Dropping either from its list strands them here.
       saveEdit,
       searchEnabled,
       setSearchEnabled,
+      reasoningEffort,
+      setReasoningEffort,
       editResearchEnabled,
       stream.compactions,
       stream.rawTextLength,
@@ -1837,9 +1831,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       : undefined,
   );
   const origin = new Map(
-    [...data.agentDrafts, ...(data.scheduleDrafts ?? []), ...(data.documents ?? [])].map(
-      (item) => [item.id, item],
-    ),
+    [...data.agentDrafts, ...(data.scheduleDrafts ?? []), ...(data.documents ?? [])].map((item) => [
+      item.id,
+      item,
+    ]),
   );
   const placed = (message: DisplayMessage, index: number, id: string) => ({
     status: "complete" as const,
@@ -1907,118 +1902,115 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         autoOpenIds={liveCreated.agent}
         ref={agentDraft}
       >
-      <ScheduleDraftOwner
-        draftIds={scheduleDraftIds}
-        onGone={forgetDraft}
-        autoOpenIds={liveCreated.schedule}
-        ref={scheduleDraft}
-      >
-        <div className="flex h-full flex-col">
-          <ConversationCrumbs
-            conversationId={conversationId}
-            title={data.conversation.title}
-            schedule={data.schedule}
-            branchedFrom={data.branchedFrom}
-            agent={data.agent}
-          />
-          {foreignMachine ? (
-            <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
-          ) : null}
-          <div className="min-h-0 flex-1">
-            {/* lastSeq covers tool-activity-only updates too */}
-            <ResearchPanelOwner messages={display} />
-            {/* A Work row names a path; only this view knows whose folders it
-              resolves against. */}
-            <LocalFileConversationProvider
+        <ScheduleDraftOwner
+          draftIds={scheduleDraftIds}
+          onGone={forgetDraft}
+          autoOpenIds={liveCreated.schedule}
+          ref={scheduleDraft}
+        >
+          <div className="flex h-full flex-col">
+            <ConversationCrumbs
               conversationId={conversationId}
-              workspaceRoot={folder?.status?.workspace.path ?? null}
-            >
-              <VirtualMessageList
-                messages={withPlacedCards}
-                followKey={stream.lastSeq}
-              />
-            </LocalFileConversationProvider>
-          </div>
-          {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
+              title={data.conversation.title}
+              schedule={data.schedule}
+              branchedFrom={data.branchedFrom}
+              agent={data.agent}
+            />
+            {foreignMachine ? (
+              <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
+            ) : null}
+            <div className="min-h-0 flex-1">
+              {/* lastSeq covers tool-activity-only updates too */}
+              <ResearchPanelOwner messages={display} />
+              {/* A Work row names a path; only this view knows whose folders it
+              resolves against. */}
+              <LocalFileConversationProvider
+                conversationId={conversationId}
+                workspaceRoot={folder?.status?.workspace.path ?? null}
+              >
+                <VirtualMessageList messages={withPlacedCards} followKey={stream.lastSeq} />
+              </LocalFileConversationProvider>
+            </div>
+            {/* Mirrors the message column (scrollbar gutter + max-w + px) so the
           composer edges align exactly with message content above. No top
           padding: the scroller's fade mask handles the visual transition. */}
-          <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
-            <div className="mx-auto w-full max-w-3xl px-4">
-              {questionNeedsRefresh ? (
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
-                  <span>Your answers may not have been sent.</span>
-                  <PendingButton
-                    size="sm"
-                    variant="outline"
-                    pending={refreshQuestionMutation.isPending}
-                    onClick={() => refreshQuestionMutation.mutate()}
-                  >
-                    Refresh chat
-                  </PendingButton>
-                </div>
-              ) : null}
-              <Composer
-                ref={composer}
-                conversationId={conversationId}
-                folder={folder}
-                readOnly={work.readOnly}
-                mode={{ kind: "fixed", value: data.conversation.mode }}
-                settings={{
-                  permissionLevel: data.conversation.permissionLevel,
-                  onChange: (level) => workSettingsMutation.mutate(level),
-                }}
-                onSend={(
-                  content,
-                  attachmentIds,
-                  researchEnabled,
-                  skillIds,
-                  workspaceFiles,
-                  workspaceImports,
-                ) =>
-                  sendMutation.mutateAsync({
+            <div className="pb-4 [scrollbar-gutter:stable_both-edges]">
+              <div className="mx-auto w-full max-w-3xl px-4">
+                {questionNeedsRefresh ? (
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
+                    <span>Your answers may not have been sent.</span>
+                    <PendingButton
+                      size="sm"
+                      variant="outline"
+                      pending={refreshQuestionMutation.isPending}
+                      onClick={() => refreshQuestionMutation.mutate()}
+                    >
+                      Refresh chat
+                    </PendingButton>
+                  </div>
+                ) : null}
+                <Composer
+                  ref={composer}
+                  conversationId={conversationId}
+                  folder={folder}
+                  readOnly={work.readOnly}
+                  mode={{ kind: "fixed", value: data.conversation.mode }}
+                  settings={{
+                    permissionLevel: data.conversation.permissionLevel,
+                    onChange: (level) => workSettingsMutation.mutate(level),
+                  }}
+                  onSend={(
                     content,
                     attachmentIds,
                     researchEnabled,
-                    ...(skillIds ? { skillIds } : {}),
-                    ...(workspaceFiles ? { workspaceFiles } : {}),
-                    ...(workspaceImports ? { workspaceImports } : {}),
-                  })
-                }
-                {...(generating ? { onQueue: conversationQueue.submit } : {})}
-                queue={conversationQueue.queue}
-                {...(stoppableId
-                  ? {
-                      onStop: () =>
-                        stopMutation.mutate({
-                          messageId: stoppableId,
-                          ...(streamingMessage?.generationId
-                            ? { generationId: streamingMessage.generationId }
-                            : {}),
-                        }),
-                    }
-                  : {})}
-                // A live answer locks destructive transcript actions, not the
-                // next draft. The composer submits that draft to the queue.
-                disabled={
-                  questionNeedsRefresh ||
-                  retryMutation.isPending ||
-                  editMutation.isPending ||
-                  branchMutation.isPending
-                }
-                textareaDisabled={editPending}
-                controlsDisabled={mutationPending}
-                modelId={effectiveModelId}
-                onModelChange={changeModel}
-                searchEnabled={searchEnabled}
-                onSearchEnabledChange={setSearchEnabled}
-                reasoningEffort={reasoningEffort}
-                onReasoningEffortChange={setReasoningEffort}
-                context={context}
-              />
+                    skillIds,
+                    workspaceFiles,
+                    workspaceImports,
+                  ) =>
+                    sendMutation.mutateAsync({
+                      content,
+                      attachmentIds,
+                      researchEnabled,
+                      ...(skillIds ? { skillIds } : {}),
+                      ...(workspaceFiles ? { workspaceFiles } : {}),
+                      ...(workspaceImports ? { workspaceImports } : {}),
+                    })
+                  }
+                  {...(generating ? { onQueue: conversationQueue.submit } : {})}
+                  queue={conversationQueue.queue}
+                  {...(stoppableId
+                    ? {
+                        onStop: () =>
+                          stopMutation.mutate({
+                            messageId: stoppableId,
+                            ...(streamingMessage?.generationId
+                              ? { generationId: streamingMessage.generationId }
+                              : {}),
+                          }),
+                      }
+                    : {})}
+                  // A live answer locks destructive transcript actions, not the
+                  // next draft. The composer submits that draft to the queue.
+                  disabled={
+                    questionNeedsRefresh ||
+                    retryMutation.isPending ||
+                    editMutation.isPending ||
+                    branchMutation.isPending
+                  }
+                  textareaDisabled={editPending}
+                  controlsDisabled={mutationPending}
+                  modelId={effectiveModelId}
+                  onModelChange={changeModel}
+                  searchEnabled={searchEnabled}
+                  onSearchEnabledChange={setSearchEnabled}
+                  reasoningEffort={reasoningEffort}
+                  onReasoningEffortChange={setReasoningEffort}
+                  context={context}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </ScheduleDraftOwner>
+        </ScheduleDraftOwner>
       </AgentDraftOwner>
     </DocumentOwner>
   );
@@ -2040,13 +2032,13 @@ export function NewChatView({
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
   initialSkillId?: string | null;
-  const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   initialPrefill?: string | null;
   onPrefillConsumed?: () => void;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modelId, setModelId] = useState<string | null>(null);
+  const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   const context = useContextSelection({
     mode: "draft",
     agent: initialAgentId ? { id: initialAgentId, name: null } : null,
@@ -2111,13 +2103,13 @@ export function NewChatView({
       const conversation = {
         kind: "new" as const,
         id: conversationId,
-        reasoningEffort,
         mode: input.mode,
       };
       const fields = {
         modelId: modelId!,
         content: input.content,
         searchEnabled,
+        reasoningEffort,
         timeZone: browserTimeZone(),
         attachmentIds: input.attachmentIds,
         researchEnabled: input.researchEnabled,
@@ -2252,19 +2244,19 @@ export function NewChatView({
                 ...(workspaceFiles ? { workspaceFiles } : {}),
                 ...(workspaceImports ? { workspaceImports } : {}),
                 mode,
-              if (id !== modelId) setReasoningEffort(null);
               })
             }
             disabled={sendMutation.isPending}
             modelId={modelId}
-            reasoningEffort={reasoningEffort}
-            onReasoningEffortChange={setReasoningEffort}
             onModelChange={(id, source) => {
               if (source !== "default") modelOverride.current = selectedAgentId;
+              if (id !== modelId) setReasoningEffort(null);
               setModelId(id);
             }}
             searchEnabled={searchEnabled}
             onSearchEnabledChange={setSearchEnabled}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={setReasoningEffort}
             context={{
               ...context,
               onAgentChange: (id) => {
