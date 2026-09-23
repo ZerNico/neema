@@ -888,11 +888,8 @@ export class StreamEngine extends Context.Service<
                   ),
               ),
             );
-          // Keyed off web tools, not any toolkit: memory must not preserve
-          // citation markers or receive search/source reminders.
           const historyMessages = yield* buildHistoryMessages(promptDeps, {
             deferAssistantBytes: true,
-            webToolsEnabled: webTools !== undefined || knowledgeSession !== null,
             messages: historySuffix,
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
@@ -908,7 +905,6 @@ export class StreamEngine extends Context.Service<
                       messages: [message],
                       deferAssistantBytes: true,
                       expandAssistantTurns: true,
-                      webToolsEnabled: webTools !== undefined || knowledgeSession !== null,
                       modelSupportsFiles: model?.capabilities.files ?? false,
                       ...(model
                         ? {
@@ -946,9 +942,20 @@ export class StreamEngine extends Context.Service<
             const snapshot = planTools?.current();
             return snapshot ? renderPlanReminder(snapshot) : null;
           };
+          // History keeps its citation markers for a stable cached prefix, so an
+          // attempt with nothing to cite says so here instead of stripping them.
+          const citesNothing =
+            webTools === undefined &&
+            knowledgeSession === null &&
+            historySuffix.some(
+              (message) => message.role === "assistant" && /\[\^\d+\]/.test(message.content),
+            );
           const reminderPrompt = (lastCycle: boolean) => {
             const sections = [
               webTools ? buildSearchReminder({ sources: recapSources(), lastCycle }) : null,
+              citesNothing
+                ? "Citation markers like [^1] in earlier answers point at sources from earlier turns. This answer has no sources to cite, so write no citation markers."
+                : null,
               knowledgeReminder(),
               planReminder(),
             ].filter(Boolean);
@@ -1196,7 +1203,6 @@ export class StreamEngine extends Context.Service<
                     {
                       messages: [message],
                       loadedBytes,
-                      webToolsEnabled: webTools !== undefined || knowledgeSession !== null,
                       modelSupportsFiles: model?.capabilities.files ?? false,
                       modelSupportsVision: model?.capabilities.vision ?? false,
                       ...(model

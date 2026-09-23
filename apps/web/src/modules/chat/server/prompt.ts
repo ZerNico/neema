@@ -9,7 +9,6 @@ import type { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import type { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import type { AttachmentRepo, AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { buildTextFence } from "~/modules/attachments/server/validation.ts";
-import { stripCitationMarkers } from "../citation-markers.ts";
 
 export interface HistoryMessage {
   readonly id: string;
@@ -72,8 +71,6 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   deps: PromptDeps,
   input: {
     messages: ReadonlyArray<HistoryMessage>;
-    /** Any web tool armed for this generation: search, the reader, or both. */
-    webToolsEnabled: boolean;
     /** Model accepts non-image file parts (catalog `files` capability). */
     modelSupportsFiles: boolean;
     modelSupportsVision?: boolean;
@@ -83,15 +80,13 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     expandAssistantTurns?: boolean;
   },
 ) {
-  const normalizeAssistantText = (text: string) =>
-    input.webToolsEnabled ? text : stripCitationMarkers(text);
+  // Citation markers stay in history whether or not this attempt has web
+  // tools: rendering history per toggle rewrote every earlier answer, and so
+  // the cached prefix, each time search was switched. The trailing reminder
+  // says when a new answer must not cite.
   const plain = (message: HistoryMessage): Prompt.MessageEncoded => ({
     role: message.role,
-    content:
-      messageTimestamp(message) +
-      // Without web tools there is no recap block, so history markers would
-      // teach the model to emit unresolvable citations, so strip them.
-      (message.role === "assistant" ? normalizeAssistantText(message.content) : message.content),
+    content: messageTimestamp(message) + message.content,
   });
 
   // A workspace import is named ahead of the text, like an attachment part,
@@ -241,22 +236,13 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       const signedReplay = turns.some(protectsText);
       let timestamp = messageTimestamp(message);
       if (signedReplay) {
-        const signedCitations = turns.some((turn) => {
-          const text = message.content.slice(turn.startOffset, turn.endOffset);
-          return protectsText(turn) && normalizeAssistantText(text) !== text;
-        });
-        // Never prepend timestamps or strip citations inside an opaque replay unit.
-        // This annotation belongs to the same history group, before its assistant
+        // Never prepend a timestamp inside an opaque replay unit. This
+        // annotation belongs to the same history group, before its assistant
         // turns (and never between a tool call and its result).
-        if (timestamp || signedCitations)
+        if (timestamp)
           messages.push({
             role: "user",
-            content:
-              "Historical assistant response metadata:\n" +
-              timestamp +
-              (signedCitations
-                ? "Citation markers in the following historical assistant response are retained for provider replay only. Do not reuse these markers in a new answer.\n"
-                : ""),
+            content: "Historical assistant response metadata:\n" + timestamp,
           });
         timestamp = "";
       }
@@ -269,9 +255,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           timestamp = "";
         }
         const appendText = (start: number, end: number) => {
-          // Offsets address the persisted UTF-16 string, not its normalized form.
-          const raw = message.content.slice(start, end);
-          const text = protectsText(turn) ? raw : normalizeAssistantText(raw);
+          const text = message.content.slice(start, end);
           if (text) parts.push({ type: "text", text });
         };
         let cursor = turn.startOffset;

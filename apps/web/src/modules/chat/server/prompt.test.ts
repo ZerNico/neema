@@ -74,12 +74,11 @@ const harness = (options: {
 const build = (
   deps: PromptDeps,
   messages: ReadonlyArray<HistoryMessage>,
-  options: { webToolsEnabled?: boolean; modelSupportsFiles?: boolean } = {},
+  options: { modelSupportsFiles?: boolean } = {},
 ) =>
   Effect.runPromise(
     buildHistoryMessages(deps, {
       messages,
-      webToolsEnabled: options.webToolsEnabled ?? false,
       modelSupportsFiles: options.modelSupportsFiles ?? false,
     }),
   );
@@ -87,7 +86,7 @@ const build = (
 const user = (id: string, content: string): HistoryMessage => ({ id, role: "user", content });
 
 describe("buildHistoryMessages without attachments", () => {
-  it("passes plain strings through and strips stale citation markers", async () => {
+  it("passes plain strings through, citation markers included", async () => {
     const { deps } = harness({ rows: [] });
     const messages = await build(deps, [
       user("m1", "hello"),
@@ -95,7 +94,7 @@ describe("buildHistoryMessages without attachments", () => {
     ]);
     expect(messages).toEqual([
       { role: "user", content: "hello" },
-      { role: "assistant", content: "an answer" },
+      { role: "assistant", content: "an answer[^1]" },
     ]);
   });
 
@@ -124,16 +123,6 @@ describe("buildHistoryMessages without attachments", () => {
       { role: "user", content: "plain question" },
     ]);
   });
-
-  it("keeps markers when a web tool is armed for this generation", async () => {
-    const { deps } = harness({ rows: [] });
-    const messages = await build(
-      deps,
-      [{ id: "m1", role: "assistant", content: "an answer[^1]" }],
-      { webToolsEnabled: true },
-    );
-    expect(messages).toEqual([{ role: "assistant", content: "an answer[^1]" }]);
-  });
 });
 
 describe("buildHistoryMessages timestamps", () => {
@@ -152,7 +141,7 @@ describe("buildHistoryMessages timestamps", () => {
     expect(first).toEqual(await build(deps, history));
     expect(first).toEqual([
       { role: "user", content: `[Sent: ${createdAt.toISOString()}]\nhello` },
-      { role: "assistant", content: `[Completed: ${completedAt.toISOString()}]\nanswer` },
+      { role: "assistant", content: `[Completed: ${completedAt.toISOString()}]\nanswer[^1]` },
       { role: "system", content: "policy" },
     ]);
     expect(history[0]?.content).toBe("hello");
@@ -383,7 +372,6 @@ describe("assistant image replay", () => {
     messages: [message],
     modelSupportsFiles: false,
     modelSupportsVision: true,
-    webToolsEnabled: false,
     expandAssistantTurns: true,
     modelIdentity: { providerId: "provider", modelKey: "model" },
   };
@@ -406,46 +394,43 @@ describe("assistant image replay", () => {
         });
       }),
   );
-  for (const webToolsEnabled of [false, true]) {
-    it.effect(`normalizes fileless empty-metadata replay with web tools ${webToolsEnabled}`, () =>
-      Effect.gen(function* () {
-        const { deps } = harness({ rows: [] });
-        const content = "Answer[^1]";
-        const completedAt = new Date("2026-09-08T12:00:00Z");
-        const history: HistoryMessage = {
-          ...message,
-          content,
-          assistantOutput: null,
-          completedAt,
-          createdAt: new Date("2026-09-01T00:00:00Z"),
-          providerReplay: {
-            ...message.providerReplay!,
-            turns: [
-              { turnIndex: 0, startOffset: 0, endOffset: content.length, reasoningDetails: [] },
-            ],
-          },
-        };
-        const rendered = yield* buildHistoryMessages(deps, {
-          ...input,
-          webToolsEnabled,
-          messages: [history],
-        });
-        expect(rendered).toEqual([
-          {
-            role: "assistant",
-            content: [
-              { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
-              { type: "text", text: webToolsEnabled ? content : "Answer" },
-            ],
-            options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
-          },
-        ]);
-        expect(history.content).toBe(content);
-      }),
-    );
-  }
+  it.effect("replays fileless empty-metadata text exactly, markers included", () =>
+    Effect.gen(function* () {
+      const { deps } = harness({ rows: [] });
+      const content = "Answer[^1]";
+      const completedAt = new Date("2026-09-08T12:00:00Z");
+      const history: HistoryMessage = {
+        ...message,
+        content,
+        assistantOutput: null,
+        completedAt,
+        createdAt: new Date("2026-09-01T00:00:00Z"),
+        providerReplay: {
+          ...message.providerReplay!,
+          turns: [
+            { turnIndex: 0, startOffset: 0, endOffset: content.length, reasoningDetails: [] },
+          ],
+        },
+      };
+      const rendered = yield* buildHistoryMessages(deps, {
+        ...input,
+        messages: [history],
+      });
+      expect(rendered).toEqual([
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
+            { type: "text", text: content },
+          ],
+          options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
+        },
+      ]);
+      expect(history.content).toBe(content);
+    }),
+  );
   for (const mode of ["empty metadata", "incompatible model", "collapsed estimate"] as const) {
-    it.effect(`normalizes raw slices without moving images for ${mode}`, () =>
+    it.effect(`replays raw slices without moving images for ${mode}`, () =>
       Effect.gen(function* () {
         const { deps } = harness({ rows: [imageRow] });
         const prefix = "😀before[^1]";
@@ -484,9 +469,9 @@ describe("assistant image replay", () => {
         expect(rendered).toHaveLength(1);
         expect(rendered[0]?.content).toEqual([
           { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
-          { type: "text", text: "😀before" },
+          { type: "text", text: "😀before[^1]" },
           expect.objectContaining({ type: "file", fileName: "generated.png" }),
-          { type: "text", text: "after" },
+          { type: "text", text: "after[^2]" },
         ]);
         expect(JSON.stringify(rendered)).not.toContain("opaque");
         expect(history.assistantOutput?.files[0]?.textOffset).toBe(prefix.length);
@@ -495,7 +480,7 @@ describe("assistant image replay", () => {
     );
   }
   it.effect(
-    "annotates outside signed text and tools while normalizing an unsigned trailing turn",
+    "annotates outside signed text and tools, and replays an unsigned trailing turn as stored",
     () =>
       Effect.gen(function* () {
         const { deps } = harness({ rows: [imageRow] });
@@ -551,7 +536,7 @@ describe("assistant image replay", () => {
         expect(rendered).toHaveLength(4);
         expect(rendered[0]).toEqual({
           role: "user",
-          content: `Historical assistant response metadata:\n[Completed: ${completedAt.toISOString()}]\nCitation markers in the following historical assistant response are retained for provider replay only. Do not reuse these markers in a new answer.\n`,
+          content: `Historical assistant response metadata:\n[Completed: ${completedAt.toISOString()}]\n`,
         });
         expect(rendered[1]).toEqual({
           role: "assistant",
@@ -577,7 +562,7 @@ describe("assistant image replay", () => {
         });
         expect(rendered[3]).toMatchObject({
           role: "assistant",
-          content: [{ type: "text", text: "tail" }],
+          content: [{ type: "text", text: "tail[^3]" }],
         });
         expect(history).toEqual(original);
       }),

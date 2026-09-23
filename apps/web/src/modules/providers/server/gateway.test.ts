@@ -374,7 +374,6 @@ describe("sensitive input diagnostics for text output", () => {
               modelSupportsFiles: false,
               modelSupportsVision: true,
               expandAssistantTurns: true,
-              webToolsEnabled: false,
             },
           );
           const error = yield* request(
