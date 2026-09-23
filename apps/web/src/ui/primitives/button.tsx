@@ -29,6 +29,10 @@ const buttonVariantClasses = cva(
           "h-9 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5",
         xs: "h-6 gap-1 px-2.5 text-xs has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-8 gap-1 px-3 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        // `sm` with an icon and a label, until the enclosing @container is under
+        // 28rem: then the label goes screen-reader-only and the button is icon-sm's circle.
+        "sm-collapsible":
+          "h-8 gap-1 px-3 has-data-[icon=inline-start]:pl-2 @max-md:w-8 @max-md:px-0 @max-md:has-data-[icon=inline-start]:pl-0 @max-md:[&>span]:sr-only",
         lg: "h-10 gap-1.5 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
         icon: "size-9",
         "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",

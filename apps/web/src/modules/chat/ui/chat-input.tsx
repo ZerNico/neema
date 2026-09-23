@@ -515,7 +515,7 @@ export const ChatInput = forwardRef<
       />
       {/* The textarea's own bottom padding is inside its scroll box, so the gap
           above the controls lives here: it stays constant once the text scrolls. */}
-      <div className="flex flex-wrap items-center gap-1 p-2 pt-2">
+      <div className="@container flex flex-wrap items-center gap-1 p-2 pt-2">
         {target ? (
           <input
             ref={fileInputRef}
@@ -668,7 +668,7 @@ export const ChatInput = forwardRef<
         ) : null}
         {searchAvailable ? (
           <Button
-            size="sm"
+            size="sm-collapsible"
             variant={searchEnabled ? "default" : "ghost"}
             aria-label="Search the web"
             aria-pressed={searchEnabled}
@@ -677,32 +677,16 @@ export const ChatInput = forwardRef<
             className={cn("shrink-0", !searchEnabled && "text-muted-foreground")}
           >
             <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span className="max-[420px]:sr-only">Search</span>
+            <span>Search</span>
           </Button>
         ) : null}
-        <ModelPicker
-          models={models}
-          value={selectedModel?.id ?? null}
-          onChange={onModelChange}
-          disabled={noModels || controlsDisabled}
-          trigger={
-            <Button
-              variant="ghost"
-              size="sm"
-              // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
-              className="text-muted-foreground hover:text-foreground hover:bg-accent min-w-0 max-w-52 gap-1.5"
-            />
-          }
-        >
-          <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
-        </ModelPicker>
         {onReasoningEffortChange && (selectedModel?.reasoningEfforts?.length ?? 0) > 0 ? (
           <DropdownMenu open={reasoningMenuOpen} onOpenChange={setReasoningMenuOpen}>
             <DropdownMenuTrigger
               render={
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="sm-collapsible"
                   disabled={controlsDisabled}
                   // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
                   className="text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -711,9 +695,7 @@ export const ChatInput = forwardRef<
               }
             >
               <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
-              <span className="max-[420px]:sr-only">
-                {reasoningEffort ? effortLabels[reasoningEffort] : "Default"}
-              </span>
+              <span>{reasoningEffort ? effortLabels[reasoningEffort] : "Default"}</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start">
               <DropdownMenuRadioGroup
@@ -739,62 +721,82 @@ export const ChatInput = forwardRef<
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          {onStop && queueDraft ? (
+        {/* One unit, so a narrow composer wraps model and send onto their own
+            row together instead of wherever the tools happen to run out. */}
+        <div className="flex min-w-0 grow items-center gap-1">
+          <ModelPicker
+            models={models}
+            value={selectedModel?.id ?? null}
+            onChange={onModelChange}
+            disabled={noModels || controlsDisabled}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
+                className="text-muted-foreground hover:text-foreground hover:bg-accent min-w-0 max-w-64 gap-1.5"
+              />
+            }
+          >
+            <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
+          </ModelPicker>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {onStop && queueDraft ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={onStop}
+                      aria-label="Stop generating"
+                    />
+                  }
+                >
+                  <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
+                </TooltipTrigger>
+                <TooltipContent>Stop generating</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {onCancel ? (
+              <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>
+                Cancel
+              </Button>
+            ) : null}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     size="icon-sm"
-                    variant="ghost"
-                    onClick={onStop}
-                    aria-label="Stop generating"
+                    onClick={stopping ? onStop : submit}
+                    // Stop is available precisely while sending is disabled.
+                    disabled={!stopping && !canSubmit}
+                    aria-label={actionLabel}
+                    aria-busy={(!onStop && target?.queued) || undefined}
                   />
                 }
               >
-                <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
+                <MotionSwap value={action} kind="icon" className="size-4">
+                  {stopping ? (
+                    <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
+                  ) : target?.queued ? (
+                    <Spinner aria-hidden className="size-4" />
+                  ) : (
+                    <HugeiconsIcon
+                      icon={ArrowUp02Icon}
+                      strokeWidth={2}
+                      className="size-4"
+                      aria-hidden
+                    />
+                  )}
+                </MotionSwap>
               </TooltipTrigger>
-              <TooltipContent>Stop generating</TooltipContent>
+              <TooltipContent>
+                {actionLabel}
+                {!stopping ? <Kbd>Enter</Kbd> : null}
+              </TooltipContent>
             </Tooltip>
-          ) : null}
-          {onCancel ? (
-            <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>
-              Cancel
-            </Button>
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  onClick={stopping ? onStop : submit}
-                  // Stop is available precisely while sending is disabled.
-                  disabled={!stopping && !canSubmit}
-                  aria-label={actionLabel}
-                  aria-busy={(!onStop && target?.queued) || undefined}
-                />
-              }
-            >
-              <MotionSwap value={action} kind="icon" className="size-4">
-                {stopping ? (
-                  <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
-                ) : target?.queued ? (
-                  <Spinner aria-hidden className="size-4" />
-                ) : (
-                  <HugeiconsIcon
-                    icon={ArrowUp02Icon}
-                    strokeWidth={2}
-                    className="size-4"
-                    aria-hidden
-                  />
-                )}
-              </MotionSwap>
-            </TooltipTrigger>
-            <TooltipContent>
-              {actionLabel}
-              {!stopping ? <Kbd>Enter</Kbd> : null}
-            </TooltipContent>
-          </Tooltip>
+          </div>
         </div>
       </div>
       <Disclosure
