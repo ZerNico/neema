@@ -218,7 +218,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
           </div>
           <div className="text-muted-foreground flex min-h-64 items-center justify-center gap-2 text-sm">
             <Spinner aria-hidden />
-            Reading the package…
+            Reading the skill…
           </div>
         </div>
       ) : review ? (
