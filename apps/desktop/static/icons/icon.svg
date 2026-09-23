@@ -1,0 +1,8 @@
+<!-- macOS grid: an 824 tile centred on a 1024 canvas, the favicon scaled into it. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <g transform="translate(100 100) scale(12.875)">
+    <rect width="64" height="64" rx="14.4" fill="#171717"/>
+    <path d="M42 46V30a10 10 0 0 0-20 0v11.5c0 3-2 5.4-5 6" stroke="#fafafa" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="47.5" cy="17.5" r="3.5" fill="#fafafa"/>
+  </g>
+</svg>

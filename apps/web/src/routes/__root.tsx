@@ -38,6 +38,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         href: "/favicon-light.svg",
         media: "(prefers-color-scheme: dark)",
       },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      { rel: "manifest", href: "/site.webmanifest" },
     ],
   }),
   shellComponent: RootDocument,

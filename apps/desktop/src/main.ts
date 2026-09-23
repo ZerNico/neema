@@ -64,6 +64,9 @@ const connectFile = join(here, "..", "static", "connect.html");
 const recoveryFile = join(here, "..", "static", "recovery.html");
 const connectUrl = pathToFileURL(connectFile).href;
 const recoveryUrl = pathToFileURL(recoveryFile).href;
+// Rendered from the SVGs beside them by scripts/render-icons.sh.
+const appIconFile = join(here, "..", "static", "icons", "icon.png");
+const trayIconFile = join(here, "..", "static", "icons", "trayTemplate.png");
 const devReload = process.env.CHAT_DESKTOP_DEV_RELOAD === "1";
 // Select the profile before services capture paths or Electron opens a session.
 if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
@@ -206,6 +209,7 @@ const openConnectWindow = (current: string | null) => {
     height: 360,
     resizable: false,
     title: "Connect",
+    icon: appIconFile,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -312,6 +316,7 @@ const openMainWindow = (origin: string) => {
     ...chromeOptions(platform, nativeTheme.shouldUseDarkColors),
     width: 1280,
     height: 860,
+    icon: appIconFile,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -459,21 +464,15 @@ void app.whenReady().then(async () => {
     ]),
   );
   app.dock?.setMenu(Menu.buildFromTemplate(actions));
-  // A small monochrome speech bubble works as a template icon and in Windows' tray.
-  const pixels = Buffer.alloc(18 * 18 * 4);
-  for (let y = 3; y < 16; y += 1) {
-    for (let x = 2; x < 16; x += 1) {
-      if (
-        (y < 13 && (x === 2 || x === 15 || y === 3 || y === 12)) ||
-        (x === 5 && y >= 12) ||
-        (y === 14 && x === 6)
-      )
-        pixels[(y * 18 + x) * 4 + 3] = 255;
-    }
-  }
-  const icon = nativeImage.createFromBitmap(pixels, { width: 18, height: 18 });
-  icon.setTemplateImage(true);
-  tray = new Tray(icon);
+  // Unpackaged, the dock would otherwise show Electron.app's own icon.
+  app.dock?.setIcon(appIconFile);
+  // macOS recolours the black template glyph for the menu bar; elsewhere it
+  // would vanish on a dark taskbar, so the tray gets the full-colour icon.
+  tray = new Tray(
+    process.platform === "darwin"
+      ? trayIconFile
+      : nativeImage.createFromPath(appIconFile).resize({ width: 32, height: 32 }),
+  );
   tray.setToolTip("neema");
   tray.setContextMenu(Menu.buildFromTemplate(actions));
   tray.on("click", restoreWindow);
