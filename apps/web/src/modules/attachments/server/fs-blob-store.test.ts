@@ -1,4 +1,12 @@
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +20,7 @@ const root = mkdtempSync(join(tmpdir(), "blob-store-"));
 process.env.BLOB_STORE_ROOT = root;
 
 const { BlobStore, blobStorageKey, userBlobPrefix } = await import("./blob-store.ts");
-const { fsBlobStoreLayer } = await import("./fs-blob-store.ts");
+const { fsBlobStoreLayer, sweepStaleBlobTemps } = await import("./fs-blob-store.ts");
 
 const hash = (seed: string) => seed.repeat(64).slice(0, 64);
 const HASH = hash("ab12cd34");
@@ -127,6 +135,35 @@ describe("fsBlobStore", () => {
       const error = await expectFailure((store) => store.get(key));
       expect(error).toMatchObject({ _tag: "BlobStoreError", message: "malformed storage key" });
     }
+  });
+
+  it("removes only aged temporary siblings of canonical keys", async () => {
+    const key = keyFor("sweep", HASH);
+    const directory = join(root, "blobs", "sweep", "ab", "12");
+    mkdirSync(directory, { recursive: true });
+    const old = join(root, `${key}.0123456789abcdef.tmp`);
+    const fresh = join(root, `${key}.fedcba9876543210.tmp`);
+    const unrelated = join(directory, `${HASH}.not-a-key.0123456789abcdef.tmp`);
+    for (const file of [old, fresh, unrelated]) writeFileSync(file, "bytes");
+    const now = Date.now();
+    const aged = new Date(now - 2 * 60 * 60 * 1000);
+    utimesSync(old, aged, aged);
+    utimesSync(unrelated, aged, aged);
+    expect(await sweepStaleBlobTemps(root, now)).toBe(1);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+  });
+
+  it("does not follow symlinked blob directories", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "blob-outside-"));
+    const external = join(outside, `${HASH}.${INCARNATION}.0123456789abcdef.tmp`);
+    writeFileSync(external, "untouched");
+    const aged = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(external, aged, aged);
+    symlinkSync(outside, join(root, "blobs", "linked"));
+    await sweepStaleBlobTemps(root);
+    expect(existsSync(external)).toBe(true);
   });
 
   it("never creates anything outside the root", () => {

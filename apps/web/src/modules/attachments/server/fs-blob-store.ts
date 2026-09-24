@@ -1,9 +1,50 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
-import { Config, Effect, Layer } from "effect";
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { Config, Duration, Effect, Layer, Schedule } from "effect";
 import { BlobStoreError } from "../errors.ts";
-import { BlobStore, assertValidBlobKey } from "./blob-store.ts";
+import { BlobStore, assertValidBlobKey, isValidBlobKey } from "./blob-store.ts";
+
+const TEMP_AGE_MS = 60 * 60 * 1000;
+const TEMP_NAME = /^(.*)\.([0-9a-f]{16})\.tmp$/;
+const activeTemps = new Set<string>();
+
+/** Only this writer's abandoned siblings; never follow a symlinked directory. */
+export async function sweepStaleBlobTemps(root: string, now = Date.now()): Promise<number> {
+  const blobs = join(root, "blobs");
+  try {
+    if (!(await lstat(blobs)).isDirectory()) return 0;
+  } catch (error) {
+    if (isMissing(error)) return 0;
+    throw error;
+  }
+  let removed = 0;
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(path);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const match = TEMP_NAME.exec(entry.name);
+      if (!match || activeTemps.has(path)) continue;
+      const key = relative(root, join(directory, match[1]!)).split(sep).join("/");
+      if (!isValidBlobKey(key)) continue;
+      const info = await lstat(path).catch((error: unknown) => {
+        if (isMissing(error)) return null;
+        throw error;
+      });
+      if (!info?.isFile() || now - info.mtimeMs < TEMP_AGE_MS) continue;
+      await unlink(path).catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+      removed++;
+    }
+  };
+  await visit(blobs);
+  return removed;
+}
 
 const isMissing = (error: unknown): boolean =>
   typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
@@ -24,6 +65,15 @@ export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(
       Effect.orDie,
     );
     const root = resolve(configured);
+    const sweep = Effect.tryPromise(() => sweepStaleBlobTemps(root)).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("blob temp cleanup failed", cause)),
+    );
+    yield* sweep;
+    yield* sweep.pipe(
+      Effect.delay(Duration.hours(1)),
+      Effect.repeat(Schedule.spaced("1 hour")),
+      Effect.forkScoped,
+    );
 
     // Second line of defence behind assertValidBlobKey: whatever the key says,
     // the path it resolves to has to stay inside the root.
@@ -66,6 +116,7 @@ export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(
       if (present) return;
 
       const temp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
+      activeTemps.add(temp);
       yield* attempt("put", key, async () => {
         await mkdir(dirname(path), { recursive: true });
         try {
@@ -77,7 +128,7 @@ export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(
           await rm(temp, { force: true });
           throw error;
         }
-      });
+      }).pipe(Effect.ensuring(Effect.sync(() => activeTemps.delete(temp))));
     });
 
     const get = Effect.fn("BlobStore.get")(function* (key: string) {
