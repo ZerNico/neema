@@ -26,7 +26,7 @@ import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
 import {
-  FOOTNOTE_HREF,
+  footnoteIndexes,
   collectSources,
   prepareCitedMarkdown,
   selectAnswerSources,
@@ -87,7 +87,11 @@ const CitationSources = createContext<ReadonlyMap<number, ToolSource>>(new Map()
 // re-check on upgrade.
 const citationComponents: MarkdownComponents = {
   a: function CitationLink({ node: _node, href, children, ...props }) {
-    const source = use(CitationSources).get(Number(FOOTNOTE_HREF.exec(href ?? "")?.[1]));
+    const citationSources = use(CitationSources);
+    const [source, ...more] = footnoteIndexes(href).flatMap((index) => {
+      const found = citationSources.get(index);
+      return found ? [found] : [];
+    });
     if (!source) {
       return (
         <a href={href} {...props}>
@@ -95,7 +99,7 @@ const citationComponents: MarkdownComponents = {
         </a>
       );
     }
-    return <CitationChip source={source} />;
+    return <CitationChip source={source} more={more} />;
   },
   section: ({ node, children, ...props }) => {
     // hast gives a valueless attribute the empty string, so compare against

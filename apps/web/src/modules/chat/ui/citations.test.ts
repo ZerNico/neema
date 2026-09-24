@@ -56,6 +56,17 @@ describe("prepareCitedMarkdown", () => {
     expect(out).toBe("```ts\nconst a = 1\n```\nDone[^1].\n\n[^1]: https://a.dev");
   });
 
+  it("joins adjacent markers into one reference, dropping repeats and unknown indexes", () => {
+    const out = prepareCitedMarkdown("Claim[^2][^1] [^2][^9]. Other[^1].", [
+      source(1, "https://a.dev"),
+      source(2, "https://b.dev"),
+    ]);
+    expect(out).toContain("Claim[^2-1]. Other[^1].");
+    // The group resolves to its first source, so the chip's link needs no lookup.
+    expect(out).toContain("[^2-1]: https://b.dev");
+    expect(out).toContain("[^1]: https://a.dev");
+  });
+
   it("drops markers with no matching source", () => {
     const out = prepareCitedMarkdown("Claim[^9] and claim[^1].", [source(1, "https://a.dev")]);
     expect(out).toContain("Claim and claim[^1].");

@@ -505,6 +505,44 @@ describe("MessageBubble citations", () => {
     expect(screen.getByRole("link", { name: "Source: Effect 4.0 released" })).toBe(chip);
   });
 
+  it("shows adjacent markers as one chip naming the first source and the rest", () => {
+    const activity: ToolActivity = {
+      ...searchActivity,
+      sources: [
+        ...searchActivity.sources!,
+        {
+          kind: "web" as const,
+          index: 2,
+          url: "https://github.com/Effect-TS/effect",
+          title: "Effect on GitHub",
+          snippet: "",
+          read: true,
+        },
+      ],
+    };
+    const { container } = render(
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            id: "grouped",
+            role: "assistant",
+            content: "Effect 4.0 is out[^1][^2].",
+            reasoning: "",
+            reasoningSeen: false,
+            toolActivities: [activity],
+            status: "complete",
+          }}
+        />
+      </DetailPanelProvider>,
+    );
+
+    const chip = screen.getByRole("link", { name: "Sources: Effect 4.0 released and 1 more" });
+    expect(chip).toHaveAttribute("href", "https://effect.website/blog");
+    expect(chip).toHaveTextContent("+1");
+    expect(screen.getAllByRole("link", { name: /^Sources?:/ })).toHaveLength(1);
+    expect(container.textContent).not.toContain("[^");
+  });
+
   it("suppresses the generated footnotes list", () => {
     const { container } = renderCited("Effect 4.0 is out[^1].");
 

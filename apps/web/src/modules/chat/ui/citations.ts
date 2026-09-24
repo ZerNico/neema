@@ -4,8 +4,18 @@ import { gfmFootnote } from "micromark-extension-gfm-footnote";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { mergeSources, sourceTarget } from "~/modules/tools/sources.ts";
 
-/** Matches the href streamdown gives a GFM footnote reference. */
-export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
+/**
+ * Matches the href streamdown gives a GFM footnote reference. A run of
+ * adjacent markers is rewritten to one label joining its indexes with `-`.
+ */
+export const FOOTNOTE_HREF = /^#user-content-fn-(\d+(?:-\d+)*)$/;
+
+/** The source indexes a footnote href stands for, first cited first. */
+export const footnoteIndexes = (href: string | undefined): number[] =>
+  FOOTNOTE_HREF.exec(href ?? "")?.[1]!.split("-").map(Number) ?? [];
+
+/** Adjacent markers, optionally spaced, such as `[^1][^4]` or `[^1] [^4]`. */
+const MARKER_RUN = /\[\^\d+\](?:[ \t]*\[\^\d+\])*/g;
 
 /**
  * Prepares assistant markdown for citation rendering.
@@ -18,19 +28,32 @@ export const FOOTNOTE_HREF = /^#user-content-fn-(\d+)$/;
  *
  * Also drops markers we can't back with a source: a half-streamed trailing
  * `[^1` (so the last few characters don't flicker) and hallucinated indexes
- * that would otherwise sit in the prose as raw text.
+ * that would otherwise sit in the prose as raw text. Adjacent markers become
+ * one reference, so a sentence drawing on three sources shows one chip.
  */
 export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<ToolSource>): string {
   if (sources.length === 0) return content;
 
-  const known = new Set(sources.map((s) => s.index));
+  const targets = new Map(sources.map((s) => [s.index, sourceTarget(s)]));
+  const groups = new Map<string, number>();
   const body = content
     // A marker still being streamed, e.g. "…as of 2026[^1" at the very end.
     .replace(/\[\^\d*$/, "")
-    // Indexes with no matching source, since the model invented them.
-    .replace(/\[\^(\d+)\]/g, (match, n: string) => (known.has(Number(n)) ? match : ""));
+    .replace(MARKER_RUN, (run) => {
+      // Indexes with no matching source are dropped, since the model invented them.
+      const indexes = [
+        ...new Set([...run.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1]))),
+      ].filter((index) => targets.has(index));
+      if (indexes.length === 0) return "";
+      const label = indexes.join("-");
+      if (indexes.length > 1) groups.set(label, indexes[0]!);
+      return `[^${label}]`;
+    });
 
-  const definitions = sources.map((s) => `[^${s.index}]: ${sourceTarget(s)}`).join("\n");
+  const definitions = [
+    ...sources.map((s) => `[^${s.index}]: ${sourceTarget(s)}`),
+    ...[...groups].map(([label, first]) => `[^${label}]: ${targets.get(first)}`),
+  ].join("\n");
   // Mid-stream the answer can end inside an unterminated code fence; without
   // this the definitions would land *inside* it and render as code.
   const openFence = (body.match(/^\s*```/gm)?.length ?? 0) % 2 === 1 ? "\n```" : "";

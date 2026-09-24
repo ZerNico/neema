@@ -37,6 +37,27 @@ describe("CitationChip", () => {
     expect(preview.querySelector('[data-slot="tooltip-arrow"]')).toBeNull();
   });
 
+  it("lists every source of a grouped chip in its preview", async () => {
+    const user = userEvent.setup();
+    const other = {
+      ...source,
+      index: 2,
+      url: "https://docs.example.org/page",
+      title: "Second source",
+      snippet: "Not shown for a secondary source.",
+    };
+    render(<CitationChip source={source} more={[other]} />);
+    const link = screen.getByRole("link", { name: `Sources: ${source.title} and 1 more` });
+    expect(link).toHaveTextContent("+1");
+
+    await user.hover(link);
+    const preview = document.querySelector<HTMLElement>('[data-slot="tooltip-content"]')!;
+    expect(within(preview).getByText(source.snippet)).toBeTruthy();
+    expect(within(preview).getByText("Second source")).toBeTruthy();
+    expect(within(preview).getByText("docs.example.org")).toBeTruthy();
+    expect(within(preview).queryByText(other.snippet)).toBeNull();
+  });
+
   it("supports keyboard focus and Escape with a hostname-only source", async () => {
     const user = userEvent.setup();
     render(<CitationChip source={{ ...source, title: "", snippet: "" }} />);

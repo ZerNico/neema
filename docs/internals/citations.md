@@ -16,6 +16,11 @@ plugin config because highlighting, math, mermaid and CJK handling are opt-in an
   suppress on `!== undefined` — a truthiness check silently renders the list. Pinned by `message-list.test.tsx`.
 - A citation chip is a link to its source showing favicon and truncated title; the number is never rendered,
   in chips or in the sources panel. Markers, source manifests and the panel's row keys all use the number.
+- Adjacent markers (`[^2][^5]`) are rewritten to one reference labelled `2-5`, with a synthesized definition
+  pointing at the first source, so they render as one chip with a "+1" count and every source on hover.
+  `FOOTNOTE_HREF` parses that label; the sources panel still reads the model's raw markers. The prompt asks
+  for a marker per paragraph or list item, not per sentence: the chip is visual weight, and a chip on every
+  line of an answer drawn from one page buries the prose.
 - Citation numbers are conversation-scoped: `createSourceIndexer` is seeded from prior messages' persisted
   sources and shared by all web tools in a generation, so repeats keep their number and every tool continues
   one sequence.
