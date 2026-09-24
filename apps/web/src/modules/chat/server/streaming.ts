@@ -369,6 +369,7 @@ export class StreamEngine extends Context.Service<
               PubSub.publish(pubsub, {
                 kind: "done",
                 messageId: row.messageId,
+                ...(row.generationId ? { runId: row.generationId } : {}),
                 status: "error",
               }).pipe(
                 Effect.andThen(
@@ -2868,6 +2869,52 @@ export class StreamEngine extends Context.Service<
               );
             yield* runGeneration({ ...input, abort });
           }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                yield* Effect.logError("generation startup failed", cause);
+                const current = yield* repo.getMessage(input.messageId);
+                if (current?.status !== "streaming" || current.generationId !== input.generationId)
+                  return;
+                yield* repo.failGeneration({
+                  messageId: input.messageId,
+                  error: shortErrorMessage(cause),
+                  ledger: {
+                    userId: input.userId,
+                    kind: "chat",
+                    modelId: null,
+                    modelName: input.modelId,
+                    conversationId: input.conversationId,
+                    messageId: input.messageId,
+                    status: "error",
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cachedInputTokens: 0,
+                    reasoningTokens: 0,
+                    usageComplete: false,
+                    cost: null,
+                    costSource: null,
+                  },
+                });
+                yield* PubSub.publish(pubsub, {
+                  kind: "done",
+                  messageId: input.messageId,
+                  ...(input.generationId ? { runId: input.generationId } : {}),
+                  status: "error",
+                });
+                yield* sync.publish(input.userId, {
+                  type: "message.status",
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  status: "error",
+                });
+                yield* (input.onSettled ?? (() => Effect.void))({
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  messageId: input.messageId,
+                  status: "error",
+                });
+              }),
+            ),
             Effect.scoped,
             Effect.provideService(GenerationFence, fence),
             Effect.provideService(GenerationSettled, input.onSettled ?? (() => Effect.void)),
@@ -2967,11 +3014,7 @@ export class StreamEngine extends Context.Service<
             }
 
             const live: Stream.Stream<StreamEvent> = Stream.fromSubscription(subscription).pipe(
-              Stream.filter(
-                (event) =>
-                  event.messageId === messageId &&
-                  (event.runId === runId || (event.kind === "done" && event.runId === undefined)),
-              ),
+              Stream.filter((event) => event.messageId === messageId && event.runId === runId),
               Stream.filter((event) => event.kind === "done" || event.seq > lastSeq),
               Stream.tap((event) =>
                 Effect.sync(() => {

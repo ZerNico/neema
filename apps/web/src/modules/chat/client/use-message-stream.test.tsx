@@ -148,6 +148,29 @@ describe("research attempt identity", () => {
     expect(result.current.text).toBe("New text");
   });
 
+  it("reconciles a terminal detail refresh when the SSE terminal event is missing", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ status, runId }) => useMessageStream("m1", null, "c1", 0, runId, status),
+      {
+        wrapper,
+        initialProps: {
+          status: "streaming" as "streaming" | "error",
+          runId: "run-1",
+        },
+      },
+    );
+    const old = FakeEventSource.instances.at(-1)!;
+    rerender({ status: "error", runId: "run-1" });
+    expect(old.close).toHaveBeenCalled();
+    expect(result.current.status).toBe("error");
+    act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
+    expect(result.current.lastSeq).toBe(0);
+  });
+
   it("refetches a changed server attempt without applying its done or subsequent chunks", () => {
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");

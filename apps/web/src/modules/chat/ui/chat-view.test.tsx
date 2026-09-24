@@ -1243,6 +1243,7 @@ describe("ChatView question handoff", () => {
       "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       0,
       null,
+      "streaming",
     );
   });
 
@@ -1300,6 +1301,7 @@ describe("ChatView question handoff", () => {
         "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         0,
         null,
+        "streaming",
       ),
     );
     expect(screen.getByRole("textbox", { name: "Unrelated composer draft" })).toHaveValue(

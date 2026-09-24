@@ -678,6 +678,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     conversationId,
     retryEpoch,
     subscribedMessage?.generationId ?? null,
+    subscribedMessage?.status,
   );
 
   // A draft of this conversation, from any of the three paths that can reveal
@@ -857,6 +858,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   );
   const {
     enabled: searchEnabled,
+    preferred: searchPreference,
     setEnabled: setSearchEnabled,
     reset: resetSearchEnabled,
   } = useSearchMode(data.agent?.searchEnabled ?? true);
@@ -1298,6 +1300,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       setModelId,
       reasoningEffort,
       setReasoningEffort,
+      searchPreference,
       setSearchEnabled,
       resetSearchEnabled,
       seedCollections: context.seed,

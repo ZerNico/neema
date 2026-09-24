@@ -919,9 +919,20 @@ export class ChatRepo extends Context.Service<
      * streamed. Returns the messages it settled so the caller can notify.
      */
     reapExpiredGenerations(): Effect.Effect<
-      ReadonlyArray<{ userId: string; conversationId: string; messageId: string }>
+      ReadonlyArray<{
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        generationId: string | null;
+      }>
     >;
     listCompactionEvents(messageIds: ReadonlyArray<string>): Effect.Effect<CompactionEventRow[]>;
+    /** Settle a failed detached attempt and its activity in one generation-fenced write. */
+    failGeneration(input: {
+      messageId: string;
+      error: string;
+      ledger: UsageEventInput & { conversationId: string };
+    }): Effect.Effect<void>;
     finalizeMessage(input: {
       ledger?: UsageEventInput & { conversationId: string };
       messageId: string;
@@ -2494,7 +2505,12 @@ export class ChatRepo extends Context.Service<
               ),
             )
             .pipe(Effect.orDie);
-          const settled: Array<{ userId: string; conversationId: string; messageId: string }> = [];
+          const settled: Array<{
+            userId: string;
+            conversationId: string;
+            messageId: string;
+            generationId: string | null;
+          }> = [];
           for (const row of expired) {
             const result = yield* db
               .transaction((tx) =>
@@ -2570,6 +2586,7 @@ export class ChatRepo extends Context.Service<
                     userId: conversation.userId,
                     conversationId: row.conversationId,
                     messageId: row.id,
+                    generationId: row.generationId,
                   };
                 }),
               )
@@ -2731,6 +2748,61 @@ export class ChatRepo extends Context.Service<
               asc(messageCompactionEvents.passIndex),
             )
             .pipe(Effect.orDie);
+        }),
+
+        failGeneration: Effect.fn("ChatRepo.failGeneration")(function* (input) {
+          yield* generationWrite((tx) =>
+            Effect.gen(function* () {
+              const chunks = yield* tx
+                .select({ kind: messageChunks.kind, delta: messageChunks.delta })
+                .from(messageChunks)
+                .where(eq(messageChunks.messageId, input.messageId))
+                .orderBy(asc(messageChunks.seq));
+              const joined = (kind: "text" | "reasoning") =>
+                chunks
+                  .filter((chunk) => chunk.kind === kind)
+                  .map((chunk) => chunk.delta)
+                  .join("");
+              const failed = {
+                status: "error" as const,
+                error: { code: "GenerationFailed", message: input.error },
+                completedAt: new Date(),
+              };
+              yield* tx
+                .update(messageToolCalls)
+                .set(failed)
+                .where(
+                  and(
+                    eq(messageToolCalls.messageId, input.messageId),
+                    eq(messageToolCalls.status, "running"),
+                  ),
+                );
+              yield* tx
+                .update(messageCompactionEvents)
+                .set(failed)
+                .where(
+                  and(
+                    eq(messageCompactionEvents.messageId, input.messageId),
+                    eq(messageCompactionEvents.status, "running"),
+                  ),
+                );
+              yield* tx
+                .update(messages)
+                .set({
+                  status: "error",
+                  content: joined("text"),
+                  reasoning: joined("reasoning"),
+                  error: { tag: "GenerationFailed", message: input.error },
+                  completedAt: new Date(),
+                })
+                .where(eq(messages.id, input.messageId));
+              yield* tx.insert(usageEvents).values({ id: uuidv7(), ...input.ledger });
+              yield* tx
+                .update(conversations)
+                .set({ lastMessageAt: new Date() })
+                .where(eq(conversations.id, input.ledger.conversationId));
+            }),
+          ).pipe(Effect.orDie);
         }),
 
         finalizeMessage: Effect.fn("ChatRepo.finalizeMessage")(function* (input) {

@@ -3,6 +3,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo, type QueueGate } from "./repo.ts";
+import { StreamEngine } from "./streaming.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 
 const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
@@ -57,9 +58,11 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   // children are read.
   const conversation = yield* repo.getConversation(userId, conversationId);
   yield* repo.research?.reap() ?? Effect.void;
-  // Loader path has no engine handle; the reaper is a repo concern so a stuck
-  // row settles on reload too, not only for SSE subscribers.
-  yield* reapGenerationsForDetail(repo);
+  const engine = yield* Effect.serviceOption(StreamEngine);
+  // Share the engine's terminal event path with live subscribers when present;
+  // a standalone detail loader still settles the database row and syncs it.
+  if (Option.isSome(engine)) yield* engine.value.reapOrphans;
+  else yield* reapGenerationsForDetail(repo);
   // The source of a branch, for the "branched from" link. Read through the
   // same ownership check, and null when it has been deleted since. It depends
   // on the conversation only, so it rides with the messages.

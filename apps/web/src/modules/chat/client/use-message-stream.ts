@@ -942,6 +942,7 @@ export function useMessageStream(
    */
   epoch = 0,
   runId: string | null = null,
+  canonicalStatus?: "streaming" | "complete" | "error" | "aborted",
 ) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
@@ -975,6 +976,9 @@ export function useMessageStream(
     });
   }
   const activeRef = useRef<string | null>(null);
+  const terminalFailure = canonicalStatus === "error" || canonicalStatus === "aborted"
+    ? canonicalStatus
+    : null;
 
   useEffect(() => {
     if (!messageId) {
@@ -982,6 +986,13 @@ export function useMessageStream(
       return;
     }
     activeRef.current = generationKey;
+    // A reaped error may reach detail before this tab gets its SSE terminal
+    // event. Successful detail can precede the last tool chunks, so keep its
+    // subscription alive until the stream delivers those and its done marker.
+    if (terminalFailure) {
+      dispatch({ kind: "done", status: terminalFailure });
+      return;
+    }
 
     const after = initial?.lastSeq ?? 0;
     const source = new EventSource(
@@ -1045,7 +1056,7 @@ export function useMessageStream(
       source.close();
     };
     // initial is intentionally captured only when the generation changes
-  }, [messageId, epoch, runId, conversationId, queryClient, generationKey]);
+  }, [messageId, epoch, runId, terminalFailure, conversationId, queryClient, generationKey]);
 
   // The reducer accumulates raw deltas (lastSeq must track receipt exactly,
   // since resume depends on it); only the strings the UI renders are word-paced.

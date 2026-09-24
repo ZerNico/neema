@@ -29,6 +29,7 @@ import {
   attachments,
   messageAttachments,
   messageChunks,
+  messageGenerationConfig,
   messages,
   models,
   skills,
@@ -3031,6 +3032,191 @@ describe("queued turns", () => {
 });
 
 describe("resumable streaming pipeline", () => {
+  it("terminalizes a committed attempt when configuration preflight fails", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupConversation;
+        yield* db
+          .delete(messageGenerationConfig)
+          .where(eq(messageGenerationConfig.messageId, seed.assistant.id));
+        yield* db.insert(messageChunks).values([
+          { messageId: seed.assistant.id, seq: 1, kind: "text", delta: "partial " },
+          { messageId: seed.assistant.id, seq: 2, kind: "reasoning", delta: "thought" },
+          { messageId: seed.assistant.id, seq: 3, kind: "text", delta: "answer" },
+        ]);
+        const runningTool = uuidv7();
+        const completedTool = uuidv7();
+        yield* repo.insertToolCall({
+          id: runningTool,
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "running-preflight",
+          toolName: "web_search",
+          arguments: {},
+        });
+        yield* repo.insertToolCall({
+          id: completedTool,
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 1,
+          providerCallId: "completed-preflight",
+          toolName: "web_search",
+          arguments: {},
+        });
+        yield* repo.completeToolCall({ id: completedTool, status: "complete", result: {} });
+        const runningCompaction = uuidv7();
+        yield* repo.createCompactionEvent({
+          id: runningCompaction,
+          messageId: seed.assistant.id,
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+        });
+        yield* engine.startGeneration({
+          generationId: seed.assistant.generationId ?? undefined,
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          modelId: "fake",
+          searchEnabled: false,
+        });
+        const events = yield* engine
+          .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+          .pipe(Stream.runCollect, Effect.timeout("5 seconds"));
+        return {
+          events: Array.from(events),
+          message: yield* repo.getMessage(seed.assistant.id),
+          tools: yield* repo.listToolCalls([seed.assistant.id]),
+          compactions: yield* repo.listCompactionEvents([seed.assistant.id]),
+          ledger: yield* db
+            .select()
+            .from(usageEvents)
+            .where(eq(usageEvents.messageId, seed.assistant.id)),
+        };
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "error" });
+    expect(result.message).toMatchObject({
+      status: "error",
+      content: "partial answer",
+      reasoning: "thought",
+    });
+    expect(result.tools.map((call) => call.status)).toEqual(["error", "complete"]);
+    expect(result.compactions.map((event) => event.status)).toEqual(["error"]);
+    expect(result.ledger).toHaveLength(1);
+    expect(result.ledger[0]).toMatchObject({ status: "error", usageComplete: false });
+  });
+
+  it("settles a desktop attempt when external registration fails", async () => {
+    const external = await runtime.runPromise(ExternalCompletion);
+    const track = vi
+      .spyOn(external, "track")
+      .mockImplementationOnce(() => Effect.die(new Error("desktop registration failed")));
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const engine = yield* StreamEngine;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const seed = yield* setupConversation;
+          yield* engine.startGeneration({
+            generationId: seed.assistant.generationId ?? undefined,
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            modelId: "fake",
+            searchEnabled: false,
+            desktopExecutorId: "test-executor",
+          });
+          const events = yield* engine
+            .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect);
+          return {
+            events: Array.from(events),
+            message: yield* repo.getMessage(seed.assistant.id),
+            ledger: yield* db
+              .select()
+              .from(usageEvents)
+              .where(eq(usageEvents.messageId, seed.assistant.id)),
+          };
+        }),
+      );
+      expect(track).toHaveBeenCalledOnce();
+      expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "error" });
+      expect(result.message?.status).toBe("error");
+      expect(result.ledger).toMatchObject([{ status: "error", usageComplete: false }]);
+    } finally {
+      track.mockRestore();
+    }
+  });
+
+  it("cannot settle activity or ledger through an older generation fence", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupConversation;
+        yield* repo.insertToolCall({
+          id: uuidv7(),
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "current-attempt",
+          toolName: "web_search",
+          arguments: {},
+        });
+        const stale = yield* Effect.exit(
+          repo
+            .failGeneration({
+              messageId: seed.assistant.id,
+              error: "old attempt failed",
+              ledger: {
+                userId: seed.userId,
+                kind: "chat",
+                modelId: null,
+                modelName: "fake",
+                conversationId: seed.conversation.id,
+                messageId: seed.assistant.id,
+                status: "error",
+                inputTokens: 0,
+                outputTokens: 0,
+                cachedInputTokens: 0,
+                reasoningTokens: 0,
+                usageComplete: false,
+                cost: null,
+                costSource: null,
+              },
+            })
+            .pipe(
+              Effect.provideService(GenerationFence, {
+                userId: seed.userId,
+                conversationId: seed.conversation.id,
+                messageId: seed.assistant.id,
+                generationId: uuidv7(),
+              }),
+            ),
+        );
+        return {
+          stale,
+          message: yield* repo.getMessage(seed.assistant.id),
+          tools: yield* repo.listToolCalls([seed.assistant.id]),
+          ledger: yield* db
+            .select()
+            .from(usageEvents)
+            .where(eq(usageEvents.messageId, seed.assistant.id)),
+        };
+      }),
+    );
+    expect(Exit.hasInterrupts(result.stale)).toBe(true);
+    expect(result.message?.status).toBe("streaming");
+    expect(result.tools[0]?.status).toBe("running");
+    expect(result.ledger).toEqual([]);
+  });
+
   it("loads the generation model once for capabilities and accounting", async () => {
     const providers = await runtime.runPromise(ProviderRepo);
     const lookup = vi.spyOn(providers, "getModel");
@@ -3281,6 +3467,55 @@ describe("resumable streaming pipeline", () => {
     expect(result.chunks.map((c) => c.seq)).toEqual(result.chunks.map((_, index) => index + 1));
     expect(result.chunks.map((c) => c.delta).join("")).toBe(result.final?.content);
   }, 60_000);
+
+  it.each(["timer", "detail"] as const)(
+    "notifies an existing subscriber when the %s reaper settles its generation",
+    async (path) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const engine = yield* StreamEngine;
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const seed = yield* setupConversation;
+          yield* db.insert(messageChunks).values({
+            messageId: seed.assistant.id,
+            seq: 1,
+            kind: "text",
+            delta: "partial",
+          });
+          const subscribed = yield* Deferred.make<void>();
+          const events = yield* Effect.forkChild(
+            engine.subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined).pipe(
+              Stream.tap((event) =>
+                event.kind === "chunk" ? Deferred.succeed(subscribed, undefined) : Effect.void,
+              ),
+              Stream.runCollect,
+              Effect.timeout("5 seconds"),
+            ),
+          );
+          yield* Deferred.await(subscribed);
+          yield* db
+            .update(messages)
+            .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
+            .where(eq(messages.id, seed.assistant.id));
+          if (path === "detail") yield* loadConversationDetail(seed.userId, seed.conversation.id);
+          else yield* engine.reapOrphans;
+          return {
+            events: Array.from(yield* Fiber.join(events)),
+            message: yield* repo.getMessage(seed.assistant.id),
+            generationId: seed.assistant.generationId,
+          };
+        }),
+      );
+      expect(result.events.at(-1)).toEqual({
+        kind: "done",
+        messageId: result.message?.id,
+        runId: result.generationId,
+        status: "error",
+      });
+      expect(result.message?.status).toBe("error");
+    },
+  );
 
   it("settles a generation whose process died and lets the reader stop or resend", async () => {
     const result = await runtime.runPromise(
@@ -5691,6 +5926,52 @@ describe("local tools on the user's machine", () => {
       expect(result.detail.messages.at(-1)?.status).toBe("aborted");
       expect(JSON.stringify(result.detail)).not.toContain("LATE_ANSWER");
     } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("settles active tool and compaction rows when finalization itself fails", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const repo = await runtime.runPromise(ChatRepo);
+    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
+    let renewal: { mockRestore(): void } | undefined;
+    try {
+      const sent = await runtime.runPromise(send(seed, true));
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => null);
+          yield* Deferred.await(bridge.first);
+          const before = yield* repo.listToolCalls([sent.assistantMessageId]);
+          expect(before).toMatchObject([{ status: "running" }]);
+          const compactionId = uuidv7();
+          yield* repo.createCompactionEvent({
+            id: compactionId,
+            messageId: sent.assistantMessageId,
+            beforeTurnIndex: 0,
+            passIndex: 0,
+            scope: "history",
+          });
+          renewal = vi
+            .spyOn(repo, "renewGenerationLease")
+            .mockImplementation(() => Effect.die(new Error("lease renewal failed")));
+          yield* Fiber.join(bridge.fiber);
+          const db = yield* Db;
+          return {
+            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
+            compactions: yield* repo.listCompactionEvents([sent.assistantMessageId]),
+            ledger: yield* db
+              .select()
+              .from(usageEvents)
+              .where(eq(usageEvents.messageId, sent.assistantMessageId)),
+          };
+        }),
+      );
+      expect(result.detail.messages.at(-1)?.status).toBe("error");
+      expect(result.detail.toolCalls.at(-1)?.status).toBe("error");
+      expect(result.compactions.at(-1)?.status).toBe("error");
+      expect(result.ledger).toHaveLength(1);
+    } finally {
+      renewal?.mockRestore();
       authoringScript = null;
     }
   }, 60_000);
