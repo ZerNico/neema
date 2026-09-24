@@ -10,6 +10,8 @@ import {
   agents,
   conversationDrafts,
   conversations,
+  groupMembers,
+  groups,
   knowledgeCollections,
   messages,
   researchRuns,
@@ -37,6 +39,7 @@ import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
@@ -305,6 +308,23 @@ describe("tool-created agent drafts", () => {
     expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(1);
   });
 
+  it("invalidates a stale editor receipt when a blank draft is reused with changes", async () => {
+    const owner = await createUser();
+    const fence = await ordinary(owner);
+    const first = await open(owner, fence);
+    const reused = await open(owner, fence, { changes: { name: "New name" } });
+    expect(reused).toMatchObject({
+      outcome: "drafted",
+      draft: { id: first.draft.id, revision: first.draft.revision + 1 },
+    });
+    expect(await save(owner, first.draft)).toEqual({ outcome: "conflict", draft: reused.draft });
+    expect(await patch(owner, first.draft, { name: "Stale name" })).toEqual({
+      outcome: "conflict",
+      draft: reused.draft,
+    });
+    expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(2);
+  });
+
   it("starts a second draft once the first carries anything at all", async () => {
     const owner = await createUser();
     const fence = await ordinary(owner);
@@ -354,6 +374,51 @@ describe("tool-created agent drafts", () => {
     expect(await get(owner, first)).not.toBeNull();
     // Discarding a draft never touches the agent it was saved to.
     expect(await countAgents(owner)).toBe(2);
+  });
+
+  it("cannot read, save, patch or discard another kind of draft through the agent service", async () => {
+    const owner = await createUser();
+    const draft = await initialize(owner);
+    await run(Effect.flatMap(Db, (db) =>
+      db.update(conversationDrafts).set({ kind: "schedule" }).where(eq(conversationDrafts.id, draft.id)),
+    ));
+    expect(await get(owner, draft)).toBeNull();
+    await expect(save(owner, draft)).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
+    await expect(patch(owner, draft, { name: "Wrong kind" })).rejects.toMatchObject({
+      _tag: "DraftNotAvailable",
+    });
+    await expect(
+      run(Effect.flatMap(AgentDraftService, (service) => service.discard(owner, draft.id))),
+    ).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
+    const [row] = await run(Effect.flatMap(Db, (db) =>
+      db.select({ kind: conversationDrafts.kind }).from(conversationDrafts)
+        .where(eq(conversationDrafts.id, draft.id)),
+    ));
+    expect(row?.kind).toBe("schedule");
+  });
+
+  it("refuses discard after agent authoring is revoked", async () => {
+    const owner = await createUser();
+    const draft = await initialize(owner);
+    const groupId = uuidv7();
+    await run(Effect.gen(function* () {
+      const db = yield* Db;
+      yield* db.insert(groups).values({
+        id: groupId,
+        name: groupId,
+        capabilities: { ...ALL_CAPABILITIES, agentsCreate: false },
+      });
+      yield* db.insert(groupMembers).values({ groupId, userId: owner });
+    }));
+    await expect(
+      run(Effect.flatMap(AgentDraftService, (service) => service.discard(owner, draft.id))),
+    ).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
+    const [row] = await run(Effect.flatMap(Db, (db) =>
+      db.select({ id: conversationDrafts.id }).from(conversationDrafts)
+        .where(eq(conversationDrafts.id, draft.id)),
+    ));
+    expect(row?.id).toBe(draft.id);
+    expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(0);
   });
 
   it("reopens the draft already holding a target rather than making a rival for it", async () => {

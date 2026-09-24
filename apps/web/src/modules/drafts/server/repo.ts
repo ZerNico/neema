@@ -34,7 +34,7 @@ export class DraftRepo extends Context.Service<
       targetId: string | null,
       targetRevision?: number | null,
     ): Effect.Effect<ConversationDraft, DraftNotAvailable>;
-    get(userId: string, draftId: string): Effect.Effect<ConversationDraft | null>;
+    get(userId: string, draftId: string, kind: DraftKind): Effect.Effect<ConversationDraft | null>;
     /** Oldest first, so a chat's drafts keep the order they were started in. */
     listForConversation(
       userId: string,
@@ -46,6 +46,7 @@ export class DraftRepo extends Context.Service<
       tx: DbTx,
       userId: string,
       draftId: string,
+      kind: DraftKind,
     ): Effect.Effect<ConversationDraft, DraftNotAvailable>;
     /** Caller holds lock; settings and receipt updates remain in that transaction. */
     write(tx: DbTx, draftId: string, changes: DraftWrite): Effect.Effect<ConversationDraft>;
@@ -105,12 +106,18 @@ export class DraftRepo extends Context.Service<
             return toDraft(row!);
           },
         ),
-        get: Effect.fn("DraftRepo.get")(function* (userId, draftId) {
+        get: Effect.fn("DraftRepo.get")(function* (userId, draftId, kind) {
           const [row] = yield* db
             .select({ draft: conversationDrafts })
             .from(conversationDrafts)
             .innerJoin(conversations, eq(conversations.id, conversationDrafts.conversationId))
-            .where(and(eq(conversations.userId, userId), eq(conversationDrafts.id, draftId)))
+            .where(
+              and(
+                eq(conversations.userId, userId),
+                eq(conversationDrafts.id, draftId),
+                eq(conversationDrafts.kind, kind),
+              ),
+            )
             .pipe(Effect.orDie);
           return row ? toDraft(row.draft) : null;
         }),
@@ -132,21 +139,21 @@ export class DraftRepo extends Context.Service<
             return rows.map((row) => toDraft(row.draft));
           },
         ),
-        lock: Effect.fn("DraftRepo.lock")(function* (tx, userId, draftId) {
+        lock: Effect.fn("DraftRepo.lock")(function* (tx, userId, draftId, kind) {
           // Unlocked read only to resolve the parent: the conversation lock is
           // taken first in every path, and the locked re-read below is what the
           // caller acts on.
           const [parent] = yield* tx
             .select({ conversationId: conversationDrafts.conversationId })
             .from(conversationDrafts)
-            .where(eq(conversationDrafts.id, draftId))
+            .where(and(eq(conversationDrafts.id, draftId), eq(conversationDrafts.kind, kind)))
             .pipe(Effect.orDie);
           if (!parent) return yield* new DraftNotAvailable({ draftId });
           yield* lockConversation(tx, userId, parent.conversationId);
           const [row] = yield* tx
             .select()
             .from(conversationDrafts)
-            .where(eq(conversationDrafts.id, draftId))
+            .where(and(eq(conversationDrafts.id, draftId), eq(conversationDrafts.kind, kind)))
             .for("update")
             .pipe(Effect.orDie);
           if (!row) return yield* new DraftNotAvailable({ draftId });

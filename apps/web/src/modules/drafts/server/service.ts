@@ -57,7 +57,7 @@ export type OpenDraftResult<S> =
 export class DraftService extends Context.Service<
   DraftService,
   {
-    get<S>(userId: string, draftId: string): Effect.Effect<ConversationDraft<S> | null>;
+    get<S>(userId: string, draftId: string, kind: DraftKind): Effect.Effect<ConversationDraft<S> | null>;
     list<S>(
       userId: string,
       conversationId: string,
@@ -79,7 +79,12 @@ export class DraftService extends Context.Service<
       DraftError | E,
       R
     >;
-    discard(userId: string, draftId: string): Effect.Effect<ConversationDraft, DraftError>;
+    discard<E = never, R = never>(
+      userId: string,
+      draftId: string,
+      kind: DraftKind,
+      guard: DraftWriteGuard<E, R>,
+    ): Effect.Effect<ConversationDraft, DraftError | E, R>;
     /** Per-kind services call this after their own mutations. */
     changed(
       userId: string,
@@ -89,6 +94,7 @@ export class DraftService extends Context.Service<
       tx: DbTx,
       userId: string,
       draftId: string,
+      kind: DraftKind,
     ): Effect.Effect<ConversationDraft<S>, DraftNotAvailable>;
     write<S>(
       tx: DbTx,
@@ -122,15 +128,15 @@ export class DraftService extends Context.Service<
             JSON.stringify(empty),
         );
       return DraftService.of({
-        get: (userId, draftId) =>
-          drafts.get(userId, draftId) as Effect.Effect<ConversationDraft<never> | null>,
+        get: (userId, draftId, kind) =>
+          drafts.get(userId, draftId, kind) as Effect.Effect<ConversationDraft<never> | null>,
         list: (userId, conversationId, kind) =>
           drafts.listForConversation(userId, conversationId, kind) as Effect.Effect<
             ConversationDraft<never>[]
           >,
         changed,
-        lock: (tx, userId, draftId) =>
-          drafts.lock(tx, userId, draftId) as Effect.Effect<
+        lock: (tx, userId, draftId, kind) =>
+          drafts.lock(tx, userId, draftId, kind) as Effect.Effect<
             ConversationDraft<never>,
             DraftNotAvailable
           >,
@@ -165,19 +171,27 @@ export class DraftService extends Context.Service<
                       tx,
                       userId,
                       reusable.id,
+                      config.kind,
                     )) as ConversationDraft<S>;
                     // A blank draft has nothing to lose, so the changes this call
                     // carried still land. A draft already holding a target keeps
                     // its settings: those may be the user's own edits.
-                    const apply = targetId === null && input.changes;
-                    return {
-                      outcome: "read" as const,
-                      draft: apply
-                        ? ((yield* drafts.write(tx, locked.id, {
-                            settings: { ...locked.settings, ...input.changes },
-                          })) as ConversationDraft<S>)
-                        : locked,
-                    };
+                    const current = locked.settings as Record<string, unknown>;
+                    const settingsChanged =
+                      targetId === null &&
+                      input.changes &&
+                      Object.entries(input.changes).some(
+                        ([field, value]) => JSON.stringify(value) !== JSON.stringify(current[field]),
+                      );
+                    return settingsChanged
+                      ? {
+                          outcome: "drafted" as const,
+                          draft: (yield* drafts.write(tx, locked.id, {
+                            settings: { ...current, ...input.changes },
+                            revision: locked.revision + 1,
+                          })) as ConversationDraft<S>,
+                        }
+                      : { outcome: "read" as const, draft: locked };
                   }
                   const targetRevision =
                     targetId !== null && config.checkTarget
@@ -210,7 +224,7 @@ export class DraftService extends Context.Service<
           }),
         patch: <S, E = never, R = never>(
           userId: string,
-          _config: DraftKindConfig<S>,
+          config: DraftKindConfig<S>,
           input: PatchDraftInput,
           guard?: DraftWriteGuard<E, R>,
         ) =>
@@ -224,6 +238,7 @@ export class DraftService extends Context.Service<
                     tx,
                     userId,
                     input.draftId,
+                    config.kind,
                   )) as ConversationDraft<S>;
                   if (draft.revision !== input.expectedRevision)
                     return { outcome: "conflict" as const, draft };
@@ -247,19 +262,26 @@ export class DraftService extends Context.Service<
             if (result.outcome === "updated") yield* changed(userId, result.draft);
             return result;
           }),
-        discard: Effect.fn("DraftService.discard")(function* (userId, draftId) {
-          const draft = yield* db
-            .transaction((tx) =>
-              Effect.gen(function* () {
-                const locked = yield* drafts.lock(tx, userId, draftId);
-                yield* drafts.remove(tx, locked.id);
-                return locked;
-              }),
-            )
-            .pipe(Effect.catchTag("SqlError", Effect.die));
-          yield* changed(userId, draft);
-          return draft;
-        }),
+        discard: <E = never, R = never>(
+          userId: string,
+          draftId: string,
+          kind: DraftKind,
+          guard: DraftWriteGuard<E, R>,
+        ) =>
+          Effect.gen(function* () {
+            const draft = yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  yield* guard(tx);
+                  const locked = yield* drafts.lock(tx, userId, draftId, kind);
+                  yield* drafts.remove(tx, locked.id);
+                  return locked;
+                }),
+              )
+              .pipe(Effect.catchTag("SqlError", Effect.die));
+            yield* changed(userId, draft);
+            return draft;
+          }),
       });
     }),
   ).pipe(Layer.provide(DraftRepo.layer));

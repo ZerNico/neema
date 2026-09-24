@@ -126,7 +126,7 @@ export class AgentDraftService extends Context.Service<
               Effect.flatMap((allowed) =>
                 allowed
                   ? core
-                      .get(userId, draftId)
+                      .get(userId, draftId, "agent")
                       .pipe(Effect.map((draft) => (draft ? asAgent(draft) : null)))
                   : Effect.succeed(null),
               ),
@@ -192,7 +192,7 @@ export class AgentDraftService extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 yield* requireAuthoring(userId, tx);
-                const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId));
+                const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId, "agent"));
                 // A newer draft always wins over an older receipt, even if that older
                 // request once succeeded. Never approve contents the user did not see.
                 if (draft.revision !== parsed.expectedRevision)
@@ -274,7 +274,7 @@ export class AgentDraftService extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 yield* requireAuthoring(userId, tx);
-                const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId));
+                const draft = asAgent(yield* core.lock(tx, userId, parsed.draftId, "agent"));
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };
                 if (draft.targetId === null) return { outcome: "no_target" as const, draft };
@@ -297,7 +297,10 @@ export class AgentDraftService extends Context.Service<
           if (result.outcome === "reloaded") yield* core.changed(userId, result.draft);
           return result;
         }),
-        discard: (userId, draftId) => core.discard(userId, draftId).pipe(Effect.asVoid),
+        discard: (userId, draftId) =>
+          core
+            .discard(userId, draftId, "agent", (tx) => requireAuthoring(userId, tx))
+            .pipe(Effect.asVoid),
       });
     }),
   ).pipe(Layer.provide(DraftService.layer), Layer.provide(AgentRepo.layer));

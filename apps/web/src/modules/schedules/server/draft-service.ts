@@ -126,7 +126,7 @@ export class ScheduleDraftService extends Context.Service<
               Effect.flatMap((allowed) =>
                 allowed
                   ? core
-                      .get(userId, draftId)
+                      .get(userId, draftId, "schedule")
                       .pipe(Effect.map((draft) => (draft ? asSchedule(draft) : null)))
                   : Effect.succeed(null),
               ),
@@ -198,7 +198,7 @@ export class ScheduleDraftService extends Context.Service<
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
                   return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
-                const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId));
+                const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId, "schedule"));
                 // A newer draft always wins over an older receipt, even if that
                 // older request once succeeded.
                 if (draft.revision !== parsed.expectedRevision)
@@ -274,7 +274,7 @@ export class ScheduleDraftService extends Context.Service<
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
                   return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
-                const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId));
+                const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId, "schedule"));
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };
                 if (draft.targetId === null) return { outcome: "no_target" as const, draft };
@@ -296,15 +296,17 @@ export class ScheduleDraftService extends Context.Service<
           return result;
         }),
         discard: (userId, draftId) =>
-          policy
-            .can(userId, "schedules")
-            .pipe(
-              Effect.flatMap((allowed) =>
-                allowed
-                  ? core.discard(userId, draftId).pipe(Effect.asVoid)
-                  : Effect.fail(new DraftRejected({ reason: "schedule editing is unavailable" })),
+          core
+            .discard(userId, draftId, "schedule", (tx) =>
+              policy.can(userId, "schedules", tx).pipe(
+                Effect.flatMap((allowed) =>
+                  allowed
+                    ? Effect.void
+                    : Effect.fail(new DraftRejected({ reason: "schedule editing is unavailable" })),
+                ),
               ),
-            ),
+            )
+            .pipe(Effect.asVoid),
       });
     }),
   ).pipe(Layer.provide(DraftService.layer), Layer.provideMerge(ScheduleRepo.layer));
