@@ -125,16 +125,19 @@ export const checkScheduleResources = (
         });
     }
     // A chosen chat must be the owner's and a plain chat: a work chat needs
-    // the desktop app, which an unattended fire never has.
+    // the desktop app, which an unattended fire never has, and a temporary one
+    // is swept away while the schedule still points at it.
     if (settings.chatId) {
       const [chat] = yield* tx
-        .select({ mode: conversations.mode })
+        .select({ mode: conversations.mode, temporary: conversations.temporary })
         .from(conversations)
         .where(and(eq(conversations.id, settings.chatId), eq(conversations.userId, userId)))
         .limit(1);
       if (!chat) return yield* new ScheduleRejected({ reason: "the selected chat is unavailable" });
       if (chat.mode !== "chat")
         return yield* new ScheduleRejected({ reason: "a work chat cannot run a schedule" });
+      if (chat.temporary)
+        return yield* new ScheduleRejected({ reason: "a temporary chat cannot run a schedule" });
     }
     if (settings.skillIds.length) {
       const available = yield* tx

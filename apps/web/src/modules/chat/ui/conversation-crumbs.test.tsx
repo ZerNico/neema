@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
+import { keepConversation } from "../server/functions.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -11,6 +12,8 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }));
+
+vi.mock("../server/functions.ts", () => ({ keepConversation: vi.fn(async () => {}) }));
 
 vi.mock("~/modules/schedules/server/functions.ts", () => ({
   getSchedule: vi.fn(),
@@ -66,5 +69,19 @@ describe("ConversationCrumbs", () => {
       "href",
       "/schedules/$scheduleId",
     );
+  });
+
+  it("marks a temporary chat and keeps it on request", async () => {
+    renderCrumbs({ temporary: true });
+    expect(screen.getByText("Temporary")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Keep chat" }));
+    await waitFor(() =>
+      expect(keepConversation).toHaveBeenCalledWith({ data: { conversationId: "c1" } }),
+    );
+  });
+
+  it("offers no Keep on an ordinary chat", () => {
+    renderCrumbs({});
+    expect(screen.queryByRole("button", { name: "Keep chat" })).toBeNull();
   });
 });

@@ -15,7 +15,8 @@ actions.
   anything its own pages would not show: gate on `capabilitiesQuery` and the session role, and
   keep server queries scoped to the signed-in user as the module's other reads are.
 - Kinds whose whole list the browser already loads (agents, collections, skills, schedules) use
-  `listSource` and filter locally. Only chats search on the server.
+  `listSource` and filter locally. Only chats search on the server, and never find a
+  [temporary chat](temporary-chats.md).
 - Results stay grouped by source and are never merged into one ranking: scores from different
   sources, local or remote, are not comparable.
 - A result's excerpt is plain text plus highlight ranges (`Snippet`, `modules/search/text.ts`),

@@ -997,3 +997,78 @@ describe("StreamEngine foreground saved memory", () => {
     );
   }, 60_000);
 });
+
+describe("StreamEngine temporary chats", () => {
+  // Each attempt reads the flag from the conversation row, so Keep takes
+  // effect on the next one without anything carried by the client.
+  it("neither reads nor offers memory until the chat is kept", async () => {
+    memoryState.referenceEnabled = true;
+    memoryState.referenceable = [
+      {
+        id: "existing-memory",
+        content: "Uses dark mode",
+        origin: "model",
+        editedAt: null,
+        sourceConversationId: null,
+        sourceConversationTitle: null,
+        sourceMessageId: null,
+        sourceMessageEdited: false,
+        createdAt: SETTINGS_UPDATED_AT,
+        updatedAt: SETTINGS_UPDATED_AT,
+      },
+    ];
+
+    const turns = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const engine = yield* StreamEngine;
+        const userId = uuidv7();
+        yield* db.execute(
+          `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+        );
+        const answer = Effect.fn("test.answer")(function* (
+          conversation: Parameters<typeof repo.createTurn>[0]["conversation"],
+        ) {
+          const turn = yield* repo.createTurn({
+            userId,
+            conversation,
+            modelId,
+            content: "Please remember that I prefer concise answers.",
+            attachmentIds: [],
+          });
+          yield* engine.startGeneration({
+            generationId: turn.assistant.generationId ?? undefined,
+            userId,
+            conversationId: turn.conversation.id,
+            messageId: turn.assistant.id,
+            modelId,
+            searchEnabled: false,
+          });
+          const events = Array.from(
+            yield* engine.subscribe(turn.assistant.id, 0).pipe(Stream.runCollect),
+          );
+          return { turn, done: events.at(-1) };
+        });
+        const temporary = yield* answer({
+          kind: "new",
+          id: uuidv7(),
+          mode: "chat",
+          temporary: true,
+        });
+        expect(yield* repo.keepConversation(userId, temporary.turn.conversation.id)).toBe(true);
+        const kept = yield* answer({ kind: "existing", id: temporary.turn.conversation.id });
+        return { temporary, kept };
+      }),
+    );
+
+    expect(turns.temporary.done).toMatchObject({ kind: "done", status: "complete" });
+    expect(turns.kept.done).toMatchObject({ kind: "done", status: "complete" });
+    expect(gatewayState.calls).toHaveLength(2);
+    expect(gatewayState.calls[0]?.tools).not.toContain("save_memory");
+    expect(gatewayState.calls[0]?.prompt).not.toContain("Uses dark mode");
+    expect(gatewayState.calls[0]?.prompt).not.toContain("save_memory");
+    expect(gatewayState.calls[1]?.tools).toContain("save_memory");
+    expect(gatewayState.calls[1]?.prompt).toContain("Uses dark mode");
+  }, 60_000);
+});

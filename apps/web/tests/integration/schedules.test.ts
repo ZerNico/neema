@@ -768,6 +768,8 @@ describe("schedule removal", () => {
         const theirs = yield* chat(yield* makeUser());
         const work = uuidv7();
         yield* db.insert(conversations).values({ id: work, userId, mode: "work" });
+        const temporary = uuidv7();
+        yield* db.insert(conversations).values({ id: temporary, userId, temporary: true });
         const check = (chatId: string) =>
           checkScheduleResources(db as never, userId, {
             skillIds: [],
@@ -779,13 +781,19 @@ describe("schedule removal", () => {
               onSuccess: () => "ok",
             }),
           );
-        return { mine: yield* check(mine), theirs: yield* check(theirs), work: yield* check(work) };
+        return {
+          mine: yield* check(mine),
+          theirs: yield* check(theirs),
+          work: yield* check(work),
+          temporary: yield* check(temporary),
+        };
       }),
     );
     expect(result).toEqual({
       mine: "ok",
       theirs: "the selected chat is unavailable",
       work: "a work chat cannot run a schedule",
+      temporary: "a temporary chat cannot run a schedule",
     });
   });
 

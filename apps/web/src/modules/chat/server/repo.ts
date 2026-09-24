@@ -30,6 +30,7 @@ import {
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
+import { TEMPORARY_CHAT_HOURS } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { projectResearchProgress } from "../research-schema.ts";
 import { createResearchStore, type ResearchStore } from "./research/repo.ts";
@@ -147,6 +148,10 @@ const draftSummary = (draft: {
   messageId: draft.messageId,
 });
 
+/** The user's chats that lists and search may show: never a temporary one. */
+const listedBy = (userId: string) =>
+  and(eq(conversations.userId, userId), eq(conversations.temporary, false));
+
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
@@ -191,7 +196,12 @@ export const PLAIN_GENERATION: GenerationConfig = {
 
 /** Everything about a turn except its content; `CreateTurnInput` adds that. */
 export type ConversationReference =
-  | { readonly kind: "new"; readonly id: string; readonly mode: "chat" | "work" }
+  | {
+      readonly kind: "new";
+      readonly id: string;
+      readonly mode: "chat" | "work";
+      readonly temporary?: boolean | undefined;
+    }
   | { readonly kind: "existing"; readonly id: string };
 
 export type TurnFields = {
@@ -205,7 +215,7 @@ export type TurnFields = {
   associateAgentId?: string | undefined;
   /**
    * Set only when a schedule fires this turn into a brand-new conversation;
-   * marks the chat as a scheduled run so the sidebar list omits it.
+   * links the chat back to the schedule that started it.
    */
   scheduleId?: string | undefined;
   /** A pending scheduled attempt, bound to this turn inside its transaction. */
@@ -862,6 +872,8 @@ export class ChatRepo extends Context.Service<
         permissionLevel: "manual" | "auto" | "skip";
       }>,
     ): Effect.Effect<void>;
+    /** Clears the temporary flag. False when it was already a kept chat. */
+    keepConversation(userId: string, conversationId: string): Effect.Effect<boolean>;
     /**
      * Resolves a pending title. False when the row is gone or already titled,
      * since a manual rename that landed first must not be overwritten.
@@ -874,6 +886,17 @@ export class ChatRepo extends Context.Service<
       userId: string,
       conversationId: string,
     ): Effect.Effect<ReadonlyArray<string>>;
+    /** Temporary chats past their lifetime with no live answer, oldest first. */
+    listExpiredTemporary(limit: number): Effect.Effect<ReadonlyArray<{ id: string }>>;
+    /**
+     * Deletes the chat only if it is still an expired temporary one under the
+     * row lock, so a Keep or a new message landing after the listing wins.
+     * Null when it no longer qualifies; otherwise its owner and the storage
+     * keys the caller must delete after the commit.
+     */
+    deleteExpiredTemporary(
+      conversationId: string,
+    ): Effect.Effect<{ userId: string; keys: ReadonlyArray<string> } | null>;
     /**
      * Forks the conversation into a new one carrying every message up to and
      * including `throughMessageId`. Messages, tool calls and attachment links
@@ -1119,6 +1142,61 @@ export class ChatRepo extends Context.Service<
         });
 
       /**
+       * A temporary chat a day past its last activity, judged by the database
+       * clock. One with an answer still inside its lease is left for the next
+       * pass rather than deleted from under the generation.
+       */
+      const expiredTemporary = and(
+        eq(conversations.temporary, true),
+        sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt}) < now() - make_interval(hours => ${TEMPORARY_CHAT_HOURS})`,
+        sql`not exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming' and ${messages.generationLeaseUntil} > now())`,
+      );
+
+      /**
+       * Deletes one conversation if `condition` still holds under its row
+       * lock. The condition gates everything below, not just the final
+       * delete: the attachment release must never run for a conversation the
+       * caller does not own.
+       */
+      const deleteLocked = (conversationId: string, condition: SQL | undefined) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const [owned] = yield* tx
+                .select({ userId: conversations.userId })
+                .from(conversations)
+                .where(and(eq(conversations.id, conversationId), condition))
+                .for("update");
+              if (!owned) return null;
+              yield* research.finalizeBeforeDelete(tx, conversationId);
+
+              const rows = yield* tx
+                .select({ id: messages.id })
+                .from(messages)
+                .where(eq(messages.conversationId, conversationId));
+              // Both link tables cascade, but the attachment rows they
+              // point at do not, so release them explicitly. Queued
+              // messages hold files too, and nothing else would free them
+              // before the 24-hour sweep.
+              const keys = yield* attachments.releaseForMessages(
+                tx,
+                rows.map((row) => row.id),
+              );
+              const queued = yield* tx
+                .select({ id: conversationQueueEntries.id })
+                .from(conversationQueueEntries)
+                .where(eq(conversationQueueEntries.conversationId, conversationId));
+              const queuedKeys = yield* attachments.releaseForQueueEntries(
+                tx,
+                queued.map((row) => row.id),
+              );
+              yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
+              return { userId: owned.userId, keys: [...keys, ...queuedKeys] };
+            }),
+          )
+          .pipe(Effect.orDie);
+
+      /**
        * Newest matching message per chat among the user's most recent chats,
        * each checked back through its latest messages. Bounded work, and the
        * common case: a frequent term fills the page from recent chats without
@@ -1133,7 +1211,7 @@ export class ChatRepo extends Context.Service<
             activity: sql<string>`${activity}`.as("recent_activity"),
           })
           .from(conversations)
-          .where(eq(conversations.userId, userId))
+          .where(listedBy(userId))
           .orderBy(desc(activity), desc(conversations.id))
           .limit(SEARCH_WINDOW_CHATS)
           .as("recent");
@@ -1182,7 +1260,7 @@ export class ChatRepo extends Context.Service<
                 .innerJoin(conversations, eq(conversations.id, messages.conversationId))
                 .where(
                   and(
-                    eq(conversations.userId, userId),
+                    listedBy(userId),
                     ne(messages.role, "system"),
                     sql`${messageSearchVector(messages.content)} @@ ${query}`,
                   ),
@@ -1232,7 +1310,7 @@ export class ChatRepo extends Context.Service<
             .from(conversations)
             .where(
               and(
-                eq(conversations.userId, input.userId),
+                listedBy(input.userId),
                 // Keyset, not OFFSET: the list reorders whenever a message
                 // lands, and an offset would then skip or repeat rows.
                 input.cursor
@@ -1275,7 +1353,7 @@ export class ChatRepo extends Context.Service<
             .from(conversations)
             .where(
               and(
-                eq(conversations.userId, input.userId),
+                listedBy(input.userId),
                 ilike(conversations.title, `%${escapeLike(needle)}%`),
               ),
             )
@@ -1624,6 +1702,7 @@ export class ChatRepo extends Context.Service<
                       modelId: input.modelId,
                       title: null,
                       mode: input.conversation.mode,
+                      temporary: input.conversation.temporary ?? false,
                       ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
                     })
                     .returning()
@@ -2170,6 +2249,24 @@ export class ChatRepo extends Context.Service<
           },
         ),
 
+        keepConversation: Effect.fn("ChatRepo.keepConversation")(
+          function* (userId, conversationId) {
+            const rows = yield* db
+              .update(conversations)
+              .set({ temporary: false, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(conversations.id, conversationId),
+                  eq(conversations.userId, userId),
+                  eq(conversations.temporary, true),
+                ),
+              )
+              .returning({ id: conversations.id })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
+
         setTitleIfPending: Effect.fn("ChatRepo.setTitleIfPending")(
           function* (conversationId, title) {
             const rows = yield* db
@@ -2184,49 +2281,26 @@ export class ChatRepo extends Context.Service<
 
         deleteConversation: Effect.fn("ChatRepo.deleteConversation")(
           function* (userId, conversationId) {
-            return yield* db
-              .transaction((tx) =>
-                Effect.gen(function* () {
-                  // Ownership gates everything below, not just the final
-                  // delete. The attachment release must never run for a
-                  // conversation the caller does not own.
-                  const owned = yield* tx
-                    .select({ id: conversations.id })
-                    .from(conversations)
-                    .where(
-                      and(eq(conversations.id, conversationId), eq(conversations.userId, userId)),
-                    )
-                    .for("update");
-                  if (owned.length === 0) return [] as ReadonlyArray<string>;
-                  yield* research.finalizeBeforeDelete(tx, conversationId);
-
-                  const rows = yield* tx
-                    .select({ id: messages.id })
-                    .from(messages)
-                    .where(eq(messages.conversationId, conversationId));
-                  // Both link tables cascade, but the attachment rows they
-                  // point at do not, so release them explicitly. Queued
-                  // messages hold files too, and nothing else would free them
-                  // before the 24-hour sweep.
-                  const keys = yield* attachments.releaseForMessages(
-                    tx,
-                    rows.map((row) => row.id),
-                  );
-                  const queued = yield* tx
-                    .select({ id: conversationQueueEntries.id })
-                    .from(conversationQueueEntries)
-                    .where(eq(conversationQueueEntries.conversationId, conversationId));
-                  const queuedKeys = yield* attachments.releaseForQueueEntries(
-                    tx,
-                    queued.map((row) => row.id),
-                  );
-                  yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
-                  return [...keys, ...queuedKeys];
-                }),
-              )
-              .pipe(Effect.orDie);
+            const deleted = yield* deleteLocked(
+              conversationId,
+              eq(conversations.userId, userId),
+            );
+            return deleted?.keys ?? [];
           },
         ),
+
+        listExpiredTemporary: Effect.fn("ChatRepo.listExpiredTemporary")(function* (limit) {
+          return yield* db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(expiredTemporary)
+            .orderBy(sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`)
+            .limit(limit)
+            .pipe(Effect.orDie);
+        }),
+
+        deleteExpiredTemporary: (conversationId) => deleteLocked(conversationId, expiredTemporary),
+
 
         cloneConversationPrefix: Effect.fn("ChatRepo.cloneConversationPrefix")(function* (input) {
           return yield* db
@@ -2302,6 +2376,9 @@ export class ChatRepo extends Context.Service<
                     // The approval level is a fact about the chat too.
                     mode: source.mode,
                     permissionLevel: source.permissionLevel,
+                    // A copy of a temporary chat must not outlive it in the
+                    // sidebar; it gets its own day from now.
+                    temporary: source.temporary,
                     branchedFrom: source.id,
                     // Left null so the branch sorts by its own createdAt (now)
                     // and lands at the top of the list, like a new chat.

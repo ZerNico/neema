@@ -4080,6 +4080,34 @@ describe("scheduled turns into a work chat", () => {
   }, 60_000);
 });
 
+describe("temporary chats", () => {
+  it("refuses a temporary work chat before creating anything", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const chat = yield* ChatService;
+        const db = yield* Db;
+        const id = uuidv7();
+        const error = yield* chat
+          .sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id, mode: "work", temporary: true },
+            modelId: textModelId,
+            content: "Tidy the repo.",
+            attachmentIds: [],
+            searchEnabled: false,
+            researchEnabled: false,
+          })
+          .pipe(Effect.flip);
+        const rows = yield* db.select().from(conversations).where(eq(conversations.id, id));
+        return { error, rows };
+      }),
+    );
+    expect(result.error).toMatchObject({ reason: "a work chat cannot be temporary" });
+    expect(result.rows).toEqual([]);
+  }, 60_000);
+});
+
 describe("retry with a different model", () => {
   // Rows only: the guard under test runs before any blob is read, so the
   // stubbed store never has to hold bytes.

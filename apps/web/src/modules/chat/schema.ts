@@ -78,11 +78,19 @@ const generationFields = {
   ),
 };
 
+/** How long a temporary chat outlives its last message. */
+export const TEMPORARY_CHAT_HOURS = 24;
+
 export const ConversationMode = Schema.Literals(["chat", "work"]);
 export type ConversationMode = typeof ConversationMode.Type;
 
 export const ConversationReference = Schema.Union([
-  Schema.Struct({ kind: Schema.Literals(["new"]), id: WorkspaceId, mode: ConversationMode }),
+  Schema.Struct({
+    kind: Schema.Literals(["new"]),
+    id: WorkspaceId,
+    mode: ConversationMode,
+    temporary: Schema.optionalKey(Schema.Boolean),
+  }),
   Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
 ]);
 export type ConversationReference = typeof ConversationReference.Type;

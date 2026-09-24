@@ -706,6 +706,24 @@ export const renameConversation = createServerFn({ method: "POST" })
     ),
   );
 
+export const keepConversation = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ConversationIdInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.keepConversation({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+        }),
+      ).pipe(
+        Effect.catchTag("ConversationNotFound", () =>
+          Effect.die(new Response("Not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
 export const listChatModels = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>

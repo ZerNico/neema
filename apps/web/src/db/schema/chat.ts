@@ -6,6 +6,7 @@ import { desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
+  boolean,
   index,
   integer,
   jsonb,
@@ -60,6 +61,10 @@ export const conversations = pgTable(
      * FK constraint (`on delete set null`) lives in the migrations.
      */
     scheduleId: text("schedule_id"),
+    // Kept out of lists and search, cut off from memory and swept after a day
+    // without activity. Cleared by Keep, never set later. See
+    // docs/internals/temporary-chats.md.
+    temporary: boolean().notNull().default(false),
   },
   (t) => [
     index("conversations_user_id_idx").on(t.userId),
@@ -80,6 +85,10 @@ export const conversations = pgTable(
       sql`coalesce(${t.lastMessageAt}, ${t.createdAt}) desc`,
       desc(t.id),
     ),
+    // Serves the temporary-chat sweep, which compares exactly this expression.
+    index("conversations_temporary_activity_idx")
+      .on(sql`coalesce(${t.lastMessageAt}, ${t.createdAt})`)
+      .where(sql`${t.temporary}`),
   ],
 );
 

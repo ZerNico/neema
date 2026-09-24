@@ -866,11 +866,18 @@ export class StreamEngine extends Context.Service<
               }).pipe(Effect.provideService(KnowledgeService, knowledgeService))
             : null;
 
+          // Read per attempt, so Keep takes effect on the next one. A chat
+          // deleted underneath this attempt counts as temporary: fail closed.
+          const temporary = yield* repo.getConversation(input.userId, input.conversationId).pipe(
+            Effect.map((row) => row.temporary),
+            Effect.catchTag("ConversationNotFound", () => Effect.succeed(true)),
+          );
           const conversationContext = yield* prepareConversationContext({
             memory,
             userId: input.userId,
             conversationId: input.conversationId,
             history: completed,
+            memoryDisabled: temporary,
           });
           const { memoryTools } = conversationContext;
           // Research is a tool on an ordinary turn: the model writes the brief

@@ -64,3 +64,12 @@ export const QueueSweepInterval = Context.Reference<Duration.Duration | null>(
   "chat/QueueSweepInterval",
   { defaultValue: () => Duration.seconds(5) },
 );
+
+/**
+ * How often expired temporary chats are deleted; `null` turns the sweep off.
+ * Tests call `ChatService.sweepTemporary` directly instead.
+ */
+export const TemporarySweepInterval = Context.Reference<Duration.Duration | null>(
+  "chat/TemporarySweepInterval",
+  { defaultValue: () => Duration.minutes(10) },
+);

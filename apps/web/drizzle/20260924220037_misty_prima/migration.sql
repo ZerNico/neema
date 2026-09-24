@@ -1,0 +1,2 @@
+ALTER TABLE "conversations" ADD COLUMN "temporary" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX "conversations_temporary_activity_idx" ON "conversations" (coalesce("last_message_at", "created_at")) WHERE "temporary";

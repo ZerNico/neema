@@ -14,13 +14,17 @@ import { skillsQuery } from "~/modules/skills/client/queries.ts";
 export const Route = createFileRoute("/_app/")({
   // `?agent=<id>` from an agent page pre-selects it in the composer. The
   // server still authorizes the install at send time.
-  validateSearch: (search: Record<string, unknown>): { agent?: string; skill?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { agent?: string; skill?: string; temporary?: 1 } => ({
     ...(typeof search["agent"] === "string" && search["agent"].length <= 128
       ? { agent: search["agent"] }
       : {}),
     ...(typeof search["skill"] === "string" && search["skill"].length <= 128
       ? { skill: search["skill"] }
       : {}),
+    // In the address so a reload keeps the choice.
+    ...(search["temporary"] === 1 || search["temporary"] === "1" ? { temporary: 1 as const } : {}),
   }),
   loader: async ({ context }) => {
     await Promise.all([
@@ -41,7 +45,7 @@ export const Route = createFileRoute("/_app/")({
 function NewChatPage() {
   // `user` comes from the parent `_app` route's beforeLoad context.
   const { user } = Route.useRouteContext();
-  const { agent, skill } = Route.useSearch();
+  const { agent, skill, temporary } = Route.useSearch();
   const router = useRouter();
   const location = useLocation();
   // oxlint-disable eslint/no-underscore-dangle -- TanStack owns this history entry key.
@@ -58,6 +62,18 @@ function NewChatPage() {
     <NewChatView
       key={JSON.stringify([agent, skill])}
       user={user}
+      temporary={temporary === 1}
+      onTemporaryChange={(next) =>
+        void router.navigate({
+          to: "/",
+          search: ({ agent: a, skill: s }) => ({
+            ...(a !== undefined ? { agent: a } : {}),
+            ...(s !== undefined ? { skill: s } : {}),
+            ...(next ? { temporary: 1 as const } : {}),
+          }),
+          replace: true,
+        })
+      }
       initialAgentId={agent ?? null}
       initialSkillId={skill ?? null}
       initialPrefill={readChatPrefill(location.state.chatPrefill)}

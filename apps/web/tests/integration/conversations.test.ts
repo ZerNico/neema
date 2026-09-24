@@ -362,3 +362,98 @@ describe("listConversations title search", () => {
     expect(ids).toEqual(["w2", "w1"]);
   });
 });
+
+describe("temporary chat expiry", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  it("deletes only temporary chats a day past their last activity with no live answer", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const now = Date.now();
+        const ids = {
+          expired: uuidv7(),
+          expiredNeverUsed: uuidv7(),
+          fresh: uuidv7(),
+          ordinary: uuidv7(),
+          live: uuidv7(),
+        };
+        const row = (id: string, temporary: boolean, created: number, last: number | null) => ({
+          id,
+          userId,
+          title: null,
+          temporary,
+          createdAt: new Date(created),
+          updatedAt: new Date(created),
+          lastMessageAt: last === null ? null : new Date(last),
+        });
+        yield* db
+          .insert(conversations)
+          .values([
+            row(ids.expired, true, now - 48 * HOUR, now - 25 * HOUR),
+            row(ids.expiredNeverUsed, true, now - 25 * HOUR, null),
+            // Created long ago but active recently: the day runs from activity.
+            row(ids.fresh, true, now - 48 * HOUR, now - 1 * HOUR),
+            row(ids.ordinary, false, now - 48 * HOUR, now - 25 * HOUR),
+            row(ids.live, true, now - 48 * HOUR, now - 25 * HOUR),
+          ]);
+        yield* db.insert(messages).values({
+          id: uuidv7(),
+          conversationId: ids.live,
+          role: "assistant",
+          status: "streaming",
+          generationLeaseUntil: new Date(now + HOUR),
+        });
+
+        const listed = new Set((yield* repo.listExpiredTemporary(100)).map((r) => r.id));
+        const deleted = yield* repo.deleteExpiredTemporary(ids.expired);
+        const remaining = yield* db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.userId, userId));
+        return { ids, listed, deleted, remaining: new Set(remaining.map((r) => r.id)) };
+      }),
+    );
+    expect(result.listed).toEqual(new Set([result.ids.expired, result.ids.expiredNeverUsed]));
+    expect(result.deleted).toEqual({ userId: expect.any(String), keys: [] });
+    expect(result.remaining.has(result.ids.expired)).toBe(false);
+    expect(result.remaining.has(result.ids.live)).toBe(true);
+    expect(result.remaining.has(result.ids.fresh)).toBe(true);
+    expect(result.remaining.has(result.ids.ordinary)).toBe(true);
+  });
+
+  it("lets a Keep that lands after the listing win", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const id = uuidv7();
+        const long = new Date(Date.now() - 25 * HOUR);
+        yield* db.insert(conversations).values({
+          id,
+          userId,
+          temporary: true,
+          createdAt: long,
+          updatedAt: long,
+          lastMessageAt: long,
+        });
+        const listed = (yield* repo.listExpiredTemporary(100)).some((r) => r.id === id);
+        const kept = yield* repo.keepConversation(userId, id);
+        const keptAgain = yield* repo.keepConversation(userId, id);
+        const deleted = yield* repo.deleteExpiredTemporary(id);
+        const [row] = yield* db.select().from(conversations).where(eq(conversations.id, id));
+        return { listed, kept, keptAgain, deleted, temporary: row?.temporary };
+      }),
+    );
+    expect(result).toEqual({
+      listed: true,
+      kept: true,
+      keptAgain: false,
+      deleted: null,
+      temporary: false,
+    });
+  });
+});

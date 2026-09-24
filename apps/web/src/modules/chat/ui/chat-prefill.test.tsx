@@ -15,6 +15,7 @@ import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { sendMessage } from "../server/functions.ts";
 import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
+import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 
 vi.mock("../server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -147,7 +148,12 @@ async function fixture({
   await router.load();
   const tree = (
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <HeaderSlotProvider>
+        <header>
+          <HeaderSlot />
+        </header>
+        <RouterProvider router={router} />
+      </HeaderSlotProvider>
     </QueryClientProvider>
   );
   const view = mount ? render(tree) : null;
@@ -269,5 +275,39 @@ describe("one-shot new-chat prefill", () => {
     expect(sendMessage).not.toHaveBeenCalled();
     await act(async () => root.unmount());
     container.remove();
+  });
+});
+
+describe("temporary new chat", () => {
+  it("keeps the draft when switched on, records it in the address and sends it", async () => {
+    const { history } = await fixture({ prefill: null });
+    const textbox = await screen.findByRole("textbox");
+    fireEvent.change(textbox, { target: { value: "Something private" } });
+    const toggle = screen.getByRole("button", { name: "Temporary chat" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(history.location.search).toBe("?temporary=1"));
+    expect(screen.getByRole("button", { name: "Temporary chat" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // Presence only: both enter from opacity 0, and jsdom runs no animation.
+    expect(screen.getByRole("heading", { name: "Temporary chat" })).toBeInTheDocument();
+    expect(screen.getByText(/won’t appear in your history/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("Something private");
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({
+      conversation: { kind: "new", mode: "chat", temporary: true },
+    });
+  });
+
+  it("sends an ordinary chat without the flag", async () => {
+    await fixture();
+    fireEvent.click(await screen.findByRole("button", { name: /^Send$/ }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sendMessage).mock.calls[0]![0].data.conversation).not.toHaveProperty(
+      "temporary",
+    );
   });
 });

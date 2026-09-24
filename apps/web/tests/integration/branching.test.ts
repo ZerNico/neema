@@ -774,3 +774,51 @@ describe("branching a conversation", () => {
     ]);
   });
 });
+
+describe("temporary chats", () => {
+  it("branches a temporary chat into another temporary chat", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
+        yield* db
+          .update(conversationsTable)
+          .set({ temporary: true })
+          .where(eq(conversationsTable.id, source.conversation.id));
+        const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
+        return { temporary: forked.conversation.temporary, listed: yield* conversationIds(userId) };
+      }),
+    );
+    expect(result).toEqual({ temporary: true, listed: [] });
+  });
+
+  it("sweeps an expired temporary chat and tells its owner's tabs", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const chat = yield* ChatService;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
+        const long = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        yield* db
+          .update(conversationsTable)
+          .set({ temporary: true, createdAt: long, lastMessageAt: long })
+          .where(eq(conversationsTable.id, source.conversation.id));
+        const events = yield* listenFor(userId, 1);
+        yield* chat.sweepTemporary();
+        const remaining = yield* db
+          .select({ id: conversationsTable.id })
+          .from(conversationsTable)
+          .where(eq(conversationsTable.id, source.conversation.id));
+        return {
+          id: source.conversation.id,
+          remaining,
+          events: Array.from(yield* Fiber.join(events)),
+        };
+      }),
+    );
+    expect(result.remaining).toEqual([]);
+    expect(result.events).toEqual([{ type: "conversation.deleted", conversationId: result.id }]);
+  });
+});

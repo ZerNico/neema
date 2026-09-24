@@ -2,7 +2,7 @@ import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import type { DesktopSubmission } from "../schema.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
-import { Context, Duration, Effect, Layer, Option } from "effect";
+import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   BranchNotAllowed,
@@ -55,7 +55,7 @@ import {
   type ResolveError,
 } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
-import { QueueSweepInterval } from "./generation-fence.ts";
+import { QueueSweepInterval, TemporarySweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 
 /**
@@ -356,6 +356,13 @@ export class ChatService extends Context.Service<
       conversationId: string;
       title: string;
     }): Effect.Effect<void, ConversationNotFound>;
+    /** Turns a temporary chat into an ordinary one. Idempotent. */
+    keepConversation(input: {
+      userId: string;
+      conversationId: string;
+    }): Effect.Effect<void, ConversationNotFound>;
+    /** One pass of the temporary-chat sweep; exposed so tests need not wait for it. */
+    sweepTemporary(): Effect.Effect<void>;
     /**
      * Fires one schedule into a fresh conversation or an existing one.
      * Internal: no composer concerns (attachments, desktop, clarifications)
@@ -1048,6 +1055,15 @@ function makeChatService() {
       const { model, attachmentFileNames, researchEnabled } =
         yield* validateGenerationOptions(input);
       const searchAvailable = yield* searchToolEnabled;
+
+      // A work chat's grants and folders live on the user's machine under its
+      // id, so sweeping it away a day later would strand them.
+      if (
+        input.conversation.kind === "new" &&
+        input.conversation.temporary &&
+        input.conversation.mode === "work"
+      )
+        return yield* new InvalidMessage({ reason: "a work chat cannot be temporary" });
 
       // The association is fixed at creation; its configuration is live for
       // every subsequent attempt. Swapping or removal is not a chat setting.
@@ -1867,8 +1883,39 @@ function makeChatService() {
       });
     });
 
+    const keepConversation = Effect.fn("ChatService.keepConversation")(function* (input: {
+      userId: string;
+      conversationId: string;
+    }) {
+      yield* repo.getConversation(input.userId, input.conversationId);
+      if (yield* repo.keepConversation(input.userId, input.conversationId))
+        yield* sync.publish(input.userId, {
+          type: "conversation.updated",
+          conversationId: input.conversationId,
+        });
+    });
+
+    // Deletes expired temporary chats the way a person's own delete does, so
+    // research, attachments and every open tab settle the same way.
+    const sweepTemporary = Effect.fn("ChatService.sweepTemporary")(function* () {
+      const expired = yield* repo.listExpiredTemporary(100);
+      for (const { id } of expired) {
+        const deleted = yield* repo.deleteExpiredTemporary(id);
+        if (!deleted) continue;
+        yield* attachmentService.deleteBlobs(deleted.keys);
+        yield* sync.publish(deleted.userId, { type: "conversation.deleted", conversationId: id });
+      }
+    });
+
     const sweepInterval = yield* QueueSweepInterval;
     if (sweepInterval) yield* startQueueSweeper(drainQueue, sweepInterval);
+    const temporarySweepInterval = yield* TemporarySweepInterval;
+    if (temporarySweepInterval)
+      yield* sweepTemporary().pipe(
+        Effect.catchCause((cause) => Effect.logError("temporary chat sweep failed", cause)),
+        Effect.repeat(Schedule.spaced(temporarySweepInterval)),
+        Effect.forkScoped,
+      );
 
     return ChatService.of({
       reserveWorkTurn,
@@ -1888,6 +1935,8 @@ function makeChatService() {
       deleteConversation,
       updateWorkSettings,
       renameConversation,
+      keepConversation,
+      sweepTemporary,
       runScheduledTurn,
     });
   });

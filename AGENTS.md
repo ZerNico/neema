@@ -66,6 +66,9 @@ edit the wrong thing.
 - **branch**: a copy of a conversation prefix into a new conversation. Copies
   messages, tool rows and display snapshots with fresh ids; never copies chunks,
   calls or ledger rows.
+- **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
+  lists and search, neither reads nor saves memory, and is swept a day after its last
+  activity. Keep clears the flag; nothing sets it later.
 - **queue entry / steer**: a message held behind the live generation, with its
   own claimed files; it becomes a user message when promoted. A steer hands one
   to the running generation at its next safe boundary instead, and from then on
@@ -219,6 +222,8 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
+- `docs/internals/temporary-chats.md`: the flag, where it is read, the sweep and
+  what a branch or schedule does with one.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,

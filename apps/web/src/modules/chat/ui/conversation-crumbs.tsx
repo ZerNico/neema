@@ -1,11 +1,13 @@
-import { Calendar03Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon, GitBranchIcon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { scheduleQuery } from "~/modules/schedules/client/queries.ts";
 import { cadenceLabel, nextFireLabel } from "~/modules/schedules/ui/schedule-labels.ts";
 import { HeaderContent } from "~/ui/header-slot.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { keepConversation } from "../server/functions.ts";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
 import { Badge } from "~/ui/primitives/badge";
 import { agentIcon } from "./context-picker.tsx";
@@ -31,8 +33,11 @@ export function ConversationCrumbs({
   schedule,
   branchedFrom,
   agent,
+  temporary = false,
 }: {
   conversationId: string;
+  /** Hidden from lists and without memory until kept. */
+  temporary?: boolean;
   title: string | null;
   agent: { id: string | null; name: string | null; icon?: string } | null | undefined;
   schedule: ScheduleOrigin | null | undefined;
@@ -64,8 +69,54 @@ export function ConversationCrumbs({
             <span className="truncate">{branchedFrom.title ?? "New chat…"}</span>
           </Badge>
         ) : null}
+        {temporary ? <TemporaryTag /> : null}
       </div>
+      {temporary ? <KeepButton conversationId={conversationId} /> : null}
     </HeaderContent>
+  );
+}
+
+function TemporaryTag() {
+  return (
+    <HoverCard>
+      <HoverCardTrigger
+        delay={300}
+        closeDelay={100}
+        render={<Badge variant="secondary" className={tagClassName} tabIndex={0} />}
+      >
+        <HugeiconsIcon icon={IncognitoIcon} strokeWidth={2} aria-hidden />
+        <span className="truncate">Temporary</span>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" sideOffset={8}>
+        <p className="text-muted-foreground text-xs">
+          This chat isn’t in your history and doesn’t use your memories. It’s deleted after a day
+          without new messages, unless you keep it.
+        </p>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function KeepButton({ conversationId }: { conversationId: string }) {
+  const queryClient = useQueryClient();
+  const keep = useMutation({
+    mutationFn: () => keepConversation({ data: { conversationId } }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+      ]),
+  });
+  return (
+    <PendingButton
+      size="sm"
+      variant="outline"
+      className="ml-auto shrink-0"
+      pending={keep.isPending}
+      onClick={() => keep.mutate()}
+    >
+      Keep chat
+    </PendingButton>
   );
 }
 

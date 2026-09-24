@@ -5,6 +5,7 @@ import {
   ComputerIcon,
   FolderLibraryIcon,
   HelpCircleIcon,
+  IncognitoIcon,
   Moon02Icon,
   PlusSignIcon,
   Robot01Icon,
@@ -52,6 +53,13 @@ const useActionSearch: SearchSource = (query, active) => {
   const items = matching(
     [
       { id: "action:new-chat", label: "New chat", icon: PlusSignIcon, href: "/" },
+      {
+        id: "action:new-temporary-chat",
+        label: "New temporary chat",
+        keywords: "incognito private",
+        icon: IncognitoIcon,
+        href: "/?temporary=1",
+      },
       can("agentsCreate") && {
         id: "action:new-agent",
         label: "New agent",

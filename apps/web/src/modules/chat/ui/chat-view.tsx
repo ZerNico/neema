@@ -33,6 +33,7 @@ import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
+import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -68,6 +69,12 @@ import {
   updateWorkSettings,
 } from "../server/functions.ts";
 import type { ConversationMode, PermissionLevel } from "../schema.ts";
+import { HeaderContent } from "~/ui/header-slot.tsx";
+import { Toggle } from "~/ui/primitives/toggle";
+import { AnimatePresence } from "motion/react";
+import * as motion from "motion/react-m";
+import { MotionSwap, motionEase, useAppReducedMotion } from "~/ui/motion.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
   copyWorkspaceToBranch,
@@ -1957,6 +1964,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               schedule={data.schedule}
               branchedFrom={data.branchedFrom}
               agent={data.agent}
+              temporary={data.conversation.temporary}
             />
             {foreignMachine ? (
               <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
@@ -2070,8 +2078,13 @@ export function NewChatView({
   initialSkillId = null,
   initialPrefill = null,
   onPrefillConsumed,
+  temporary = false,
+  onTemporaryChange,
 }: {
   user: { name: string };
+  /** Starts the chat as temporary; the route keeps it in the address. */
+  temporary?: boolean;
+  onTemporaryChange?: (temporary: boolean) => void;
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
   initialSkillId?: string | null;
@@ -2149,6 +2162,7 @@ export function NewChatView({
         kind: "new" as const,
         id: conversationId,
         mode: input.mode,
+        ...(input.mode === "chat" && temporary ? { temporary: true } : {}),
       };
       const fields = {
         modelId: modelId!,
@@ -2209,8 +2223,45 @@ export function NewChatView({
     },
   });
 
+  // A work chat keeps grants and folders on the machine, so it is never temporary.
+  const offerTemporary = mode === "chat" && !!onTemporaryChange;
+  const isTemporary = offerTemporary && temporary;
+  const reducedMotion = useAppReducedMotion();
+
   return (
     <div className="flex h-full flex-col">
+      {offerTemporary ? (
+        <HeaderContent>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  size="icon"
+                  variant="solid"
+                  className="ml-auto"
+                  aria-label="Temporary chat"
+                  pressed={temporary}
+                  onPressedChange={onTemporaryChange}
+                />
+              }
+            >
+              {/* Keyed on the state, so each switch replays a small pop. */}
+              <motion.span
+                key={String(temporary)}
+                className="flex"
+                initial={reducedMotion ? false : { scale: 0.6, rotate: temporary ? -12 : 12 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 520, damping: 20 }}
+              >
+                <HugeiconsIcon icon={IncognitoIcon} strokeWidth={2} aria-hidden />
+              </motion.span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {temporary ? "Turn off temporary chat" : "Start a temporary chat"}
+            </TooltipContent>
+          </Tooltip>
+        </HeaderContent>
+      ) : null}
       {/* Anchored to the bottom of its share of the column, so the greeting
           keeps its distance from the composer while both travel down. */}
       <div className="flex min-h-0 flex-1 flex-col justify-end px-4 pb-6">
@@ -2240,8 +2291,28 @@ export function NewChatView({
               ) : null}
             </>
           ) : (
-            <h1 className="text-muted-foreground text-2xl font-medium">{greetingFor(user.name)}</h1>
+            <h1 className="text-muted-foreground text-2xl font-medium">
+              <MotionSwap value={isTemporary ? "temporary" : "greeting"}>
+                {isTemporary ? "Temporary chat" : greetingFor(user.name)}
+              </MotionSwap>
+            </h1>
           )}
+          <AnimatePresence initial={false}>
+            {isTemporary ? (
+              <motion.div
+                key="temporary"
+                className="overflow-hidden"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: reducedMotion ? 0 : 0.18, ease: motionEase }}
+              >
+                <p className="text-muted-foreground max-w-md pt-2 text-sm">
+                  This chat won’t appear in your history or use your memories.
+                </p>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
         {starters.length > 0 && !sending ? (
           <ul

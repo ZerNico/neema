@@ -34,6 +34,7 @@ const BASE = new Date("2026-05-01T12:00:00Z").getTime();
 interface SeedChat {
   title: string | null;
   at: number;
+  temporary?: boolean;
   messages: ReadonlyArray<{
     role?: "user" | "assistant" | "system";
     content: string;
@@ -61,6 +62,7 @@ const seed = (chats: ReadonlyArray<SeedChat>) =>
           createdAt: new Date(BASE + chat.at),
           updatedAt: new Date(BASE + chat.at),
           lastMessageAt: new Date(BASE + chat.at),
+          temporary: chat.temporary ?? false,
         });
         if (chat.messages.length)
           yield* db.insert(messages).values(
@@ -232,5 +234,38 @@ describe("chat search", () => {
       ),
     );
     expect(JSON.stringify(plan)).toContain("messages_search_idx");
+  });
+});
+
+describe("chat search and temporary chats", () => {
+  // Title, recent-window and indexed matches are separate queries; a word
+  // this rare runs all three, so a leak in any one shows here.
+  it("finds a temporary chat by neither title nor text until it is kept", async () => {
+    const { userId, ids } = await seed([
+      { title: "Ordinary", at: 0, messages: [{ content: "nothing to see" }] },
+      {
+        title: "Zanzibar plans",
+        at: 1000,
+        temporary: true,
+        messages: [{ content: "a zanzibar itinerary" }],
+      },
+    ]);
+    const temporaryId = ids[1]!;
+    expect(await search(userId, "zanzibar")).toEqual([]);
+    expect(await search(userId, "itinerary")).toEqual([]);
+    const listed = await runtime.runPromise(
+      Effect.flatMap(ChatRepo, (repo) => repo.listConversations({ userId, limit: 10 })),
+    );
+    expect(listed.conversations.map((c) => c.id)).toEqual([ids[0]]);
+
+    await runtime.runPromise(
+      Effect.flatMap(ChatRepo, (repo) => repo.keepConversation(userId, temporaryId)),
+    );
+    expect((await search(userId, "zanzibar")).map((hit) => hit.conversationId)).toEqual([
+      temporaryId,
+    ]);
+    expect((await search(userId, "itinerary")).map((hit) => hit.conversationId)).toEqual([
+      temporaryId,
+    ]);
   });
 });
