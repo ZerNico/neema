@@ -253,6 +253,14 @@ function NoteDialog({
   );
 }
 
+// The limit only matters once it is close, so it stays out of the way until then.
+const documentCount = (count: number) => {
+  const max = KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
+  if (count >= max) return `Full: ${count} of ${max} documents`;
+  if (count >= max * 0.8) return `${count} of ${max} documents`;
+  return count === 1 ? "1 document" : `${count} documents`;
+};
+
 export function CollectionPage({ collectionId }: { collectionId: string }) {
   const queryClient = useQueryClient();
   const panel = useDetailPanel();
@@ -352,6 +360,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   // still count toward the collection's limit.
   const ownDocuments = documents.filter((document) => !document.source);
   const syncedDocuments = documents.filter((document) => document.source);
+  const onlySynced = ownDocuments.length === 0 && syncedDocuments.length > 0;
   const pickFile = (documentId: string | null) => {
     replacing.current = documentId;
     fileInput.current?.click();
@@ -454,7 +463,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       >
         <Section
           title="Documents"
-          description={`${documents.length} of ${KNOWLEDGE_LIMITS.maxDocumentsPerCollection}${syncedDocuments.length ? `, ${syncedDocuments.length} synced` : ""}`}
+          description={documentCount(documents.length)}
           actions={
             canEdit ? (
               <>
@@ -508,10 +517,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
             ) : undefined
           }
         >
-          {ownDocuments.length === 0 ? (
+          {/* Synced pages are listed under their source, so a collection holding
+              only those is not empty and needs no empty state here. */}
+          {onlySynced ? null : ownDocuments.length === 0 ? (
             <EmptyState
               icon={FolderLibraryIcon}
-              title={syncedDocuments.length ? "No files or notes yet" : "No documents yet"}
+              title="No documents yet"
               description={
                 canEdit
                   ? "Add documents or notes to use in chats."
@@ -691,7 +702,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
         </m.div>
       </div>
       <KnowledgeSourcesSection
-          collectionId={collectionId}
+        collectionId={collectionId}
         documents={syncedDocuments}
         onEdit={setSyncing}
       />
