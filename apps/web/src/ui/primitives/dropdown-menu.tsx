@@ -177,6 +177,41 @@ function DropdownMenuCheckboxItem({
   );
 }
 
+/**
+ * A checkbox item that reads as an on/off setting. The switch is drawn, not a
+ * nested `Switch`: the item already is the control, and a button inside a menu
+ * item would be a second focus stop announcing the same state.
+ */
+function DropdownMenuSwitchItem({
+  className,
+  children,
+  inset,
+  ...props
+}: MenuPrimitive.CheckboxItem.Props & {
+  inset?: boolean;
+}) {
+  return (
+    <MenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-switch-item"
+      data-inset={inset}
+      className={cn(
+        "group/switch-item relative flex cursor-default items-center gap-2.5 rounded-2xl py-2 pr-2.5 pl-3 text-sm font-medium outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-9.5 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <span
+        aria-hidden
+        data-slot="dropdown-menu-switch-item-indicator"
+        className="bg-input/90 group-data-checked/switch-item:bg-primary pointer-events-none ml-auto inline-flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors"
+      >
+        <span className="bg-background dark:bg-foreground dark:group-data-checked/switch-item:bg-primary-foreground block h-3 w-3.5 rounded-full shadow-sm transition-transform group-data-checked/switch-item:translate-x-2.5" />
+      </span>
+    </MenuPrimitive.CheckboxItem>
+  );
+}
+
 function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
   return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
 }
@@ -244,6 +279,7 @@ export {
   DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
+  DropdownMenuSwitchItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,

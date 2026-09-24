@@ -191,7 +191,7 @@ false`), so a page body is written against data already there. This includes loc
 - The web-search toggle rests on a default (`useSearchMode(defaultEnabled)`): true in plain chat,
   the installed or selected agent's "web search by default" otherwise. A manual flip is one
   message's opt-in or opt-out and resets on send; picking another agent in a new chat resets it
-  too. Deep research is a checkbox in the plus menu and nothing else — the two are independent
+  too. Deep research is a switch item in the plus menu and nothing else — the two are independent
   offers now, so it never takes the search pill's place or hides it, and its own state is read
   where it is set. An edit carries its own offer, cleared each time an editor opens, because an
   edit is a fresh submission rather than a continuation. Opening a conversation or new chat focuses the

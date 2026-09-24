@@ -185,9 +185,14 @@ describe("research composer", () => {
     menu().focus();
     await user.keyboard("{Enter}");
     const research = await screen.findByRole("menuitemcheckbox", { name: "Deep research" });
+    // Shown as a switch, but the item stays the one control screen readers meet.
+    expect(
+      research.querySelector('[data-slot="dropdown-menu-switch-item-indicator"]'),
+    ).toHaveAttribute("aria-hidden", "true");
     research.focus();
     await user.keyboard("{Enter}");
     await waitFor(() => expect(research).toHaveAttribute("aria-checked", "true"));
+    expect(research).toHaveAttribute("data-checked");
     expect(searchPill()).toHaveAttribute("aria-pressed", "true");
     research.focus();
     await user.keyboard("{Enter}");

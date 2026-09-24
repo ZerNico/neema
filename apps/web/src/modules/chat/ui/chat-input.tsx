@@ -51,7 +51,7 @@ import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuCheckboxItem,
+  DropdownMenuSwitchItem,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -635,7 +635,7 @@ export const ChatInput = forwardRef<
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="w-64">
                     {integrations.items.map((item) => (
-                      <DropdownMenuCheckboxItem
+                      <DropdownMenuSwitchItem
                         key={item.integrationId}
                         checked={item.enabled}
                         onCheckedChange={(checked) =>
@@ -644,7 +644,7 @@ export const ChatInput = forwardRef<
                       >
                         <IntegrationLogo integrationId={item.integrationId} />
                         {item.name}
-                      </DropdownMenuCheckboxItem>
+                      </DropdownMenuSwitchItem>
                     ))}
                     {integrations.items.length ? <DropdownMenuSeparator /> : null}
                     <DropdownMenuItem onClick={() => setAddingIntegration(true)}>
@@ -658,7 +658,7 @@ export const ChatInput = forwardRef<
             {canResearch && (onResearchEnabledChange || researchEnabled) ? (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
+                <DropdownMenuSwitchItem
                   checked={researchEnabled}
                   onCheckedChange={(checked) => onResearchEnabledChange?.(checked)}
                   disabled={
@@ -668,7 +668,7 @@ export const ChatInput = forwardRef<
                 >
                   <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
                   Deep research
-                </DropdownMenuCheckboxItem>
+                </DropdownMenuSwitchItem>
                 {researchUnavailableReason ? (
                   <p id={researchHintId} className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs">
                     {researchUnavailableReason}
