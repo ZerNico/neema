@@ -36,19 +36,13 @@ describe("server chooser", () => {
     expect(effects.openConnect).toHaveBeenCalledExactlyOnceWith("https://chat.example.com");
   });
 
-  it("asks before cancelling local work and disposes it only on yes", async () => {
+  it("leaves Work running if the chooser is cancelled", async () => {
     const { effects } = host({ hasWork: () => true });
-    effects.confirmSwitch.mockResolvedValueOnce(false);
     const flow = makeConnectFlow(effects);
     await flow.openChooser();
+    expect(effects.openConnect).toHaveBeenCalledExactlyOnceWith("https://chat.example.com");
+    expect(effects.confirmSwitch).not.toHaveBeenCalled();
     expect(effects.disposeWork).not.toHaveBeenCalled();
-    expect(effects.openConnect).not.toHaveBeenCalled();
-    await flow.openChooser();
-    expect(effects.confirmSwitch).toHaveBeenCalledTimes(2);
-    expect(effects.disposeWork).toHaveBeenCalledOnce();
-    expect(effects.openConnect).toHaveBeenCalledOnce();
-    const order = effects.disposeWork.mock.invocationCallOrder[0]!;
-    expect(effects.openConnect.mock.invocationCallOrder[0]).toBeGreaterThan(order);
   });
 
   it("does not ask on first run, when no main window exists", async () => {
@@ -70,18 +64,18 @@ describe("server chooser", () => {
     expect(effects.openConnect).not.toHaveBeenCalled();
   });
 
-  it("coalesces requests while the confirmation is still open", async () => {
+  it("coalesces competing accepted switches while confirmation is open", async () => {
     const { effects } = host({ hasWork: () => true });
     const answer = Promise.withResolvers<boolean>();
     effects.confirmSwitch.mockReturnValue(answer.promise);
     const flow = makeConnectFlow(effects);
-    const first = flow.openChooser();
-    const second = flow.openChooser();
+    const first = flow.connect("https://other.example.com");
+    const second = flow.connect("https://different.example.com");
     expect(second).toBe(first);
     answer.resolve(true);
     await first;
     expect(effects.confirmSwitch).toHaveBeenCalledOnce();
-    expect(effects.openConnect).toHaveBeenCalledOnce();
+    expect(effects.writeConfig).toHaveBeenCalledExactlyOnceWith("https://other.example.com");
   });
 
   it("refuses to open or connect while CHAT_DESKTOP_SERVER pins the server", async () => {
@@ -131,6 +125,32 @@ describe("connecting", () => {
     expect(effects.disposeWork).not.toHaveBeenCalled();
     expect(effects.closeMain).not.toHaveBeenCalled();
     expect(effects.openMain).toHaveBeenCalledExactlyOnceWith("https://chat.example.com");
+    expect(chooser.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("asks if Work starts while the chooser is open", async () => {
+    let running = false;
+    const { effects } = host({ hasWork: () => running });
+    const flow = makeConnectFlow(effects);
+    await flow.openChooser();
+    running = true;
+    effects.confirmSwitch.mockResolvedValueOnce(false);
+    await expect(flow.connect("https://other.example.com")).resolves.toEqual({
+      ok: true,
+      declined: true,
+    });
+    expect(effects.disposeWork).not.toHaveBeenCalled();
+    expect(effects.writeConfig).not.toHaveBeenCalled();
+  });
+
+  it("keeps Work when the selected server is already current", async () => {
+    const { effects, chooser } = host({ hasWork: () => true });
+    effects.chooser.mockReturnValue(chooser);
+    await expect(makeConnectFlow(effects).connect("https://chat.example.com")).resolves.toEqual({
+      ok: true,
+    });
+    expect(effects.confirmSwitch).not.toHaveBeenCalled();
+    expect(effects.disposeWork).not.toHaveBeenCalled();
     expect(chooser.destroy).toHaveBeenCalledOnce();
   });
 
