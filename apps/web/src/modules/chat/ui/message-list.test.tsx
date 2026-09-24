@@ -481,6 +481,30 @@ describe("MessageBubble citations", () => {
     expect(container.textContent).not.toContain("[^1]");
   });
 
+  it("keeps the same chip while the answer streams on, so its preview stays open", () => {
+    const bubble = (content: string) => (
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            id: "cited",
+            role: "assistant",
+            content,
+            reasoning: "",
+            reasoningSeen: false,
+            toolActivities: [searchActivity],
+            status: "streaming",
+          }}
+        />
+      </DetailPanelProvider>
+    );
+    const { rerender } = render(bubble("Effect 4.0 is out[^1]. It"));
+    const chip = screen.getByRole("link", { name: "Source: Effect 4.0 released" });
+    // Each token recomputes the sources; a remount here would close a hovered preview.
+    rerender(bubble("Effect 4.0 is out[^1]. It ships"));
+    rerender(bubble("Effect 4.0 is out[^1]. It ships with a new runtime"));
+    expect(screen.getByRole("link", { name: "Source: Effect 4.0 released" })).toBe(chip);
+  });
+
   it("suppresses the generated footnotes list", () => {
     const { container } = renderCited("Effect 4.0 is out[^1].");
 

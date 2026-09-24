@@ -3,7 +3,16 @@ import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  use,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   type CompactionActivity,
   type ResearchToolActivity,
@@ -64,39 +73,41 @@ import {
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 
+// The sources change with every streamed token, but the components must not:
+// a new component function is a new element type to React, which remounts the
+// chip and closes its hover card mid-read. So they are fixed and read the
+// current sources from context.
+const CitationSources = createContext<ReadonlyMap<number, ToolSource>>(new Map());
+
 // Renders GFM footnote references as citation chips linking to their source,
 // and hides the footnote list streamdown would otherwise append (the detail
 // panel is our sources UI).
 // Both hooks into streamdown's output, the `#user-content-fn-N` href shape and
 // `data-footnotes` section, are verified against 2.5.0 by render tests;
 // re-check on upgrade.
-function citationComponents(sources: ToolSource[]): MarkdownComponents {
-  const byIndex = new Map(sources.map((s) => [s.index, s]));
-  return {
-    a: ({ node: _node, href, children, ...props }) => {
-      const index = Number(FOOTNOTE_HREF.exec(href ?? "")?.[1]);
-      const source = byIndex.get(index);
-      if (!source) {
-        return (
-          <a href={href} {...props}>
-            {children}
-          </a>
-        );
-      }
-      return <CitationChip source={source} />;
-    },
-    section: ({ node, children, ...props }) => {
-      // hast gives a valueless attribute the empty string, so compare against
-      // undefined, since a truthiness check here silently renders the list.
-      const properties = node?.properties as Record<string, unknown> | undefined;
-      if (properties?.dataFootnotes !== undefined) return null;
-      return <section {...props}>{children}</section>;
-    },
-    // A chip is already superscript-sized; the extra <sup> would raise it off
-    // the line and shrink it again.
-    sup: ({ children }) => <>{children}</>,
-  };
-}
+const citationComponents: MarkdownComponents = {
+  a: function CitationLink({ node: _node, href, children, ...props }) {
+    const source = use(CitationSources).get(Number(FOOTNOTE_HREF.exec(href ?? "")?.[1]));
+    if (!source) {
+      return (
+        <a href={href} {...props}>
+          {children}
+        </a>
+      );
+    }
+    return <CitationChip source={source} />;
+  },
+  section: ({ node, children, ...props }) => {
+    // hast gives a valueless attribute the empty string, so compare against
+    // undefined, since a truthiness check here silently renders the list.
+    const properties = node?.properties as Record<string, unknown> | undefined;
+    if (properties?.dataFootnotes !== undefined) return null;
+    return <section {...props}>{children}</section>;
+  },
+  // A chip is already superscript-sized; the extra <sup> would raise it off
+  // the line and shrink it again.
+  sup: ({ children }) => <>{children}</>,
+};
 
 // Every segment shares its message's source set.
 const CitedAnswer = memo(function CitedAnswer({
@@ -108,9 +119,13 @@ const CitedAnswer = memo(function CitedAnswer({
   sources: ToolSource[];
   streaming: boolean;
 }) {
-  const components = useMemo(() => citationComponents(sources), [sources]);
+  const byIndex = useMemo(() => new Map(sources.map((s) => [s.index, s])), [sources]);
   const content = useMemo(() => prepareCitedMarkdown(rawContent, sources), [rawContent, sources]);
-  return <AssistantMarkdown content={content} components={components} streaming={streaming} />;
+  return (
+    <CitationSources value={byIndex}>
+      <AssistantMarkdown content={content} components={citationComponents} streaming={streaming} />
+    </CitationSources>
+  );
 });
 
 export interface DisplayMessage {
