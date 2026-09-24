@@ -841,6 +841,10 @@ export class StreamEngine extends Context.Service<
                 },
                 permissionsFor: (integrationId) =>
                   integrations.permissionsFor(input.userId, input.conversationId, integrationId),
+                sessionFor: (integrationId) =>
+                  integrations
+                    .session(input.userId, integrationId)
+                    .pipe(Effect.orElseSucceed(() => null)),
                 rowIdFor: (providerCallId) =>
                   Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
                     Effect.map((row) => row?.rowId),
@@ -1685,7 +1689,7 @@ export class StreamEngine extends Context.Service<
                                                   ? "custom"
                                                   : integrationTools?.names.has(part.name)
                                                     ? "integration"
-                                                  : null;
+                                                    : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
