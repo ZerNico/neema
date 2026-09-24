@@ -86,7 +86,11 @@ An approval's "Always allow in this chat" records that one tool on
 `conversation_integrations.allowed_tools`; it lifts an ask in that chat and never a block.
 A destructive tool is the exception: only an explicit "allow" in Settings runs it unasked, a
 one-off approval cannot, and a scheduled run never does, whatever it was granted.
-Permissions are read at call time, so either change applies to the rest of the answer.
+Consent is checked both before an approval wait and immediately before execution; an
+approval cannot override a newly blocked or unavailable integration. Execution also resolves
+the current connection and requires the same connection row as the offer. A newly required
+approval cannot be silently skipped by a call that was offered as allowed. Credential refresh
+checks availability again, without treating an admin disable as bad credentials.
 
 The approval card names the call's target from the manifest's summary of the arguments,
 unless the adapter's `describe` can look the target up in the service first: Outline's delete

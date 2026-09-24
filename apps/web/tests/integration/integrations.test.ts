@@ -21,6 +21,9 @@ import { outlineAdapter } from "~/modules/integrations/outline/server/adapter.ts
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
+import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
+import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
+import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { KnowledgeSourceService } from "~/modules/integrations/server/sync.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -68,6 +71,7 @@ const bodies = new Map([
 ]);
 const titles: Record<string, string> = { d1: "Onboarding", d2: "Laptop", d3: "Holidays" };
 const deleted: Record<string, unknown>[] = [];
+const created: Record<string, unknown>[] = [];
 
 const readBody = (request: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -150,6 +154,9 @@ const startOutline = () =>
           const found = tree.find((node) => node.id === body.id);
           return found ? json(200, { data: found }) : json(404, { ok: false, error: "not_found" });
         }
+        case "/api/documents.create":
+          created.push(body);
+          return json(200, { data: { id: "created", title: body.title, url: "/doc/created" } });
         case "/api/documents.delete":
           // Recorded, not applied, so later syncs still see the whole tree.
           deleted.push(body);
@@ -520,6 +527,72 @@ describe("approvals", () => {
     );
     expect(late).toBe(false);
   });
+
+  it.each(["block", "disable", "allow", "unprompted"] as const)(
+    "checks a tool call after %s before publishing",
+    async (change) => {
+      await configure();
+      const userId = await newUser();
+      await connectKey(userId);
+      const conversationId = uuidv7();
+      await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
+      created.length = 0;
+      const result = await run(
+        Effect.gen(function* () {
+          const service = yield* IntegrationService;
+          const approvals = yield* IntegrationApprovals;
+          const offered = yield* service.resolveOffer({ userId, conversationId, grants: null });
+          const prepared = prepareIntegrationTools({
+            offered,
+            indexer: createSourceIndexer([]),
+            approvals,
+            owner: { userId, conversationId, messageId: "answer" },
+            permissionsFor: (integrationId) =>
+              service.permissionsFor(userId, conversationId, integrationId),
+            sessionFor: (integrationId) =>
+              service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+            rowIdFor: () => Effect.succeed("pending-call"),
+            reportAuthFailure: (session) =>
+              service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+          });
+          const handler = prepared?.group.handlers.int_outline__create_document as
+            | ((
+                args: Record<string, unknown>,
+                context: { toolCallId: string },
+              ) => Effect.Effect<IntegrationModelResult>)
+            | undefined;
+          if (!handler) throw new Error("create document was not offered");
+          if (change === "unprompted")
+            yield* service.updatePreferences(userId, "outline", {
+              toolPermissions: { create_document: "allow" },
+            });
+          const waiting = yield* Effect.forkChild(
+            handler({ title: "Plan", collectionId: "c1", text: "Content" }, { toolCallId: "call" }),
+          );
+          if (change !== "unprompted") yield* waitForPending(userId);
+          if (change === "block")
+            yield* service.updatePreferences(userId, "outline", {
+              toolPermissions: { create_document: "block" },
+            });
+          if (change === "disable")
+            yield* service.saveConfig({
+              id: "outline",
+              enabled: false,
+              config: { baseUrl },
+              oauthClientId: "client",
+              oauthClientSecret: "secret",
+              allowApiKeys: true,
+            });
+          if (change !== "unprompted")
+            expect(yield* approvals.decide(userId, "pending-call", "allow")).toBe(true);
+          return yield* Fiber.join(waiting);
+        }),
+      );
+      expect(result.ok).toBe(change === "allow" || change === "unprompted");
+      expect(created).toHaveLength(change === "allow" || change === "unprompted" ? 1 : 0);
+      await configure();
+    },
+  );
 });
 
 describe("knowledge sync", () => {

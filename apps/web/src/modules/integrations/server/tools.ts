@@ -54,6 +54,7 @@ export function prepareIntegrationTools(input: {
     permissions: Readonly<Record<string, ToolPermission>>;
     allowedInChat: ReadonlyArray<string>;
   }>;
+  sessionFor: (integrationId: string) => Effect.Effect<ConnectedSession | null>;
   /** The persisted row id for a provider call, once the observer minted it. */
   rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
   reportAuthFailure: (session: ConnectedSession) => Effect.Effect<void>;
@@ -85,22 +86,29 @@ export function prepareIntegrationTools(input: {
         context: { readonly toolCallId: string },
       ) =>
         Effect.gen(function* () {
-          const now = yield* input.permissionsFor(offer.integrationId);
-          const permission = permissionFor(tool, now.permissions);
-          const consent = consentFor({
-            access: tool.access,
-            permission,
-            allowedInChat: now.allowedInChat.includes(tool.name),
-            unattended: offer.unattended,
+          const currentConsent = Effect.gen(function* () {
+            const now = yield* input.permissionsFor(offer.integrationId);
+            const permission = permissionFor(tool, now.permissions);
+            return {
+              permission,
+              consent: consentFor({
+                access: tool.access,
+                permission,
+                allowedInChat: now.allowedInChat.includes(tool.name),
+                unattended: offer.unattended,
+              }),
+            };
           });
-          if (consent === "refuse")
-            return failure(
+          const before = yield* currentConsent;
+          const refused = (permission: ToolPermission) =>
+            failure(
               permission === "block"
                 ? `Not permitted: the user has blocked “${tool.title}” for ${manifest.name}.`
                 : `Not permitted: this scheduled run was only allowed to ${offer.unattended === "write" ? "read and change" : "read"} ${manifest.name}. Say what you would have done instead.`,
               true,
             );
-          if (consent === "ask") {
+          if (before.consent === "refuse") return refused(before.permission);
+          if (before.consent === "ask") {
             const callId = yield* input.rowIdFor(context.toolCallId);
             if (!callId) return failure("This action could not be put to the user.", true);
             const described = adapterTool.describe
@@ -122,7 +130,14 @@ export function prepareIntegrationTools(input: {
             if (answer === "timeout")
               return failure("Nobody approved this action in time, so it did not run.", true);
           }
-          return yield* adapterTool.run(offer.session, args).pipe(
+          const after = yield* currentConsent;
+          if (after.consent === "refuse") return refused(after.permission);
+          if (after.consent === "ask" && before.consent !== "ask")
+            return failure("This action now needs approval. Ask the user before trying again.", true);
+          const session = yield* input.sessionFor(offer.integrationId);
+          if (!session || session.connectionId !== offer.session.connectionId)
+            return failure(`${manifest.name} is no longer connected or available.`, true);
+          return yield* adapterTool.run(session, args).pipe(
             Effect.map((result): IntegrationModelResult => {
               const sources = (result.sources ?? []).map((source): IntegrationSource => ({
                 kind: "integration",
@@ -151,7 +166,7 @@ export function prepareIntegrationTools(input: {
             Effect.catch((error: AdapterFailure) => {
               if (error._tag === "IntegrationAuthFailed")
                 return input
-                  .reportAuthFailure(offer.session)
+                  .reportAuthFailure(session)
                   .pipe(
                     Effect.as(
                       failure(

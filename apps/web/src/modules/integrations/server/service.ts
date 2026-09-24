@@ -275,6 +275,14 @@ export class IntegrationService extends Context.Service<
           const current = yield* repo.getConnectionById(connection.id);
           if (!current || current.status !== "active")
             return yield* new IntegrationAuthFailed({ integrationId: adapter.id });
+          const enabled = yield* available(connection.userId, adapter.id).pipe(
+            Effect.orElseSucceed(() => null),
+          );
+          if (!enabled || current.configFingerprint !== enabled.fingerprint)
+            return yield* new IntegrationRequestFailed({
+              status: null,
+              message: "This integration is no longer available.",
+            });
           const stored = yield* repo.decrypt(current);
           if (stored.kind === "api_key") return stored.apiKey;
           if (stored.expiresAt === null || stored.expiresAt - REFRESH_MARGIN_MS > Date.now())
