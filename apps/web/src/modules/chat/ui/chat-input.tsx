@@ -765,10 +765,13 @@ export const ChatInput = forwardRef<
         {/* One unit, so a narrow composer wraps model, reasoning and send onto
             their own row together instead of wherever the tools run out. */}
         <div className="flex min-w-0 grow items-center gap-1">
+          {/* Below when there is room, as on an empty new chat, like the plus
+              menu; both flip above the composer in a conversation. */}
           <ModelPicker
             models={models}
             value={selectedModel?.id ?? null}
             onChange={onModelChange}
+            side="bottom"
             disabled={noModels || controlsDisabled}
             trigger={
               <Button
@@ -798,7 +801,7 @@ export const ChatInput = forwardRef<
                 <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
                 <span>{reasoningEffort ? effortLabels[reasoningEffort] : "Default"}</span>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start">
+              <DropdownMenuContent align="start">
                 <DropdownMenuRadioGroup
                   value={reasoningEffort ?? "default"}
                   onValueChange={(chosenEffort) => {

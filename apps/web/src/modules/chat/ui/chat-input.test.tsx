@@ -284,6 +284,25 @@ describe("ChatInput default model", () => {
     await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
   });
 
+  it("opens the model and reasoning menus below the composer when there is room", async () => {
+    const user = userEvent.setup();
+    renderDefaultProbe("vision", [
+      { ...MODELS[0]!, isDefault: false },
+      { ...MODELS[1]!, isDefault: true, reasoningEfforts: ["low", "high"] },
+    ]);
+    await user.click(screen.getByRole("combobox"));
+    const search = await screen.findByPlaceholderText("Search models…");
+    expect(search.closest('[data-slot="combobox-content"]')).toHaveAttribute("data-side", "bottom");
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "Reasoning: Default" }));
+    const option = await screen.findByRole("menuitemradio", { name: "Low" });
+    expect(option.closest('[data-slot="dropdown-menu-content"]')).toHaveAttribute(
+      "data-side",
+      "bottom",
+    );
+  });
+
   it.each([null, "removed"])(
     "selects the marked default for %s rather than the first row",
     (initialModelId) => {
