@@ -72,6 +72,8 @@ const devReload = process.env.CHAT_DESKTOP_DEV_RELOAD === "1";
 if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
   app.setPath("userData", resolve(process.env.CHAT_DESKTOP_PROFILE));
 }
+// userData was resolved from the old name at startup, so renaming leaves the profile in place.
+app.setName("neema");
 // The server keys the desktop session policy on this token; set before any window exists.
 app.userAgentFallback = `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`;
 const windowChrome = new WeakMap<BrowserWindow, ReturnType<typeof attachChrome>>();

@@ -8,7 +8,7 @@
     "test": "pnpm exec vitest run",
     "dev": "node dev.mjs",
     "build": "node build.mjs",
-    "start": "pnpm build && electron dist/main.cjs"
+    "start": "pnpm build && node electron-app.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.75",

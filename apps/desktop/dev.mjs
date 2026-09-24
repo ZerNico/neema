@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
-import electron from "electron";
 import { context } from "esbuild";
 import { buildOptions } from "./build.mjs";
+import { electronBinary } from "./electron-app.mjs";
 import { makeDevReloader } from "./src/dev-reloader.ts";
 
 // Rebuilding interrupts local Work, so retire its execution host before replacing it.
 const reloader = makeDevReloader({
   spawn: () =>
-    spawn(electron, ["dist/main.cjs"], {
+    spawn(electronBinary(), ["dist/main.cjs"], {
       stdio: ["inherit", "inherit", "inherit", "ipc"],
       env: {
         ...process.env,
