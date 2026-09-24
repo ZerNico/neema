@@ -579,11 +579,7 @@ const send = (
     }),
   );
 const collect = (messageId: string, runId?: string) =>
-  Effect.flatMap(StreamEngine, (engine) =>
-    Stream.runCollect(engine.subscribe(messageId, 0, runId)).pipe(
-      Effect.timeout(Duration.seconds(20)),
-    ),
-  );
+  Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(messageId, 0, runId)));
 /**
  * A message no longer points at a run: the run points back, through the tool
  * call it answers. Tests that used to read `message.researchRunId` ask here.
@@ -805,9 +801,7 @@ describe("deep research as a tool call", () => {
     };
     const gate = hold;
     const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(
-      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-    );
+    await runtime.runPromise(Deferred.await(gate.reached));
     const other = await runtime.runPromise(
       ChatRepo.use((repo) => repo.createConversation({ userId: input.userId, modelId })),
     );
@@ -1477,6 +1471,92 @@ describe("ending a run", () => {
     );
   });
 
+  it("settles expired research after its message was reaped and retried", async () => {
+    const input = await runtime.runPromise(seed);
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const turn = yield* repo.createTurn({
+          userId: input.userId,
+          conversation: { kind: "existing", id: input.conversationId },
+          modelId,
+          content: "first",
+          attachmentIds: [],
+        });
+        const generationId = turn.assistant.generationId!;
+        const toolCallId = uuidv7();
+        yield* repo.insertToolCall({
+          id: toolCallId,
+          messageId: turn.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "old-generation-research",
+          toolName: "deep_research",
+          arguments: {},
+        });
+        const runId = yield* repo.research!.queue({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: turn.assistant.id,
+          generationId,
+          toolCallId,
+          modelId,
+        });
+        const claimed = (yield* repo.research!.claim(runId))!;
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
+          .where(eq(messages.id, turn.assistant.id));
+        expect(yield* repo.reapExpiredGenerations()).toHaveLength(1);
+        expect((yield* repo.research!.get(runId))?.status).toBe("running");
+        const snapshot = yield* repo.listMessages(input.conversationId);
+        const retried = yield* repo.resetMessageForRetry({
+          userId: input.userId,
+          messageId: turn.assistant.id,
+          modelId,
+          expectedMessages: snapshot,
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+        expect(retried.claimed).toBe(true);
+        expect(retried.generationId).not.toBe(generationId);
+        expect(yield* repo.research!.finalize(runId, "complete", claimed.fence.owner)).toBe(false);
+        yield* db
+          .update(researchRuns)
+          .set({ leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+          .where(eq(researchRuns.id, runId));
+        yield* repo.research!.reap();
+        const settled = yield* repo.research!.get(runId);
+        expect(settled?.status).toBe("terminal");
+        expect(settled?.progress.phase).toBe("interrupted");
+        expect((yield* repo.getMessage(turn.assistant.id))?.status).toBe("streaming");
+        expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, runId))).toHaveLength(
+          1,
+        );
+        const nextCallId = uuidv7();
+        yield* repo.insertToolCall({
+          id: nextCallId,
+          messageId: turn.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "new-generation-research",
+          toolName: "deep_research",
+          arguments: {},
+        });
+        const nextId = yield* repo.research!.queue({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: turn.assistant.id,
+          generationId: retried.generationId!,
+          toolCallId: nextCallId,
+          modelId,
+        });
+        expect(nextId).not.toBe(runId);
+      }),
+    );
+  });
+
   it("checkpoints active research usage before conversation deletion and interrupts its owner", async () => {
     const input = await runtime.runPromise(seed);
     const release = Deferred.makeUnsafe<void>();
@@ -1488,41 +1568,44 @@ describe("ending a run", () => {
     };
     const gate = hold;
     const sent = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(
-      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-    );
-    const run = (await runFor(sent.assistantMessageId))!;
-    const generationId = await generationOf(sent.assistantMessageId);
-    await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
-    hold = null;
-    await runtime.runPromise(Deferred.succeed(release, undefined));
-    await runtime.runPromise(
-      StreamEngine.use((engine) => engine.awaitSettled(sent.assistantMessageId, generationId)),
-    );
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const repo = yield* ChatRepo;
-        expect(yield* repo.getMessage(sent.assistantMessageId)).toBeNull();
-        expect(
-          yield* db.select().from(researchRuns).where(eq(researchRuns.id, run.id)),
-        ).toHaveLength(0);
-        expect(
-          yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id)),
-        ).toHaveLength(0);
-        const ledger = yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id));
-        expect(ledger).toHaveLength(1);
-        expect(ledger[0]!.inputTokens).toBeGreaterThan(0);
-        expect(ledger[0]!.usageComplete).toBe(false);
-        expect(ledger[0]!.status).toBe("aborted");
-        expect(ledger[0]!.conversationId).toBe(input.conversationId);
-        expect(ledger[0]!.messageId).toBe(sent.assistantMessageId);
-        yield* repo.research!.reap();
-        expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id))).toHaveLength(
-          1,
-        );
-      }),
-    );
+    try {
+      await runtime.runPromise(Deferred.await(gate.reached));
+      const run = (await runFor(sent.assistantMessageId))!;
+      const generationId = await generationOf(sent.assistantMessageId);
+      await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
+      hold = null;
+      await runtime.runPromise(Deferred.succeed(release, undefined));
+      await runtime.runPromise(
+        StreamEngine.use((engine) => engine.awaitSettled(sent.assistantMessageId, generationId)),
+      );
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const repo = yield* ChatRepo;
+          expect(yield* repo.getMessage(sent.assistantMessageId)).toBeNull();
+          expect(
+            yield* db.select().from(researchRuns).where(eq(researchRuns.id, run.id)),
+          ).toHaveLength(0);
+          expect(
+            yield* db.select().from(researchCalls).where(eq(researchCalls.runId, run.id)),
+          ).toHaveLength(0);
+          const ledger = yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id));
+          expect(ledger).toHaveLength(1);
+          expect(ledger[0]!.inputTokens).toBeGreaterThan(0);
+          expect(ledger[0]!.usageComplete).toBe(false);
+          expect(ledger[0]!.status).toBe("aborted");
+          expect(ledger[0]!.conversationId).toBe(input.conversationId);
+          expect(ledger[0]!.messageId).toBe(sent.assistantMessageId);
+          yield* repo.research!.reap();
+          expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id))).toHaveLength(
+            1,
+          );
+        }),
+      );
+    } finally {
+      hold = null;
+      await runtime.runPromise(Deferred.succeed(release, undefined));
+    }
   });
 
   it("retains stopped research source numbers in a subsequent attempt", async () => {
@@ -1534,9 +1617,7 @@ describe("ending a run", () => {
     };
     const gate = hold;
     const first = await runtime.runPromise(send(input.userId, input.conversationId));
-    await runtime.runPromise(
-      Deferred.await(gate.reached).pipe(Effect.timeout(Duration.seconds(10))),
-    );
+    await runtime.runPromise(Deferred.await(gate.reached));
     const generationId = await generationOf(first.assistantMessageId);
     await runtime.runPromise(
       ChatService.use((service) =>

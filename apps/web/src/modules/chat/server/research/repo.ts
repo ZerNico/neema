@@ -130,13 +130,7 @@ export const createResearchStore = (db: Db["Service"]) => {
     phase: ResearchProgress["phase"],
   ) {
     if (run.cancelRequested) phase = "aborted";
-    const current = (yield* tx
-      .select()
-      .from(messages)
-      .where(eq(messages.id, run.messageId))
-      .pipe(Effect.orDie))[0];
-    if (!current || current.generationId !== run.generationId || run.status === "terminal")
-      return false;
+    if (run.status === "terminal") return false;
     const calls = yield* tx
       .select()
       .from(researchCalls)
@@ -308,9 +302,12 @@ export const createResearchStore = (db: Db["Service"]) => {
             const live = yield* tx
               .select({ id: researchRuns.id })
               .from(researchRuns)
+              .innerJoin(messages, eq(messages.id, researchRuns.messageId))
               .where(
                 and(
                   eq(researchRuns.id, runId),
+                  eq(messages.generationId, run.generationId),
+                  eq(messages.status, "streaming"),
                   sql`${researchRuns.leaseUntil} > clock_timestamp()`,
                 ),
               )
