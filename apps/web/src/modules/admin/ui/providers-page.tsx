@@ -4,7 +4,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@ta
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
-import { DefaultModelOrder } from "./default-model-order.tsx";
+import { DefaultModelsDialog } from "./default-model-order.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
@@ -49,16 +49,22 @@ export function ProvidersPage() {
   const { data: providers } = useSuspenseQuery(providersQuery);
   const { data: models } = useSuspenseQuery(modelsQuery);
   const [adding, setAdding] = useState(false);
+  const [editingDefaults, setEditingDefaults] = useState(false);
 
   return (
     <Page
       title="Providers"
       description="AI providers this instance can talk to."
       actions={
-        <Button size="sm" onClick={() => setAdding(true)}>
-          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-          Add provider
-        </Button>
+        <>
+          <Button size="sm" variant="outline" onClick={() => setEditingDefaults(true)}>
+            Default models
+          </Button>
+          <Button size="sm" onClick={() => setAdding(true)}>
+            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+            Add provider
+          </Button>
+        </>
       }
     >
       {providers.length === 0 ? (
@@ -109,7 +115,12 @@ export function ProvidersPage() {
           })}
         </ListCard>
       )}
-      <DefaultModelOrder models={models} providers={providers} />
+      <DefaultModelsDialog
+        open={editingDefaults}
+        onOpenChange={setEditingDefaults}
+        models={models}
+        providers={providers}
+      />
       <AddProviderDialog open={adding} onOpenChange={setAdding} />
     </Page>
   );
