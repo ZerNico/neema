@@ -1,3 +1,4 @@
+import { matchesWords } from "~/modules/search/match.ts";
 import {
   Book02Icon,
   BriefcaseIcon,
@@ -75,12 +76,6 @@ export interface ComposerContext {
 }
 
 export const MAX_SELECTED_COLLECTIONS = KNOWLEDGE_LIMITS.maxCollectionsPerSelection;
-
-const words = (query: string) => query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-const matchesWords = (haystack: string, query: string) => {
-  const lower = haystack.toLowerCase();
-  return words(query).every((word) => lower.includes(word));
-};
 
 export type ContextPickerKind = "agent" | "collections";
 
