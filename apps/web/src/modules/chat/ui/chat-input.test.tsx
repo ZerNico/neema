@@ -813,6 +813,7 @@ describe("ChatInput preview", () => {
     });
     pick(harness, textFile());
     const previewButton = await screen.findByRole("button", { name: "Preview notes.txt" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
 
     fireEvent.click(previewButton);
 
@@ -830,7 +831,9 @@ describe("ChatInput preview", () => {
     });
     pick(harness, new File(["# Title"], "notes.md", { type: "text/markdown" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview notes.md" }));
+    const previewButton = await screen.findByRole("button", { name: "Preview notes.md" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    fireEvent.click(previewButton);
 
     expect(await screen.findByRole("heading", { name: "Title" })).toBeInTheDocument();
 
@@ -850,7 +853,9 @@ describe("ChatInput preview", () => {
     });
     pick(harness, new File(["const x = 1;"], "app.ts", { type: "text/plain" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview app.ts" }));
+    const previewButton = await screen.findByRole("button", { name: "Preview app.ts" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    fireEvent.click(previewButton);
 
     // Source files go to CodeViewer, not through markdown: one line, numbered,
     // coloured once the grammar lands. "Rendered/Plain" is markdown-only.
@@ -875,7 +880,9 @@ describe("ChatInput preview", () => {
     });
     pick(harness, textFile());
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview notes.txt" }));
+    const previewButton = await screen.findByRole("button", { name: "Preview notes.txt" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    fireEvent.click(previewButton);
 
     expect(await screen.findByText("# not a heading")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Rendered" })).not.toBeInTheDocument();
