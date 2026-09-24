@@ -77,7 +77,26 @@ try {
     assert.doesNotMatch(body, /data-slot="spinner"/);
     console.log(`Not a shell: ${path} (${response.status})`);
   }
+  // Server functions refuse anything not proven same-origin (src/start.ts).
+  const refusals = await Promise.all(
+    [
+      ["cross-site", { "sec-fetch-site": "cross-site" }],
+      ["no origin headers", {}],
+    ].map(async ([label, headers]) => {
+      const response = await fetch(new URL("/_serverFn/startup-missing", origin), {
+        headers,
+        signal: AbortSignal.timeout(10000),
+      });
+      await response.text();
+      return [label, response.status];
+    }),
+  );
+  for (const [label, status] of refusals) {
+    assert.equal(status, 403, `server function, ${label}`);
+    console.log(`Refused server function call: ${label} (${status})`);
+  }
   const missingFunction = await fetch(new URL("/_serverFn/startup-missing", origin), {
+    headers: { "sec-fetch-site": "same-origin" },
     signal: AbortSignal.timeout(10000),
   });
   const body = await missingFunction.text();

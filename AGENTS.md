@@ -382,6 +382,10 @@ Differs from most Effect 3 material online.
   clock (`not_before <= now()` in SQL), never a JS `Date`: the two drift, and a
   reconciler that quietly sees nothing is the exact failure the ledger exists to
   prevent. Attachments, skills and knowledge all sit on this.
+- Server functions sit behind TanStack's CSRF middleware (`src/start.ts`): a call
+  must prove it is same-origin through `Sec-Fetch-Site`, `Origin` or `Referer`,
+  and one sending none is refused with 403. Browsers, the desktop window
+  included, send them; anything calling from outside a page uses `/api` routes.
 - Nitro's dev middleware guesses static assets from `sec-fetch-dest`;
   `vite.config.ts` strips it for `/api/*` so `<img src="/api/files/:id">` works.
 - jsdom applies no stylesheet: match accessible names with `\s?` where a browser
