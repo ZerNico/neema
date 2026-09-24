@@ -34,6 +34,7 @@ const row = (id: string, overrides: Partial<QueueRow> = {}): QueueRow => ({
 const settings = () => ({
   modelId: "composer-model" as string | null,
   setModelId: vi.fn(),
+  searchPreference: false as boolean | null,
   setSearchEnabled: vi.fn(),
   resetSearchEnabled: vi.fn(),
   seedCollections: vi.fn(),
@@ -166,8 +167,16 @@ describe("useConversationQueue", () => {
     expect(props.settings.seedCollections).toHaveBeenLastCalledWith(["col-1"]);
     act(() => result.current.queue.onEditEnd());
     expect(props.settings.setModelId).toHaveBeenLastCalledWith("composer-model");
-    expect(props.settings.resetSearchEnabled).toHaveBeenCalledOnce();
+    expect(props.settings.setSearchEnabled).toHaveBeenLastCalledWith(false);
+    expect(props.settings.resetSearchEnabled).not.toHaveBeenCalled();
     expect(props.settings.settleCollections).toHaveBeenCalledOnce();
+  });
+
+  it("restores a default-following search preference after queued editing", () => {
+    const { result, props } = render({ settings: { ...settings(), searchPreference: null } });
+    act(() => result.current.queue.onEditStart(result.current.queue.entries[0]!));
+    act(() => result.current.queue.onEditEnd());
+    expect(props.settings.setSearchEnabled).toHaveBeenLastCalledWith(null);
   });
 
   it("sends this app's desktop fields with Send now and Send next", async () => {

@@ -18,6 +18,7 @@ export function useSearchMode(defaultEnabled = true) {
 
   return {
     enabled: (preferred ?? defaultEnabled) && eligible,
+    preferred,
     setEnabled: setPreferred,
     reset: () => setPreferred(null),
   };

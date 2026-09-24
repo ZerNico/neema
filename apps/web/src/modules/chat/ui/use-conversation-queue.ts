@@ -85,7 +85,8 @@ export function useConversationQueue(input: {
     setModelId: (modelId: string | null) => void;
     reasoningEffort?: ReasoningEffort | null;
     setReasoningEffort?: (effort: ReasoningEffort | null, modelId?: string | null) => void;
-    setSearchEnabled: (enabled: boolean) => void;
+    searchPreference: boolean | null;
+    setSearchEnabled: (enabled: boolean | null) => void;
     resetSearchEnabled: () => void;
     seedCollections: (ids: ReadonlyArray<string>) => void;
     settleCollections: () => void;
@@ -162,6 +163,7 @@ export function useConversationQueue(input: {
   const borrowed = useRef<{
     modelId: string | null;
     reasoningEffort: ReasoningEffort | null;
+    searchPreference: boolean | null;
   } | null>(null);
 
   return {
@@ -205,6 +207,7 @@ export function useConversationQueue(input: {
         borrowed.current = {
           modelId: settings.modelId,
           reasoningEffort: settings.reasoningEffort ?? null,
+          searchPreference: settings.searchPreference,
         };
         const row = input.rows.find((item) => item.id === entry.id);
         if (!row) return;
@@ -217,9 +220,9 @@ export function useConversationQueue(input: {
         if (borrowed.current) {
           settings.setModelId(borrowed.current.modelId);
           settings.setReasoningEffort?.(borrowed.current.reasoningEffort, borrowed.current.modelId);
+          settings.setSearchEnabled(borrowed.current.searchPreference);
         }
         borrowed.current = null;
-        settings.resetSearchEnabled();
         settings.settleCollections();
       },
     },
