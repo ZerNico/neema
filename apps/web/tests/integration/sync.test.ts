@@ -1,6 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { approvalEvents } from "~/modules/auth/server/approval-events.ts";
@@ -161,4 +161,21 @@ it("reconciles after a real LISTEN connection loss and resumes delivery", async 
       expect(yield* browser).toEqual([{ type: "memory.changed" }]);
     }).pipe(Effect.scoped),
   );
+});
+
+it("ends open feeds when the bus is disposed, so a tab reconnects to its replacement", async () => {
+  // A second runtime stands in for the one a dev hot swap throws away.
+  const replaced = ManagedRuntime.make(
+    SyncBus.layer.pipe(
+      Layer.provide(
+        PgClient.layer({ url: Redacted.make(container.getConnectionUri()), maxConnections: 2 }),
+      ),
+    ),
+  );
+  const feed = await replaced.runPromise(Effect.map(SyncBus, (bus) => bus.subscribe("reader")));
+  const drained = runtime.runPromise(Stream.runCollect(feed).pipe(Effect.exit));
+  await replaced.dispose();
+  // Before the fix the feed never ended: this await hung until the test timed out.
+  const exit = await drained;
+  expect(exit._tag === "Success" || Cause.hasInterruptsOnly(exit.cause)).toBe(true);
 });

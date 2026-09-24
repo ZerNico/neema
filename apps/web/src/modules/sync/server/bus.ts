@@ -22,6 +22,10 @@ export class SyncBus extends Context.Service<
     Effect.gen(function* () {
       const pg = yield* PgClient.PgClient;
       const pubsub = yield* PubSub.sliding<{ sequence: number; event: Relayed }>(4096);
+      // Ends every open feed with this layer. A dev hot swap disposes it while
+      // tabs stay connected; without this they keep a silent feed alive on the
+      // heartbeat and never reconnect to the new runtime.
+      yield* Effect.addFinalizer(() => PubSub.shutdown(pubsub));
       let sequence = 0;
       const relay = (event: Relayed) =>
         Effect.suspend(() => PubSub.publish(pubsub, { sequence: ++sequence, event }));
