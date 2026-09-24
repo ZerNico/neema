@@ -241,7 +241,55 @@ const tools: ReadonlyArray<AdapterTool> = [
         };
       }),
   },
+  {
+    name: "delete_document",
+    description:
+      "Move an Outline document to the trash, with every document nested under it. The user can restore it from Outline's trash. Only when the user asked for it.",
+    parameters: Schema.Struct({
+      id: optionalText("The document id."),
+    }),
+    describe: (session, args) =>
+      Effect.gen(function* () {
+        const id = text(args.id);
+        if (!id) return null;
+        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
+        const nested = yield* nestedCount(session, id);
+        const title = `“${data.title || "Untitled"}”`;
+        return nested === 0
+          ? title
+          : `${title} and ${nested} nested page${nested === 1 ? "" : "s"}`;
+      }),
+    run: (session, args) =>
+      Effect.gen(function* () {
+        const id = text(args.id);
+        if (!id) return yield* reject("Pass `id` of the document to delete.");
+        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
+        const nested = yield* nestedCount(session, id);
+        // Not `permanent`: the trash is how a person undoes a mistaken approval.
+        yield* outlineCall(session, "documents.delete", { id });
+        return {
+          output: {
+            id: data.id,
+            title: data.title,
+            movedToTrash: true,
+            nestedDocuments: nested,
+          },
+        };
+      }),
+  },
 ];
+
+/** Every document under one, at any depth: deleting it trashes them too. */
+const nestedCount = (session: IntegrationSession, id: string) =>
+  outlineCall<OutlineNavigationNode | OutlineNavigationNode[]>(session, "documents.documents", {
+    id,
+  }).pipe(
+    Effect.map(({ data }) => {
+      const count = (nodes: ReadonlyArray<OutlineNavigationNode>): number =>
+        nodes.reduce((total, node) => total + 1 + count(node.children ?? []), 0);
+      return count(Array.isArray(data) ? data : (data.children ?? []));
+    }),
+  );
 
 function navigationSummary(
   session: IntegrationSession,

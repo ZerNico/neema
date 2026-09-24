@@ -103,6 +103,11 @@ export function prepareIntegrationTools(input: {
           if (consent === "ask") {
             const callId = yield* input.rowIdFor(context.toolCallId);
             if (!callId) return failure("This action could not be put to the user.", true);
+            const described = adapterTool.describe
+              ? yield* adapterTool
+                  .describe(offer.session, args)
+                  .pipe(Effect.orElseSucceed(() => null))
+              : null;
             const answer: ApprovalAnswer = yield* input.approvals.request(input.owner.userId, {
               callId,
               conversationId: input.owner.conversationId,
@@ -110,7 +115,7 @@ export function prepareIntegrationTools(input: {
               integrationId: offer.integrationId,
               tool: tool.name,
               access: tool.access,
-              summary: tool.summarize(args),
+              summary: described ?? tool.summarize(args),
             });
             if (answer === "deny")
               return failure("The user declined this action. Do not retry it unasked.", true);

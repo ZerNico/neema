@@ -41,6 +41,15 @@ export interface AdapterTool {
     session: IntegrationSession,
     args: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<AdapterToolResult, AdapterFailure>;
+  /**
+   * Names the target for an approval card from the service itself, so a person
+   * approves what the call will really touch rather than the model's wording.
+   * A failure falls back to the manifest summary; `run` still reports it.
+   */
+  readonly describe?: (
+    session: IntegrationSession,
+    args: Readonly<Record<string, unknown>>,
+  ) => Effect.Effect<string | null, AdapterFailure>;
 }
 
 /** One remote document a source may mirror, with its place in the tree. */

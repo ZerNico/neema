@@ -17,6 +17,7 @@ import {
   knowledgeDocumentVersions,
   user,
 } from "~/db/schema/index.ts";
+import { outlineAdapter } from "~/modules/integrations/outline/server/adapter.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -66,6 +67,7 @@ const bodies = new Map([
   ["d3", { text: "Twenty-five days.", updatedAt: "2026-09-01T00:00:00.000Z" }],
 ]);
 const titles: Record<string, string> = { d1: "Onboarding", d2: "Laptop", d3: "Holidays" };
+const deleted: Record<string, unknown>[] = [];
 
 const readBody = (request: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -144,6 +146,14 @@ const startOutline = () =>
               })
             : json(404, { ok: false, error: "not_found" });
         }
+        case "/api/documents.documents": {
+          const found = tree.find((node) => node.id === body.id);
+          return found ? json(200, { data: found }) : json(404, { ok: false, error: "not_found" });
+        }
+        case "/api/documents.delete":
+          // Recorded, not applied, so later syncs still see the whole tree.
+          deleted.push(body);
+          return json(200, { success: true });
         default:
           return json(404, { ok: false, error: "not_found" });
       }
@@ -448,6 +458,22 @@ describe("what a chat is offered", () => {
       "update_document",
     ]);
     expect((await permissions(second)).allowedInChat).toEqual([]);
+  });
+});
+
+describe("chat tools", () => {
+  const deleteTool = outlineAdapter.tools.find((tool) => tool.name === "delete_document")!;
+
+  it("names what a delete will take before asking, and only ever trashes", async () => {
+    // Built here: `baseUrl` exists only once the fake server is listening.
+    const target = { config: { baseUrl }, bearer: Effect.succeed("ol_api_good") };
+    // The approval shows the service's title and what goes with it, not the model's id.
+    expect(await run(deleteTool.describe!(target, { id: "d1" }))).toBe(
+      "“Onboarding” and 1 nested page",
+    );
+    const result = await run(deleteTool.run(target, { id: "d1" }));
+    expect(result.output).toMatchObject({ title: "Onboarding", nestedDocuments: 1 });
+    expect(deleted).toEqual([{ id: "d1" }]);
   });
 });
 

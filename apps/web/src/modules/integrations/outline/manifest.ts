@@ -67,6 +67,13 @@ export const outlineManifest = {
       access: "write",
       summarize: (args) => quoted(args.title) ?? text(args.id),
     },
+    {
+      name: "delete_document",
+      title: "Delete documents",
+      label: "Delete an Outline document",
+      access: "destructive",
+      summarize: (args) => text(args.id),
+    },
   ],
   knowledgeSource: true,
 } satisfies IntegrationManifest;

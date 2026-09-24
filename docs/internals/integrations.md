@@ -88,6 +88,12 @@ A destructive tool is the exception: only an explicit "allow" in Settings runs i
 one-off approval cannot, and a scheduled run never does, whatever it was granted.
 Permissions are read at call time, so either change applies to the rest of the answer.
 
+The approval card names the call's target from the manifest's summary of the arguments,
+unless the adapter's `describe` can look the target up in the service first: Outline's delete
+shows the page title and how many nested pages go with it, never just the id the model
+passed. That lookup failing falls back to the summary; it never blocks the ask. Outline's
+delete only moves to the trash, so a mistaken approval can be undone there.
+
 Asking parks the handler on `IntegrationApprovals`, a per-call `Deferred` keyed by the tool
 row id. The observer releases the handler only after that row exists, the same handoff
 desktop tools use. Stop, lease loss and the end of the generation interrupt the wait, and
