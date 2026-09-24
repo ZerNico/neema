@@ -12,12 +12,15 @@ export type NotificationFrame = { type: "ready" } | { type: "payload"; payload: 
 export const listenNotifications = (config: PgClient.PgClientConfig) =>
   Stream.callback<NotificationFrame, Error>((queue) =>
     Effect.gen(function* () {
+      // The pool may take the password as an effect it re-reads on each
+      // connection attempt (rotating credentials); every reconnect here does too.
+      const password = Effect.isEffect(config.password) ? yield* config.password : config.password;
       const client = new pg.Client({
         connectionString: config.url ? Redacted.value(config.url) : undefined,
         host: config.host,
         port: config.port,
         user: config.username,
-        password: config.password ? Redacted.value(config.password) : undefined,
+        password: password ? Redacted.value(password) : undefined,
         database: config.database,
         ssl: config.ssl,
         application_name: "chat-notifications",

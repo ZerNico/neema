@@ -237,13 +237,15 @@ All release candidates. Pin exactly; never float to `latest`.
   dist-tag). `latest` is Effect 3.
 - `drizzle-orm` / `drizzle-kit` are `1.0.0-rc.5-*` builds, kept as a matched pair.
   rc.4 crashes at import with effect >= 4.0.0-beta.104.
-- `vitest` is v4 (peer of `@effect/vitest` rc). `katex` stays on 0.16 because
+- `vitest` is v5 (peer of `@effect/vitest` rc). `katex` stays on 0.16 because
   `@streamdown/math` pins `rehype-katex@7`.
 - `@effect/ai-openrouter` is patched (`patches/`) and cannot be un-patched: image
   replay, the `imageReplay` prompt option, `refusal` deltas as text, ordered
   `reasoningDetails`, and an image-delta normalizer, all inside code a wrapper
-  cannot reach. On a bump, diff the new `src/` first; rc.111 to rc.112 was
-  byte-identical, so the upgrade was renaming the patch and its workspace key.
+  cannot reach. On a bump, diff the new `src/` first. pnpm applies patches
+  without fuzz, so when the patched files moved, regenerate: drop the
+  `patchedDependencies` entry, install, `pnpm patch` the new version, apply the
+  old patch there with `patch -p1`, then `pnpm patch-commit`.
   Nine tests in `image-replay.test.ts` and `gateway.test.ts` run the real adapter
   and fail if the patch stops applying.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on

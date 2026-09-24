@@ -8,10 +8,10 @@ packages:
 # key identities, so a service provided by one is invisible to the other and
 # the failure is a silent missing-service at runtime, not a type error.
 catalog:
-  effect: 4.0.0-rc.112
-  "@effect/ai-openrouter": 4.0.0-rc.112
-  "@effect/sql-pg": 4.0.0-rc.112
-  "@effect/vitest": 4.0.0-rc.112
+  effect: 4.0.0-rc.117
+  "@effect/ai-openrouter": 4.0.0-rc.117
+  "@effect/sql-pg": 4.0.0-rc.117
+  "@effect/vitest": 4.0.0-rc.117
 
 # pnpm’s default 24h cooldown blunts the window in which a compromised release
 # is live. It is kept on; the exclusions below are the packages this project
@@ -48,4 +48,4 @@ allowBuilds:
 
 # Behaviour @effect/ai-openrouter does not have upstream; see CLAUDE.md.
 patchedDependencies:
-  "@effect/ai-openrouter@4.0.0-rc.112": patches/@effect__ai-openrouter@4.0.0-rc.112.patch
+  '@effect/ai-openrouter@4.0.0-rc.117': patches/@effect__ai-openrouter@4.0.0-rc.117.patch

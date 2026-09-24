@@ -593,7 +593,7 @@ const toolEnvelopes = (events: Awaited<ReturnType<typeof runGeneration>>["events
       : [],
   );
 
-describe.sequential("StreamEngine durable clarification handoff", () => {
+describe("StreamEngine durable clarification handoff", () => {
   it("finishes a tool-only question without another model call and replays its persisted result", async () => {
     gatewayState.askOnFirstCall = true;
     memoryState.globalEnabled = false;
@@ -780,7 +780,7 @@ describe.sequential("StreamEngine durable clarification handoff", () => {
   });
 });
 
-describe.sequential("StreamEngine foreground saved memory", () => {
+describe("StreamEngine foreground saved memory", () => {
   it("offers memory and questions without adding web tools or a search reminder", async () => {
     const result = await runGeneration(false);
 

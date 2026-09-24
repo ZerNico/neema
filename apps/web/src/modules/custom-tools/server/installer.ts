@@ -85,13 +85,13 @@ export class CustomToolInstaller extends Context.Service<
   static readonly layer = Layer.effect(
     CustomToolInstaller,
     Effect.gen(function* () {
-      const configuredRoot = yield* Config.string("CUSTOM_TOOL_PACKAGE_ROOT").pipe(
+      const configuredRoot = yield* Config.String("CUSTOM_TOOL_PACKAGE_ROOT").pipe(
         Config.withDefault(".data/custom-tools"),
         Effect.orDie,
       );
       // Registry base URL. Operators point this at a mirror or private
       // registry; the admin UI never sees it.
-      const registry = yield* Config.string("CUSTOM_TOOL_REGISTRY").pipe(
+      const registry = yield* Config.String("CUSTOM_TOOL_REGISTRY").pipe(
         Config.withDefault("https://registry.npmjs.org"),
         Effect.orDie,
       );

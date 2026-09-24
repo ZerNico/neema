@@ -208,7 +208,7 @@ export class CustomToolRuntime extends Context.Service<
   static readonly layer = Layer.effect(
     CustomToolRuntime,
     Effect.gen(function* () {
-      const configuredSize = yield* Config.int("CUSTOM_TOOL_WORKERS").pipe(
+      const configuredSize = yield* Config.Int("CUSTOM_TOOL_WORKERS").pipe(
         Config.withDefault(2),
         Effect.orDie,
       );

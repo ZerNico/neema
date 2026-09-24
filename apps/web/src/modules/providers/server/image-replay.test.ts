@@ -220,7 +220,8 @@ describe("pinned OpenRouter image replay contract", () => {
         expect(requests[1]!.messages[1]).toMatchObject({
           role: "tool",
           tool_call_id: "call-1",
-          content: JSON.stringify("Inspected"),
+          // Since rc.117 a string result is sent as is, not JSON-encoded.
+          content: "Inspected",
         });
       }),
   );

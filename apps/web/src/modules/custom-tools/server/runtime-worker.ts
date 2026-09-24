@@ -3,7 +3,7 @@ import { createRequire, isBuiltin } from "node:module";
 import { parentPort } from "node:worker_threads";
 import vm from "node:vm";
 import { inspect as inspectValue } from "node:util";
-import { Schema } from "effect";
+import { Schema, SchemaAST } from "effect";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import {
   isCustomToolFile,
@@ -181,7 +181,13 @@ const toProviderSchema = (
 ): Record<string, JsonValue> => {
   const document = Schema.toJsonSchemaDocument(parameters);
   const schema = document.schema as Record<string, JsonValue>;
-  const emptyStruct = JSON.stringify(schema) === '{"anyOf":[{"type":"object"},{"type":"array"}]}';
+  // Read from the schema itself, not its JSON rendering: Effect has changed
+  // how it renders `Struct({})` between release candidates.
+  const ast = parameters.ast;
+  const emptyStruct =
+    SchemaAST.isObjects(ast) &&
+    ast.propertySignatures.length === 0 &&
+    ast.indexSignatures.length === 0;
   // A struct carrying an `identifier` comes back as a bare root `$ref`, and
   // providers want `type: "object"` at the root of tool parameters, so that
   // root definition is inlined. Nested references keep resolving via `$defs`.

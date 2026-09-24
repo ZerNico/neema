@@ -7,7 +7,7 @@ import { relations } from "~/db/relations.ts";
  * Effect-native Postgres client (pooled). Also powers LISTEN/NOTIFY for sync.
  */
 export const PgLive = PgClient.layerConfig({
-  url: Config.redacted("DATABASE_URL"),
+  url: Config.Redacted("DATABASE_URL"),
   maxConnections: Config.succeed(10),
 });
 

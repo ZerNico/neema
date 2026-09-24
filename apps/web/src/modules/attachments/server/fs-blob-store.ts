@@ -60,7 +60,7 @@ const message = (error: unknown): string =>
 export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(
   BlobStore,
   Effect.gen(function* () {
-    const configured = yield* Config.string("BLOB_STORE_ROOT").pipe(
+    const configured = yield* Config.String("BLOB_STORE_ROOT").pipe(
       Config.withDefault(".data/storage"),
       Effect.orDie,
     );

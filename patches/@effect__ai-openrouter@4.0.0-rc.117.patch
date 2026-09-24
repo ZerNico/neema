@@ -1,8 +1,8 @@
 diff --git a/dist/OpenRouterClient.js b/dist/OpenRouterClient.js
-index 1d2f669b87e5f8716b5cbedeaa1892e54f498c3a..a303e41f7fbb5f38243bb53f7e6f434aea3d702f 100644
+index 4283c073ec58427c9d51ae2251a2871717e9a8f0..96fe6e9b6aee056aacf1543dd002dfb8d18ba0f9 100644
 --- a/dist/OpenRouterClient.js
 +++ b/dist/OpenRouterClient.js
-@@ -175,7 +175,17 @@ export const layerConfig = options => Layer.effect(OpenRouterClient, Effect.gen(
+@@ -192,7 +192,17 @@ export const layerConfig = options => Layer.effect(OpenRouterClient, Effect.gen(
  // =============================================================================
  // Internal Utilities
  // =============================================================================
@@ -24,7 +24,7 @@ index 1d2f669b87e5f8716b5cbedeaa1892e54f498c3a..a303e41f7fbb5f38243bb53f7e6f434a
  //# sourceMappingURL=OpenRouterClient.js.map
 \ No newline at end of file
 diff --git a/dist/OpenRouterLanguageModel.d.ts b/dist/OpenRouterLanguageModel.d.ts
-index fe2201ac4593ebfc56174fd8790c49ee462aa139..a6eaa049dc765d332f4467128b2b1a5d38137ade 100644
+index a56e5c4bbc3f7d4229e9e86b33f97ec7ce6369d1..424f4b207ca2dc1b0570a1bbe371ec83e95457bd 100644
 --- a/dist/OpenRouterLanguageModel.d.ts
 +++ b/dist/OpenRouterLanguageModel.d.ts
 @@ -288,6 +288,8 @@ declare module "effect/unstable/ai/Prompt" {
@@ -49,10 +49,10 @@ index fe2201ac4593ebfc56174fd8790c49ee462aa139..a6eaa049dc765d332f4467128b2b1a5d
              /**
               * Raw token usage reported by OpenRouter.
 diff --git a/dist/OpenRouterLanguageModel.js b/dist/OpenRouterLanguageModel.js
-index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb344e4109 100644
+index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da0ef60efe 100644
 --- a/dist/OpenRouterLanguageModel.js
 +++ b/dist/OpenRouterLanguageModel.js
-@@ -362,9 +362,22 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -366,9 +366,22 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
          {
            let text = "";
            let reasoning = "";
@@ -75,7 +75,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
                case "text":
                  {
                    text += part.text;
-@@ -404,7 +417,7 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -408,7 +421,7 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
            if (Predicate.isNotNull(candidateReasoningDetails) && candidateReasoningDetails.length > 0) {
              const uniqueReasoningDetails = [];
              for (const detail of candidateReasoningDetails) {
@@ -84,7 +84,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
                  uniqueReasoningDetails.push(detail);
                }
              }
-@@ -415,6 +428,7 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -419,6 +432,7 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
            messages.push({
              role: "assistant",
              content: text,
@@ -92,7 +92,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
              reasoning: reasoning.length > 0 ? reasoning : null,
              ...(Predicate.isNotNull(reasoningDetails) ? {
                reasoning_details: reasoningDetails
-@@ -702,6 +716,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -705,6 +719,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
    const activeToolCalls = {};
    // Track reasoning details to preserve for multi-turn conversations
    const accumulatedReasoningDetails = [];
@@ -100,7 +100,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
    // Track file annotations to expose in provider metadata
    const accumulatedFileAnnotations = [];
    const usage = {
-@@ -770,7 +785,8 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -773,7 +788,8 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        });
        const reasoningDetails = delta.reasoning_details;
        if (Predicate.isNotUndefined(reasoningDetails) && reasoningDetails.length > 0) {
@@ -110,7 +110,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
          // Merge consecutive reasoning.text items into a single entry
          for (const detail of reasoningDetails) {
            if (detail.type === "reasoning.text") {
-@@ -826,7 +842,10 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -829,7 +845,10 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        } else if (Predicate.isNotNullish(delta.reasoning)) {
          yield* emitReasoning(delta.reasoning);
        }
@@ -122,7 +122,7 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
        if (Predicate.isNotNullish(content)) {
          // If reasoning was previously active and now we're starting text content,
          // we should end the reasoning first to maintain proper order
-@@ -1050,6 +1069,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -1053,6 +1072,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        }
        const metadata = {
          openrouter: {
@@ -131,10 +131,10 @@ index 371be3d891c1c3f901cac2622b08a34de8f25338..4dae879ea79c6af19d924287169bdbfb
              systemFingerprint: event.system_fingerprint
            } : undefined),
 diff --git a/src/OpenRouterClient.ts b/src/OpenRouterClient.ts
-index 8a2e664292a7a410412764f46642ce4c30f2c683..d461e0c5843ed080f40835bed9be930608f4e81c 100644
+index 5f57c92022c687d42b35c1366b0b239dd46addb7..b0134485412a8c786d226a33d47c25358e4e6bbe 100644
 --- a/src/OpenRouterClient.ts
 +++ b/src/OpenRouterClient.ts
-@@ -357,7 +357,7 @@ export const layerConfig = (options?: {
+@@ -395,7 +395,7 @@ export const layerConfig = (options?: {
  // Internal Utilities
  // =============================================================================
  
@@ -143,7 +143,7 @@ index 8a2e664292a7a410412764f46642ce4c30f2c683..d461e0c5843ed080f40835bed9be9306
  const decodeChatStreamingResponseChunkData = Schema.decodeUnknownEffect(ChatStreamingResponseChunkDataFromString)
  
  const decodeChatCompletionSseData = (
-@@ -365,4 +365,16 @@ const decodeChatCompletionSseData = (
+@@ -403,4 +403,16 @@ const decodeChatCompletionSseData = (
  ): Effect.Effect<ChatStreamingResponseChunkData | "[DONE]", Schema.SchemaError> =>
    data === "[DONE]"
      ? Effect.succeed(data)
@@ -162,7 +162,7 @@ index 8a2e664292a7a410412764f46642ce4c30f2c683..d461e0c5843ed080f40835bed9be9306
 +      return Schema.decodeUnknownEffect(Generated.ChatStreamingResponse.fields.data)(value)
 +    }))
 diff --git a/src/OpenRouterLanguageModel.ts b/src/OpenRouterLanguageModel.ts
-index 52fbb20da8bd08789d27b4c1647b3e94ddb95c64..4d2506f23aca9da86ddab68e1b2d976aef3e1eed 100644
+index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f4e737416 100644
 --- a/src/OpenRouterLanguageModel.ts
 +++ b/src/OpenRouterLanguageModel.ts
 @@ -174,6 +174,8 @@ declare module "effect/unstable/ai/Prompt" {
@@ -186,7 +186,7 @@ index 52fbb20da8bd08789d27b4c1647b3e94ddb95c64..4d2506f23aca9da86ddab68e1b2d976a
        readonly systemFingerprint?: string | null
        /**
         * Raw token usage reported by OpenRouter.
-@@ -901,10 +905,25 @@ const prepareMessages = Effect.fnUntraced(
+@@ -902,10 +906,25 @@ const prepareMessages = Effect.fnUntraced(
          case "assistant": {
            let text = ""
            let reasoning = ""
@@ -212,7 +212,7 @@ index 52fbb20da8bd08789d27b4c1647b3e94ddb95c64..4d2506f23aca9da86ddab68e1b2d976a
                case "text": {
                  text += part.text
                  break
-@@ -947,7 +966,10 @@ const prepareMessages = Effect.fnUntraced(
+@@ -948,7 +967,10 @@ const prepareMessages = Effect.fnUntraced(
            if (Predicate.isNotNull(candidateReasoningDetails) && candidateReasoningDetails.length > 0) {
              const uniqueReasoningDetails: Mutable<ReasoningDetails> = []
              for (const detail of candidateReasoningDetails) {
@@ -224,7 +224,7 @@ index 52fbb20da8bd08789d27b4c1647b3e94ddb95c64..4d2506f23aca9da86ddab68e1b2d976a
                  uniqueReasoningDetails.push(detail)
                }
              }
-@@ -959,6 +981,7 @@ const prepareMessages = Effect.fnUntraced(
+@@ -960,6 +982,7 @@ const prepareMessages = Effect.fnUntraced(
            messages.push({
              role: "assistant",
              content: text,

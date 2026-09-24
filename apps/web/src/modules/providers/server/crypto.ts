@@ -15,7 +15,7 @@ export class KeyCipher extends Context.Service<
   static readonly layer = Layer.effect(
     KeyCipher,
     Effect.gen(function* () {
-      const secret = yield* Config.redacted("PROVIDER_KEY_SECRET").pipe(Effect.orDie);
+      const secret = yield* Config.Redacted("PROVIDER_KEY_SECRET").pipe(Effect.orDie);
       const key = Buffer.from(Redacted.value(secret), "base64");
 
       const encrypt = (plaintext: string) =>
