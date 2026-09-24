@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { listScheduleRuns, runScheduleNow, updateSchedule } from "../server/functions.ts";
+import { deleteSchedule, listScheduleRuns, runScheduleNow, updateSchedule } from "../server/functions.ts";
 import { ScheduleDetailPage } from "./schedule-detail-page.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -28,12 +28,18 @@ vi.mock("~/modules/knowledge/server/functions.ts", () => ({
 vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
+const navigation = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  blocker: null as null | { shouldBlockFn: () => Promise<boolean>; enableBeforeUnload: boolean },
+}));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
   ),
-  useNavigate: () => vi.fn(),
-  useBlocker: vi.fn(),
+  useNavigate: () => navigation.navigate,
+  useBlocker: (options: typeof navigation.blocker) => {
+    navigation.blocker = options;
+  },
 }));
 vi.stubGlobal(
   "matchMedia",
@@ -75,6 +81,7 @@ const renderPage = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigation.blocker = null;
   vi.mocked(runScheduleNow).mockResolvedValue(undefined as never);
 });
 
@@ -95,8 +102,62 @@ describe("ScheduleDetailPage runs", () => {
     });
     renderPage();
     expect(await screen.findByText("Skipped")).toBeInTheDocument();
-    expect(screen.getByText("Schedule access is not permitted")).toBeInTheDocument();
+    expect(screen.getByText("schedule access is not permitted")).toBeInTheDocument();
     expect(screen.getByText("Skipped").closest("li")?.querySelector("a")).toBeNull();
+  });
+});
+
+describe("ScheduleDetailPage delete", () => {
+  it("navigates past dirty edits only after deletion succeeds", async () => {
+    let finishDelete!: () => void;
+    vi.mocked(deleteSchedule).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve;
+      }) as never,
+    );
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Prompt"), {
+      target: { value: "Unsaved prompt" },
+    });
+    expect(navigation.blocker?.enableBeforeUnload).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete schedule" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete schedule" }));
+    await waitFor(() => expect(deleteSchedule).toHaveBeenCalledWith({ data: { scheduleId: "s1" } }));
+    expect(navigation.navigate).not.toHaveBeenCalled();
+
+    await act(async () => finishDelete());
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith({ to: "/schedules", ignoreBlocker: true }),
+    );
+  });
+
+  it("preserves the dirty leave guard if deletion fails", async () => {
+    let failDelete!: (error: Error) => void;
+    vi.mocked(deleteSchedule).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        failDelete = reject;
+      }) as never,
+    );
+    renderPage();
+    const prompt = await screen.findByLabelText("Prompt");
+    fireEvent.change(prompt, { target: { value: "Unsaved prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Schedule actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete schedule" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete schedule" }));
+    await waitFor(() => expect(deleteSchedule).toHaveBeenCalledOnce());
+    await act(async () => failDelete(new Error("Offline")));
+
+    expect(navigation.navigate).not.toHaveBeenCalled();
+    expect(prompt).toHaveValue("Unsaved prompt");
+    expect(navigation.blocker?.enableBeforeUnload).toBe(true);
+    let blocked!: Promise<boolean>;
+    act(() => {
+      blocked = navigation.blocker!.shouldBlockFn();
+    });
+    expect(await screen.findByText("Discard unsaved changes?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await blocked).toBe(true);
   });
 });
 

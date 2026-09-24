@@ -43,6 +43,10 @@ vi.mock("~/modules/sharing/server/functions.ts", () => ({
   revokeResourceGroup: vi.fn(),
   publishResource: vi.fn(),
 }));
+const navigation = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  blocker: null as null | { shouldBlockFn: () => Promise<boolean>; enableBeforeUnload: boolean },
+}));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
@@ -62,8 +66,10 @@ vi.mock("@tanstack/react-router", () => ({
       {children as never}
     </a>
   ),
-  useNavigate: () => vi.fn(),
-  useBlocker: () => {},
+  useNavigate: () => navigation.navigate,
+  useBlocker: (options: typeof navigation.blocker) => {
+    navigation.blocker = options;
+  },
 }));
 vi.stubGlobal(
   "matchMedia",
@@ -113,6 +119,7 @@ const renderEditor = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigation.blocker = null;
 });
 
 describe("AgentEditorPage", () => {
@@ -224,6 +231,57 @@ describe("AgentEditorPage", () => {
     await waitFor(() =>
       expect(vi.mocked(deleteAgent)).toHaveBeenCalledWith({ data: { agentId: "a1" } }),
     );
+  });
+
+  it("bypasses the dirty leave guard only after deleting an agent", async () => {
+    let finishDelete!: () => void;
+    vi.mocked(deleteAgent).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve;
+      }) as never,
+    );
+    renderEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Unsaved name" },
+    });
+    expect(navigation.blocker?.enableBeforeUnload).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Agent actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete agent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete agent" }));
+    await waitFor(() => expect(deleteAgent).toHaveBeenCalledOnce());
+    expect(navigation.navigate).not.toHaveBeenCalled();
+
+    await act(async () => finishDelete());
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith({ to: "/agents", ignoreBlocker: true }),
+    );
+  });
+
+  it("keeps dirty agent edits guarded when deletion fails", async () => {
+    let failDelete!: (error: Error) => void;
+    vi.mocked(deleteAgent).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        failDelete = reject;
+      }) as never,
+    );
+    renderEditor();
+    const name = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "Unsaved name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Agent actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete agent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete agent" }));
+    await waitFor(() => expect(deleteAgent).toHaveBeenCalledOnce());
+    await act(async () => failDelete(new Error("Offline")));
+    expect(navigation.navigate).not.toHaveBeenCalled();
+    expect(name).toHaveValue("Unsaved name");
+    expect(navigation.blocker?.enableBeforeUnload).toBe(true);
+    let blocked!: Promise<boolean>;
+    act(() => {
+      blocked = navigation.blocker!.shouldBlockFn();
+    });
+    expect(await screen.findByText("Discard unsaved changes?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await blocked).toBe(true);
   });
 
   it("keeps Start chat and Access beside the menu", () => {

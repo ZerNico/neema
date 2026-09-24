@@ -351,7 +351,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     mutationFn: () => settled(deleteCustomTool({ data: { toolId: tool!.id } })),
     onSuccess: async () => {
       await invalidateLists(queryClient);
-      await navigate({ to: "/admin/custom-tools" });
+      await navigate({ to: "/admin/custom-tools", ignoreBlocker: true });
     },
     onError: (error) => toastError("Could not delete the module.", error),
   });

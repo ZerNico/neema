@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,10 @@ import { getResourceSharing } from "~/modules/sharing/server/functions.ts";
 import { CustomToolEditorPage } from "./custom-tool-editor-page.tsx";
 
 const navigate = vi.fn();
+const confirm = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const blocker = vi.hoisted(() => ({
+  current: null as null | { shouldBlockFn: () => Promise<boolean>; enableBeforeUnload: boolean },
+}));
 vi.mock("../server/functions.ts", () => ({
   getCustomTool: vi.fn(),
   checkCustomTool: vi.fn(),
@@ -40,13 +44,15 @@ vi.mock("~/modules/sharing/server/functions.ts", () => ({
   revokeResourceGroup: vi.fn(),
   publishResource: vi.fn(),
 }));
-vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
+vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => confirm }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
   useMatches: () => [{ pathname: "/admin/custom-tools/t1" }],
   useNavigate: () => navigate,
-  useBlocker: () => {},
+  useBlocker: (options: typeof blocker.current) => {
+    blocker.current = options;
+  },
 }));
 // CodeMirror needs a real layout engine; swap it for a textarea, like the
 // text-editor mocks in the skills and documents suites.
@@ -119,6 +125,7 @@ const renderEditor = (tool?: CustomToolDetail) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  blocker.current = null;
 });
 
 // The page's own save confirmation is a status too; these tests mean the other one.
@@ -331,6 +338,57 @@ describe("CustomToolEditorPage", () => {
     expect(within(dialog).getByText("starting")).toBeInTheDocument();
   });
 
+  it("bypasses the dirty leave guard only after deleting a stored module", async () => {
+    const user = userEvent.setup();
+    let finishDelete!: () => void;
+    vi.mocked(deleteCustomTool).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve;
+      }) as never,
+    );
+    renderEditor(detail());
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved module" } });
+    expect(blocker.current?.enableBeforeUnload).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Module actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete module" }));
+    await waitFor(() => expect(deleteCustomTool).toHaveBeenCalledWith({ data: { toolId: "t1" } }));
+    expect(navigate).not.toHaveBeenCalled();
+
+    await act(async () => finishDelete());
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ to: "/admin/custom-tools", ignoreBlocker: true }),
+    );
+  });
+
+  it("keeps unsaved module edits guarded after a failed deletion", async () => {
+    const user = userEvent.setup();
+    let failDelete!: (error: Error) => void;
+    vi.mocked(deleteCustomTool).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        failDelete = reject;
+      }) as never,
+    );
+    renderEditor(detail());
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Unsaved module" } });
+    await user.click(screen.getByRole("button", { name: "Module actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete module" }));
+    await waitFor(() => expect(deleteCustomTool).toHaveBeenCalledOnce());
+    await act(async () => failDelete(new Error("Offline")));
+
+    expect(toast.error).toHaveBeenCalledWith("Could not delete the module.", {
+      description: "Offline.",
+    });
+    expect(navigate).not.toHaveBeenCalled();
+    expect(name).toHaveValue("Unsaved module");
+    expect(blocker.current?.enableBeforeUnload).toBe(true);
+    confirm.mockResolvedValueOnce(false);
+    expect(await blocker.current!.shouldBlockFn()).toBe(true);
+    expect(confirm).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Discard unsaved changes?" }),
+    );
+  });
+
   it("toggles from the header switch and deletes from the menu", async () => {
     const user = userEvent.setup();
     vi.mocked(setCustomToolEnabled).mockRejectedValue(new Error("boom"));
@@ -347,6 +405,8 @@ describe("CustomToolEditorPage", () => {
     await user.click(screen.getByRole("button", { name: "Module actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete module" }));
     await waitFor(() => expect(deleteCustomTool).toHaveBeenCalledWith({ data: { toolId: "t1" } }));
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/admin/custom-tools" }));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ to: "/admin/custom-tools", ignoreBlocker: true }),
+    );
   });
 });

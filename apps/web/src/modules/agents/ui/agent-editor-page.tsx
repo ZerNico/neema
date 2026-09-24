@@ -96,7 +96,7 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
                 try {
                   await deleteAgent({ data: { agentId: agent.id } });
                   await queryClient.invalidateQueries({ queryKey: ["agents"] });
-                  await navigate({ to: "/agents" });
+                  await navigate({ to: "/agents", ignoreBlocker: true });
                 } catch {
                   toast.error("Could not delete the agent.");
                 }

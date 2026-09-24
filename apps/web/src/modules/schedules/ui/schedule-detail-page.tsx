@@ -250,7 +250,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                     try {
                       await remove.mutateAsync();
                       await queryClient.invalidateQueries({ queryKey: ["schedules"] });
-                      await navigate({ to: "/schedules" });
+                      await navigate({ to: "/schedules", ignoreBlocker: true });
                     } catch {
                       // remove.onError already toasted
                     }
@@ -302,10 +302,13 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                   <span className="min-w-0 flex-1 truncate">
                     {run.conversationId
                       ? (run.conversationTitle ?? "Untitled chat")
-                      : run.status === "skipped"
-                        ? "Schedule access is not permitted"
-                        : (run.error ?? "Could not run")}
+                      : run.status === "pending"
+                        ? "Starting scheduled chat…"
+                        : run.status === "skipped"
+                          ? (run.error ?? "Skipped")
+                          : (run.error ?? "Could not run")}
                   </span>
+                  {run.status === "pending" ? <Badge variant="secondary">Pending</Badge> : null}
                   {run.status === "error" ? <Badge variant="destructive">Failed</Badge> : null}
                   {run.status === "skipped" ? <Badge variant="secondary">Skipped</Badge> : null}
                   <time
