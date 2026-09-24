@@ -94,12 +94,14 @@ export class ScheduleRepo extends Context.Service<
       runs: ScheduleRunSummary[];
       nextCursor: { firedAt: Date; id: string } | null;
     }>;
-    recordRun(input: {
-      scheduleId: string;
-      conversationId: string | null;
-      status: "started" | "error" | "skipped";
-      error?: string | undefined;
-    }): Effect.Effect<RunRow>;
+    /** Manual fires reserve their attempt before detaching the work. */
+    beginRun(scheduleId: string): Effect.Effect<RunRow>;
+    /** Only an unbound attempt can be terminalized; a bound turn owns its answer. */
+    finishRun(runId: string, status: "error" | "skipped", error: string): Effect.Effect<boolean>;
+    /** Keep an active, unbound fire alive across slow pre-turn work. */
+    renewRun(runId: string): Effect.Effect<void>;
+    /** An unbound fire whose lease lapsed cannot be replayed safely. */
+    expirePending(): Effect.Effect<RunRow[]>;
     /**
      * Atomically move due schedules to their next fire after now and return
      * the claimed rows. Claiming reschedules from now, so downtime costs one
@@ -108,7 +110,7 @@ export class ScheduleRepo extends Context.Service<
     claimDue(
       limit: number,
       nextFor: (row: ScheduleRow) => Date | null,
-    ): Effect.Effect<ScheduleRow[]>;
+    ): Effect.Effect<Array<ScheduleRow & { runId: string }>>;
   }
 >()("chat/schedules/ScheduleRepo") {
   static readonly layer = Layer.effect(
@@ -216,19 +218,47 @@ export class ScheduleRepo extends Context.Service<
             nextCursor: last ? { firedAt: last.run.firedAt, id: last.run.id } : null,
           };
         }),
-        recordRun: Effect.fn("ScheduleRepo.recordRun")(function* (input) {
+        beginRun: Effect.fn("ScheduleRepo.beginRun")(function* (scheduleId) {
           const [row] = yield* db
             .insert(scheduleRuns)
-            .values({
-              id: uuidv7(),
-              scheduleId: input.scheduleId,
-              conversationId: input.conversationId,
-              status: input.status,
-              error: input.error ?? null,
-            })
+            .values({ id: uuidv7(), scheduleId, status: "pending" })
             .returning()
             .pipe(Effect.orDie);
           return row!;
+        }),
+        finishRun: Effect.fn("ScheduleRepo.finishRun")(function* (runId, status, error) {
+          const rows = yield* db
+            .update(scheduleRuns)
+            .set({ status, error })
+            .where(and(eq(scheduleRuns.id, runId), eq(scheduleRuns.status, "pending")))
+            .returning({ id: scheduleRuns.id })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
+        renewRun: Effect.fn("ScheduleRepo.renewRun")(function* (runId) {
+          yield* db
+            .update(scheduleRuns)
+            .set({ leaseUntil: sql`clock_timestamp() + interval '60 seconds'` })
+            .where(and(eq(scheduleRuns.id, runId), eq(scheduleRuns.status, "pending")))
+            .pipe(Effect.orDie, Effect.asVoid);
+        }),
+        expirePending: Effect.fn("ScheduleRepo.expirePending")(function* () {
+          return yield* db
+            .update(scheduleRuns)
+            .set({
+              status: "error",
+              error: "the scheduled fire was interrupted before its turn started",
+            })
+            // A live fire renews its lease while waiting for the turn. A crashed
+            // one cannot safely be replayed, even if its turn never became visible.
+            .where(
+              and(
+                eq(scheduleRuns.status, "pending"),
+                sql`${scheduleRuns.leaseUntil} <= clock_timestamp()`,
+              ),
+            )
+            .returning()
+            .pipe(Effect.orDie);
         }),
         claimDue: Effect.fn("ScheduleRepo.claimDue")(function* (limit, nextFor) {
           return yield* db
@@ -250,7 +280,7 @@ export class ScheduleRepo extends Context.Service<
                   .orderBy(schedules.nextFireAt)
                   .limit(limit)
                   .for("update", { skipLocked: true });
-                const claimed: ScheduleRow[] = [];
+                const claimed: Array<ScheduleRow & { runId: string }> = [];
                 for (const row of due) {
                   const next = nextFor(row);
                   const [updated] = yield* tx
@@ -262,7 +292,13 @@ export class ScheduleRepo extends Context.Service<
                     })
                     .where(eq(schedules.id, row.id))
                     .returning();
-                  if (updated) claimed.push(updated);
+                  if (updated) {
+                    const runId = uuidv7();
+                    yield* tx
+                      .insert(scheduleRuns)
+                      .values({ id: runId, scheduleId: row.id, status: "pending" });
+                    claimed.push({ ...updated, runId });
+                  }
                 }
                 return claimed;
               }),

@@ -23,7 +23,7 @@ const BUSY_RETRY = { schedule: Schedule.spaced("15 seconds"), times: 20 } as con
  */
 export class ScheduleFire extends Context.Service<
   ScheduleFire,
-  (row: ScheduleRow) => Effect.Effect<FireOutcome>
+  (row: ScheduleRow, runId: string) => Effect.Effect<FireOutcome>
 >()("chat/schedules/ScheduleFire") {
   static readonly layer = Layer.effect(
     ScheduleFire,
@@ -31,10 +31,11 @@ export class ScheduleFire extends Context.Service<
       const chat = yield* ChatService;
       const integrations = yield* IntegrationService;
       const repo = yield* ScheduleRepo;
-      const turn = (row: ScheduleRow, target: { conversationId: string } | null) =>
+      const turn = (row: ScheduleRow, runId: string, target: { conversationId: string } | null) =>
         chat.runScheduledTurn({
           userId: row.userId,
           scheduleId: row.id,
+          scheduleRunId: runId,
           prompt: row.prompt,
           modelId: row.modelId,
           agentId: row.agentId,
@@ -47,34 +48,34 @@ export class ScheduleFire extends Context.Service<
           target: target ? { kind: "existing", ...target } : { kind: "new" },
         });
       // A fresh chat; in "same chat" mode it becomes the chat later fires use.
-      const fresh = (row: ScheduleRow) =>
-        turn(row, null).pipe(
+      const fresh = (row: ScheduleRow, runId: string) =>
+        turn(row, runId, null).pipe(
           Effect.tap((started) =>
             row.chatMode === "same" ? repo.adoptChat(row.id, started.conversationId) : Effect.void,
           ),
         );
-      const start = (row: ScheduleRow) =>
+      const start = (row: ScheduleRow, runId: string) =>
         row.chatMode === "same" && row.chatId
-          ? turn(row, { conversationId: row.chatId }).pipe(
+          ? turn(row, runId, { conversationId: row.chatId }).pipe(
               Effect.retry({
                 ...BUSY_RETRY,
                 while: (error) => Predicate.isTagged(error, "ConversationBusy"),
               }),
               // Deleted since the claim (the FK clears chatId for later fires):
               // start its replacement now rather than skipping this one.
-              Effect.catchTag("ConversationNotFound", () => fresh(row)),
+              Effect.catchTag("ConversationNotFound", () => fresh(row, runId)),
             )
-          : fresh(row);
+          : fresh(row, runId);
       // A granted integration that cannot be used ends the run with a reason,
       // like a lost collection, rather than answering without it unannounced.
       const grantsUsable = (row: ScheduleRow) =>
         Effect.forEach(row.integrationGrants, (grant) =>
           integrations.session(row.userId, grant.integrationId).pipe(Effect.asVoid),
         );
-      const fire: ScheduleFire["Service"] = (row) =>
+      const fire: ScheduleFire["Service"] = (row, runId) =>
         grantsUsable(row)
           .pipe(
-            Effect.andThen(() => start(row)),
+            Effect.andThen(() => start(row, runId)),
             Effect.catchTag("IntegrationNotAvailable", (error) =>
               Effect.fail({
                 _tag: "GrantUnavailable" as const,

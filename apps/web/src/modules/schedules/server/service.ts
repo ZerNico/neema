@@ -1,4 +1,6 @@
-import { Context, Duration, Effect, Layer, Schedule as EffectSchedule } from "effect";
+import { Context, Duration, Effect, Exit, Layer, Schedule as EffectSchedule } from "effect";
+import { eq } from "drizzle-orm";
+import { schedules } from "~/db/schema/index.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -79,48 +81,75 @@ export class ScheduleService extends Context.Service<
         return row;
       });
 
-      const fire = Effect.fn("ScheduleService.fire")(function* (row: ScheduleRow) {
-        if (!(yield* policy.can(row.userId, "schedules"))) {
-          const run = yield* repo.recordRun({
-            scheduleId: row.id,
-            conversationId: null,
-            status: "skipped",
-            error: "schedule access is not permitted",
-          });
-          yield* runChanged(row.userId, row.id, run.id);
-          return;
-        }
-        const outcome = yield* fireSchedule(row).pipe(
-          Effect.catch((error: unknown) =>
-            Effect.logError("scheduled fire failed", { scheduleId: row.id, error }).pipe(
-              Effect.as({
-                conversationId: null,
-                error: "the scheduled message could not be sent",
-              } satisfies FireOutcome),
+      const fire = (row: ScheduleRow, runId: string) =>
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            repo.renewRun(runId).pipe(Effect.delay(Duration.seconds(10)), Effect.forever),
+          );
+          if (!(yield* policy.can(row.userId, "schedules"))) {
+            yield* repo.finishRun(runId, "skipped", "schedule access is not permitted");
+            yield* runChanged(row.userId, row.id, runId);
+            return;
+          }
+          const outcome = yield* fireSchedule(row, runId).pipe(
+            Effect.catch((error: unknown) =>
+              Effect.logError("scheduled fire failed", { scheduleId: row.id, error }).pipe(
+                Effect.as({
+                  conversationId: null,
+                  error: "the scheduled message could not be sent",
+                } satisfies FireOutcome),
+              ),
             ),
+          );
+          if (!outcome.conversationId)
+            yield* repo.finishRun(
+              runId,
+              outcome.error?.startsWith("skipped:") ? "skipped" : "error",
+              outcome.error ?? "the scheduled message could not be sent",
+            );
+          yield* runChanged(row.userId, row.id, runId);
+        }).pipe(
+          Effect.scoped,
+          // Defects and interruption bypass typed catches. A bound turn stays
+          // started; its generation lease is responsible for its answer.
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit)
+              ? repo
+                  .finishRun(
+                    runId,
+                    "error",
+                    "the scheduled fire was interrupted before its turn started",
+                  )
+                  .pipe(
+                    Effect.flatMap((settled) =>
+                      settled ? runChanged(row.userId, row.id, runId) : Effect.void,
+                    ),
+                  )
+              : Effect.void,
           ),
         );
-        const run = yield* repo.recordRun({
-          scheduleId: row.id,
-          conversationId: outcome.conversationId,
-          status: outcome.conversationId ? "started" : "error",
-          error: outcome.error,
-        });
-        yield* runChanged(row.userId, row.id, run.id);
-      });
 
       // Defined in ./fire.ts to keep the chat coupling in one place.
       const fireSchedule = yield* ScheduleFire;
 
       const tick: Effect.Effect<void> = Effect.suspend(() =>
         Effect.gen(function* () {
+          const expired = yield* repo.expirePending();
+          for (const run of expired) {
+            const row = yield* db
+              .select({ userId: schedules.userId })
+              .from(schedules)
+              .where(eq(schedules.id, run.scheduleId))
+              .pipe(Effect.orDie);
+            if (row[0]) yield* runChanged(row[0].userId, run.scheduleId, run.id);
+          }
           const claimed = yield* repo.claimDue(ScheduleRepo.batch, (row) =>
             firstFireAt({ cron: row.cron, timezone: row.timezone, endAt: row.endAt }),
           );
-          for (const row of claimed) {
-            // Detached so one slow fire cannot hold the tick; the claim already
-            // rescheduled, and the run row is the record of the attempt.
-            yield* Effect.forkDetach(fire(row));
+          for (const { runId, ...row } of claimed) {
+            // The pending row committed with the claim, even if this process
+            // exits before the detached fire gets a chance to start.
+            yield* Effect.forkDetach(fire(row, runId));
           }
         }),
       );
@@ -234,7 +263,8 @@ export class ScheduleService extends Context.Service<
         tick,
         runNow: Effect.fn("ScheduleService.runNow")(function* (userId, scheduleId) {
           const row = yield* get(userId, scheduleId);
-          yield* Effect.forkDetach(fire(row));
+          const run = yield* repo.beginRun(row.id);
+          yield* Effect.forkDetach(fire(row, run.id));
         }),
       });
     }),

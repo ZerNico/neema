@@ -1,6 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { execSync } from "node:child_process";
 import { uuidv7 } from "uuidv7";
@@ -9,11 +9,16 @@ import {
   conversations,
   groupMembers,
   groups,
+  messages,
+  models,
+  providers,
   scheduleRuns,
   schedules,
   user,
 } from "~/db/schema/index.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -201,6 +206,158 @@ describe("schedule claims", () => {
   });
 });
 
+describe("durable scheduled attempts", () => {
+  it("commits the pending record with the cadence claim and never claims it twice", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const owner = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const db = yield* Db;
+        const schedule = yield* insert(owner, { nextFireAt: new Date(Date.now() - 60_000) });
+        const [claimed] = yield* repo.claimDue(25, () => null);
+        const again = yield* repo.claimDue(25, () => null);
+        const runs = yield* db
+          .select()
+          .from(scheduleRuns)
+          .where(eq(scheduleRuns.scheduleId, schedule.id));
+        return { claimed, again, runs };
+      }),
+    );
+    expect(result.claimed?.runId).toBe(result.runs[0]?.id);
+    expect(result.runs).toMatchObject([{ status: "pending", conversationId: null }]);
+    expect(result.again).toEqual([]);
+  });
+
+  it("expires only an abandoned pending attempt, not an older live lease", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const owner = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const db = yield* Db;
+        const schedule = yield* insert(owner);
+        const abandoned = yield* repo.beginRun(schedule.id);
+        const waiting = yield* repo.beginRun(schedule.id);
+        const renewed = yield* repo.beginRun(schedule.id);
+        yield* db
+          .update(scheduleRuns)
+          .set({ leaseUntil: new Date(Date.now() - 11 * 60_000) })
+          .where(eq(scheduleRuns.id, renewed.id));
+        yield* repo.renewRun(renewed.id);
+        yield* db
+          .update(scheduleRuns)
+          .set({ leaseUntil: new Date(Date.now() - 11 * 60_000) })
+          .where(eq(scheduleRuns.id, abandoned.id));
+        yield* db
+          .update(scheduleRuns)
+          .set({ firedAt: new Date(Date.now() - 11 * 60_000) })
+          .where(eq(scheduleRuns.id, waiting.id));
+        const expired = yield* repo.expirePending();
+        const repeated = yield* repo.expirePending();
+        const rows = yield* db
+          .select()
+          .from(scheduleRuns)
+          .where(eq(scheduleRuns.scheduleId, schedule.id));
+        return { expired, repeated, rows };
+      }),
+    );
+    expect(result.expired).toMatchObject([{ status: "error", conversationId: null }]);
+    expect(result.repeated).toEqual([]);
+    expect(result.rows.find((row) => row.id === result.expired[0]?.id)?.status).toBe("error");
+    expect(result.rows.filter((row) => row.status === "pending")).toHaveLength(2);
+  });
+
+  it("binds exactly one turn and rejects a stale or reused attempt inside the turn transaction", async () => {
+    const turnRuntime = ManagedRuntime.make(
+      ChatRepo.layer.pipe(
+        Layer.provideMerge(AttachmentRepo.layer),
+        Layer.provideMerge(ScheduleRepo.layer),
+        Layer.provideMerge(Db.layer),
+        Layer.provideMerge(PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 })),
+      ),
+    );
+    try {
+      const result = await turnRuntime.runPromise(
+        Effect.gen(function* () {
+          const owner = yield* makeUser();
+          const schedule = yield* insert(owner);
+          const repo = yield* ScheduleRepo;
+          const chatRepo = yield* ChatRepo;
+          const db = yield* Db;
+          const providerId = uuidv7();
+          const modelId = uuidv7();
+          yield* db.insert(providers).values({
+            id: providerId,
+            name: "Test provider",
+            kind: "openrouter",
+            baseUrl: "http://x",
+            apiKeyCiphertext: "x",
+          });
+          yield* db.insert(models).values({
+            id: modelId,
+            providerId,
+            modelKey: "scheduled-test",
+            displayName: "Test",
+            type: "chat",
+          });
+          const pending = yield* repo.beginRun(schedule.id);
+          const create = () =>
+            chatRepo.createTurn({
+              userId: owner,
+              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+              modelId,
+              content: schedule.prompt,
+              attachmentIds: [],
+              scheduleId: schedule.id,
+              scheduleRunId: pending.id,
+              resolve: () => Effect.succeed(PLAIN_GENERATION),
+            });
+          const first = yield* create();
+          const duplicate = yield* create().pipe(Effect.flip);
+          const expired = yield* repo.beginRun(schedule.id);
+          yield* db
+            .update(scheduleRuns)
+            .set({ leaseUntil: new Date(Date.now() - 11 * 60_000) })
+            .where(eq(scheduleRuns.id, expired.id));
+          yield* repo.expirePending();
+          const stale = yield* chatRepo
+            .createTurn({
+              userId: owner,
+              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+              modelId,
+              content: schedule.prompt,
+              attachmentIds: [],
+              scheduleRunId: expired.id,
+              resolve: () => Effect.succeed(PLAIN_GENERATION),
+            })
+            .pipe(Effect.flip);
+          const rows = yield* db
+            .select()
+            .from(scheduleRuns)
+            .where(eq(scheduleRuns.scheduleId, schedule.id));
+          const turns = yield* db
+            .select()
+            .from(messages)
+            .where(eq(messages.conversationId, first.conversation.id));
+          const chats = yield* db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.scheduleId, schedule.id));
+          return { first, duplicate, stale, rows, turns, chats };
+        }),
+      );
+      expect(result.duplicate._tag).toBe("InvalidMessage");
+      expect(result.stale._tag).toBe("InvalidMessage");
+      expect(
+        result.rows.find((row) => row.conversationId === result.first.conversation.id)?.status,
+      ).toBe("started");
+      expect(result.turns).toHaveLength(2);
+      expect(result.chats).toHaveLength(1);
+    } finally {
+      await turnRuntime.dispose();
+    }
+  });
+});
+
 describe("schedule capability revocation", () => {
   it("records a skipped fire without a chat, then fires after a regrant", async () => {
     let published = Effect.runSync(Deferred.make<void>());
@@ -209,13 +366,18 @@ describe("schedule capability revocation", () => {
       ScheduleFire,
       Effect.gen(function* () {
         const db = yield* Db;
-        return ScheduleFire.of((row) =>
+        return ScheduleFire.of((row, runId) =>
           Effect.gen(function* () {
             fireCalls++;
             const conversationId = uuidv7();
             yield* db
               .insert(conversations)
               .values({ id: conversationId, userId: row.userId, scheduleId: row.id })
+              .pipe(Effect.orDie);
+            yield* db
+              .update(scheduleRuns)
+              .set({ status: "started", conversationId })
+              .where(eq(scheduleRuns.id, runId))
               .pipe(Effect.orDie);
             return { conversationId };
           }),
@@ -344,6 +506,201 @@ describe("schedule capability revocation", () => {
   });
 });
 
+describe("manual schedule fires", () => {
+  it("keeps old but active manual and claimed fires pending across service recreation", async () => {
+    const entered = Effect.runSync(Deferred.make<void>());
+    const release = Effect.runSync(Deferred.make<void>());
+    const settled = Effect.runSync(Deferred.make<void>());
+    let started = 0;
+    let finished = 0;
+    const expectedScheduleIds = new Set<string>();
+    const fakeFire = Layer.succeed(
+      ScheduleFire,
+      ScheduleFire.of(() =>
+        Effect.gen(function* () {
+          started++;
+          if (started === 2) yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+          return { conversationId: null, error: "pre-turn check failed" };
+        }),
+      ),
+    );
+    const fakeBus = Layer.succeed(
+      SyncBus,
+      SyncBus.of({
+        publish: (_userId, event) =>
+          event.type === "schedule.run.changed" && expectedScheduleIds.has(event.scheduleId)
+            ? Effect.gen(function* () {
+                finished++;
+                if (finished === 2) yield* Deferred.succeed(settled, undefined);
+              })
+            : Effect.void,
+      } as SyncBus["Service"]),
+    );
+    const makeRuntime = () =>
+      ManagedRuntime.make(
+        ScheduleService.layer.pipe(
+          Layer.provideMerge(FeaturePolicy.layer),
+          Layer.provideMerge(fakeFire),
+          Layer.provideMerge(fakeBus),
+          Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
+          Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
+          Layer.provideMerge(Db.layer),
+          Layer.provideMerge(
+            PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 }),
+          ),
+        ),
+      );
+    const first = makeRuntime();
+    const replacement = makeRuntime();
+    try {
+      await first.runPromise(ScheduleService);
+      const { owner, manual, due } = await run(
+        Effect.gen(function* () {
+          const owner = yield* makeUser();
+          const manual = yield* insert(owner, { nextFireAt: new Date(Date.now() + 3_600_000) });
+          const due = yield* insert(owner, { nextFireAt: new Date(Date.now() - 60_000) });
+          return { owner, manual, due };
+        }),
+      );
+      expectedScheduleIds.add(manual.id);
+      expectedScheduleIds.add(due.id);
+      await first.runPromise(
+        Effect.flatMap(ScheduleService, (service) =>
+          Effect.gen(function* () {
+            yield* service.runNow(owner, manual.id);
+            yield* service.tick;
+            yield* Deferred.await(entered);
+          }),
+        ),
+      );
+      await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db
+            .update(scheduleRuns)
+            .set({ firedAt: new Date(Date.now() - 11 * 60_000) })
+            .where(inArray(scheduleRuns.scheduleId, [manual.id, due.id]));
+        }),
+      );
+      await replacement.runPromise(Effect.flatMap(ScheduleService, (service) => service.tick));
+      const pending = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          return yield* db
+            .select()
+            .from(scheduleRuns)
+            .where(inArray(scheduleRuns.scheduleId, [manual.id, due.id]));
+        }),
+      );
+      expect(pending.every((row) => row.status === "pending")).toBe(true);
+      expect(pending.map((row) => row.scheduleId).sort()).toEqual([due.id, manual.id].sort());
+      expect(started).toBe(2);
+      await first.runPromise(Deferred.succeed(release, undefined));
+      await first.runPromise(Deferred.await(settled));
+      const finishedRuns = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          return yield* db
+            .select()
+            .from(scheduleRuns)
+            .where(inArray(scheduleRuns.scheduleId, [manual.id, due.id]));
+        }),
+      );
+      expect(finishedRuns.map((row) => row.status)).toEqual(["error", "error"]);
+    } finally {
+      await first.runPromise(Deferred.succeed(release, undefined));
+      await first.dispose();
+      await replacement.dispose();
+    }
+  });
+
+  it.each(["defect", "interruption"] as const)(
+    "reserves a pending manual run then settles %s without changing cadence",
+    async (failure) => {
+      const gate = Effect.runSync(Deferred.make<void>());
+      const published = Effect.runSync(Deferred.make<void>());
+      const fakeFire = Layer.succeed(
+        ScheduleFire,
+        ScheduleFire.of(() =>
+          Deferred.await(gate).pipe(
+            Effect.andThen(failure === "defect" ? Effect.die("fire crashed") : Effect.interrupt),
+          ),
+        ),
+      );
+      const fakeBus = Layer.succeed(
+        SyncBus,
+        SyncBus.of({
+          publish: (_userId, event) =>
+            event.type === "schedule.run.changed"
+              ? Deferred.succeed(published, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+        } as SyncBus["Service"]),
+      );
+      const serviceRuntime = ManagedRuntime.make(
+        ScheduleService.layer.pipe(
+          Layer.provideMerge(FeaturePolicy.layer),
+          Layer.provideMerge(fakeFire),
+          Layer.provideMerge(fakeBus),
+          Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
+          Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
+          Layer.provideMerge(Db.layer),
+          Layer.provideMerge(
+            PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 }),
+          ),
+        ),
+      );
+      try {
+        const { owner, schedule } = await run(
+          Effect.gen(function* () {
+            const owner = yield* makeUser();
+            return {
+              owner,
+              schedule: yield* insert(owner, { nextFireAt: new Date(Date.now() + 3_600_000) }),
+            };
+          }),
+        );
+        await serviceRuntime.runPromise(
+          Effect.gen(function* () {
+            const service = yield* ScheduleService;
+            yield* service.runNow(owner, schedule.id);
+          }),
+        );
+        const pending = await run(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            return yield* db
+              .select()
+              .from(scheduleRuns)
+              .where(eq(scheduleRuns.scheduleId, schedule.id));
+          }),
+        );
+        expect(pending).toMatchObject([{ status: "pending", conversationId: null }]);
+        await serviceRuntime.runPromise(Deferred.succeed(gate, undefined));
+        await serviceRuntime.runPromise(Deferred.await(published));
+        const settled = await run(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            const [row] = yield* db
+              .select()
+              .from(scheduleRuns)
+              .where(eq(scheduleRuns.scheduleId, schedule.id));
+            const [unchanged] = yield* db
+              .select()
+              .from(schedules)
+              .where(eq(schedules.id, schedule.id));
+            return { row, unchanged };
+          }),
+        );
+        expect(settled.row).toMatchObject({ status: "error", conversationId: null });
+        expect(settled.unchanged?.nextFireAt).toEqual(schedule.nextFireAt);
+      } finally {
+        await serviceRuntime.dispose();
+      }
+    },
+  );
+});
+
 describe("schedule removal", () => {
   it("cascades the run history with the schedule", async () => {
     const result = await run(
@@ -352,12 +709,8 @@ describe("schedule removal", () => {
         const repo = yield* ScheduleRepo;
         const db = yield* Db;
         const row = yield* insert(userId);
-        yield* repo.recordRun({
-          scheduleId: row.id,
-          conversationId: null,
-          status: "error",
-          error: "no model",
-        });
+        const pending = yield* repo.beginRun(row.id);
+        yield* repo.finishRun(pending.id, "error", "no model");
         yield* repo.remove(userId, row.id);
         const runs = yield* db
           .select()

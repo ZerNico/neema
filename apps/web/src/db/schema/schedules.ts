@@ -69,8 +69,9 @@ export const schedules = pgTable(
 /**
  * One row per fire. `conversationId` is null when the turn never started (no
  * available model), so error runs still show in the history without a chat.
- * Generation outcome is read off the conversation's assistant message; this
- * status only records whether the turn started at all.
+ * A pending row is written before the fire can start and atomically bound to
+ * the turn. Generation outcome is read off the conversation's assistant message;
+ * this status only records whether the turn started at all.
  */
 export const scheduleRuns = pgTable(
   "schedule_runs",
@@ -83,9 +84,17 @@ export const scheduleRuns = pgTable(
       onDelete: "cascade",
     }),
     firedAt: timestamp("fired_at", { withTimezone: true }).notNull().defaultNow(),
-    status: text({ enum: ["started", "error", "skipped"] }).notNull(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp() + interval '60 seconds'`),
+    status: text({ enum: ["pending", "started", "error", "skipped"] }).notNull(),
     error: text(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("schedule_runs_schedule_idx").on(t.scheduleId, t.firedAt)],
+  (t) => [
+    index("schedule_runs_schedule_idx").on(t.scheduleId, t.firedAt),
+    index("schedule_runs_pending_idx")
+      .on(t.leaseUntil)
+      .where(sql`${t.status} = 'pending'`),
+  ],
 );

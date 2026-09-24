@@ -27,8 +27,12 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   a one-shot whose next fire is past `endAt` comes out with `nextFireAt = null` and never
   fires again. Due-ness by database clock follows the blob-ledger rule: a JS Date that drifts
   ahead would make the scheduler quietly see nothing.
-- The claim already rescheduled, so each fire is `Effect.forkDetach`ed and one slow fire
-  cannot hold the tick; the `schedule_runs` row is the record of the attempt, not a reaper.
+- The claim reschedules and inserts a `pending` `schedule_runs` row in the same transaction,
+  before the fire is detached. One slow fire cannot hold the tick. Manual Run now inserts its
+  pending row before detaching, without changing cadence. A detached fire renews the pending
+  row's database-clock lease while it works; a lapsed, unbound attempt is reconciled to
+  `error`, never replayed, because replay could duplicate a turn whose outcome is uncertain.
+  This also protects slow pre-turn checks and busy-chat waits across a runtime replacement.
   Revoked schedule permission keeps the row but records a `skipped` fire without a chat;
   future fires resume on regrant, not missed one-shots. See [feature access](feature-policy.md).
 
@@ -74,8 +78,11 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   an in-flight fire finishes in its chat. Pause and resume touch only `paused`
   and `nextFireAt`; an in-flight fire is unaffected. "Run now" calls the same fire path
   without claiming, so the cadence is untouched and a run row is still written.
-- Run status beyond "started" is derived by joining the run's conversation messages — no
-  second status machine, no reaper.
+- `createTurn` locks the pending attempt and binds its conversation in the same transaction
+  that writes the user and assistant messages. A stale or settled attempt cannot create a
+  turn. Typed failures, defects and interruption settle an unbound attempt; a bound attempt
+  remains `started`, and the message-generation lease handles an orphaned streaming answer.
+  Outcome beyond "started" is derived by joining the run's conversation messages.
 
 ## Drafts and sync
 

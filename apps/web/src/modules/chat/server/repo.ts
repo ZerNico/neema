@@ -50,6 +50,7 @@ import {
   messages,
   messageToolCalls,
   schedules,
+  scheduleRuns,
   usageEvents,
   workTurnReservations,
   conversationIntegrations,
@@ -198,6 +199,8 @@ export type TurnFields = {
    * marks the chat as a scheduled run so the sidebar list omits it.
    */
   scheduleId?: string | undefined;
+  /** A pending scheduled attempt, bound to this turn inside its transaction. */
+  scheduleRunId?: string | undefined;
   /** Standalone collections selected for this message only. */
   collectionIds?: ReadonlyArray<string> | undefined;
   skillIds?: ReadonlyArray<string> | undefined;
@@ -1275,6 +1278,24 @@ export class ChatRepo extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 const conversationId = input.conversation.id;
+                if (input.scheduleRunId) {
+                  const [pending] = yield* tx
+                    .select({ id: scheduleRuns.id, userId: schedules.userId })
+                    .from(scheduleRuns)
+                    .innerJoin(schedules, eq(schedules.id, scheduleRuns.scheduleId))
+                    .where(
+                      and(
+                        eq(scheduleRuns.id, input.scheduleRunId),
+                        eq(scheduleRuns.status, "pending"),
+                      ),
+                    )
+                    .for("update", { of: scheduleRuns })
+                    .pipe(Effect.orDie);
+                  if (!pending || pending.userId !== input.userId)
+                    return yield* new InvalidMessage({
+                      reason: "the scheduled fire is no longer pending",
+                    });
+                }
                 yield* lockWorkTurn(tx, conversationId);
                 yield* expireWorkTurns(tx);
                 let reservation: WorkTurnReservationRow | null = null;
@@ -1478,6 +1499,17 @@ export class ChatRepo extends Context.Service<
                   .returning()
                   .pipe(Effect.orDie);
                 yield* writeConfig(tx, assistantRows[0]!.id, config);
+                if (input.scheduleRunId)
+                  yield* tx
+                    .update(scheduleRuns)
+                    .set({ status: "started", conversationId: conversation.id })
+                    .where(
+                      and(
+                        eq(scheduleRuns.id, input.scheduleRunId),
+                        eq(scheduleRuns.status, "pending"),
+                      ),
+                    )
+                    .pipe(Effect.orDie);
                 yield* tx
                   .update(conversations)
                   .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })

@@ -366,6 +366,7 @@ export class ChatService extends Context.Service<
     runScheduledTurn(input: {
       userId: string;
       scheduleId: string;
+      scheduleRunId?: string;
       prompt: string;
       modelId: string | null;
       agentId: string | null;
@@ -1193,6 +1194,7 @@ function makeChatService() {
     const runScheduledTurn = Effect.fn("ChatService.runScheduledTurn")(function* (input: {
       userId: string;
       scheduleId: string;
+      scheduleRunId?: string;
       prompt: string;
       modelId: string | null;
       agentId: string | null;
@@ -1245,6 +1247,7 @@ function makeChatService() {
           attachmentIds: [],
           ...(agentId !== undefined ? { associateAgentId: agentId } : {}),
           ...(target.kind === "new" ? { scheduleId: input.scheduleId } : {}),
+          ...(input.scheduleRunId ? { scheduleRunId: input.scheduleRunId } : {}),
           resolve: resolver({
             attempt: "send",
             userId: input.userId,
