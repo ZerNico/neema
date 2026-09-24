@@ -24,6 +24,8 @@ export const compose = [
   join(root, "docker-compose.yml"),
 ];
 const interrupted = "Interrupted by development snapshot import.";
+const changedBlob =
+  "A primary file changed during the copy, likely removed by its running app. Run the import again.";
 
 export async function connect(url, readonly = false) {
   const connection = new URL(url);
@@ -72,10 +74,12 @@ export async function checkMigrations(client, migrations = join(root, "apps/web/
   const local = new Set(await readdir(migrations));
   for (const row of rows) {
     if (!row.name || !local.has(row.name))
-      throw new Error("Snapshot contains migrations not present in this checkout.");
+      throw safeError(
+        "The primary has migrations this checkout lacks. Rebase or merge main, then import again.",
+      );
     const sql = await readFile(join(migrations, row.name, "migration.sql"));
     if (createHash("sha256").update(sql).digest("hex") !== row.hash)
-      throw new Error(`Migration differs from source: ${row.name}`);
+      throw safeError(`Migration ${row.name} differs between the primary and this checkout.`);
   }
 }
 
@@ -85,8 +89,8 @@ export async function assertIdle(admin, instance) {
     [instance.database],
   );
   if (rows[0].n !== 0)
-    throw new Error(
-      "The destination database has active connections. Stop its server and database tools first.",
+    throw safeError(
+      "This checkout’s database has active connections. Stop this checkout’s dev server and database tools first; the primary can keep running.",
     );
 }
 
@@ -231,7 +235,11 @@ export async function copyBlobs(client, sourceRoot, targetRoot) {
       key.includes("\0")
     )
       throw new Error("Invalid source blob key.");
-    const path = await realpath(join(source, key));
+    // The primary may be running, and its reconciler can delete a blob after the dump.
+    const path = await realpath(join(source, key)).catch((error) => {
+      if (error.code === "ENOENT") throw safeError(changedBlob);
+      throw error;
+    });
     if (!path.startsWith(source + sep)) throw new Error("Source blob escapes storage root.");
     const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const destination = join(target, key);
@@ -248,7 +256,7 @@ export async function copyBlobs(client, sourceRoot, targetRoot) {
         await output.writeFile(chunk);
       }
       if (size !== Number(row.size) || hash.digest("hex") !== row.sha256)
-        throw new Error("Source blob is missing or changed; retry from a quiescent source.");
+        throw safeError(changedBlob);
     } finally {
       await input.close();
       await output?.close();

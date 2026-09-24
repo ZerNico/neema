@@ -352,9 +352,15 @@ async function main() {
       importSnapshot(current, source, runImportCommand),
     );
   }
-  if (["migrate", "push"].includes(command)) {
+  // Drizzle applies pending migrations in one transaction, so a running server is fine.
+  // Push diffs the schema interactively and may drop columns, so it still wants quiet.
+  if (command === "migrate") {
+    await checkReady(instance);
+    return run("pnpm", ["--filter", "@chat/web", "db:migrate"], { env: instanceEnv(instance) });
+  }
+  if (command === "push") {
     return withIdleDatabase(instance, (current) =>
-      run("pnpm", ["--filter", "@chat/web", `db:${command}`], { env: instanceEnv(current) }),
+      run("pnpm", ["--filter", "@chat/web", "db:push"], { env: instanceEnv(current) }),
     );
   }
   if (command === "studio") {

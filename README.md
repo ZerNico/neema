@@ -28,8 +28,9 @@ agent. For an unprivileged proxy, use
 Open the printed URL and register: the first account is the admin. Open the
 user menu (bottom-left) → **Admin** → add a provider and pick models.
 Development starts empty by default. The primary checkout’s selected generated dev
-instance is the seed source for every worktree. Stop the primary app with Ctrl-C,
-then run `pnpm dev:import` in a worktree and confirm. In a T3 Code worktree, choose
+instance is the seed source for every worktree. Run `pnpm dev:import` in a
+worktree and confirm; the primary app can keep running, only the worktree’s own
+server must be stopped. In a T3 Code worktree, choose
 **Seed development data** from its scripts menu to run the same staged copy without
 a prompt. It copies the primary database and blobs and reuses its provider encryption
 key. The source stays unchanged; a failed import keeps the current dev state, and a

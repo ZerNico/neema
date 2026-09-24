@@ -57,8 +57,12 @@ normal development state without a prompt, including real provider keys. The hoo
 does not seed automatically, because disposable worktrees should not silently gain
 personal data or incur provider cost. Normal
 startup does not migrate. The terminal that started development owns it: Ctrl-C
-stops its child processes. `db:migrate`, `db:push`, imports and destruction refuse
-to act while the selected database has connections. Studio is read-only from the
+stops its child processes. `db:push`, imports and destruction refuse to act while
+this checkout’s database has connections; `db:migrate` does not, since Drizzle applies
+pending migrations in one transaction. The import source is never required to be idle:
+`pg_dump` reads one consistent, read-only snapshot, and the copy terminalizes whatever
+was mid-generation in it. The one race is a blob the running primary deletes after the
+dump; the import then fails before activation and is simply run again. Studio is read-only from the
 launcher’s perspective and may run alongside the server. `dev:info` reports the last
 launched URL and resource paths; it never claims a process is live.
 
