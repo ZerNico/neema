@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/register")({
 
 function RegisterPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { redirect } = Route.useSearch();
   const destination = redirect ?? "/";
   const [serverError, setServerError] = useState<string | null>(null);
@@ -48,6 +50,9 @@ function RegisterPage() {
         setServerError(error.message ?? "Could not create the account.");
         return;
       }
+      // This page's guard cached "signed out"; the app guard would read that
+      // and send the new session straight back here. Sign-out clears the same.
+      queryClient.clear();
       await navigate({ href: destination });
     },
   });
