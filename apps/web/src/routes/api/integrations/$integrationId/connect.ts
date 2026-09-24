@@ -11,8 +11,8 @@ import {
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
 
-const settings = (search: Record<string, string>) =>
-  `/settings/integrations?${new URLSearchParams(search).toString()}`;
+const settings = (integrationId: string, search: Record<string, string>) =>
+  `/settings/integrations/${encodeURIComponent(integrationId)}?${new URLSearchParams(search).toString()}`;
 
 /**
  * Starts an OAuth connection in whatever browser opened it. The desktop app
@@ -52,7 +52,7 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
           return new Response(null, {
             status: 302,
             headers: {
-              location: settings({ integration: params.integrationId, error: started.error }),
+              location: settings(params.integrationId, { error: started.error }),
             },
           });
         const secure = origin.startsWith("https:") ? "; Secure" : "";

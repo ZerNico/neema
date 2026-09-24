@@ -204,7 +204,16 @@ function SourceRow({
             </>
           ) : (
             // Syncing resumes by itself once the owner connects again.
-            <Button size="sm" variant="outline" render={<Link to="/settings/integrations" />}>
+            <Button
+              size="sm"
+              variant="outline"
+              render={
+                <Link
+                  to="/settings/integrations/$integrationId"
+                  params={{ integrationId: source.integrationId }}
+                />
+              }
+            >
               Reconnect {name}
             </Button>
           )}

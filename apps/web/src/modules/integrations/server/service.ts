@@ -128,7 +128,7 @@ export class IntegrationService extends Context.Service<
     /**
      * Connected, usable integrations and whether this chat offers them: the
      * chat's own choice, else the agent's attachments, else the connection's
-     * "offer in chats". A null conversation is a chat not created yet.
+     * "turn on in new chats". A null conversation is a chat not created yet.
      */
     chatIntegrations(
       userId: string,

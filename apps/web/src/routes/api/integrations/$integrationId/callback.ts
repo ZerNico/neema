@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/integrations/$integrationId/callback"
           new Response(null, {
             status: 302,
             headers: {
-              location: `/settings/integrations?${new URLSearchParams({ integration: params.integrationId, ...search }).toString()}`,
+              location: `/settings/integrations/${encodeURIComponent(params.integrationId)}?${new URLSearchParams(search).toString()}`,
               "set-cookie": `${OAUTH_STATE_COOKIE}=; Path=${callbackPath(params.integrationId)}; HttpOnly; SameSite=Lax; Max-Age=0`,
             },
           });

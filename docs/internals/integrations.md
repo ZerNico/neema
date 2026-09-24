@@ -67,7 +67,7 @@ it needs no deep link back.
 
 The offer is read as the generation starts (`resolveOffer`, beside custom tools) and held
 for it. A chat's own choice (`conversation_integrations.enabled`) wins; otherwise an
-installed agent's attachments decide, otherwise the connection's "Offer in chats". A
+installed agent's attachments decide, otherwise the connection's "Turn on in new chats". A
 connection that stopped working drops out rather than failing the turn. The choice is sticky
 per chat, not per message, because a changed tool list recaches the whole prefix. An
 existing chat saves each toggle immediately; a chat not created yet sends its toggles with

@@ -1,13 +1,15 @@
-import { PlugSocketIcon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, PlugSocketIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ToolPermission } from "../consent.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { toastError } from "~/ui/error-toast.ts";
-import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
+import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
-import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
+import { FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
 import { findIntegration } from "../catalog.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
@@ -17,8 +19,17 @@ import { ConnectActions } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
+function StatusBadge({ integration }: { integration: UserIntegration }) {
+  const { connection } = integration;
+  if (!connection) return null;
+  if (!integration.available) return <Badge variant="outline">Turned off</Badge>;
+  if (connection.status === "needs_reauth") return <Badge variant="destructive">Reconnect</Badge>;
+  return <Badge variant="secondary">Connected</Badge>;
+}
+
 export function IntegrationsSettingsPage() {
   const { data } = useSuspenseQuery(myIntegrationsQuery);
+  const listed = data.filter((integration) => findIntegration(integration.id));
   return (
     <Page
       title="Integrations"
@@ -26,7 +37,7 @@ export function IntegrationsSettingsPage() {
       rootPath="/settings"
       rootLabel="Settings"
     >
-      {data.length === 0 ? (
+      {listed.length === 0 ? (
         <EmptyState
           icon={PlugSocketIcon}
           title="No integrations yet"
@@ -34,124 +45,225 @@ export function IntegrationsSettingsPage() {
         />
       ) : (
         <ListCard>
-          {data.map((integration) => (
-            <IntegrationRow key={integration.id} integration={integration} />
-          ))}
+          {listed.map((integration) => {
+            const manifest = findIntegration(integration.id)!;
+            return (
+              <Link
+                key={integration.id}
+                to="/settings/integrations/$integrationId"
+                params={{ integrationId: integration.id }}
+                className="block"
+              >
+                <ListRow interactive>
+                  <IntegrationLogo integrationId={integration.id} variant="tile" />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 text-sm font-medium">
+                      {manifest.name}
+                      <StatusBadge integration={integration} />
+                    </p>
+                    <p className="text-muted-foreground truncate text-xs">{manifest.description}</p>
+                  </div>
+                  <HugeiconsIcon
+                    strokeWidth={2}
+                    icon={ArrowRight01Icon}
+                    className="text-muted-foreground size-4 shrink-0"
+                  />
+                </ListRow>
+              </Link>
+            );
+          })}
         </ListCard>
       )}
     </Page>
   );
 }
 
-function IntegrationRow({ integration }: { integration: UserIntegration }) {
-  const manifest = findIntegration(integration.id);
+export function IntegrationSettingsPage({ integrationId }: { integrationId: string }) {
+  const { data } = useSuspenseQuery(myIntegrationsQuery);
+  const integration = data.find((item) => item.id === integrationId);
+  const manifest = findIntegration(integrationId);
+  if (!integration || !manifest)
+    return (
+      <Page title="Integration" backTo="/settings/integrations" backLabel="Integrations">
+        <EmptyState
+          icon={PlugSocketIcon}
+          title="Integration not found"
+          description="It may have been turned off, or it is not available to you."
+        />
+      </Page>
+    );
+  const { connection } = integration;
+  const usable = connection && integration.available && connection.status === "active";
+  return (
+    <Page
+      title={manifest.name}
+      description={manifest.description}
+      backTo="/settings/integrations"
+      backLabel="Integrations"
+    >
+      <Section title="Account">
+        <ListCard>
+          <AccountRow integration={integration} />
+          {usable ? <DefaultRow integration={integration} /> : null}
+        </ListCard>
+      </Section>
+      {usable ? (
+        <Section
+          title="Tool permissions"
+          description="Choose when chats may use each tool. Blocked tools are never offered."
+        >
+          <PermissionsEditor integration={integration} />
+        </Section>
+      ) : (
+        <Section title="What chats can do">
+          <ListCard>
+            {manifest.tools.map((tool) => (
+              <ListRow key={tool.name}>
+                <span className="text-sm">{tool.title}</span>
+              </ListRow>
+            ))}
+          </ListCard>
+        </Section>
+      )}
+    </Page>
+  );
+}
+
+type ConnectionChanges = {
+  offerByDefault?: boolean;
+  toolPermissions?: Record<string, ToolPermission>;
+};
+
+// Optimistic, so a click changes one control instead of disabling them all
+// while the save runs; the last save to settle refetches the truth.
+const useConnectionUpdate = (integrationId: string) => {
+  const queryClient = useQueryClient();
+  const mutationKey = ["integrations", "connection", integrationId];
+  const { queryKey } = myIntegrationsQuery;
+  return useMutation({
+    mutationKey,
+    mutationFn: (input: ConnectionChanges) =>
+      updateIntegrationConnection({ data: { integrationId, ...input } }),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData(queryKey);
+      queryClient.setQueryData(queryKey, (current) =>
+        current?.map((item) =>
+          item.id === integrationId && item.connection
+            ? {
+                ...item,
+                connection: {
+                  ...item.connection,
+                  ...(input.offerByDefault === undefined
+                    ? {}
+                    : { offerByDefault: input.offerByDefault }),
+                  toolPermissions: { ...item.connection.toolPermissions, ...input.toolPermissions },
+                },
+              }
+            : item,
+        ),
+      );
+      return { previous };
+    },
+    onError: (error, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
+      toastError("Could not save that preference.", error);
+    },
+    onSettled: () =>
+      queryClient.isMutating({ mutationKey }) === 1
+        ? queryClient.invalidateQueries({ queryKey })
+        : undefined,
+  });
+};
+
+const plural = (count: number, noun: string) =>
+  count === 0 ? null : `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+function AccountRow({ integration }: { integration: UserIntegration }) {
+  const manifest = findIntegration(integration.id)!;
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-  const fieldId = useId();
-  const refresh = () => queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey });
-
-  const update = useMutation({
-    mutationFn: (input: {
-      offerByDefault?: boolean;
-      toolPermissions?: Record<string, ToolPermission>;
-    }) => updateIntegrationConnection({ data: { integrationId: integration.id, ...input } }),
-    onSuccess: refresh,
-    onError: (error) => toastError("Could not save that preference.", error),
-  });
   const disconnect = useMutation({
     mutationFn: () => disconnectIntegration({ data: { integrationId: integration.id } }),
-    onSuccess: refresh,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
     onError: (error) => toastError("Could not disconnect.", error),
   });
-
-  if (!manifest) return null;
-  const { connection } = integration;
+  const { connection, dependents } = integration;
   const needsReauth = connection?.status === "needs_reauth";
-  const dependents = [
-    integration.dependents.sources === 1
-      ? "1 knowledge source"
-      : integration.dependents.sources > 1
-        ? `${integration.dependents.sources} knowledge sources`
-        : null,
-    integration.dependents.schedules === 1
-      ? "1 schedule"
-      : integration.dependents.schedules > 1
-        ? `${integration.dependents.schedules} schedules`
-        : null,
+  const affected = [
+    plural(dependents.sources, "knowledge source"),
+    plural(dependents.schedules, "schedule"),
   ].filter(Boolean);
 
   return (
-    <ListRow className="flex-col items-stretch gap-3">
-      <div className="flex items-center gap-3">
-        <IntegrationLogo integrationId={integration.id} variant="tile" />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="flex items-center gap-2 text-sm font-medium">
-            {manifest.name}
-            {needsReauth ? <Badge variant="destructive">Reconnect</Badge> : null}
-            {!integration.available && connection ? (
-              <Badge variant="outline">Turned off</Badge>
-            ) : null}
-          </span>
-          <span className="text-muted-foreground truncate text-xs">
-            {connection ? connection.accountLabel : manifest.description}
-          </span>
-        </div>
-        {integration.available && (!connection || needsReauth) ? (
-          <ConnectActions integration={integration} />
-        ) : null}
-        {connection ? (
-          <PendingButton
-            size="sm"
-            variant="ghost"
-            pending={disconnect.isPending}
-            onClick={async () => {
-              if (
-                await confirm({
-                  title: `Disconnect ${manifest.name}?`,
-                  description: dependents.length
-                    ? `Chats lose its tools, and ${dependents.join(" and ")} stop working until you connect again. Documents already synced stay.`
-                    : "Chats lose its tools until you connect again.",
-                  confirmLabel: "Disconnect",
-                })
-              )
-                disconnect.mutate();
-            }}
-          >
-            Disconnect
-          </PendingButton>
-        ) : null}
+    <ListRow className="flex-wrap">
+      <IntegrationLogo integrationId={integration.id} variant="tile" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          {connection ? connection.accountLabel : "Not connected"}
+          <StatusBadge integration={integration} />
+        </span>
+        <span className="text-muted-foreground text-xs">
+          {!integration.available
+            ? "An admin turned this integration off."
+            : needsReauth
+              ? `Sign in to ${manifest.name} again to keep using it.`
+              : connection
+                ? `Chats use ${manifest.name} as this account.`
+                : `Connect your ${manifest.name} account to use it in chats.`}
+        </span>
       </div>
-      {connection && integration.available && !needsReauth ? (
-        <div className="flex flex-col gap-3 pl-12">
-          <Field>
-            <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={`${fieldId}-offer`}>Offer in chats</FieldLabel>
-              <Switch
-                id={`${fieldId}-offer`}
-                checked={connection.offerByDefault}
-                disabled={update.isPending}
-                onCheckedChange={(offerByDefault) => update.mutate({ offerByDefault })}
-              />
-            </div>
-            <FieldDescription>
-              On for every new chat. Any chat can still turn it on or off, or mention it with @
-              {manifest.id}.
-            </FieldDescription>
-          </Field>
-          <div className="flex flex-col gap-1">
-            <p className="text-sm font-medium">Tool permissions</p>
-            <p className="text-muted-foreground mb-2 text-xs">
-              Choose when chats may use each tool. Blocked tools are never offered.
-            </p>
-            <ToolPermissions
-              integrationId={integration.id}
-              permissions={connection.toolPermissions}
-              disabled={update.isPending}
-              onChange={(toolPermissions) => update.mutate({ toolPermissions })}
-            />
-          </div>
-        </div>
+      {integration.available && (!connection || needsReauth) ? (
+        <ConnectActions integration={integration} />
+      ) : null}
+      {connection ? (
+        <PendingButton
+          size="sm"
+          variant="ghost"
+          pending={disconnect.isPending}
+          onClick={async () => {
+            if (
+              await confirm({
+                title: `Disconnect ${manifest.name}?`,
+                description: affected.length
+                  ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
+                  : "Chats lose its tools until you connect again.",
+                confirmLabel: "Disconnect",
+              })
+            )
+              disconnect.mutate();
+          }}
+        >
+          Disconnect
+        </PendingButton>
       ) : null}
     </ListRow>
+  );
+}
+
+function DefaultRow({ integration }: { integration: UserIntegration }) {
+  const fieldId = useId();
+  const update = useConnectionUpdate(integration.id);
+  const connection = integration.connection!;
+  return (
+    <ListRow className="justify-between">
+      <FieldLabel htmlFor={fieldId}>Turn on in new chats</FieldLabel>
+      <Switch
+        id={fieldId}
+        checked={connection.offerByDefault}
+        onCheckedChange={(offerByDefault) => update.mutate({ offerByDefault })}
+      />
+    </ListRow>
+  );
+}
+
+function PermissionsEditor({ integration }: { integration: UserIntegration }) {
+  const update = useConnectionUpdate(integration.id);
+  return (
+    <ToolPermissions
+      integrationId={integration.id}
+      permissions={integration.connection!.toolPermissions}
+      onChange={(toolPermissions) => update.mutate({ toolPermissions })}
+    />
   );
 }
