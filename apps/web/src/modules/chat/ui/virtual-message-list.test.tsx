@@ -123,6 +123,7 @@ describe("VirtualMessageList", () => {
 
     fireEvent.scroll(scroller);
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveClass("opacity-100");
+    expect(screen.getByRole("button", { name: "Jump to bottom" })).not.toHaveAttribute("inert");
 
     rerender(<VirtualMessageList messages={messages} followKey={1} />);
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);
@@ -131,6 +132,7 @@ describe("VirtualMessageList", () => {
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(2);
     expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "smooth" });
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveClass("opacity-0");
+    expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveAttribute("inert");
 
     rerender(<VirtualMessageList messages={messages} followKey={2} />);
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(3);

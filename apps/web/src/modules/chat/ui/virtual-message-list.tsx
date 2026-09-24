@@ -129,6 +129,7 @@ export function VirtualMessageList({
         size="icon-sm"
         variant="floating"
         aria-label="Jump to bottom"
+        inert={atBottom || undefined}
         onClick={() => scrollToBottom("smooth")}
         className={cn(
           "absolute bottom-3 left-1/2 -translate-x-1/2 transition-opacity",
