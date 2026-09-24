@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client } from "pg";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -36,7 +34,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
 
@@ -141,7 +139,7 @@ const FakeParser = Layer.succeed(DocumentParser, {
   availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
 });
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 type Services =
   | Db
   | AgentRepo
@@ -205,13 +203,8 @@ const configureEmbeddings = async (input: {
 let embeddingModelId: string;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm db:migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
@@ -256,7 +249,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 // Explicit grant fixtures for tests of ingestion/search rather than sharing policy.
@@ -4082,7 +4075,7 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       const owner = await createUser();
       const group = await run(GroupRepo.use((repo) => repo.createGroup(`Race-${uuidv7()}`)));
       await run(GroupRepo.use((repo) => repo.addMember(group.id, owner)));
-      const controller = new Client({ connectionString: container.getConnectionUri() });
+      const controller = new Client({ connectionString: database.url });
       await controller.connect();
       const { rows: controllerRows } = await controller.query<{ pid: number }>(
         "select pg_backend_pid() as pid",

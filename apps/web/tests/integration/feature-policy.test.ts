@@ -1,5 +1,3 @@
-import { execSync } from "node:child_process";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PgClient } from "@effect/sql-pg";
 import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
@@ -12,19 +10,14 @@ import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { capabilityAllowedSql, FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Db | GroupRepo | FeaturePolicy, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const infra = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
@@ -35,7 +28,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, Db | GroupRepo | FeaturePolicy>) =>

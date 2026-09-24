@@ -1,5 +1,4 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { execSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -8,13 +7,13 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { conversationDrafts } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 /** The migration that renames the agent-draft table into the generic store. */
 const GENERIC_DRAFTS = "20260918203923_blue_magma";
 const root = new URL("../..", import.meta.url).pathname;
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Db, unknown>;
 let url: string;
 
@@ -42,8 +41,8 @@ export default defineConfig({
 };
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  url = container.getConnectionUri();
+  database = await createTestDatabase({ migrated: false });
+  url = database.url;
   runtime = ManagedRuntime.make(
     Db.layer.pipe(
       Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 2 })),
@@ -52,7 +51,7 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 describe("agent drafts migrate onto the generic draft store", () => {

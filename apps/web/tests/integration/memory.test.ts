@@ -1,8 +1,6 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
-import { execSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { uuidv7 } from "uuidv7";
 import {
@@ -21,11 +19,11 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 11).toString("base64");
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<MemoryRepo | MemoryService | ToolsRepo | Db, unknown>;
 const published: Array<{ userId: string; type: string }> = [];
 let syncShouldFail = false;
@@ -94,13 +92,8 @@ const createSource = async (userId: string, content = "I prefer concise answers"
 };
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const Infra = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
@@ -116,7 +109,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 describe("saved memory repository", () => {

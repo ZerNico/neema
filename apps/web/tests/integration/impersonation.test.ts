@@ -1,5 +1,3 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
@@ -8,10 +6,10 @@ import { relations } from "~/db/relations.ts";
 import { session, signupBootstrap, user } from "~/db/schema/index.ts";
 import { createAppAuth, type ImpersonationEvent } from "~/modules/auth/server/config.ts";
 import { projectSessionIdentity } from "~/modules/auth/identity.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 const origin = "http://localhost:9876";
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let pool: Pool;
 let db: ReturnType<typeof drizzle<typeof relations>>;
 let auth: ReturnType<typeof createAppAuth>;
@@ -68,13 +66,8 @@ let admin: Browser, target: Browser, other: Browser;
 let adminId: string, targetId: string, otherId: string;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   pool = new Pool({ connectionString: url });
   db = drizzle({ client: pool, relations });
   auth = createAppAuth({
@@ -87,7 +80,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(async () => {
   await pool?.end();
-  await container?.stop();
+  await database?.drop();
 });
 beforeEach(async () => {
   await db.delete(user);

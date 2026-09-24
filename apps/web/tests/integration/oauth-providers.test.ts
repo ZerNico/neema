@@ -1,5 +1,3 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { PgClient } from "@effect/sql-pg";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -12,12 +10,12 @@ import { createAppAuth, type AuthOAuthProvider } from "~/modules/auth/server/con
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
 
 const origin = "http://localhost:9877";
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let pool: Pool;
 let db: ReturnType<typeof drizzle<typeof relations>>;
 let runtime: ManagedRuntime.ManagedRuntime<OAuthRepo | Db, unknown>;
@@ -79,13 +77,8 @@ const repo = <A>(f: (r: OAuthRepo["Service"]) => Effect.Effect<A>) =>
 
 beforeAll(async () => {
   await startIdp();
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   pool = new Pool({ connectionString: url });
   db = drizzle({ client: pool, relations });
   runtime = ManagedRuntime.make(
@@ -99,7 +92,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime?.dispose();
   await pool?.end();
-  await container?.stop();
+  await database?.drop();
   await new Promise<void>((resolve) => idp.close(() => resolve()));
 });
 

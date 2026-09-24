@@ -1,5 +1,3 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { eq } from "drizzle-orm";
@@ -26,7 +24,7 @@ import { BlobStoreError } from "~/modules/attachments/errors.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { SkillFile } from "~/modules/skills/package.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 const blobs = new Map<string, Uint8Array>();
 const MemoryBlobs = Layer.succeed(
@@ -59,7 +57,7 @@ const QuietSync = Layer.succeed(
     subscribe: () => Stream.empty,
   }),
 );
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 type Services = Db | SkillRepo | SkillService | SkillReader | SharingService | AttachmentRepo;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
@@ -93,13 +91,8 @@ const manifest = (owner: string, explicit: string[], attached: string[] = []) =>
     ),
   );
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm db:migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const infra = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
   );
@@ -116,7 +109,7 @@ beforeAll(async () => {
 }, 240000);
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 describe("portable skill storage and ACLs", () => {

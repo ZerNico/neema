@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
@@ -63,7 +61,7 @@ import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
 // Knowledge-backed generations are exercised in knowledge.test.ts; here no
@@ -76,7 +74,7 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
   | ChatRepo
   | ChatService
@@ -433,13 +431,8 @@ const FakeReader = Layer.succeed(UrlReaderExecutor, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const infra = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
@@ -508,7 +501,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await remote?.dispose();
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 beforeEach(async () => {
   await runtime.runPromise(

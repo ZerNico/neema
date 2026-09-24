@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
@@ -9,19 +7,14 @@ import { conversations, messages, schedules } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type ConversationCursor } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | Db, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   runtime = ManagedRuntime.make(
     ChatRepo.layer.pipe(
@@ -34,7 +27,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, ChatRepo | Db>) =>

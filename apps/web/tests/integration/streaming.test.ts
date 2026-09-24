@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import {
@@ -82,7 +80,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -97,7 +95,7 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
   | AgentRepo
   | AgentDraftService
@@ -269,13 +267,8 @@ const FakeGateway = Layer.succeed(AiGateway, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 5 });
   const InfraLayer = Db.layer.pipe(Layer.provideMerge(PgLive));
@@ -374,7 +367,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const setupConversation = Effect.gen(function* () {

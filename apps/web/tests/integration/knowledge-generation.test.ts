@@ -1,5 +1,3 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
@@ -39,7 +37,7 @@ import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { makeFakeMemoryService } from "./fake-memory.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { FakeDocumentParser, FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
@@ -134,7 +132,7 @@ const MemoryBlobStore = Layer.succeed(BlobStore, {
   deletePrefix: () => Effect.void,
 } as never);
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 type Services =
   | Db
   | ChatRepo
@@ -273,13 +271,8 @@ const retry = (userId: string, conversationId: string, messageId: string) =>
   Effect.flatMap(ChatService, (chat) => chat.retryMessage({ userId, conversationId, messageId }));
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 });
   const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(Layer.provideMerge(PgLive));
   const ReposLayer = Layer.mergeAll(
@@ -352,7 +345,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 describe("knowledge-backed generations", () => {

@@ -1,5 +1,4 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Cause, Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -7,15 +6,15 @@ import { approvalEvents } from "~/modules/auth/server/approval-events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let pool: Pool;
 let runtime: ManagedRuntime.ManagedRuntime<SyncBus | Db, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
+  database = await createTestDatabase({ migrated: false });
+  const url = database.url;
   pool = new Pool({ connectionString: url });
   runtime = ManagedRuntime.make(
     Layer.mergeAll(SyncBus.layer, Db.layer).pipe(
@@ -28,7 +27,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime?.dispose();
   await pool?.end();
-  await container?.stop();
+  await database?.drop();
 });
 
 it("delivers database wakeups only after commit and discards rolled-back notifications", async () => {
@@ -151,7 +150,7 @@ it("reconciles after a real LISTEN connection loss and resumes delivery", async 
       expect(yield* internal).toEqual([{ type: "ready" }]);
       const killed = yield* Effect.promise(() =>
         pool.query<{ terminated: boolean }>(
-          "select pg_terminate_backend(pid) as terminated from pg_stat_activity where application_name = 'chat-notifications'",
+          "select pg_terminate_backend(pid) as terminated from pg_stat_activity where datname = current_database() and application_name = 'chat-notifications'",
         ),
       );
       expect(killed.rows).toEqual([{ terminated: true }]);
@@ -168,7 +167,7 @@ it("ends open feeds when the bus is disposed, so a tab reconnects to its replace
   const replaced = ManagedRuntime.make(
     SyncBus.layer.pipe(
       Layer.provide(
-        PgClient.layer({ url: Redacted.make(container.getConnectionUri()), maxConnections: 2 }),
+        PgClient.layer({ url: Redacted.make(database.url), maxConnections: 2 }),
       ),
     ),
   );

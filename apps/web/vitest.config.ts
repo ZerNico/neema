@@ -25,7 +25,8 @@ export default defineConfig({
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
           environment: "node",
-          // Testcontainers startup
+          globalSetup: ["./tests/integration/global-setup.ts"],
+          // Multi-turn generations against a real database under a loaded run.
           testTimeout: 120_000,
           hookTimeout: 120_000,
         },

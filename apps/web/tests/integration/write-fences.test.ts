@@ -1,8 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted } from "effect";
-import { execSync } from "node:child_process";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -19,23 +17,18 @@ import {
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Db | MemoryRepo, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
-  const database = Db.layer.pipe(
+  database = await createTestDatabase();
+  const url = database.url;
+  const dbLayer = Db.layer.pipe(
     Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
-  runtime = ManagedRuntime.make(MemoryRepo.layer.pipe(Layer.provideMerge(database)));
+  runtime = ManagedRuntime.make(MemoryRepo.layer.pipe(Layer.provideMerge(dbLayer)));
   await runtime.runPromise(
     Effect.flatMap(Db, (db) =>
       db.update(tools).set({ enabled: true }).where(eq(tools.name, "memory")).pipe(Effect.orDie),
@@ -45,7 +38,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 /** One streaming attempt, plus the run a `deep_research` call inside it started. */
@@ -122,7 +115,7 @@ const expectFenceLoss = (exit: Exit.Exit<unknown, unknown>) => {
 };
 
 const connectController = async () => {
-  const client = new Client({ connectionString: container.getConnectionUri() });
+  const client = new Client({ connectionString: database.url });
   await client.connect();
   const { rows } = await client.query<{ pid: number }>("select pg_backend_pid() as pid");
   return { client, pid: rows[0]!.pid };

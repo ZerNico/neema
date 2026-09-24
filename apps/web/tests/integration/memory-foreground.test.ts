@@ -1,8 +1,6 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 import { PgClient } from "@effect/sql-pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
@@ -48,7 +46,7 @@ import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-s
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
 
@@ -393,18 +391,13 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | StreamEngine | Db, unknown>;
 let modelId: string;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
@@ -472,7 +465,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 /** sha256 and length of the bytes FakeBlobStore hands back for every key. */

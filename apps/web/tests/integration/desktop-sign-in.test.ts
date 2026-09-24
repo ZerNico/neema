@@ -1,6 +1,4 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
@@ -18,14 +16,14 @@ import {
 import { createAppAuth } from "~/modules/auth/server/config.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 const origin = "http://localhost:9877";
 const DESKTOP_UA = "Mozilla/5.0 Electron/38.0.0 ChatDesktop/0.1.0";
 const BROWSER_UA = "Mozilla/5.0 Safari/605.1.15";
 const DAY = 24 * 60 * 60 * 1000;
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let pool: Pool;
 let db: ReturnType<typeof drizzle<typeof relations>>;
 let auth: ReturnType<typeof createAppAuth>;
@@ -124,13 +122,8 @@ class Client {
 }
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   pool = new Pool({ connectionString: url });
   db = drizzle({ client: pool, relations });
   runtime = ManagedRuntime.make(
@@ -172,7 +165,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime?.dispose();
   await pool?.end();
-  await container?.stop();
+  await database?.drop();
 });
 
 let browser: Client, desktop: Client, userId: string;

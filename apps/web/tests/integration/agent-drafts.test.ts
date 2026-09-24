@@ -1,8 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, sql } from "drizzle-orm";
 import { Cause, Deferred, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
-import { execSync } from "node:child_process";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -40,10 +38,10 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 type Services = Db | DraftRepo | AgentDraftService | AgentRepo | AgentService;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
@@ -65,13 +63,8 @@ const TestBus = Layer.succeed(SyncBus, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const infrastructure = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
@@ -91,7 +84,7 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 beforeEach(() => {
   events.length = 0;
@@ -252,7 +245,7 @@ const interrupted = (exit: Exit.Exit<unknown, unknown>) => {
   if (Exit.isFailure(exit)) expect(Cause.hasInterrupts(exit.cause)).toBe(true);
 };
 const controller = async () => {
-  const client = new Client({ connectionString: container.getConnectionUri() });
+  const client = new Client({ connectionString: database.url });
   await client.connect();
   const { rows } = await client.query<{ pid: number }>("select pg_backend_pid() as pid");
   return { client, pid: rows[0]!.pid };
@@ -262,7 +255,7 @@ const waitForBlocked = async (client: Client, blocker?: number) => {
     .poll(async () => {
       const { rows } = await client.query<{ count: number }>(
         blocker === undefined
-          ? "select count(*)::int as count from pg_stat_activity where cardinality(pg_blocking_pids(pid)) > 0"
+          ? "select count(*)::int as count from pg_stat_activity where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0"
           : "select count(*)::int as count from pg_stat_activity where $1::int = any(pg_blocking_pids(pid))",
         blocker === undefined ? [] : [blocker],
       );

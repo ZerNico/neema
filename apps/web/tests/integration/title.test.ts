@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
@@ -11,21 +9,16 @@ import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 /** conversations.model_id is a real FK. */
 let modelId: string;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | Db, unknown>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const AppLayer = ChatRepo.layer.pipe(
     Layer.provideMerge(AttachmentRepo.layer),
@@ -56,7 +49,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, ChatRepo | Db>) =>

@@ -25,7 +25,7 @@ blob root and desktop profile in the child environment, overriding inherited val
 before Vite loads any env files. Direct package scripts are deliberately
 lower-level: they require an explicitly supplied `DATABASE_URL` and provide no such
 boundary, which is why `drizzle.config.ts` throws rather than defaulting. Integration
-tests still own their separate Testcontainers databases. This is local namespacing,
+tests use a separate Testcontainers server, with one database per test file. This is local namespacing,
 not a security boundary: every local checkout knows the dedicated container’s
 administrator password.
 

@@ -1,6 +1,4 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted, Stream } from "effect";
@@ -45,7 +43,7 @@ import {
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -60,7 +58,7 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 type Services = ChatRepo | ChatService | CustomToolRepo | AttachmentRepo | SyncBus | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** messages.model_id / conversations.model_id are real FKs. */
@@ -95,13 +93,8 @@ const FakeGateway = Layer.succeed(AiGateway, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
@@ -168,7 +161,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) =>

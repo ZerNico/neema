@@ -1,8 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray, sql } from "drizzle-orm";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
-import { execSync } from "node:child_process";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -28,23 +26,18 @@ import { ScheduleService } from "~/modules/schedules/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let databaseUrl: string;
 let runtime: ManagedRuntime.ManagedRuntime<ScheduleRepo | Db, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, ScheduleRepo | Db>) =>
   runtime.runPromise(effect as never) as Promise<A>;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
+  database = await createTestDatabase();
+  const url = database.url;
   databaseUrl = url;
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
   runtime = ManagedRuntime.make(
     ScheduleRepo.layer.pipe(
       Layer.provideMerge(Db.layer),
@@ -55,7 +48,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const makeUser = Effect.fn("test.makeUser")(function* () {

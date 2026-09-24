@@ -79,10 +79,15 @@ edit the wrong thing.
    database commands use checkout-isolated state on a dedicated Postgres at
    `127.0.0.1:5433`, provisioned by `pnpm dev:setup`; they do not read `.env`.
    See [development isolation](docs/internals/development.md).
-   Integration tests get their own throwaway Postgres from Testcontainers.
-2. **Integration tests need the pinned image.** `tests/integration/postgres-image.ts`
-   pins a pgvector image. `postgres:17-alpine` fails migrations with a bare
-   "drizzle-kit migrate" error that names no cause. Docker must be running.
+   Integration tests get a throwaway Postgres from Testcontainers.
+2. **Integration tests need the pinned image and share one server.**
+   `tests/integration/postgres-image.ts` pins a pgvector image;
+   `postgres:17-alpine` fails migrations with a bare "drizzle-kit migrate" error
+   that names no cause. Docker must be running. `global-setup.ts` starts one
+   server per run and migrates a template once; each file calls
+   `createTestDatabase()` for its own clone. Server-wide views such as
+   `pg_stat_activity` must filter `datname = current_database()`, or a test
+   sees, and may terminate, another file's sessions.
 3. **Vitest projects are by extension.** `--project unit` is `src/**/*.test.ts`,
    `--project ui` is `src/**/*.test.tsx`, `--project integration` is
    `tests/integration/**`. Running a `.test.tsx` under `unit` prints "No test

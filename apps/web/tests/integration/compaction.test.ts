@@ -1,7 +1,5 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { execSync } from "node:child_process";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
@@ -51,7 +49,7 @@ import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-s
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
@@ -66,7 +64,7 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 /** No declared window: the estimator falls back to its default. */
 let modelId: string;
 /** A window small enough that a handful of long turns overflow it. */
@@ -249,13 +247,8 @@ const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
 });
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
 
   const InfraLayer = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
@@ -335,7 +328,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, ChatRepo | AnalyticsRepo | StreamEngine | Db>) =>

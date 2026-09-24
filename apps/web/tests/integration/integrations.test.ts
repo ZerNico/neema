@@ -1,5 +1,3 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { execSync } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { PgClient } from "@effect/sql-pg";
 import { count, eq } from "drizzle-orm";
@@ -29,7 +27,7 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import { POSTGRES_IMAGE } from "./postgres-image.ts";
+import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
 
@@ -40,7 +38,7 @@ type Services =
   | IntegrationApprovals
   | KnowledgeSourceService;
 
-let container: StartedPostgreSqlContainer;
+let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 
@@ -203,13 +201,8 @@ const insert = <A>(f: (db: Db["Service"]) => Effect.Effect<A, unknown>) =>
 
 beforeAll(async () => {
   await startOutline();
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-  const url = container.getConnectionUri();
-  execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-  });
+  database = await createTestDatabase();
+  const url = database.url;
   const Infra = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
@@ -227,7 +220,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.dispose();
-  await container?.stop();
+  await database?.drop();
   outline?.close();
 });
 
