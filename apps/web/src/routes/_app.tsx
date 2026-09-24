@@ -23,6 +23,7 @@ import { AppMotionProvider } from "~/ui/motion.tsx";
 import { AppHeader } from "~/ui/desktop-chrome.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
+import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
 export const Route = createFileRoute("/_app")({
@@ -70,28 +71,31 @@ function AuthenticatedLayout({
         <ConfirmProvider>
           <FeatureTourProvider enabled={!identity.impersonatedBy}>
             <SidebarProvider>
-              <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
-              <SidebarInset className="h-svh overflow-hidden">
-                <DetailPanelProvider>
-                  <HeaderSlotProvider>
-                    <AppHeader>
-                      <SidebarTrigger />
-                      <HeaderSlot />
-                      <WorkAttention />
-                    </AppHeader>
-                    <IntegrationApprovalNotifier />
-                    <WorkConnectionNotice />
-                    {/* The detail rail is a sibling of the content, not an overlay:
+              <CommandPaletteProvider>
+                <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
+                <SidebarInset className="h-svh overflow-hidden">
+                  <DetailPanelProvider>
+                    <HeaderSlotProvider>
+                      <AppHeader>
+                        <SidebarTrigger />
+                        <SearchButton />
+                        <HeaderSlot />
+                        <WorkAttention />
+                      </AppHeader>
+                      <IntegrationApprovalNotifier />
+                      <WorkConnectionNotice />
+                      {/* The detail rail is a sibling of the content, not an overlay:
                 opening it shrinks the chat column instead of covering it. */}
-                    <div className="flex min-h-0 flex-1">
-                      <main className="min-w-0 flex-1">
-                        <Outlet />
-                      </main>
-                      <DetailPanelRail />
-                    </div>
-                  </HeaderSlotProvider>
-                </DetailPanelProvider>
-              </SidebarInset>
+                      <div className="flex min-h-0 flex-1">
+                        <main className="min-w-0 flex-1">
+                          <Outlet />
+                        </main>
+                        <DetailPanelRail />
+                      </div>
+                    </HeaderSlotProvider>
+                  </DetailPanelProvider>
+                </SidebarInset>
+              </CommandPaletteProvider>
             </SidebarProvider>
           </FeatureTourProvider>
         </ConfirmProvider>

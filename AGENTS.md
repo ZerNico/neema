@@ -219,6 +219,8 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
+- `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
+  expression index for chat text, and what another search backend would need.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,
   cache anchors and which providers need them.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
