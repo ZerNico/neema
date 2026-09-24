@@ -1,5 +1,5 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { AUTH_SETTINGS_ID, authSettings, user, userApprovals } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
@@ -22,7 +22,7 @@ export class SignupRepo extends Context.Service<
      */
     policy(): Effect.Effect<SignupPolicy>;
     setPolicy(policy: SignupPolicy): Effect.Effect<void>;
-    /** Null for a user with no row, which is a user created before this existed. */
+    /** Reconciles a missing row before returning the user's status. */
     statusOf(userId: string): Effect.Effect<ApprovalStatus | null>;
     record(input: { userId: string; status: ApprovalStatus }): Effect.Effect<void>;
     listPending(): Effect.Effect<PendingAccount[]>;
@@ -62,6 +62,19 @@ export class SignupRepo extends Context.Service<
         }),
 
         statusOf: Effect.fn("SignupRepo.statusOf")(function* (userId) {
+          // The bootstrap claim is the sole authority for recovering a lost
+          // after-hook. Everyone else without a row enters the admin queue.
+          yield* db
+            .execute(sql`
+            INSERT INTO user_approvals (user_id, status, decided_at)
+            SELECT u.id,
+              CASE WHEN b.owner_id = u.id THEN 'approved' ELSE 'pending' END,
+              CASE WHEN b.owner_id = u.id THEN now() ELSE NULL END
+            FROM "user" u LEFT JOIN signup_bootstrap b ON b.id = ${AUTH_SETTINGS_ID}
+            WHERE u.id = ${userId}
+            ON CONFLICT (user_id) DO NOTHING
+          `)
+            .pipe(Effect.orDie);
           const rows = yield* db
             .select({ status: userApprovals.status })
             .from(userApprovals)
@@ -72,19 +85,56 @@ export class SignupRepo extends Context.Service<
 
         record: Effect.fn("SignupRepo.record")(function* ({ userId, status }) {
           yield* db
-            .insert(userApprovals)
-            .values({
-              userId,
-              status,
-              ...(status === "approved" ? { decidedAt: new Date() } : {}),
-            })
-            // Creation writes this row once. Doing nothing on conflict keeps a
-            // retried signup from resetting a decision an admin already made.
-            .onConflictDoNothing({ target: userApprovals.userId })
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const inserted = yield* tx
+                  .insert(userApprovals)
+                  .values({
+                    userId,
+                    status,
+                    ...(status === "approved" ? { decidedAt: new Date() } : {}),
+                  })
+                  .onConflictDoNothing({ target: userApprovals.userId })
+                  .returning({ userId: userApprovals.userId });
+                if (inserted.length || status !== "approved") return;
+
+                // A status read may have reconciled a missing row while the
+                // signup after-hook was still pending. Only that undecided row
+                // may be promoted; an admin decision wins the row lock.
+                const promoted = yield* tx
+                  .update(userApprovals)
+                  .set({ status: "approved", decidedAt: new Date() })
+                  .where(
+                    and(
+                      eq(userApprovals.userId, userId),
+                      eq(userApprovals.status, "pending"),
+                      isNull(userApprovals.decidedAt),
+                      isNull(userApprovals.decidedBy),
+                    ),
+                  )
+                  .returning({ userId: userApprovals.userId });
+                if (promoted.length)
+                  yield* notifyOnCommit(tx, {
+                    scope: "user",
+                    userId,
+                    event: { type: "account.approval.changed" },
+                  });
+              }),
+            )
             .pipe(Effect.orDie);
         }),
 
         listPending: Effect.fn("SignupRepo.listPending")(function* () {
+          yield* db
+            .execute(sql`
+            INSERT INTO user_approvals (user_id, status)
+            SELECT u.id, 'pending' FROM "user" u
+            LEFT JOIN user_approvals a ON a.user_id = u.id
+            LEFT JOIN signup_bootstrap b ON b.id = ${AUTH_SETTINGS_ID}
+            WHERE a.user_id IS NULL AND (b.owner_id IS NULL OR b.owner_id <> u.id)
+            ON CONFLICT (user_id) DO NOTHING
+          `)
+            .pipe(Effect.orDie);
           return yield* db
             .select({
               userId: userApprovals.userId,

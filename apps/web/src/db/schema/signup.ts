@@ -18,6 +18,12 @@ export const authSettings = pgTable("auth_settings", {
 
 export const AUTH_SETTINGS_ID = "instance";
 
+/** This claim outlives its user: deletion or a failed signup must never elect a second admin. */
+export const signupBootstrap = pgTable("signup_bootstrap", {
+  id: text().primaryKey(),
+  ownerId: text("owner_id").notNull(),
+});
+
 export const userApprovals = pgTable("user_approvals", {
   userId: text("user_id")
     .primaryKey()

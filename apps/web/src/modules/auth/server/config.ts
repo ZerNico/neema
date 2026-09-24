@@ -91,7 +91,7 @@ export interface SignupGate {
     providerId: string | null;
     isFirstUser: boolean;
   }) => Promise<void>;
-  /** Whether an existing account may use the app; a missing record counts as yes. */
+  /** Whether an existing account may use the app; missing approvals are reconciled first. */
   approved: (userId: string) => Promise<boolean>;
 }
 
@@ -155,16 +155,26 @@ export function createAppAuth({
       user: {
         create: {
           before: async (userData) => {
+            // Better Auth writes the user after this hook, outside our claim
+            // transaction. Keep the preallocated id even if that write fails:
+            // recycling it could admit a late writer as a second admin.
+            const id = uuidv7();
             const [row] = await db.select({ n: count() }).from(schema.user);
-            const isFirstUser = (row?.n ?? 0) === 0;
-            // The account that becomes admin is how a fresh instance is set
-            // up, so it is never refused; there is nobody to ask yet.
+            const [claimed] =
+              (row?.n ?? 0) === 0
+                ? await db
+                    .insert(schema.signupBootstrap)
+                    .values({ id: schema.AUTH_SETTINGS_ID, ownerId: id })
+                    .onConflictDoNothing()
+                    .returning({ ownerId: schema.signupBootstrap.ownerId })
+                : [];
+            const isFirstUser = claimed?.ownerId === id;
             if (!isFirstUser && !(await signup.allow())) {
               throw new APIError("FORBIDDEN", {
                 message: "This instance is not accepting new accounts.",
               });
             }
-            return { data: { ...userData, role: isFirstUser ? "admin" : "user" } };
+            return { data: { ...userData, id, role: isFirstUser ? "admin" : "user" } };
           },
           after: async (created, context) => {
             await signup.record({

@@ -90,6 +90,5 @@ export async function sessionFromHeaders(headers: Headers) {
   const status = await runtime.runPromise(
     Effect.flatMap(SignupRepo, (repo) => repo.statusOf(session.user.id)),
   );
-  // No row means an account created before approvals existed.
-  return { session, approved: status === null || status === "approved" };
+  return { session, approved: status === "approved" };
 }

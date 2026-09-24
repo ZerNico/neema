@@ -116,7 +116,8 @@ export const desktopSessions = ({
             if (!verifier || !sameHash(await challengeOf(verifier), challenge)) throw invalid();
           }
           const user = await ctx.context.internalAdapter.findUserById(userId);
-          if (!user || (user as { banned?: boolean | null }).banned) throw invalid();
+          if (!user || (user as { banned?: boolean | null }).banned || !(await approved(userId)))
+            throw invalid();
           // `overrideAll` applies the override after the adapter's own 7-day
           // default; without it the longer expiry is silently replaced.
           const session = await ctx.context.internalAdapter.createSession(
@@ -148,7 +149,11 @@ export const desktopSessions = ({
           const { session, user } = ctx.context.session;
           // Only a session minted by the shell (its stored UA carries the
           // product token) gets the long lease, and never while impersonating.
-          if (!hasDesktopMarker(session.userAgent) || impersonated(session)) {
+          if (
+            !hasDesktopMarker(session.userAgent) ||
+            impersonated(session) ||
+            !(await approved(user.id))
+          ) {
             throw new APIError("FORBIDDEN", { message: "Only the desktop app can do this." });
           }
           const updated = await ctx.context.internalAdapter.updateSession(session.token, {
@@ -173,6 +178,8 @@ export const desktopSessions = ({
         { method: "GET", use: [sessionMiddleware] },
         async (ctx) => {
           const { session, user } = ctx.context.session;
+          if (!(await approved(user.id)))
+            throw new APIError("FORBIDDEN", { message: "This account cannot list devices." });
           const sessions = await ctx.context.internalAdapter.listSessions(user.id, {
             onlyActiveSessions: true,
           });
@@ -195,7 +202,7 @@ export const desktopSessions = ({
         { method: "POST", body: RevokeBody, use: [sensitiveSessionMiddleware] },
         async (ctx) => {
           const { session, user } = ctx.context.session;
-          if (impersonated(session)) {
+          if (impersonated(session) || !(await approved(user.id))) {
             throw new APIError("FORBIDDEN", { message: "This account cannot sign out devices." });
           }
           if (ctx.body.id === session.id) {

@@ -19,7 +19,7 @@ export const getApprovalStatus = createServerFn({ method: "GET" }).handler(async
   const status = await runtime.runPromise(
     Effect.flatMap(SignupRepo, (repo) => repo.statusOf(current.session.user.id)),
   );
-  return status ?? "approved";
+  return status ?? "pending";
 });
 
 export const getSignupPolicy = createServerFn({ method: "GET" })

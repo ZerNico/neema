@@ -1,14 +1,15 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { PgClient } from "@effect/sql-pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { Pool } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { oauthProviders, user, userApprovals } from "~/db/schema/index.ts";
+import { oauthProviders, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
 import { createAppAuth } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { makeSignupGate } from "~/modules/auth/server/signup-gate.ts";
@@ -30,6 +31,16 @@ const signups = <A>(f: (r: SignupRepo["Service"]) => Effect.Effect<A>) =>
   runtime.runPromise(Effect.flatMap(SignupRepo, f));
 
 let seededPolicy: string | undefined;
+let gate: ReturnType<typeof makeSignupGate>;
+
+const makeAuth = () =>
+  createAppAuth({
+    db,
+    baseURL: origin,
+    secret: "isolated-auth-test-secret-at-least-32-characters",
+    purgeUserFiles: async () => {},
+    signup: gate,
+  });
 
 const insertUser = async (name: string) => {
   const id = uuidv7();
@@ -59,6 +70,34 @@ const signUp = async (name: string) => {
   );
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
+};
+
+const signInAndRequestDesktop = async (name: string) => {
+  const login = await auth.handler(
+    new Request(`${origin}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({
+        email: `${name}@example.test`,
+        password: "isolated-test-password-123",
+      }),
+    }),
+  );
+  const cookie = login.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const desktop = await auth.handler(
+    new Request(`${origin}/api/auth/desktop/ticket`, {
+      method: "POST",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: "{}",
+    }),
+  );
+  const devices = await auth.handler(
+    new Request(`${origin}/api/auth/desktop/devices`, { headers: { origin, cookie } }),
+  );
+  return { login: login.status, desktop: desktop.status, devices: devices.status };
 };
 
 const statusOf = async (name: string) => {
@@ -94,14 +133,8 @@ beforeAll(async () => {
     )
   ).rows[0]?.signup_policy;
 
-  auth = createAppAuth({
-    db,
-    baseURL: origin,
-    secret: "isolated-auth-test-secret-at-least-32-characters",
-    purgeUserFiles: async () => {},
-    // The gate production wires into the same factory, on this runtime.
-    signup: makeSignupGate((effect) => runtime.runPromise(effect)),
-  });
+  gate = makeSignupGate((effect) => runtime.runPromise(effect));
+  auth = makeAuth();
 }, 120_000);
 
 afterAll(async () => {
@@ -112,13 +145,40 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.delete(user);
+  await db.delete(signupBootstrap);
   await db.delete(oauthProviders);
   await signups((repo) => repo.setPolicy("approval"));
+  auth = makeAuth();
 });
 
 describe("who gets an account", () => {
   it("ships set to approval, so an upgraded instance stops admitting strangers", () => {
     expect(seededPolicy).toBe("approval");
+  });
+
+  it("seeds existing users and approvals in the upgrade without electing a missing admin", async () => {
+    const originalAdmin = await insertUser("legacy-admin");
+    const other = await insertUser("legacy-other");
+    await db.update(user).set({ role: "admin" }).where(eq(user.id, originalAdmin));
+    await signups((repo) => repo.record({ userId: other, status: "rejected" }));
+    const migration = readFileSync(
+      new URL("../../drizzle/20260924122445_premium_banshee/migration.sql", import.meta.url),
+      "utf8",
+    );
+    const statements = migration.split("--> statement-breakpoint");
+    for (const statement of statements.slice(1, 3)) await pool.query(statement);
+    expect((await db.select().from(signupBootstrap))[0]?.ownerId).toBe(originalAdmin);
+    expect(await signups((repo) => repo.statusOf(originalAdmin))).toBe("approved");
+    expect(await signups((repo) => repo.statusOf(other))).toBe("rejected");
+
+    await db.delete(user);
+    await db.delete(signupBootstrap);
+    const unclaimed = await insertUser("legacy-no-admin");
+    for (const statement of statements.slice(1, 3)) await pool.query(statement);
+    expect((await db.select().from(signupBootstrap))[0]?.ownerId).toBe("legacy-no-admin");
+    expect(await signups((repo) => repo.statusOf(unclaimed))).toBe("approved");
+    await signups((repo) => repo.setPolicy("closed"));
+    expect((await signUp("not-an-admin")).status).toBe(403);
   });
 
   it("lets the first account in as an approved admin, having nobody to ask", async () => {
@@ -150,6 +210,114 @@ describe("who gets an account", () => {
 
     expect((await signUp("newcomer")).status).not.toBe(200);
     expect(await db.select().from(user)).toHaveLength(1);
+  });
+
+  it.each(["open", "closed"] as const)(
+    "gives exactly one concurrent first signup the admin claim under %s policy",
+    async (policy) => {
+      await signups((repo) => repo.setPolicy(policy));
+      const results = await Promise.all([signUp("first"), signUp("second")]);
+      const rows = await db.select().from(user);
+      const owners = rows.filter((row) => row.role === "admin");
+      const [claim] = await db.select().from(signupBootstrap);
+      expect(owners).toHaveLength(1);
+      expect(claim?.ownerId).toBe(owners[0]?.id);
+      expect(results.filter((result) => result.status === 200)).toHaveLength(
+        policy === "open" ? 2 : 1,
+      );
+      expect(rows).toHaveLength(policy === "open" ? 2 : 1);
+    },
+  );
+
+  it("reserves a failed pre-insert claim until an operator repairs it", async () => {
+    await pool.query(`CREATE FUNCTION reject_first_signup() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'test rejects insert'; END $$`);
+    await pool.query(`CREATE TRIGGER reject_first_signup BEFORE INSERT ON "user"
+      FOR EACH ROW EXECUTE FUNCTION reject_first_signup()`);
+    try {
+      expect((await signUp("first")).status).toBe(422);
+    } finally {
+      await pool.query(`DROP TRIGGER reject_first_signup ON "user"`);
+      await pool.query(`DROP FUNCTION reject_first_signup()`);
+    }
+    const [claim] = await db.select().from(signupBootstrap);
+    expect(claim?.ownerId).toBeTruthy();
+    expect(await db.select().from(user)).toHaveLength(0);
+    await signups((repo) => repo.setPolicy("closed"));
+    expect((await signUp("next")).status).toBe(403);
+    expect(await db.select().from(user)).toHaveLength(0);
+  });
+
+  it("repairs the bootstrap approval after an after-hook failure", async () => {
+    auth = createAppAuth({
+      db,
+      baseURL: origin,
+      secret: "isolated-auth-test-secret-at-least-32-characters",
+      purgeUserFiles: async () => {},
+      signup: {
+        ...gate,
+        record: async () => {
+          throw new Error("lost approval write");
+        },
+      },
+    });
+    await signUp("founder").catch(() => {});
+    const [founder] = await db.select().from(user);
+    expect(founder?.role).toBe("admin");
+    expect(await db.select().from(userApprovals)).toHaveLength(0);
+    expect(await gate.approved(founder!.id)).toBe(true);
+    expect(await statusOf("founder")).toBe("approved");
+    expect(await signInAndRequestDesktop("founder")).toEqual({
+      login: 200,
+      desktop: 200,
+      devices: 200,
+    });
+  });
+
+  it("denies and reconciles a later account whose after-hook failed", async () => {
+    await signUp("founder");
+    auth = createAppAuth({
+      db,
+      baseURL: origin,
+      secret: "isolated-auth-test-secret-at-least-32-characters",
+      purgeUserFiles: async () => {},
+      signup: {
+        ...gate,
+        record: async () => {
+          throw new Error("lost approval write");
+        },
+      },
+    });
+    await signUp("missing").catch(() => {});
+    const [missing] = await db.select().from(user).where(eq(user.email, "missing@example.test"));
+    expect(missing?.role).toBe("user");
+    expect(
+      await db.select().from(userApprovals).where(eq(userApprovals.userId, missing!.id)),
+    ).toHaveLength(0);
+    expect(await signInAndRequestDesktop("missing")).toEqual({
+      login: 200,
+      desktop: 403,
+      devices: 403,
+    });
+    expect(await gate.approved(missing!.id)).toBe(false);
+    expect(await statusOf("missing")).toBe("pending");
+    expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).toContain(
+      missing!.id,
+    );
+  });
+
+  it("lets administrators see other missing rows without overwriting a decision", async () => {
+    const adminId = (await signUp("founder")).body.user.id as string;
+    const missingId = await insertUser("missing");
+    const rejectedId = await insertUser("rejected");
+    await signups((repo) => repo.record({ userId: rejectedId, status: "rejected" }));
+    const pending = await signups((repo) => repo.listPending());
+    expect(pending.map((row) => row.userId)).toContain(missingId);
+    expect(await signups((repo) => repo.statusOf(rejectedId))).toBe("rejected");
+    await signups((repo) =>
+      repo.decide({ userId: missingId, status: "approved", decidedBy: adminId }),
+    );
+    expect(await gate.approved(missingId)).toBe(true);
   });
 
   it("lets a trusted provider skip the queue while an untrusted one waits", async () => {
@@ -186,13 +354,87 @@ describe("who gets an account", () => {
     // Inserted rather than signed up, because an email signup would already
     // have asked the gate and the approval row is written once.
     const colleague = await insertUser("colleague");
+    const secondColleague = await insertUser("second-colleague");
     const stranger = await insertUser("stranger");
 
+    expect(await signups((repo) => repo.statusOf(colleague))).toBe("pending");
+    expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).toContain(
+      secondColleague,
+    );
     await gate.record({ userId: colleague, providerId: "work", isFirstUser: false });
+    await gate.record({ userId: secondColleague, providerId: "work", isFirstUser: false });
     await gate.record({ userId: stranger, providerId: "github", isFirstUser: false });
 
     expect(await signups((repo) => repo.statusOf(colleague))).toBe("approved");
+    expect(await signups((repo) => repo.statusOf(secondColleague))).toBe("approved");
+    expect(await gate.approved(colleague)).toBe(true);
+    expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).not.toContain(
+      secondColleague,
+    );
     expect(await signups((repo) => repo.statusOf(stranger))).toBe("pending");
+  });
+
+  it("keeps an administrator’s decision when a late approval arrives", async () => {
+    const adminId = (await signUp("founder")).body.user.id as string;
+    for (const decision of ["approved", "rejected"] as const) {
+      const userId = await insertUser(`late-${decision}`);
+      await signups((repo) => repo.statusOf(userId));
+      await signups((repo) => repo.decide({ userId, status: decision, decidedBy: adminId }));
+      const before = (
+        await db.select().from(userApprovals).where(eq(userApprovals.userId, userId))
+      )[0]!;
+      await signups((repo) => repo.record({ userId, status: "approved" }));
+      const after = (
+        await db.select().from(userApprovals).where(eq(userApprovals.userId, userId))
+      )[0]!;
+      expect(after).toEqual(before);
+    }
+  });
+
+  it("promotes a reconciled account when open signup records approval", async () => {
+    await signUp("founder");
+    await signups((repo) => repo.setPolicy("open"));
+    const newcomer = await insertUser("open-reconciled");
+    expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).toContain(
+      newcomer,
+    );
+    await gate.record({ userId: newcomer, providerId: null, isFirstUser: false });
+    expect(await gate.approved(newcomer)).toBe(true);
+  });
+
+  it("promotes a row reconciled while Better Auth’s after-hook is paused", async () => {
+    await signUp("founder");
+    await signups((repo) => repo.setPolicy("open"));
+    const entered = Effect.runSync(Deferred.make<string>());
+    const release = Effect.runSync(Deferred.make<void>());
+    auth = createAppAuth({
+      db,
+      baseURL: origin,
+      secret: "isolated-auth-test-secret-at-least-32-characters",
+      purgeUserFiles: async () => {},
+      signup: {
+        ...gate,
+        record: async (input) => {
+          await runtime.runPromise(Deferred.succeed(entered, input.userId));
+          await runtime.runPromise(Deferred.await(release));
+          await gate.record(input);
+        },
+      },
+    });
+    const signup = signUp("racing");
+    try {
+      const userId = await runtime.runPromise(Deferred.await(entered));
+      expect(await signups((repo) => repo.statusOf(userId))).toBe("pending");
+      await runtime.runPromise(Deferred.succeed(release, undefined));
+      expect((await signup).status).toBe(200);
+      expect(await signups((repo) => repo.statusOf(userId))).toBe("approved");
+      expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).not.toContain(
+        userId,
+      );
+    } finally {
+      await runtime.runPromise(Deferred.succeed(release, undefined));
+      await signup;
+    }
   });
 
   it("takes effect on the next signup, not the next restart", async () => {

@@ -328,9 +328,16 @@ Differs from most Effect 3 material online.
   current request's user agent. A work attempt additionally stamps the sending
   install's machine id onto its generation config — attempt metadata for the
   foreign-chat banner, never auth. See `docs/internals/desktop.md`.
-- First registered user becomes admin via the `user.create.before` hook. Do not
-  bypass Better Auth for user creation. That first account is also the one
-  account no policy can refuse, since there is nobody to ask yet.
+- The first signup claims a durable bootstrap owner before Better Auth inserts
+  the user. Only that owner becomes admin and bypasses closed signup; a failed
+  insert leaves the claim reserved, requiring quiesced operator repair rather
+  than automatic re-election. To recover, stop account creation and wait for
+  in-flight signups to finish, verify the claimed ID has no user row, then
+  deliberately clear or transfer the claim before reopening signup. Do not
+  bypass Better Auth for user creation.
+  Missing approval rows deny access except for that claimed owner, whose row
+  is repaired on read; other missing rows enter the pending queue. The migration
+  claims existing installations, including those with users but no admin.
 - `auth_settings.signup_policy` governs every route in, `/register` and OAuth
   alike, and is read on the creation it governs rather than captured at
   startup. `closed` refuses creation; `approval` still creates the account and

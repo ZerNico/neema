@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Schedule, Stream } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { session, user, verification } from "~/db/schema/index.ts";
+import { session, signupBootstrap, user, verification } from "~/db/schema/index.ts";
 import {
   challengeOf,
   createVerifier,
@@ -179,6 +179,7 @@ let browser: Client, desktop: Client, userId: string;
 let ipCounter = 0;
 beforeEach(async () => {
   await db.delete(user);
+  await db.delete(signupBootstrap);
   await db.delete(verification);
   pending.clear();
   // A fresh address per test keeps the in-memory limiter from carrying counts

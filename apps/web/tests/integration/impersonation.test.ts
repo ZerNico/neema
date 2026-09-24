@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { session, user } from "~/db/schema/index.ts";
+import { session, signupBootstrap, user } from "~/db/schema/index.ts";
 import { createAppAuth, type ImpersonationEvent } from "~/modules/auth/server/config.ts";
 import { projectSessionIdentity } from "~/modules/auth/identity.ts";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
@@ -91,6 +91,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await db.delete(user);
+  await db.delete(signupBootstrap);
   logs.length = 0;
   logger.mockClear();
   admin = new Browser();
