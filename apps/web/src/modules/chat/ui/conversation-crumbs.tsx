@@ -6,7 +6,7 @@ import { useState } from "react";
 import { scheduleQuery } from "~/modules/schedules/client/queries.ts";
 import { cadenceLabel, nextFireLabel } from "~/modules/schedules/ui/schedule-labels.ts";
 import { HeaderContent } from "~/ui/header-slot.tsx";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/hover-card.tsx";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
 import { Badge } from "~/ui/primitives/badge";
 import { agentIcon } from "./context-picker.tsx";
 import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
