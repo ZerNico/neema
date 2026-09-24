@@ -280,6 +280,14 @@ export const ChatInput = forwardRef<
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | "skills" | null>(null);
   const [picker, setPicker] = useState<ContextPickerKind | "skills" | null>(null);
+  // The popup opens on the side the menu did: on an empty new chat both drop
+  // below the composer, and a picker above it would send the pointer across it.
+  const menuPopup = useRef<HTMLDivElement>(null);
+  const [pickerSide, setPickerSide] = useState<"top" | "bottom">("top");
+  const choosePicker = (kind: ContextPickerKind | "skills") => {
+    setPickerSide(menuPopup.current?.dataset.side === "bottom" ? "bottom" : "top");
+    setPendingPicker(kind);
+  };
   const { data: parsingAvailability } = useQuery({
     ...documentParsingAvailabilityQuery,
     enabled: attachments !== undefined && workspaceImports === undefined,
@@ -595,7 +603,11 @@ export const ChatInput = forwardRef<
             </DropdownMenuTrigger>
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start" className={cn(hasTools && "w-64")}>
+          <DropdownMenuContent
+            ref={menuPopup}
+            align="start"
+            className={cn(hasTools && "w-64")}
+          >
             {target ? (
               <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
                 <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
@@ -607,14 +619,14 @@ export const ChatInput = forwardRef<
                 selection={context.selection}
                 agentLocked={context.agentLocked || !canChooseAgent}
                 knowledgeEnabled={canChooseKnowledge}
-                onPick={setPendingPicker}
+                onPick={choosePicker}
                 disabled={controlsDisabled}
               />
             ) : null}
             {skills && canChooseSkills ? (
               <DropdownMenuItem
                 disabled={controlsDisabled}
-                onClick={() => setPendingPicker("skills")}
+                onClick={() => choosePicker("skills")}
               >
                 <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
                 Skills
@@ -689,6 +701,7 @@ export const ChatInput = forwardRef<
             open={picker === "skills"}
             onOpenChange={(open) => setPicker(open ? "skills" : null)}
             anchor={menuAnchor}
+            side={pickerSide}
           />
         ) : null}
         {context && canChooseAgent && !context.agentLocked ? (
@@ -698,6 +711,7 @@ export const ChatInput = forwardRef<
             open={picker === "agent"}
             onOpenChange={(open) => setPicker(open ? "agent" : null)}
             anchor={menuAnchor}
+            side={pickerSide}
           />
         ) : null}
         {context && canChooseKnowledge ? (
@@ -708,6 +722,7 @@ export const ChatInput = forwardRef<
             open={picker === "collections"}
             onOpenChange={(open) => setPicker(open ? "collections" : null)}
             anchor={menuAnchor}
+            side={pickerSide}
           />
         ) : null}
         {mode && capabilities?.work ? (

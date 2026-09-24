@@ -8,6 +8,7 @@ export function SkillPicker({
   open,
   onOpenChange,
   anchor,
+  side,
   limit = 5,
 }: {
   items: readonly SkillSummary[];
@@ -16,6 +17,7 @@ export function SkillPicker({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   anchor: HTMLElement | null;
+  side?: "top" | "bottom";
   limit?: number;
 }) {
   return (
@@ -26,6 +28,7 @@ export function SkillPicker({
       open={open}
       onOpenChange={onOpenChange}
       anchor={anchor}
+      {...(side ? { side } : {})}
       limit={limit}
       placeholder="Search your skills…"
       empty="No matching local skills."

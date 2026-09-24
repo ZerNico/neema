@@ -135,6 +135,8 @@ interface PickerPopupProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   anchor: HTMLElement | null;
+  /** The side the menu opened on, so the pointer need not cross the page. */
+  side: "top" | "bottom";
 }
 
 /** Searchable agent popup for a chat that has not started yet. */
@@ -144,6 +146,7 @@ export function AgentPicker({
   open,
   onOpenChange,
   anchor,
+  side,
 }: PickerPopupProps & {
   selection: ContextSelection;
   onAgentChange: (agentId: string | null) => void;
@@ -167,7 +170,7 @@ export function AgentPicker({
       }
       autoHighlight
     >
-      <ComboboxContent side="top" anchor={anchor} className="w-72 min-w-72">
+      <ComboboxContent side={side} anchor={anchor} className="w-72 min-w-72">
         <ComboboxInput placeholder="Search agents…" showTrigger={false} aria-label="Agent" />
         <ComboboxEmpty>
           {agents.isPending
@@ -219,6 +222,7 @@ export function CollectionPicker({
   open,
   onOpenChange,
   anchor,
+  side,
 }: PickerPopupProps & {
   selection: ContextSelection;
   agentCollectionIds: ReadonlySet<string>;
@@ -272,7 +276,7 @@ export function CollectionPicker({
       }
       autoHighlight
     >
-      <ComboboxContent side="top" anchor={anchor} className="w-72 min-w-72">
+      <ComboboxContent side={side} anchor={anchor} className="w-72 min-w-72">
         <ComboboxInput
           placeholder="Search collections…"
           showTrigger={false}

@@ -106,6 +106,7 @@ function Harness({ initial }: { initial: Parameters<typeof useContextSelection>[
           open={picker === "agent"}
           onOpenChange={(open) => setPicker(open ? "agent" : null)}
           anchor={anchor}
+          side="top"
         />
       )}
       <CollectionPicker
@@ -115,6 +116,7 @@ function Harness({ initial }: { initial: Parameters<typeof useContextSelection>[
         open={picker === "collections"}
         onOpenChange={(open) => setPicker(open ? "collections" : null)}
         anchor={anchor}
+        side="top"
       />
     </>
   );

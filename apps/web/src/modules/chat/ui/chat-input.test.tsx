@@ -586,6 +586,48 @@ describe("ChatInput plus menu", () => {
   });
 });
 
+describe("ChatInput pickers", () => {
+  it("opens a picker on the side the plus menu opened", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
+    client.setQueryData(["chat-models"], MODELS);
+    client.setQueryData(["tools", "web-search", "availability"], {
+      configured: false,
+      enabled: false,
+    });
+    render(
+      <AppMotionProvider>
+        <QueryClientProvider client={client}>
+          <ChatInput
+            value=""
+            onValueChange={() => {}}
+            onSubmit={() => {}}
+            disabled={false}
+            modelId="text-only"
+            onModelChange={() => {}}
+            searchEnabled={false}
+            onSearchEnabledChange={() => {}}
+            skills={{ items: [], selectedIds: [], onChange: () => {} }}
+          />
+        </QueryClientProvider>
+      </AppMotionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+    const skills = await screen.findByRole("menuitem", { name: /Skills/ });
+    const menuSide = skills.closest("[data-side]")!.getAttribute("data-side");
+    fireEvent.click(skills);
+    const search = await screen.findByPlaceholderText("Search your skills…");
+    await waitFor(() =>
+      expect(search.closest('[data-slot="combobox-content"]')).toHaveAttribute(
+        "data-side",
+        menuSide,
+      ),
+    );
+  });
+});
+
 describe("ChatInput attachment picking", () => {
   it("opens the hidden file input from the plus menu", async () => {
     const harness = setup();

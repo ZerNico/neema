@@ -27,6 +27,7 @@ export function ResourcePicker({
   open,
   onOpenChange,
   anchor,
+  side = "top",
   limit,
   placeholder,
   empty,
@@ -38,6 +39,8 @@ export function ResourcePicker({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   anchor: HTMLElement | null;
+  /** Open where the menu that led here opened, so the pointer need not cross the page. */
+  side?: "top" | "bottom";
   limit: number;
   placeholder: string;
   empty: string;
@@ -66,7 +69,7 @@ export function ResourcePicker({
       }
       autoHighlight
     >
-      <ComboboxContent side="top" anchor={anchor} className="w-72 max-w-[calc(100vw-24px)]">
+      <ComboboxContent side={side} anchor={anchor} className="w-72 max-w-[calc(100vw-24px)]">
         <ComboboxInput placeholder={placeholder} showTrigger={false} aria-label={placeholder} />
         <ComboboxEmpty>{empty}</ComboboxEmpty>
         <ComboboxList>
