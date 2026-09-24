@@ -16,6 +16,8 @@ import {
   ne,
   or,
   sql,
+  type SQL,
+  type SQLWrapper,
 } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import {
@@ -64,6 +66,13 @@ import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { escapeLike } from "~/server/sql.ts";
+import {
+  HIGHLIGHT_END,
+  HIGHLIGHT_START,
+  prefixTsQuery,
+  snippetFromHeadline,
+  type Snippet,
+} from "~/modules/search/text.ts";
 import {
   BranchNotAllowed,
   ConversationBusy,
@@ -218,6 +227,33 @@ export const QUEUE_LIMIT = 10;
 
 export type ConversationRow = typeof conversations.$inferSelect;
 /** A list row plus the live state the list surfaces (sidebar spinner). */
+/** One chat found by search; `messageId` and `snippet` are set when message text matched. */
+export interface ChatSearchHit {
+  conversationId: string;
+  title: string | null;
+  messageId: string | null;
+  snippet: Snippet | null;
+}
+
+/**
+ * Must repeat `messages_search_idx` exactly (`src/db/schema/chat.ts`), or
+ * Postgres cannot use the index and scans every message.
+ */
+const messageSearchVector = (content: SQLWrapper) =>
+  sql`to_tsvector('app_search'::regconfig, ${content})`;
+
+/**
+ * How far the recent window reaches before falling back to the index: chats,
+ * then messages back from each chat's newest. A frequent term that only
+ * appears further back in a long, recent chat can lose to ones found here.
+ */
+const SEARCH_WINDOW_CHATS = 40;
+const SEARCH_WINDOW_MESSAGES = 200;
+
+/** Citation markers and markdown emphasis, which read as noise in an excerpt. */
+const HEADLINE_NOISE = "\\[\\^[0-9]+\\]|[*#`]+";
+const HEADLINE_OPTIONS = `StartSel=${HIGHLIGHT_START}, StopSel=${HIGHLIGHT_END}, MaxWords=24, MinWords=12`;
+
 export type ConversationListRow = ConversationRow & {
   generating: boolean;
   /** Created by a schedule, or the chat a schedule keeps running in. */
@@ -635,6 +671,16 @@ export class ChatRepo extends Context.Service<
       conversations: ConversationListRow[];
       nextCursor: ConversationCursor | null;
     }>;
+    /**
+     * The user's chats whose title or message text matches, most recent first
+     * with title matches ahead. Each carries its newest matching message and
+     * an excerpt of it.
+     */
+    searchConversations(input: {
+      userId: string;
+      query: string;
+      limit: number;
+    }): Effect.Effect<ChatSearchHit[]>;
     getConversation(
       userId: string,
       conversationId: string,
@@ -1072,6 +1118,94 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.catchTag("SqlError", Effect.die));
         });
 
+      /**
+       * Newest matching message per chat among the user's most recent chats,
+       * each checked back through its latest messages. Bounded work, and the
+       * common case: a frequent term fills the page from recent chats without
+       * touching every match in the history. Newest chats first.
+       */
+      const recentMatches = (userId: string, query: SQL, limit: number) => {
+        const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
+        const recent = db
+          .select({
+            id: conversations.id,
+            title: conversations.title,
+            activity: sql<string>`${activity}`.as("recent_activity"),
+          })
+          .from(conversations)
+          .where(eq(conversations.userId, userId))
+          .orderBy(desc(activity), desc(conversations.id))
+          .limit(SEARCH_WINDOW_CHATS)
+          .as("recent");
+        const latest = db
+          .select({ id: messages.id, content: messages.content })
+          .from(messages)
+          .where(and(sql`${messages.conversationId} = ${recent.id}`, ne(messages.role, "system")))
+          .orderBy(desc(messages.createdAt), desc(messages.id))
+          .limit(SEARCH_WINDOW_MESSAGES)
+          .as("latest");
+        const hit = db
+          .select({ messageId: latest.id })
+          .from(latest)
+          .where(sql`${messageSearchVector(latest.content)} @@ ${query}`)
+          .limit(1)
+          .as("hit");
+        return db
+          .select({ conversationId: recent.id, title: recent.title, messageId: hit.messageId })
+          .from(recent)
+          .innerJoinLateral(hit, sql`true`)
+          .orderBy(desc(recent.activity), desc(recent.id))
+          .limit(limit)
+          .pipe(Effect.orDie);
+      };
+
+      /**
+       * Newest matching message per chat across the whole history, through
+       * the index. Only for terms too rare to fill a page from recent chats.
+       * A broad term's match list outgrows the default work_mem; Postgres then
+       * rechecks whole pages and recomputes each message's vector, which is
+       * seconds instead of milliseconds at a million messages.
+       */
+      const indexedMatches = (userId: string, query: SQL, limit: number) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.execute(sql`set local work_mem = '64MB'`);
+              const matched = tx
+                .selectDistinctOn([messages.conversationId], {
+                  conversationId: sql<string>`${messages.conversationId}`.as(
+                    "matched_conversation_id",
+                  ),
+                  messageId: sql<string>`${messages.id}`.as("matched_message_id"),
+                })
+                .from(messages)
+                .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+                .where(
+                  and(
+                    eq(conversations.userId, userId),
+                    ne(messages.role, "system"),
+                    sql`${messageSearchVector(messages.content)} @@ ${query}`,
+                  ),
+                )
+                .orderBy(messages.conversationId, desc(messages.createdAt), desc(messages.id))
+                .as("matched");
+              return yield* tx
+                .select({
+                  conversationId: conversations.id,
+                  title: conversations.title,
+                  messageId: matched.messageId,
+                })
+                .from(matched)
+                .innerJoin(conversations, eq(conversations.id, matched.conversationId))
+                .orderBy(
+                  desc(sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`),
+                  desc(conversations.id),
+                )
+                .limit(limit);
+            }),
+          )
+          .pipe(Effect.orDie);
+
       return ChatRepo.of({
         research,
         saveProviderReplay: (messageId, replay) =>
@@ -1128,6 +1262,69 @@ export class ChatRepo extends Context.Service<
               ? { activity: last.lastMessageAt ?? last.createdAt, id: last.id }
               : null,
           };
+        }),
+
+        searchConversations: Effect.fn("ChatRepo.searchConversations")(function* (input) {
+          const needle = input.query.trim();
+          if (!needle) return [];
+          const tsQuery = prefixTsQuery(needle);
+          const query = sql`to_tsquery('app_search'::regconfig, ${tsQuery ?? ""})`;
+          const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
+          const titled = yield* db
+            .select({ conversationId: conversations.id, title: conversations.title })
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.userId, input.userId),
+                ilike(conversations.title, `%${escapeLike(needle)}%`),
+              ),
+            )
+            .orderBy(desc(activity), desc(conversations.id))
+            .limit(input.limit)
+            .pipe(Effect.orDie);
+
+          // Punctuation-only input has no terms, so only titles can match it;
+          // titles alone may also fill the page, and they rank first anyway.
+          const searchText = tsQuery !== null && titled.length < input.limit;
+          const matched = searchText ? yield* recentMatches(input.userId, query, input.limit) : [];
+          const found =
+            searchText && matched.length < input.limit
+              ? yield* indexedMatches(input.userId, query, input.limit)
+              : matched;
+
+          const titledIds = new Set(titled.map((row) => row.conversationId));
+          const messageFor = new Map(found.map((row) => [row.conversationId, row.messageId]));
+          const hits = [
+            ...titled.map((row) => ({
+              conversationId: row.conversationId,
+              title: row.title,
+              messageId: messageFor.get(row.conversationId) ?? null,
+            })),
+            ...found.filter((row) => !titledIds.has(row.conversationId)),
+          ].slice(0, input.limit);
+
+          // Excerpts only for what is returned: ts_headline re-reads the whole
+          // text. Citation markers and markdown emphasis would read as noise.
+          const messageIds = hits.flatMap((hit) => (hit.messageId ? [hit.messageId] : []));
+          const headlines = messageIds.length
+            ? yield* db
+                .select({
+                  id: messages.id,
+                  headline: sql<string>`ts_headline('app_search'::regconfig, regexp_replace(regexp_replace(${messages.content}, ${HEADLINE_NOISE}, '', 'g'), '[[:space:]]+', ' ', 'g'), ${query}, ${HEADLINE_OPTIONS})`,
+                })
+                .from(messages)
+                .where(inArray(messages.id, messageIds))
+                .pipe(Effect.orDie)
+            : [];
+          const snippets = new Map(
+            headlines.map((row) => [row.id, snippetFromHeadline(row.headline)] as const),
+          );
+          return hits.map((hit) => ({
+            conversationId: hit.conversationId,
+            title: hit.title,
+            messageId: hit.messageId,
+            snippet: (hit.messageId && snippets.get(hit.messageId)) || null,
+          }));
         }),
 
         getConversation: Effect.fn("ChatRepo.getConversation")(function* (userId, conversationId) {

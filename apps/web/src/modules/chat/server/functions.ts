@@ -17,6 +17,7 @@ import {
   ActivateWorkTurnInput,
   UpdateWorkSettingsInput,
   RetryMessageInput,
+  SearchChatsInput,
   SendMessageInput,
   QueueMessageInput,
   QueueEntryIdInput,
@@ -58,6 +59,22 @@ export const listConversations = createServerFn({ method: "GET" })
                 : null,
             })),
           ),
+      ),
+    ),
+  );
+
+/** The palette's chat results: titles and message text, see ChatRepo.searchConversations. */
+export const searchChats = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(standard(SearchChatsInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatRepo.use((repo) =>
+        repo.searchConversations({
+          userId: context.session.user.id,
+          query: data.query,
+          limit: data.limit ?? 8,
+        }),
       ),
     ),
   );

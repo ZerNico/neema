@@ -70,6 +70,9 @@ export const conversations = pgTable(
     // Postgres does not index the referencing side of a foreign key, and
     // `on delete set null` from schedules scans it for every deleted schedule.
     index("conversations_schedule_id_idx").on(t.scheduleId),
+    // Trigrams, not words: a title substring matches in any script, including
+    // ones without spaces, and `ilike '%q%'` can use it.
+    index("conversations_title_trgm_idx").using("gin", t.title.op("gin_trgm_ops")),
     // Serves the sidebar's keyset paging, which orders by exactly this
     // expression pair (see ChatRepo.listConversations).
     index("conversations_user_activity_idx").on(
@@ -166,6 +169,13 @@ export const messages = pgTable(
   },
   (t) => [
     index("messages_conversation_id_idx").on(t.conversationId),
+    // An expression index, not a stored column: every full-row message read
+    // would otherwise carry the vector. Queries must repeat this expression
+    // exactly (`messageSearchVector` in ChatRepo). See docs/internals/search.md.
+    index("messages_search_idx").using(
+      "gin",
+      sql`to_tsvector('app_search'::regconfig, ${t.content})`,
+    ),
     // Serves the total conversation order `(created_at, id)`. Timestamps
     // collide within a turn; uuidv7 ids break the tie in insertion order, and
     // compaction boundaries are positions in exactly this sequence.

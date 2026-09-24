@@ -156,6 +156,11 @@ export const ListConversationsInput = Schema.Struct({
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 });
 
+export const SearchChatsInput = Schema.Struct({
+  query: Schema.String.check(Schema.isMaxLength(200)),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 }))),
+});
+
 /**
  * Queueing snapshots an ordinary submission, files included. Desktop fields
  * are checked at queue time but never stored: a Work entry takes fresh ones
