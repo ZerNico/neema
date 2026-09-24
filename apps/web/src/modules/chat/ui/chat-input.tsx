@@ -747,49 +747,8 @@ export const ChatInput = forwardRef<
             <span>Search</span>
           </Button>
         ) : null}
-        {onReasoningEffortChange && (selectedModel?.reasoningEfforts?.length ?? 0) > 0 ? (
-          <DropdownMenu open={reasoningMenuOpen} onOpenChange={setReasoningMenuOpen}>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm-collapsible"
-                  disabled={controlsDisabled}
-                  // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
-                  className="text-muted-foreground hover:text-foreground hover:bg-accent"
-                  aria-label={`Reasoning: ${reasoningEffort ? effortLabels[reasoningEffort] : "Default"}`}
-                />
-              }
-            >
-              <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
-              <span>{reasoningEffort ? effortLabels[reasoningEffort] : "Default"}</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start">
-              <DropdownMenuRadioGroup
-                value={reasoningEffort ?? "default"}
-                onValueChange={(chosenEffort) => {
-                  onReasoningEffortChange(
-                    chosenEffort === "default"
-                      ? null
-                      : (selectedModel?.reasoningEfforts?.find(
-                          (effort) => effort === chosenEffort,
-                        ) ?? null),
-                  );
-                  setReasoningMenuOpen(false);
-                }}
-              >
-                <DropdownMenuRadioItem value="default">Default</DropdownMenuRadioItem>
-                {selectedModel?.reasoningEfforts?.map((effort) => (
-                  <DropdownMenuRadioItem key={effort} value={effort}>
-                    {effortLabels[effort]}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        {/* One unit, so a narrow composer wraps model and send onto their own
-            row together instead of wherever the tools happen to run out. */}
+        {/* One unit, so a narrow composer wraps model, reasoning and send onto
+            their own row together instead of wherever the tools run out. */}
         <div className="flex min-w-0 grow items-center gap-1">
           <ModelPicker
             models={models}
@@ -807,6 +766,47 @@ export const ChatInput = forwardRef<
           >
             <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
           </ModelPicker>
+          {onReasoningEffortChange && (selectedModel?.reasoningEfforts?.length ?? 0) > 0 ? (
+            <DropdownMenu open={reasoningMenuOpen} onOpenChange={setReasoningMenuOpen}>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm-collapsible"
+                    disabled={controlsDisabled}
+                    // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent"
+                    aria-label={`Reasoning: ${reasoningEffort ? effortLabels[reasoningEffort] : "Default"}`}
+                  />
+                }
+              >
+                <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
+                <span>{reasoningEffort ? effortLabels[reasoningEffort] : "Default"}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start">
+                <DropdownMenuRadioGroup
+                  value={reasoningEffort ?? "default"}
+                  onValueChange={(chosenEffort) => {
+                    onReasoningEffortChange(
+                      chosenEffort === "default"
+                        ? null
+                        : (selectedModel?.reasoningEfforts?.find(
+                            (effort) => effort === chosenEffort,
+                          ) ?? null),
+                    );
+                    setReasoningMenuOpen(false);
+                  }}
+                >
+                  <DropdownMenuRadioItem value="default">Default</DropdownMenuRadioItem>
+                  {selectedModel?.reasoningEfforts?.map((effort) => (
+                    <DropdownMenuRadioItem key={effort} value={effort}>
+                      {effortLabels[effort]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {onStop && queueDraft ? (
               <Tooltip>
