@@ -37,6 +37,11 @@ export default defineConfig({
           name: "ui",
           include: ["src/**/*.test.tsx"],
           environment: "jsdom",
+          // Each jsdom file imports most of the app. One worker per core ran
+          // the suite at half this cap's speed and timed tests out. A
+          // different cap needs its own group, so these run after the rest.
+          maxWorkers: "50%",
+          sequence: { groupOrder: 1 },
           setupFiles: ["./tests/setup.ui.ts"],
         },
       },
