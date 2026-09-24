@@ -88,6 +88,10 @@ false`), so a page body is written against data already there. This includes loc
   these" and for verbs on that section's content (Verify and Debug on a custom tool's Source), never for
   Save. Dialogs always end in `DialogFooter`, Cancel then the primary on the right. A header Save that
   submits a form in the body reaches it through the `form` attribute, as the draft panel's does.
+  `DialogContent` caps height and scrolls a full-width inner area, not its rounded popup, so the
+  popup clips the scrollbar at the corners without leaving a gutter. Dialogs with a dedicated
+  inner scroller (Access) opt out with
+  `scrollable={false}`; call sites only choose a width, not their own popup overflow.
 
 ## Buttons and pending state
 

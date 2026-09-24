@@ -31,11 +31,7 @@ export const modelAccessQuery = queryOptions({
   queryFn: () => listModelAccess(),
 });
 
-/**
- * The model settings form is tall; both model dialogs share one width and
- * scroll inside the viewport instead of growing past it.
- */
-export const TALL_DIALOG_CLASS = "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl";
+export const MODEL_DIALOG_CLASS = "sm:max-w-2xl";
 
 export interface EditableModel {
   id: string;
@@ -76,7 +72,7 @@ export function ModelEditDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className={TALL_DIALOG_CLASS}>
+      <DialogContent className={MODEL_DIALOG_CLASS}>
         {model ? (
           <ModelEditForm
             key={model.id}

@@ -18,7 +18,7 @@ import {
 } from "../server/functions.ts";
 import { groupsQuery } from "./groups-page.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
-import { ModelEditDialog, TALL_DIALOG_CLASS } from "./model-edit-dialog.tsx";
+import { ModelEditDialog, MODEL_DIALOG_CLASS } from "./model-edit-dialog.tsx";
 import {
   emptyModelSettingsDraft,
   MODEL_TYPE_LABELS,
@@ -346,7 +346,7 @@ export function AddModelDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className={TALL_DIALOG_CLASS}>
+      <DialogContent className={MODEL_DIALOG_CLASS}>
         <DialogHeader>
           <DialogTitle>Add model</DialogTitle>
           <DialogDescription>

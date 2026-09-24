@@ -152,6 +152,11 @@
 html[data-desktop-chrome] {
   --desktop-titlebar-height: max(48px, env(titlebar-area-height, 0px));
   --desktop-content-height: calc(100svh - var(--desktop-titlebar-height));
+  --dialog-viewport-height: var(--desktop-content-height);
+}
+
+html[data-desktop-chrome] [data-slot="dialog-content"] {
+  top: calc(50% + var(--desktop-titlebar-height) / 2);
 }
 
 html[data-desktop-chrome] body {

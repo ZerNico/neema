@@ -249,7 +249,10 @@ export function AccessDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="flex max-h-[min(40rem,calc(100dvh-2rem))] min-h-0 flex-col">
+      <DialogContent
+        scrollable={false}
+        className="flex max-h-[min(40rem,calc(var(--dialog-viewport-height,100dvh)-2rem))] min-h-0 flex-col"
+      >
         <DialogHeader>
           <DialogTitle>Access</DialogTitle>
           <DialogDescription className="break-words">{title}</DialogDescription>
