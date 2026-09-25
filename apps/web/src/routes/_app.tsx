@@ -21,6 +21,7 @@ import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { AppHeader } from "~/ui/desktop-chrome.tsx";
+import { HistoryButtons } from "~/ui/history-buttons.tsx";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
@@ -78,6 +79,7 @@ function AuthenticatedLayout({
                     <HeaderSlotProvider>
                       <AppHeader>
                         <SidebarTrigger />
+                        <HistoryButtons />
                         <SearchButton />
                         <HeaderSlot />
                         <WorkAttention />

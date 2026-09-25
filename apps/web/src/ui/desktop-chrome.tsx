@@ -79,6 +79,9 @@ export function DesktopChromeProvider({ children }: { children: ReactNode }) {
   return <ChromeContext value={context}>{children}</ChromeContext>;
 }
 
+/** The shell's platform when it draws its own titlebar, else null. */
+export const useDesktopChromePlatform = () => useContext(ChromeContext).chrome?.platform ?? null;
+
 /** The portal keeps sidebar and Work contexts without moving their providers. */
 export function AppHeader({ children }: { children: ReactNode }) {
   const { chrome, target } = useContext(ChromeContext);
