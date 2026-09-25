@@ -47,6 +47,12 @@ import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { ProjectFileActivityRow } from "./project-file-activity-row.tsx";
+import {
+  SaveToProjectActions,
+  useWritableChatProject,
+} from "~/modules/projects/ui/save-to-project.tsx";
+import type { AttachmentKind } from "~/modules/attachments/constants.ts";
 import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
@@ -380,17 +386,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
                 <CollectionChip key={collectionId} collectionId={collectionId} />
               ))}
               {message.attachments?.map((attachment) => (
-                <AttachmentChip
-                  key={attachment.id}
-                  item={{
-                    fileName: attachment.fileName,
-                    size: attachment.size,
-                    kind: attachment.kind,
-                    previewUrl: attachment.kind === "image" ? attachmentUrl(attachment.id) : null,
-                  }}
-                  href={attachmentUrl(attachment.id)}
-                  preview={attachmentUrl(attachment.id)}
-                />
+                <StoredAttachmentChip key={attachment.id} attachment={attachment} />
               ))}
               {message.workspaceFiles?.map((name) => (
                 <WorkspaceFileChip key={name} fileName={name} />
@@ -429,6 +425,37 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   );
 }
 
+/** A file stored with the chat; in a project chat its preview can save it there. */
+function StoredAttachmentChip({
+  attachment,
+  thumbnail = true,
+}: {
+  attachment: { id: string; fileName: string; size: number; kind: AttachmentKind };
+  thumbnail?: boolean;
+}) {
+  const url = attachmentUrl(attachment.id);
+  const project = useWritableChatProject();
+  return (
+    <AttachmentChip
+      item={{
+        fileName: attachment.fileName,
+        size: attachment.size,
+        kind: attachment.kind,
+        ...(thumbnail ? { previewUrl: attachment.kind === "image" ? url : null } : {}),
+      }}
+      href={url}
+      preview={url}
+      {...(project
+        ? {
+            previewActions: (
+              <SaveToProjectActions project={project} attachmentId={attachment.id} url={url} />
+            ),
+          }
+        : {})}
+    />
+  );
+}
+
 function AssistantFileAttachment({ file }: { file: AssistantFile }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -439,11 +466,7 @@ function AssistantFileAttachment({ file }: { file: AssistantFile }) {
     // uses; the click opens the same preview the composer's chips open.
     return (
       <AttachmentChipRow className="my-3">
-        <AttachmentChip
-          item={{ fileName: attachment.fileName, size: attachment.size, kind: attachment.kind }}
-          href={url}
-          preview={url}
-        />
+        <StoredAttachmentChip attachment={attachment} thumbnail={false} />
       </AttachmentChipRow>
     );
   return (
@@ -500,17 +523,7 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
       {steer.attachments.length > 0 ? (
         <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
           {steer.attachments.map((attachment) => (
-            <AttachmentChip
-              key={attachment.id}
-              item={{
-                fileName: attachment.fileName,
-                size: attachment.size,
-                kind: attachment.kind,
-                previewUrl: attachment.kind === "image" ? attachmentUrl(attachment.id) : null,
-              }}
-              href={attachmentUrl(attachment.id)}
-              preview={attachmentUrl(attachment.id)}
-            />
+            <StoredAttachmentChip key={attachment.id} attachment={attachment} />
           ))}
         </AttachmentChipRow>
       ) : null}
@@ -613,6 +626,8 @@ const AssistantBody = memo(function AssistantBody({
       return <ScheduleDraftActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "document")
       return <DocumentActivityBlock key={part.key} activity={part.activity} />;
+    if (part.activity.family === "project-file")
+      return <ProjectFileActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "custom") {
       return <CustomToolActivityBlock key={part.key} activity={part.activity} />;
     }

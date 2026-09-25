@@ -658,10 +658,10 @@ describe("ChatInput attachment picking", () => {
     expect(click).toHaveBeenCalled();
   });
 
-  it("accepts the configured file types and resets the input after a pick", () => {
+  it("accepts any file type and resets the input after a pick", () => {
     const harness = setup();
     const input = fileInput(harness.container);
-    expect(input.accept).toContain("application/pdf");
+    expect(input.accept).toBe("");
     expect(input.multiple).toBe(true);
 
     pick(harness, textFile());
@@ -902,6 +902,38 @@ describe("ChatInput preview", () => {
 
     expect(screen.queryByRole("heading", { name: "Title" })).not.toBeInTheDocument();
     expect(screen.getByText(/# Title/)).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+
+  it("attaches a file nothing can preview, and offers it as a download", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const harness = setup({
+      upload: () =>
+        Promise.resolve(
+          dto({
+            id: "a-deck",
+            fileName: "deck.pptx",
+            mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            kind: "file",
+          }),
+        ),
+    });
+    pick(harness, new File(["PK"], "deck.pptx", { type: "" }));
+
+    const previewButton = await screen.findByRole("button", { name: "Preview deck.pptx" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    fireEvent.click(previewButton);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("There’s no preview for this kind of file."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/api/files/a-deck",
+    );
+    // Never fetched as text to render.
+    expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 

@@ -171,7 +171,7 @@ bounded preview, character count and bounded error.
 ## Files
 
 `run` may return `{ text?, files }` where every entry comes from
-`file(bytes | string, { name, mediaType, share? })`. The brand is a symbol, so an
+`file(bytes | string, { name, mediaType?, share? })`. The brand is a symbol, so an
 object that merely resembles that shape is still an ordinary JSON result. Files
 cross the worker boundary on the transfer list beside the text; the worker
 enforces count and byte caps (`CUSTOM_TOOL_LIMITS.files`, `fileBytes`,
@@ -179,30 +179,51 @@ enforces count and byte caps (`CUSTOM_TOOL_LIMITS.files`, `fileBytes`,
 
 A returned file is an attachment of the assistant message, stored through
 `acceptGeneratedFile` (`chat/server/generated-files.ts`), the path a model's own
-image output already takes: the same validator as an upload (sniffed images, a
-PDF header, UTF-8 text with a known extension), the same `blob_cleanup_intents`
-ledger, a `message_attachments` row, an `assistant_output.files` entry anchored at
-the tool call's text offset, and a `file` chunk. Reload, branch, retry and edit
-therefore treat it exactly as a generated image, and the client renders images
-inline and everything else as the attachment chip with the shared preview, right
-after the tool row that produced it. The row records its files by attachment id
-for reload but does not render them a second time.
+image output already takes: the same classification as an upload, so any type is
+kept and `mediaType` is only a hint ([files](files.md)), the same
+`blob_cleanup_intents` ledger, a `message_attachments` row, an
+`assistant_output.files` entry anchored at the tool call's text offset, and a
+`file` chunk. Reload, branch, retry and edit therefore treat it exactly as a
+generated image, and the client renders images inline and everything else as the
+attachment chip with the shared preview, right after the tool row that produced
+it. The row records its files by attachment id for reload but does not render
+them a second time.
 
 The model's tool result carries names, types and sizes only. `share: true` also
-puts the file in front of the model on its next round, through `fileForModel`,
-the rule an upload follows: bytes for a kind the model can take, extracted text
-for a PDF otherwise, a sentence for an image it cannot see. Retained files are
-replayed by the same rule when history is rebuilt, so switching to a narrower
-model later never fails a turn on a file it was handed earlier. A file the
-validator refuses is dropped with a warning; the text result still lands.
+puts the file in front of the model on its next round, by the rule an upload
+follows ([files](files.md#what-the-model-sees)). Retained files are replayed by
+the same rule when history is rebuilt, so switching to a narrower model later
+never fails a turn on a file it was handed earlier.
 
-The model's result also names each stored file by attachment id. In a Work
-chat that id is what `save_to_workspace` takes to copy the file onto the
-machine; see `docs/internals/desktop.md`. Nothing else reads it.
+The model's result also names each stored file by attachment id. That id is what
+`save_to_workspace` takes in a Work chat (see `docs/internals/desktop.md`) and
+what `save_project_file` takes in a project chat.
 
 An admin Test has no message to attach to, so its files come back inline as
 `data:` URLs (capped at `testFileBytes`) and preview through the same dialog
 without an "Open original" link.
+
+## File inputs
+
+`fileInput({ description?, accept? })` is a parameter the model fills with a
+string, a file id or name, and `run` receives as a `ToolInputFile` (`name`,
+`mediaType`, `size`, `bytes`, `text()`). The build writes the model-facing
+description; `accept` takes extensions or media types.
+
+- The schema decodes the string by asking the host, so a file parameter works at
+  any depth and only files a call actually names are loaded. The worker posts a
+  `file` message mid-call; the pool answers from the job's resolver and transfers
+  a fresh copy of the bytes. The job's deadline keeps running meanwhile.
+- The resolver (`chat/server/tool-files.ts`) is built per answer and bounded by
+  the sender: files in this chat (attached or produced), then the current version
+  of a project file in a project chat. An id matches before a name; among equal
+  names the newest chat file wins. A lookup that fails, or a file `accept` refuses,
+  becomes the decode error the model reads, never a failed answer.
+- Per call, at most `inputFiles` files and `inputFileBytes` together. The result
+  lists what the call read, with a project file's id and version, so the model can
+  save an edited copy as the next version.
+- Test has no chat: the admin picks files in the dialog and the arguments name
+  them.
 
 ## Worker lifecycle
 

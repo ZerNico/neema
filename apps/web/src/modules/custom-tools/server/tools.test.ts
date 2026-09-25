@@ -3,7 +3,7 @@ import { Effect, Stream } from "effect";
 import { Tool } from "effect/unstable/ai";
 import { renderHermesSystemBlock } from "~/modules/providers/server/hermes-tools.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
-import type { CustomToolManifest } from "../schema.ts";
+import { CUSTOM_TOOL_LIMITS, type CustomToolManifest } from "../schema.ts";
 import { CustomToolRuntime } from "./runtime.ts";
 import { prepareCustomTools } from "./tools.ts";
 
@@ -79,6 +79,59 @@ describe("prepareCustomTools", () => {
         moduleRevision.functions[0]!.parametersSchema,
       );
       expect(renderHermesSystemBlock([tool as never], "auto")).toContain('"$defs":{"Unit"');
+    }),
+  );
+
+  it.effect("reports which files a call read, and stops at the per-call limit", () =>
+    Effect.gen(function* () {
+      // Stands in for the worker: asks for each named file in turn.
+      const reading = CustomToolRuntime.of({
+        inspect: () => Effect.succeed([]),
+        run: ({ args, resolveFile }) =>
+          Effect.gen(function* () {
+            const names = (args as { files: string[] }).files;
+            for (const name of names) {
+              const outcome = yield* Effect.result(resolveFile!(name));
+              if (outcome._tag === "Failure")
+                return { ok: false, error: outcome.failure, logs: [], durationMs: 1 };
+            }
+            return { ok: true, output: "read", logs: [], durationMs: 1 };
+          }),
+      });
+      const prepared = prepareCustomTools([moduleRevision], reading, (name) =>
+        Effect.succeed({
+          name,
+          mediaType: "text/plain",
+          bytes: new Uint8Array(1),
+          source:
+            name === "deck.pptx"
+              ? { kind: "project" as const, fileId: "file-1", version: 3 }
+              : { kind: "chat" as const, attachmentId: `att-${name}` },
+        }),
+      );
+      const toolkit = yield* mergeToolGroups([prepared!.group]);
+      const call = (files: string[]) =>
+        toolkit!.handle("custom_weather__current", { files }).pipe(
+          Effect.flatMap(Stream.runCollect),
+          Effect.map((parts) => [...parts].at(-1)?.result),
+        );
+
+      expect(yield* call(["deck.pptx", "logo.png"])).toEqual({
+        ok: true,
+        output: "read",
+        inputs: [
+          { name: "deck.pptx", source: { kind: "project", fileId: "file-1", version: 3 } },
+          { name: "logo.png", source: { kind: "chat", attachmentId: "att-logo.png" } },
+        ],
+      });
+      const tooMany = Array.from(
+        { length: CUSTOM_TOOL_LIMITS.inputFiles + 1 },
+        (_, i) => `f${i}.txt`,
+      );
+      expect(yield* call(tooMany)).toEqual({
+        ok: false,
+        error: `A call may read at most ${CUSTOM_TOOL_LIMITS.inputFiles} files.`,
+      });
     }),
   );
 });

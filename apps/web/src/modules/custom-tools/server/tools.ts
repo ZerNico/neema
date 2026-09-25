@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { CUSTOM_TOOL_LIMITS, type CustomToolManifest } from "../schema.ts";
+import type { ToolFile, ToolFileSource } from "~/modules/chat/server/tool-files.ts";
 import type { CustomToolRunFile, CustomToolRuntime } from "./runtime.ts";
 
 export interface PreparedCustomTools {
@@ -23,6 +24,8 @@ export interface PreparedCustomTools {
 export function prepareCustomTools(
   modules: ReadonlyArray<CustomToolManifest>,
   runtime: CustomToolRuntime["Service"],
+  /** Files the sender may hand a tool; absent where there is no chat to read from. */
+  resolveFile?: (reference: string) => Effect.Effect<ToolFile, string>,
 ): PreparedCustomTools | undefined {
   const functions = modules.flatMap((module) => module.functions.map((fn) => ({ module, fn })));
   if (functions.length === 0) return undefined;
@@ -37,13 +40,34 @@ export function prepareCustomTools(
   );
   const handlers: Record<string, unknown> = {};
   for (const { module, fn } of functions) {
-    handlers[fn.modelName] = (args: unknown, context: { readonly toolCallId: string }) =>
-      runtime
+    handlers[fn.modelName] = (args: unknown, context: { readonly toolCallId: string }) => {
+      // What this call read, reported back so the model can save a result
+      // over the project file it came from, at the version it read.
+      const inputs: Array<{ name: string; source: ToolFileSource }> = [];
+      let inputBytes = 0;
+      const readFile = resolveFile
+        ? (reference: string) =>
+            resolveFile(reference).pipe(
+              Effect.flatMap((file) => {
+                inputBytes += file.bytes.length;
+                if (inputs.length >= CUSTOM_TOOL_LIMITS.inputFiles)
+                  return Effect.fail(
+                    `A call may read at most ${CUSTOM_TOOL_LIMITS.inputFiles} files.`,
+                  );
+                if (inputBytes > CUSTOM_TOOL_LIMITS.inputFileBytes)
+                  return Effect.fail("The files for this call are too large together.");
+                inputs.push({ name: file.name, source: file.source });
+                return Effect.succeed(file);
+              }),
+            )
+        : undefined;
+      return runtime
         .run({
           compiled: module.compiled,
           functionKey: fn.key,
           args,
           timeoutMs: CUSTOM_TOOL_LIMITS.timeoutMs,
+          ...(readFile ? { resolveFile: readFile } : {}),
         })
         .pipe(
           Effect.map((result) => {
@@ -66,9 +90,11 @@ export function prepareCustomTools(
                     })),
                   }
                 : {}),
+              ...(inputs.length ? { inputs } : {}),
             };
           }),
         );
+    };
   }
 
   return {

@@ -43,7 +43,15 @@ export interface WorkerInvokeRequest {
   readonly captureLogs: boolean;
 }
 
-export type WorkerRequest = WorkerInspectRequest | WorkerInvokeRequest;
+/** The host's answer to a `file` message: the file, or why it cannot have it. */
+export interface WorkerFileReply {
+  readonly type: "file";
+  readonly requestId: number;
+  readonly file?: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array };
+  readonly error?: string;
+}
+
+export type WorkerRequest = WorkerInspectRequest | WorkerInvokeRequest | WorkerFileReply;
 
 /** A file crossing the worker boundary; `bytes` rides the transfer list. */
 export interface WorkerRunFile {
@@ -67,7 +75,14 @@ export type WorkerResponse =
       readonly ok: true;
       readonly value: ReadonlyArray<CustomToolFunctionManifest> | WorkerRunResult;
     }
-  | { readonly id: number; readonly ok: false; readonly error: string };
+  | { readonly id: number; readonly ok: false; readonly error: string }
+  /** Mid-call: the tool decoded a file parameter and needs that file's bytes. */
+  | {
+      readonly id: number;
+      readonly type: "file";
+      readonly requestId: number;
+      readonly reference: string;
+    };
 
 interface LoadedModule {
   readonly functions: CustomToolModule;
@@ -362,8 +377,31 @@ const normalizeResult = (value: unknown): { text: string; files: WorkerRunFile[]
   };
 };
 
+// Read by `fileInput` in the module's own copy of the authoring runtime; a
+// worker runs one call at a time, so one slot is enough.
+const fileResolverKey = Symbol.for("chat/custom-tools/file-resolver");
+const fileReplies = new Map<
+  number,
+  { resolve: (file: NonNullable<WorkerFileReply["file"]>) => void; reject: (cause: Error) => void }
+>();
+let nextFileRequest = 1;
+const requestFile = (jobId: number, reference: string) =>
+  new Promise<NonNullable<WorkerFileReply["file"]>>((resolve, reject) => {
+    const requestId = nextFileRequest++;
+    fileReplies.set(requestId, { resolve, reject });
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.
+    parentPort!.postMessage({
+      id: jobId,
+      type: "file",
+      requestId,
+      reference,
+    } satisfies WorkerResponse);
+  });
+
 const invoke = async (request: WorkerInvokeRequest): Promise<WorkerRunResult> => {
   const logs = createLogCollector(request.captureLogs);
+  (globalThis as Record<symbol, unknown>)[fileResolverKey] = (reference: string) =>
+    requestFile(request.id, reference);
   try {
     const loaded = loadModule(request.artifactHash, request.compiled);
     const definition = loaded.functions[request.functionKey];
@@ -383,6 +421,7 @@ const invoke = async (request: WorkerInvokeRequest): Promise<WorkerRunResult> =>
     return { ok: false, error: message(cause), logs: logs.lines };
   } finally {
     modules.get(request.artifactHash)?.setLogSink(undefined);
+    delete (globalThis as Record<symbol, unknown>)[fileResolverKey];
   }
 };
 
@@ -390,6 +429,13 @@ const port = parentPort;
 if (!port) throw new Error("The custom tool runtime worker needs a parent port.");
 
 port.on("message", (request: WorkerRequest) => {
+  if (request.type === "file") {
+    const pending = fileReplies.get(request.requestId);
+    fileReplies.delete(request.requestId);
+    if (request.file) pending?.resolve(request.file);
+    else pending?.reject(new Error(request.error ?? "That file is not available."));
+    return;
+  }
   Promise.resolve(request.type === "inspect" ? inspectModule(request) : invoke(request)).then(
     (value) =>
       port.postMessage(

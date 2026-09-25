@@ -68,7 +68,8 @@ import {
 } from "../server/functions.ts";
 import { exampleArguments } from "../schema-example.ts";
 import { TEMPLATE_SOURCE } from "../template.ts";
-import { attachmentKind } from "~/modules/attachments/constants.ts";
+import { attachmentKind, attachmentKindForFileName } from "~/modules/attachments/constants.ts";
+import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
@@ -266,6 +267,8 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   const [testArgs, setTestArgs] = useState<string | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(false);
   const [testOutcome, setTestOutcome] = useState<CustomToolTestResult | null>(null);
+  /** Files a Test run's file parameters may name, like a model names chat files. */
+  const [testFiles, setTestFiles] = useState<ReadonlyArray<File>>([]);
   /** `null` until the next Check; `[]` is a clean build. */
   const [problems, setProblems] = useState<ReadonlyArray<BuildProblem> | null>(null);
   const [view, setView] = useState<EditorView | null>(null);
@@ -360,7 +363,23 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       try {
         return await settled(
           testCustomTool({
-            data: { slug, source, dependencies, functionKey, argumentsJson: argumentsText },
+            data: {
+              slug,
+              source,
+              dependencies,
+              functionKey,
+              argumentsJson: argumentsText,
+              ...(testFiles.length
+                ? {
+                    files: await Promise.all(
+                      testFiles.map(async (file) => ({
+                        name: file.name,
+                        base64: await readBase64(file),
+                      })),
+                    ),
+                  }
+                : {}),
+            },
           }),
         );
       } catch (error) {
@@ -706,6 +725,48 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                   </FieldDescription>
                 </Field>
               </div>
+              <Field>
+                <FieldLabel htmlFor={`${id}-test-files`}>
+                  Files <OptionalMark />
+                </FieldLabel>
+                <Input
+                  id={`${id}-test-files`}
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    const picked = Array.from(event.target.files ?? []);
+                    event.target.value = "";
+                    setTestFiles((current) =>
+                      [
+                        ...current.filter(
+                          (file) => !picked.some((next) => next.name === file.name),
+                        ),
+                        ...picked,
+                      ].slice(0, CUSTOM_TOOL_LIMITS.inputFiles),
+                    );
+                  }}
+                />
+                <FieldDescription>
+                  For file parameters: pass a file’s name in the arguments, as the assistant would.
+                </FieldDescription>
+                {testFiles.length > 0 ? (
+                  <AttachmentChipRow aria-label="Test files">
+                    {testFiles.map((file) => (
+                      <AttachmentChip
+                        key={file.name}
+                        item={{
+                          fileName: file.name,
+                          size: file.size,
+                          kind: attachmentKindForFileName(file.name),
+                        }}
+                        onRemove={() =>
+                          setTestFiles((current) => current.filter((each) => each !== file))
+                        }
+                      />
+                    ))}
+                  </AttachmentChipRow>
+                ) : null}
+              </Field>
               {schemaOpen && selectedFunction ? (
                 <pre
                   aria-label="Parameter schema"

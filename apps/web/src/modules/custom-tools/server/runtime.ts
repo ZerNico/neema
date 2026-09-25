@@ -26,9 +26,18 @@ type PoolRequest =
   | Omit<Extract<WorkerRequest, { readonly type: "inspect" }>, "id">
   | Omit<Extract<WorkerRequest, { readonly type: "invoke" }>, "id">;
 
+/** A file a tool may read: bytes the host checked the sender may use. */
+export interface ResolvedToolFile {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+}
+type FileLookup = (reference: string) => Promise<ResolvedToolFile>;
+
 interface PendingJob<T> {
   readonly id: number;
   readonly request: PoolRequest;
+  readonly resolveFile?: FileLookup | undefined;
   readonly timeoutMs: number;
   readonly signal: AbortSignal;
   readonly resolve: (value: T) => void;
@@ -63,12 +72,18 @@ class WorkerPool {
     for (let index = 0; index < size; index += 1) this.#spawn();
   }
 
-  submit<T>(request: PoolRequest, timeoutMs: number, signal: AbortSignal): Promise<T> {
+  submit<T>(
+    request: PoolRequest,
+    timeoutMs: number,
+    signal: AbortSignal,
+    resolveFile?: FileLookup,
+  ): Promise<T> {
     if (this.#closed) return Promise.reject(new Error("The custom tool runtime is closed."));
     return new Promise<T>((resolve, reject) => {
       const job: PendingJob<T> = {
         id: this.#nextId++,
         request,
+        resolveFile,
         timeoutMs,
         signal,
         resolve,
@@ -138,10 +153,37 @@ class WorkerPool {
   #complete(slot: WorkerSlot, response: WorkerResponse): void {
     const job = slot.busy;
     if (!job || response.id !== job.id) return;
+    if ("type" in response) {
+      this.#answerFile(slot, job, response.requestId, response.reference);
+      return;
+    }
     slot.busy = undefined;
     if (response.ok) this.#finish(job, undefined, response.value);
     else this.#finish(job, new Error(response.error));
     this.#pump();
+  }
+
+  /** Runs while the job's deadline keeps ticking; a slow lookup counts against it. */
+  #answerFile(slot: WorkerSlot, job: PendingJob<unknown>, requestId: number, reference: string) {
+    const reply = (message: WorkerRequest, transfer: ArrayBuffer[] = []) => {
+      // The job may have ended (deadline, cancel) while the lookup ran.
+      if (slot.dead || slot.busy !== job) return;
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.
+      slot.worker.postMessage(message, transfer);
+    };
+    const lookup =
+      job.resolveFile ?? (() => Promise.reject(new Error("Files are not available here.")));
+    lookup(reference).then(
+      (file) => {
+        // A fresh buffer: a pooled Buffer's memory must never be transferred away.
+        const bytes = new Uint8Array(file.bytes);
+        reply(
+          { type: "file", requestId, file: { name: file.name, mediaType: file.mediaType, bytes } },
+          [bytes.buffer],
+        );
+      },
+      (cause: unknown) => reply({ type: "file", requestId, error: errorMessage(cause) }),
+    );
   }
 
   #cancel(job: PendingJob<unknown>): void {
@@ -202,6 +244,8 @@ export class CustomToolRuntime extends Context.Service<
       readonly args: unknown;
       readonly timeoutMs: number;
       readonly captureLogs?: boolean;
+      /** Resolves a file parameter; failing with a sentence the model can act on. */
+      readonly resolveFile?: (reference: string) => Effect.Effect<ResolvedToolFile, string>;
     }): Effect.Effect<CustomToolRunResult>;
   }
 >()("chat/custom-tools/CustomToolRuntime") {
@@ -244,8 +288,17 @@ export class CustomToolRuntime extends Context.Service<
         readonly args: unknown;
         readonly timeoutMs: number;
         readonly captureLogs?: boolean;
+        readonly resolveFile?: (reference: string) => Effect.Effect<ResolvedToolFile, string>;
       }) {
         const started = Date.now();
+        const resolveFile = input.resolveFile;
+        const context = yield* Effect.context<never>();
+        const lookup: FileLookup | undefined = resolveFile
+          ? (reference) =>
+              Effect.runPromiseWith(context)(
+                resolveFile(reference).pipe(Effect.mapError((reason) => new Error(reason))),
+              )
+          : undefined;
         const result = yield* Effect.tryPromise({
           try: (signal) =>
             pool.submit<WorkerRunResult>(
@@ -259,6 +312,7 @@ export class CustomToolRuntime extends Context.Service<
               },
               input.timeoutMs,
               signal,
+              lookup,
             ),
           catch: errorMessage,
         }).pipe(

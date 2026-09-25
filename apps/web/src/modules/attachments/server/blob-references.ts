@@ -5,6 +5,7 @@ import {
   attachments,
   blobCleanupIntents,
   knowledgeDocumentVersions,
+  projectFileVersions,
   skillFiles,
 } from "~/db/schema/index.ts";
 import type { DbTx } from "./repo.ts";
@@ -44,6 +45,7 @@ export const collectOrphanedBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
             sql`not exists (select 1 from ${attachments} where ${attachments.blobId} = ${attachmentBlobs.id})`,
             sql`not exists (select 1 from ${knowledgeDocumentVersions} where ${knowledgeDocumentVersions.blobId} = ${attachmentBlobs.id})`,
             sql`not exists (select 1 from ${skillFiles} where ${skillFiles.blobId} = ${attachmentBlobs.id})`,
+            sql`not exists (select 1 from ${projectFileVersions} where ${projectFileVersions.blobId} = ${attachmentBlobs.id})`,
           ),
         )
         .returning({ storageKey: attachmentBlobs.storageKey })

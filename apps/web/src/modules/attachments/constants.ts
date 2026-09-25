@@ -18,7 +18,10 @@ export const IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image
 export const PDF_MEDIA_TYPE = "application/pdf";
 export const TEXT_MEDIA_TYPE = "text/plain";
 
-export type AttachmentKind = "image" | "pdf" | "text";
+/** Anything that is none of the others: kept and downloadable, never shown inline. */
+export const GENERIC_MEDIA_TYPE = "application/octet-stream";
+
+export type AttachmentKind = "image" | "pdf" | "text" | "file";
 
 /**
  * Extensions accepted as text attachments; anything else must sniff as an
@@ -74,17 +77,6 @@ export const TEXT_EXTENSIONS: Record<string, string> = {
   zsh: "bash",
 };
 
-/**
- * `accept` for the hidden file input. Extensions carry the text types because
- * browsers report inconsistent MIME types for source files.
- */
-export const ATTACHMENT_ACCEPT = [
-  ...IMAGE_MEDIA_TYPES,
-  PDF_MEDIA_TYPE,
-  "text/*",
-  ...Object.keys(TEXT_EXTENSIONS).map((ext) => `.${ext}`),
-].join(",");
-
 export const fileExtension = (fileName: string): string => {
   const dot = fileName.lastIndexOf(".");
   if (dot <= 0 || dot === fileName.length - 1) return "";
@@ -101,14 +93,66 @@ export const textLanguage = (fileName: string): string => {
   return isTextExtension(ext) ? TEXT_EXTENSIONS[ext]! : "";
 };
 
+/**
+ * Only the exact types a model and the preview understand count as images,
+ * PDFs or text; every other stored type, `image/heic` included, is a file.
+ */
 export const attachmentKind = (mediaType: string): AttachmentKind =>
-  mediaType.startsWith("image/") ? "image" : mediaType === PDF_MEDIA_TYPE ? "pdf" : "text";
+  (IMAGE_MEDIA_TYPES as ReadonlyArray<string>).includes(mediaType)
+    ? "image"
+    : mediaType === PDF_MEDIA_TYPE
+      ? "pdf"
+      : mediaType === TEXT_MEDIA_TYPE
+        ? "text"
+        : "file";
+
+/**
+ * Descriptive types for common files, for tools and downloads. Informational
+ * only: a file is always served as a download, whatever this says.
+ */
+const FILE_MEDIA_TYPES: Record<string, string> = {
+  "7z": "application/x-7z-compressed",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  epub: "application/epub+zip",
+  gz: "application/gzip",
+  heic: "image/heic",
+  ico: "image/vnd.microsoft.icon",
+  key: "application/vnd.apple.keynote",
+  m4a: "audio/mp4",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odt: "application/vnd.oasis.opendocument.text",
+  ogg: "audio/ogg",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  rtf: "application/rtf",
+  svg: "image/svg+xml",
+  tar: "application/x-tar",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  wav: "audio/wav",
+  webm: "video/webm",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  zip: "application/zip",
+};
+
+/** The media type a file of this name is stored with; never one of the readable kinds. */
+export const fileMediaType = (fileName: string): string => {
+  const extension = fileExtension(fileName);
+  const known = Object.hasOwn(FILE_MEDIA_TYPES, extension) ? FILE_MEDIA_TYPES[extension]! : null;
+  return known && attachmentKind(known) === "file" ? known : GENERIC_MEDIA_TYPE;
+};
 
 /** Best-effort display kind for local files whose MIME type was never uploaded. */
 export const attachmentKindForFileName = (fileName: string): AttachmentKind => {
   const extension = fileExtension(fileName);
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension)) return "image";
-  return extension === "pdf" ? "pdf" : "text";
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(extension)) return "image";
+  if (extension === "pdf") return "pdf";
+  return isTextExtension(extension) ? "text" : "file";
 };
 
 export const formatFileSize = (bytes: number): string => {

@@ -20,6 +20,7 @@ import {
   type CustomToolSummary,
   type CustomToolTestResult,
 } from "../schema.ts";
+import { classifyFile } from "~/modules/attachments/server/validation.ts";
 import { CustomToolBuilder } from "./builder.ts";
 import { CustomToolRepo, type CustomToolSummaryRow } from "./repo.ts";
 import { CustomToolRuntime } from "./runtime.ts";
@@ -185,12 +186,38 @@ export const testCustomTool = createServerFn({ method: "POST" })
           const builder = yield* CustomToolBuilder;
           const toolRuntime = yield* CustomToolRuntime;
           const build = yield* builder.build(data);
+          const testFiles = (data.files ?? []).map((item) => {
+            const bytes = new Uint8Array(Buffer.from(item.base64, "base64"));
+            return {
+              name: item.name,
+              bytes,
+              mediaType: classifyFile(item.name, "", bytes).mediaType,
+            };
+          });
+          if (
+            testFiles.reduce((sum, item) => sum + item.bytes.length, 0) >
+            CUSTOM_TOOL_LIMITS.testInputBytes
+          )
+            return {
+              ok: false,
+              output: "The test files are too large together.",
+              durationMs: 0,
+              logs: [],
+              files: [],
+            } satisfies CustomToolTestResult;
           const result = yield* toolRuntime.run({
             compiled: build.compiled,
             functionKey: data.functionKey,
             args,
             timeoutMs: CUSTOM_TOOL_LIMITS.testTimeoutMs,
             captureLogs: true,
+            // A Test has no chat: its file parameters name the files picked for it.
+            resolveFile: (reference) => {
+              const found = testFiles.find((item) => item.name === reference.trim());
+              return found
+                ? Effect.succeed(found)
+                : Effect.fail(`No test file named ${JSON.stringify(reference)}.`);
+            },
           });
           return {
             ok: result.ok,

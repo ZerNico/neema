@@ -10,6 +10,12 @@ import {
   projectDocumentResult,
   type DocumentActivityResult,
 } from "~/modules/documents/tool-schema.ts";
+import {
+  ProjectFileToolEnvelope,
+  projectFileResultOk,
+  projectProjectFileResult,
+  type ProjectFileActivityResult,
+} from "~/modules/projects/file-tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import {
   ScheduleDraftToolEnvelope,
@@ -132,6 +138,11 @@ export interface DocumentToolActivity extends ToolActivityBase {
   result?: DocumentActivityResult;
 }
 
+export interface ProjectFileToolActivity extends ToolActivityBase {
+  family: "project-file";
+  result?: ProjectFileActivityResult;
+}
+
 export interface DesktopToolActivity extends ToolActivityBase {
   family: "desktop";
   /** Narrowed from the base so the transcript can switch on it exhaustively. */
@@ -170,6 +181,7 @@ export type ToolActivity =
   | ScheduleDraftToolActivity
   | CustomToolActivity
   | DocumentToolActivity
+  | ProjectFileToolActivity
   | DesktopToolActivity
   | WebToolActivity
   | MemoryToolActivity
@@ -320,6 +332,7 @@ export function applyToolChunk(
     e.family !== "custom" &&
     e.family !== "integration" &&
     e.family !== "document" &&
+    e.family !== "project-file" &&
     e.family !== "web" &&
     e.family !== "memory" &&
     e.family !== "ask" &&
@@ -454,6 +467,26 @@ export function applyToolChunk(
       callIndex:
         existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
       status: result ? (documentResultOk(result) ? "complete" : "error") : "running",
+      ...(result ? { result } : {}),
+      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "project-file") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ProjectFileToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const result = parsed.phase === "result" ? projectProjectFileResult(parsed) : undefined;
+    const next: ProjectFileToolActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: result ? (projectFileResultOk(result) ? "complete" : "error") : "running",
       ...(result ? { result } : {}),
       ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
     };

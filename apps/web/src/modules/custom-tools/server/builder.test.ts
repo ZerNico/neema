@@ -129,7 +129,19 @@ describe("custom tool core", () => {
           source: TEMPLATE_SOURCE,
           dependencies: [],
         });
-        expect(build.functions.map((fn) => fn.modelName)).toEqual(["custom_starter__echo"]);
+        expect(build.functions.map((fn) => fn.modelName)).toEqual([
+          "custom_starter__echo",
+          "custom_starter__shout_file",
+        ]);
+        // The model sees a plain string it fills with a file's id or name.
+        expect(build.functions[1]?.parametersSchema).toMatchObject({
+          properties: {
+            source: {
+              type: "string",
+              description: expect.stringContaining("Accepts .txt, .md."),
+            },
+          },
+        });
         expect(build.functions[0]?.parametersSchema).toMatchObject({
           type: "object",
           properties: { text: { type: "string", description: "Text to echo" } },
@@ -141,6 +153,43 @@ describe("custom tool core", () => {
           timeoutMs: 5_000,
         });
         expect(result).toMatchObject({ ok: true, output: "You said: hi" });
+
+        const asked: string[] = [];
+        const notes = {
+          name: "notes.md",
+          mediaType: "text/plain",
+          bytes: new TextEncoder().encode("hi"),
+        };
+        const shout = (reference: string) =>
+          runtime.run({
+            compiled: build.compiled,
+            functionKey: "shout_file",
+            args: { source: reference },
+            timeoutMs: 5_000,
+            resolveFile: (name) => {
+              asked.push(name);
+              if (name === "notes.md") return Effect.succeed(notes);
+              if (name === "photo.png")
+                return Effect.succeed({ ...notes, name, mediaType: "image/png" });
+              return Effect.fail(`No file named ${name}.`);
+            },
+          });
+        const shouted = yield* shout("notes.md");
+        expect(shouted).toMatchObject({ ok: true, output: "Upper-cased notes.md (2 bytes)." });
+        expect(new TextDecoder().decode(shouted.files?.[0]?.bytes)).toBe("HI");
+        expect(shouted.files?.[0]?.name).toBe("loud-notes.md");
+        // The host's reason and the tool's accept list both reach the model.
+        expect((yield* shout("missing.md")).error).toContain("No file named missing.md.");
+        expect((yield* shout("photo.png")).error).toContain("photo.png is image/png");
+        expect(asked).toEqual(["notes.md", "missing.md", "photo.png"]);
+        // Without a resolver (no chat to read from), the call explains itself.
+        const bare = yield* runtime.run({
+          compiled: build.compiled,
+          functionKey: "shout_file",
+          args: { source: "notes.md" },
+          timeoutMs: 5_000,
+        });
+        expect(bare.error).toContain("Files are not available here.");
       }),
     ),
   );

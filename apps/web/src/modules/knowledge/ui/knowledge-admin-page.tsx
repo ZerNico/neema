@@ -28,6 +28,7 @@ import {
   useInvalidateTools,
 } from "~/modules/tools/ui/tool-fields.tsx";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
+import { ProjectFileSettingsSection } from "~/modules/projects/ui/project-file-settings-section.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -55,6 +56,7 @@ export function KnowledgeAdminPage() {
     <Page title="Documents">
       <SemanticSearchSection />
       <DocumentParserSection />
+      <ProjectFileSettingsSection />
     </Page>
   );
 }

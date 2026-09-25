@@ -65,15 +65,36 @@ describe("sanitizeFileName", () => {
 
 describe("validateAttachment", () => {
   it("trusts the bytes over the declared type", async () => {
-    // Sniffing fails, the extension is not textual → rejected as a type error.
-    const error = await runError(
+    // Sniffing fails and the extension is not textual: an opaque file, never an
+    // image, and its stored type cannot claim to be one.
+    const result = await Effect.runPromise(
       validateAttachment({
         fileName: "totally-an-image.png",
         declaredMediaType: "image/png",
         bytes: text("<html>not an image</html>"),
       }),
     );
-    expect(error.cause).toBe("type");
+    expect(result).toMatchObject({ kind: "file", mediaType: "application/octet-stream" });
+  });
+
+  it("keeps any other file, with a descriptive type from its name", async () => {
+    const result = await Effect.runPromise(
+      validateAttachment({
+        fileName: "deck.pptx",
+        declaredMediaType: "",
+        bytes: bytes(0x50, 0x4b, 0x03, 0x04),
+      }),
+    );
+    expect(result).toEqual({
+      fileName: "deck.pptx",
+      kind: "file",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    });
+    // An image type nothing reads stays a file too.
+    const heic = await Effect.runPromise(
+      validateAttachment({ fileName: "photo.heic", declaredMediaType: "", bytes: bytes(0, 1, 2) }),
+    );
+    expect(heic).toMatchObject({ kind: "file", mediaType: "image/heic" });
   });
 
   it("normalizes text files to text/plain", async () => {
@@ -87,15 +108,15 @@ describe("validateAttachment", () => {
     expect(result).toEqual({ fileName: "main.ts", mediaType: "text/plain", kind: "text" });
   });
 
-  it("rejects binary garbage claiming to be text", async () => {
-    const error = await runError(
+  it("never treats binary garbage claiming to be text as text", async () => {
+    const result = await Effect.runPromise(
       validateAttachment({
         fileName: "notes.txt",
         declaredMediaType: "text/plain",
         bytes: bytes(0xff, 0xfe, 0x00, 0x80, 0x81),
       }),
     );
-    expect(error.cause).toBe("type");
+    expect(result).toMatchObject({ kind: "file", mediaType: "application/octet-stream" });
   });
 
   it("rejects empty files and anything over the size cap", async () => {
@@ -126,14 +147,14 @@ describe("validateAttachment", () => {
     // `x.constructor` and `x.__proto__` would pass an `in` check through the
     // prototype chain; the allowlist must only match its own entries.
     for (const fileName of ["notes.constructor", "notes.__proto__"]) {
-      const error = await runError(
+      const result = await Effect.runPromise(
         validateAttachment({
           fileName,
           declaredMediaType: "application/octet-stream",
           bytes: text("plain enough"),
         }),
       );
-      expect(error.cause).toBe("type");
+      expect(result).toMatchObject({ kind: "file", mediaType: "application/octet-stream" });
     }
   });
 });

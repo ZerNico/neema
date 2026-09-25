@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { attachmentKind } from "~/modules/attachments/constants.ts";
+import { GENERIC_MEDIA_TYPE, attachmentKind } from "~/modules/attachments/constants.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -8,7 +8,7 @@ import { runtime } from "~/server/runtime.ts";
 // RFC 5987: an ASCII fallback for old agents plus the real UTF-8 name.
 const contentDisposition = (kind: string, fileName: string) => {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  const mode = kind === "text" ? "attachment" : "inline";
+  const mode = kind === "image" || kind === "pdf" ? "inline" : "attachment";
   return `${mode}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 };
 
@@ -41,7 +41,14 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
         const kind = attachmentKind(file.mediaType);
         return new Response(file.bytes as BodyInit, {
           headers: {
-            "Content-Type": kind === "text" ? `${file.mediaType}; charset=utf-8` : file.mediaType,
+            // A file's stored type is descriptive only; served as bytes, it
+            // can never render as HTML or SVG on this origin.
+            "Content-Type":
+              kind === "text"
+                ? `${file.mediaType}; charset=utf-8`
+                : kind === "file"
+                  ? GENERIC_MEDIA_TYPE
+                  : file.mediaType,
             // From the bytes actually being sent, not the size column. If
             // store and DB ever drift the response must not be malformed.
             "Content-Length": String(file.bytes.byteLength),

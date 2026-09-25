@@ -8,6 +8,7 @@ import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import type { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import type { AttachmentRepo, AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
+import { describeFile, opaqueFileText } from "~/modules/attachments/server/file-text.ts";
 import { buildTextFence } from "~/modules/attachments/server/validation.ts";
 
 export interface HistoryMessage {
@@ -188,6 +189,13 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     if (line !== null) parts.push({ type: "text", text: line });
     for (const row of attached) {
       const kind = attachmentKind(row.mediaType);
+      if (kind === "file") {
+        parts.push({
+          type: "text",
+          text: yield* opaqueFileText(row, () => loadBytes(row)),
+        });
+        continue;
+      }
       if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
         parts.push({
           type: "file",
@@ -239,6 +247,15 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           if (!row || file.textOffset > message.content.length)
             return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
           const kind = attachmentKind(row.mediaType);
+          if (kind === "file") {
+            const part: Prompt.AssistantMessagePartEncoded = {
+              type: "text",
+              text: input.deferAssistantBytes
+                ? describeFile(row)
+                : yield* opaqueFileText(row, () => loadBytes(row)),
+            };
+            return part;
+          }
           if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
             const part: Prompt.AssistantMessagePartEncoded = {
               type: "file",

@@ -3,7 +3,15 @@ import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
+import {
+  ProjectFileToolName,
+  projectFileFailureReason,
+  projectFileResultOk,
+  projectProjectFileResult,
+} from "~/modules/projects/file-tool-schema.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
+import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts";
+import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
 import {
   prepareResearchTool,
@@ -85,6 +93,8 @@ import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { Db } from "~/server/db.ts";
+import { makeToolFileResolver } from "./tool-files.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachments/server/repo.ts";
 import {
@@ -344,6 +354,11 @@ export class StreamEngine extends Context.Service<
       // Postgres by seq, and `done` re-syncs the final row.
       const pubsub = yield* PubSub.sliding<StreamEvent>(4096);
       const imageAttachments = yield* Effect.serviceOption(AttachmentService);
+      // Optional so test engines need not build blob storage for it.
+      const projectFiles = yield* Effect.serviceOption(ProjectFileService);
+      // Optional for the same reason; without it a tool's file parameter
+      // simply finds no files.
+      const database = yield* Effect.serviceOption(Db);
 
       // messageId -> the deferred its generation races against. Completing it
       // is how "stop" works: the fiber winds itself down and still runs
@@ -740,6 +755,21 @@ export class StreamEngine extends Context.Service<
                 }
               : null,
           });
+          // Only in a project chat, and only for an answer that can be fenced.
+          const projectFileTools =
+            config.resolvedProject && fence && Option.isSome(projectFiles)
+              ? prepareProjectFileTools({
+                  service: projectFiles.value,
+                  userId: input.userId,
+                  conversationId: input.conversationId,
+                  generationId: fence.generationId,
+                  project: {
+                    id: config.resolvedProject.id,
+                    canEdit: projectCan.edit(config.resolvedProject.role),
+                  },
+                  writeGuard,
+                })
+              : null;
           // One indexer and one URL authority for the whole generation. Search
           // hits extend the reader's authority immediately, while user URLs and
           // earlier persisted sources seed it for direct reads and follow-ups.
@@ -827,7 +857,20 @@ export class StreamEngine extends Context.Service<
           // then held stable for its remaining tool rounds. An edit or deletion
           // mid-flight changes nothing here.
           const customTools = customToolManifests.length
-            ? prepareCustomTools(customToolManifests, customToolRuntime)
+            ? prepareCustomTools(
+                customToolManifests,
+                customToolRuntime,
+                Option.isSome(database)
+                  ? makeToolFileResolver({
+                      db: database.value,
+                      store: promptDeps.store,
+                      projectFiles,
+                      userId: input.userId,
+                      conversationId: input.conversationId,
+                      projectId: config.resolvedProject?.id ?? null,
+                    })
+                  : undefined,
+              )
             : undefined;
           // Display names by model-facing tool name. This map, not the
           // `custom_` prefix, decides what is a custom tool call: a model can
@@ -931,6 +974,7 @@ export class StreamEngine extends Context.Service<
             ...(permissions.agentsCreate ? [authoring.group] : []),
             ...(permissions.schedules ? [scheduleAuthoring.group] : []),
             ...(permissions.documents ? [documents.group] : []),
+            ...(projectFileTools ? [projectFileTools.group] : []),
             ...(researchTool ? [researchTool.group] : []),
             ...(desktopTools ? [desktopTools] : []),
             ...(skillTools ? [skillTools.group] : []),
@@ -1699,28 +1743,30 @@ export class StreamEngine extends Context.Service<
                               ? "schedule-draft"
                               : Schema.is(DocumentToolName)(part.name)
                                 ? "document"
-                                : Schema.is(DesktopToolName)(part.name)
-                                  ? "desktop"
-                                  : part.name === "save_memory"
-                                    ? "memory"
-                                    : part.name === "ask_user"
-                                      ? "ask"
-                                      : part.name === "update_plan"
-                                        ? "plan"
-                                        : Schema.is(SkillToolName)(part.name)
-                                          ? "skill"
-                                          : Schema.is(KnowledgeToolName)(part.name)
-                                            ? "knowledge"
-                                            : part.name === "deep_research"
-                                              ? "research"
-                                              : part.name === "web_search" ||
-                                                  part.name === "read_url"
-                                                ? "web"
-                                                : customToolNames.has(part.name)
-                                                  ? "custom"
-                                                  : integrationTools?.names.has(part.name)
-                                                    ? "integration"
-                                                    : null;
+                                : Schema.is(ProjectFileToolName)(part.name)
+                                  ? "project-file"
+                                  : Schema.is(DesktopToolName)(part.name)
+                                    ? "desktop"
+                                    : part.name === "save_memory"
+                                      ? "memory"
+                                      : part.name === "ask_user"
+                                        ? "ask"
+                                        : part.name === "update_plan"
+                                          ? "plan"
+                                          : Schema.is(SkillToolName)(part.name)
+                                            ? "skill"
+                                            : Schema.is(KnowledgeToolName)(part.name)
+                                              ? "knowledge"
+                                              : part.name === "deep_research"
+                                                ? "research"
+                                                : part.name === "web_search" ||
+                                                    part.name === "read_url"
+                                                  ? "web"
+                                                  : customToolNames.has(part.name)
+                                                    ? "custom"
+                                                    : integrationTools?.names.has(part.name)
+                                                      ? "integration"
+                                                      : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1746,6 +1792,7 @@ export class StreamEngine extends Context.Service<
                               family === "agent-draft" ||
                               family === "schedule-draft" ||
                               family === "document" ||
+                              family === "project-file" ||
                               family === "research" ||
                               family === "integration"
                                 ? {}
@@ -1865,6 +1912,19 @@ export class StreamEngine extends Context.Service<
                               phase: "start",
                               callId: rowId,
                               name: part.name as DocumentToolName,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "project-file") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name as ProjectFileToolName,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -2103,6 +2163,35 @@ export class StreamEngine extends Context.Service<
                             yield* pushToolChunk({
                               v: 1,
                               family: "document",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                              ...(reason ? { reason } : {}),
+                            });
+                            return;
+                          }
+                          if (Schema.is(ProjectFileToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            // File text the model read stays in this answer's
+                            // rounds; the row keeps which file and version.
+                            const activity = projectProjectFileResult(
+                              part.isFailure ? null : part.result,
+                            );
+                            const reason = part.isFailure
+                              ? "The project file tool failed before it could respond."
+                              : projectFileFailureReason(part.result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: projectFileResultOk(activity) ? "complete" : "error",
+                              ...(reason
+                                ? { error: { code: "ProjectFileNotUsed", message: reason } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "project-file",
                               phase: "result",
                               callId: rowId,
                               name: part.name,
@@ -2436,6 +2525,7 @@ export class StreamEngine extends Context.Service<
                               if (item.share)
                                 turnFiles.push(
                                   yield* fileForModel(promptDeps.parser, {
+                                    id: stored.attachment.id,
                                     fileName: item.name,
                                     mediaType: stored.attachment.mediaType,
                                     bytes: item.bytes,

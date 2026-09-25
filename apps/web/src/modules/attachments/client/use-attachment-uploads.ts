@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  attachmentKind,
+  attachmentKindForFileName,
   type AttachmentKind,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -172,7 +172,9 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
 
       const added = accepted.map((file): AttachmentUpload => {
         const localId = nextLocalId();
-        const kind = attachmentKind(file.type);
+        // A guess for the chip while uploading: browsers report a vague type
+        // for most files. The server's classification replaces it.
+        const kind = attachmentKindForFileName(file.name);
         const oversized = file.size > MAX_ATTACHMENT_BYTES;
         let previewUrl: string | null = null;
         if (kind === "image" && !oversized) {
@@ -208,7 +210,7 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
               destroy(attachment.id);
               return;
             }
-            patch(item.localId, { status: "complete", attachment });
+            patch(item.localId, { status: "complete", attachment, kind: attachment.kind });
             drainQueue();
           },
           (error: unknown) => {

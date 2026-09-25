@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
+import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
@@ -419,6 +420,25 @@ describe("MessageBubble attachments", () => {
     expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
       "href",
       "/api/files/a-img",
+    );
+  });
+
+  it("offers saving a sent file to the project, only in a project chat the reader edits", () => {
+    const file = attachment({ id: "a-deck", fileName: "brief.txt" });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <WritableChatProjectProvider project={{ id: "p1", name: "Relaunch" }}>
+          <MessageBubble message={userMessage("", [file])} />
+        </WritableChatProjectProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: /brief\.txt/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Save to project" })).toBeInTheDocument();
+    // The actions replace the preview's own link, so they carry it.
+    expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
+      "href",
+      "/api/files/a-deck",
     );
   });
 

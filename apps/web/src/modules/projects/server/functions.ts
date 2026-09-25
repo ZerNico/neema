@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
@@ -17,6 +17,15 @@ import {
   UpdateProjectInput,
   UpdateProjectMemoryInput,
 } from "../schema.ts";
+import {
+  PinProjectFileVersionInput,
+  PROJECT_FILE_LIMITS,
+  ProjectFileIdInput,
+  ProjectFileSettingsInput,
+  RestoreProjectFileInput,
+  SaveAttachmentToProjectInput,
+} from "../files.ts";
+import { ProjectFileService } from "./project-files.ts";
 import { ProjectMemoryService } from "./project-memory.ts";
 import { ProjectService } from "./service.ts";
 
@@ -178,3 +187,112 @@ export const deleteProjectMemory = createServerFn({ method: "POST" })
   .handler(({ context, data }) =>
     runMemory((service) => service.remove(context.session.user.id, data.projectId, data.memoryId)),
   );
+
+const runFiles = <A>(
+  body: (
+    service: ProjectFileService["Service"],
+  ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
+) =>
+  runtime.runPromise(
+    Effect.flatMap(ProjectFileService, body).pipe(
+      Effect.catchTag("ProjectNotAvailable", () =>
+        Effect.die(new Response("Not found", { status: 404 })),
+      ),
+      Effect.catchTag("ProjectRejected", (error) =>
+        Effect.die(new Response(error.reason, { status: 400 })),
+      ),
+    ),
+  );
+/** FormData at the root, so the client sends multipart; fields are checked here. */
+const readFileUpload = (data: FormData) => {
+  const file = data.get("file");
+  const projectId = data.get("projectId");
+  const fileId = data.get("fileId");
+  const basedOn = data.get("basedOnVersion");
+  if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
+    throw new Response("Expected a file", { status: 400 });
+  if (file.size > PROJECT_FILE_LIMITS.fileBytes)
+    throw new Response("The file is larger than 50 MB", { status: 413 });
+  return {
+    file,
+    projectId,
+    fileId: typeof fileId === "string" && fileId ? fileId : undefined,
+    basedOnVersion:
+      typeof basedOn === "string" && /^\d+$/.test(basedOn) ? Number(basedOn) : undefined,
+  };
+};
+export const listProjectFiles = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(standard(ProjectIdInput))
+  .handler(({ context, data }) =>
+    runFiles((service) => service.list(context.session.user.id, data.projectId)),
+  );
+export const listProjectFileVersions = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(standard(ProjectFileIdInput))
+  .handler(({ context, data }) =>
+    runFiles((service) => service.versions(context.session.user.id, data.fileId)),
+  );
+export const uploadProjectFile = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator((data: FormData) => data)
+  .handler(async ({ context, data }) => {
+    const upload = readFileUpload(data);
+    const bytes = new Uint8Array(await upload.file.arrayBuffer());
+    return runFiles((service) =>
+      service.write(
+        { origin: "user", userId: context.session.user.id },
+        {
+          projectId: upload.projectId,
+          fileId: upload.fileId,
+          name: upload.file.name,
+          bytes,
+          basedOnVersion: upload.basedOnVersion,
+        },
+      ),
+    );
+  });
+export const restoreProjectFileVersion = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(RestoreProjectFileInput))
+  .handler(({ context, data }) =>
+    runFiles((service) =>
+      service.restore(context.session.user.id, data.versionId, data.basedOnVersion),
+    ),
+  );
+export const pinProjectFileVersion = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(PinProjectFileVersionInput))
+  .handler(({ context, data }) =>
+    runFiles((service) =>
+      service.pin(context.session.user.id, data.versionId, {
+        pinned: data.pinned,
+        label: data.label,
+      }),
+    ),
+  );
+export const deleteProjectFile = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ProjectFileIdInput))
+  .handler(({ context, data }) =>
+    runFiles((service) => service.remove(context.session.user.id, data.fileId)),
+  );
+/** "Save to project" on a chat attachment the person can see. */
+export const saveAttachmentToProject = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SaveAttachmentToProjectInput))
+  .handler(({ context, data }) =>
+    runFiles((service) =>
+      service.saveAttachment(
+        { origin: "user", userId: context.session.user.id },
+        { projectId: data.projectId, attachment: { id: data.attachmentId } },
+      ),
+    ),
+  );
+export const getProjectFileSettings = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runFiles((service) => service.settings()));
+export const updateProjectFileSettings = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(ProjectFileSettingsInput))
+  .handler(({ data }) => runFiles((service) => service.updateSettings(data.maxProjectBytes)));

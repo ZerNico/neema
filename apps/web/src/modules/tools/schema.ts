@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
 import { AgentDraftToolEnvelope } from "~/modules/agents/tool-schema.ts";
 import { DocumentToolEnvelope } from "~/modules/documents/tool-schema.ts";
+import { ProjectFileToolEnvelope } from "~/modules/projects/file-tool-schema.ts";
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
@@ -195,6 +196,7 @@ export const ToolChunkEnvelope = Schema.Union([
   ScheduleDraftToolEnvelope,
   CustomToolEnvelope,
   DocumentToolEnvelope,
+  ProjectFileToolEnvelope,
   KnowledgeToolEnvelope,
   SkillToolEnvelope,
   Schema.Struct({

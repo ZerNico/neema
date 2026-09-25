@@ -1,11 +1,11 @@
 import { Effect } from "effect";
 import {
-  IMAGE_MEDIA_TYPES,
   MAX_ATTACHMENT_BYTES,
   PDF_MEDIA_TYPE,
   TEXT_MEDIA_TYPE,
   attachmentKind,
   fileExtension,
+  fileMediaType,
   isTextExtension,
   textLanguage,
 } from "../constants.ts";
@@ -77,6 +77,27 @@ export interface ValidatedAttachment {
 }
 
 /**
+ * What a file is, from its bytes: an image or PDF by signature, text when it
+ * decodes as UTF-8 and claims to be text, and otherwise an opaque file. Never
+ * refuses; size and emptiness are the caller's rules.
+ */
+export const classifyFile = (
+  fileName: string,
+  declaredMediaType: string,
+  bytes: Uint8Array,
+): ValidatedAttachment => {
+  const sniffed = sniffBinaryMediaType(bytes);
+  if (sniffed !== null) return { fileName, mediaType: sniffed, kind: attachmentKind(sniffed) };
+  const ext = fileExtension(fileName);
+  const looksTextual = ext === "" || isTextExtension(ext) || declaredMediaType.startsWith("text/");
+  if (looksTextual && isValidUtf8(bytes))
+    return { fileName, mediaType: TEXT_MEDIA_TYPE, kind: "text" };
+  // Kept as an opaque file: downloadable, readable by tools, and described to
+  // the model rather than shown to it.
+  return { fileName, mediaType: fileMediaType(fileName), kind: "file" };
+};
+
+/**
  * Decides what an uploaded file actually is, from its bytes. Text files keep no
  * trace of their declared type; everything textual is normalized to
  * text/plain so serving headers are uniform.
@@ -98,26 +119,7 @@ export const validateAttachment = Effect.fn("attachments.validateAttachment")(fu
     });
   }
 
-  const sniffed = sniffBinaryMediaType(input.bytes);
-  if (sniffed !== null) {
-    return {
-      fileName,
-      mediaType: sniffed,
-      kind: attachmentKind(sniffed),
-    } satisfies ValidatedAttachment;
-  }
-
-  const ext = fileExtension(fileName);
-  const looksTextual =
-    ext === "" || isTextExtension(ext) || input.declaredMediaType.startsWith("text/");
-  if (!looksTextual || !isValidUtf8(input.bytes)) {
-    return yield* new AttachmentRejected({
-      cause: "type",
-      reason: `Only ${IMAGE_MEDIA_TYPES.map((t) => t.slice(6).toUpperCase()).join(", ")} images, PDFs and UTF-8 text files can be attached.`,
-    });
-  }
-
-  return { fileName, mediaType: TEXT_MEDIA_TYPE, kind: "text" } satisfies ValidatedAttachment;
+  return classifyFile(fileName, input.declaredMediaType, input.bytes);
 });
 
 /**

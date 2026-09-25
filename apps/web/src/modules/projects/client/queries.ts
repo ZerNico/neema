@@ -3,6 +3,8 @@ import {
   getProject,
   getProjectMembers,
   listProjectChats,
+  listProjectFiles,
+  listProjectFileVersions,
   listProjectMemories,
   listProjects,
 } from "../server/functions.ts";
@@ -34,5 +36,17 @@ export const projectMemoriesQuery = (projectId: string) =>
   queryOptions({
     queryKey: ["projects", "memories", projectId],
     queryFn: () => listProjectMemories({ data: { projectId } }),
+    staleTime: 30_000,
+  });
+export const projectFilesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", "files", projectId],
+    queryFn: () => listProjectFiles({ data: { projectId } }),
+    staleTime: 30_000,
+  });
+export const projectFileVersionsQuery = (fileId: string) =>
+  queryOptions({
+    queryKey: ["projects", "file-versions", fileId],
+    queryFn: () => listProjectFileVersions({ data: { fileId } }),
     staleTime: 30_000,
   });

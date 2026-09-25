@@ -58,6 +58,7 @@ import { projectChatsQuery, projectQuery } from "../client/queries.ts";
 import { PROJECT_LIMITS, projectCan, type ProjectDetail } from "../schema.ts";
 import { deleteProject, updateProject } from "../server/functions.ts";
 import { ProjectMembersDialog } from "./project-members-dialog.tsx";
+import { ProjectFilesSection } from "./project-files-section.tsx";
 import { ProjectMemorySection } from "./project-memory-section.tsx";
 import { roleLabel } from "./projects-page.tsx";
 
@@ -154,7 +155,7 @@ function LoadedProject({ project }: { project: ProjectDetail }) {
                         void confirm({
                           title: `Delete “${project.name}”?`,
                           description:
-                            "Its documents and memory are deleted for everyone. Chats in it become ordinary chats and keep their messages.",
+                            "Its documents, files and memory are deleted for everyone. Chats in it become ordinary chats and keep their messages.",
                           confirmLabel: "Delete project",
                         }).then((confirmed) => {
                           if (confirmed) remove.mutate();
@@ -174,6 +175,7 @@ function LoadedProject({ project }: { project: ProjectDetail }) {
     >
       <InstructionsSection project={project} editable={editable} />
       <DocumentsSection project={project} editable={editable} />
+      <ProjectFilesSection projectId={project.id} editable={editable} />
       <ProjectMemorySection projectId={project.id} editable={editable} />
       <ChatsSection projectId={project.id} />
       <ProjectMembersDialog project={project} open={members} onOpenChange={setMembers} />

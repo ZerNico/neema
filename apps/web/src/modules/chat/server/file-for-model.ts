@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type { Prompt } from "effect/unstable/ai";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import { opaqueFileText } from "~/modules/attachments/server/file-text.ts";
 import { buildTextFence } from "~/modules/attachments/server/validation.ts";
 import { PDF_TEXT_LABEL } from "./prompt.ts";
 
@@ -17,6 +18,7 @@ const decoder = new TextDecoder();
 export const fileForModel = (
   parser: Pick<DocumentParser["Service"], "parsePdf">,
   input: {
+    id?: string;
     fileName: string;
     mediaType: string;
     bytes: Uint8Array;
@@ -26,6 +28,18 @@ export const fileForModel = (
 ): Effect.Effect<Prompt.UserMessagePartEncoded> =>
   Effect.gen(function* () {
     const kind = attachmentKind(input.mediaType);
+    if (kind === "file")
+      return {
+        type: "text",
+        text: yield* opaqueFileText(
+          {
+            ...(input.id ? { id: input.id } : {}),
+            fileName: input.fileName,
+            size: input.bytes.length,
+          },
+          () => Effect.succeed(input.bytes),
+        ),
+      };
     if ((kind === "image" && input.vision) || (kind === "pdf" && input.files))
       return {
         type: "file",

@@ -33,10 +33,34 @@ declare module "@chat/custom-tools" {
     readonly files?: ReadonlyArray<CustomToolFile>;
   }
 
+  /** \`mediaType\` is optional; the server decides the type from the bytes and the name. */
   export function file(
     data: Uint8Array | string,
-    options: { readonly name: string; readonly mediaType: string; readonly share?: boolean },
+    options: { readonly name: string; readonly mediaType?: string; readonly share?: boolean },
   ): CustomToolFile;
+
+  /** A file the model passed to a tool, resolved and permission-checked by the host. */
+  export interface ToolInputFile {
+    readonly name: string;
+    readonly mediaType: string;
+    readonly size: number;
+    readonly bytes: Uint8Array;
+    /** The bytes as UTF-8 text. */
+    text(): string;
+  }
+
+  export interface FileInputOptions {
+    /** What the file is for, in the model's terms. */
+    readonly description?: string;
+    /** Extensions (\`.pptx\`) or media types (\`image/png\`, \`image/*\`) the tool takes. */
+    readonly accept?: ReadonlyArray<string>;
+  }
+
+  /**
+   * A parameter the model fills with a file from the chat or its project. The
+   * model passes an id or name; \`run\` receives the file itself.
+   */
+  export function fileInput(options?: FileInputOptions): EffectSchema.Codec<ToolInputFile, string>;
 
   export function defineTool<S extends EffectSchema.Codec<unknown, unknown, never, unknown>>(
     definition: CustomToolDefinition<S>,

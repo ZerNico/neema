@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Effect } from "effect";
+import { strToU8, zipSync } from "fflate";
 import type { Prompt } from "effect/unstable/ai";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { buildHistoryMessages, type HistoryMessage, type PromptDeps } from "./prompt.ts";
@@ -227,6 +228,54 @@ describe("buildHistoryMessages with attachments", () => {
       ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.FilePartEncoded>)[0]
         ?.data,
     ).toBeInstanceOf(Uint8Array);
+  });
+
+  it("names a file it cannot read, and gives a Word file's text, loading only what it reads", async () => {
+    const brief = zipSync({
+      "[Content_Types].xml": strToU8("<Types/>"),
+      "word/document.xml": strToU8("<w:p><w:r><w:t>Launch in May</w:t></w:r></w:p>"),
+    });
+    const { deps } = harness({
+      rows: [
+        row({
+          id: "att-key",
+          messageId: "m1",
+          position: 0,
+          mediaType: "application/vnd.apple.keynote",
+          fileName: "pitch.key",
+          size: 2048,
+          storageKey: "blobs/key",
+        }),
+        row({
+          id: "att-doc",
+          messageId: "m1",
+          position: 1,
+          mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          fileName: "brief.docx",
+          storageKey: "blobs/doc",
+        }),
+      ],
+    });
+    const get = vi.fn((key: string) =>
+      Effect.succeed(key === "blobs/doc" ? brief : new Uint8Array()),
+    );
+    const [message] = await build({ ...deps, store: { get } }, [user("m1", "thoughts?")]);
+    expect(message).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Attached file: pitch.key (2 KB, id att-key). Its contents are not readable here; a tool that takes files can use it. If none can, say so rather than guessing at what it contains.",
+        },
+        {
+          type: "text",
+          text: "Attached file (id att-doc), text only: brief.docx\n```\nLaunch in May\n```",
+        },
+        { type: "text", text: "thoughts?" },
+      ],
+    });
+    // The Keynote file has no reader, so its bytes were never fetched.
+    expect(get.mock.calls).toEqual([["blobs/doc"]]);
   });
 
   it("omits the trailing text part for an attachment-only turn", async () => {

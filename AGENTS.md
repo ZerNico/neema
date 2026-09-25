@@ -46,17 +46,20 @@ edit the wrong thing.
 - **document** (conversation or project document): editable Markdown owned by one chat or
   one project, edited live by people and the model as a Yjs text. Never knowledge versions
   or transcript content.
-- **project**: instructions, documents and memory shared by members (owner, editor,
-  viewer) for continuing work. Chats in it stay their owner's alone; each attempt
+- **project**: instructions, documents, files and memory shared by members (owner,
+  editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
   never about a person.
+- **project file / file version**: a binary working file (a deck, a spreadsheet) kept in
+  a project. Every save is a new immutable version; history is pruned, never the current
+  one. Not a document and not a chat attachment, though its bytes share their blobs.
 - **custom tool**: an admin-authored TypeScript module containing one or more
   model-callable functions named `custom_<module>__<function>`. Offered in every
   chat the sender may use it in; an agent narrows the offer to what it attached.
   Exact npm dependencies are bundled into the module's one stored row; a save
   replaces it and an attempt resolves modules as they are at turn time, so a
-  tool-call row carries the display name it needs. A function may return files;
-  they become attachments of the answer. Workers contain hangs, not authority: code is
+  tool-call row carries the display name it needs. A function may take files through
+  `fileInput` and return files; returned ones become attachments of the answer. Workers contain hangs, not authority: code is
   trusted and has the server’s filesystem, environment, network and process access.
 - **integration / connection / source**: an integration is a service the code ships an
   adapter for (Outline), set up by an admin. A connection is one person's credentials for
@@ -125,7 +128,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  schedule-draft, document, desktop, custom, integration.
+  schedule-draft, document, project-file, desktop, custom, integration.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -216,8 +219,10 @@ skipped one on purpose.
   transactional guard under research.
 - `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,
   exact-match and streamed model edits, live sync and the one-writer hub.
+- `docs/internals/files.md`: one classification for every stored file, the opaque `file`
+  kind served only as a download, what the model sees of a file, files into tools.
 - `docs/internals/projects.md`: roles, private chats in a shared project, attempt-time
-  access, project documents and memory, deletion.
+  access, project documents, files and memory, file retention, deletion.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
   model, the `custom_` prefix contract, current module bundles and worker
   containment.

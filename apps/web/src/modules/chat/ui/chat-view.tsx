@@ -16,6 +16,11 @@ import {
   projectDocumentResult,
 } from "~/modules/documents/tool-schema.ts";
 import {
+  ProjectFileToolName,
+  projectFileResultOk,
+  projectProjectFileResult,
+} from "~/modules/projects/file-tool-schema.ts";
+import {
   AgentDraftToolName,
   projectAgentDraftResult,
   agentDraftResultOk,
@@ -105,6 +110,8 @@ import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
+import { projectCan } from "~/modules/projects/schema.ts";
+import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
@@ -260,6 +267,21 @@ export function toActivity(row: {
       callIndex: row.callIndex,
       status:
         row.status === "running" ? "running" : documentResultOk(result) ? "complete" : "error",
+      ...(row.status === "running" ? {} : { result }),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+  if (Schema.is(ProjectFileToolName)(row.toolName)) {
+    const result = projectProjectFileResult(row.result);
+    return {
+      family: "project-file",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status:
+        row.status === "running" ? "running" : projectFileResultOk(result) ? "complete" : "error",
       ...(row.status === "running" ? {} : { result }),
       ...(row.error ? { error: row.error.message } : {}),
     };
@@ -1989,7 +2011,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 conversationId={conversationId}
                 workspaceRoot={folder?.status?.workspace.path ?? null}
               >
-                <VirtualMessageList messages={withPlacedCards} followKey={stream.lastSeq} />
+                <WritableChatProjectProvider
+                  project={
+                    data.project && projectCan.edit(data.project.role)
+                      ? { id: data.project.id, name: data.project.name }
+                      : null
+                  }
+                >
+                  <VirtualMessageList messages={withPlacedCards} followKey={stream.lastSeq} />
+                </WritableChatProjectProvider>
               </LocalFileConversationProvider>
             </div>
             {/* Mirrors the message column (scrollbar gutter + max-w + px) so the

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Effect } from "effect";
 import { LIMITS, stageDroppedFile, type PromotionReceipt } from "@chat/desktop-rpc";
 import {
-  attachmentKind,
+  attachmentKindForFileName,
   formatFileSize,
+  type AttachmentKind,
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "~/modules/attachments/constants.ts";
+import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { desktopClient } from "./bridge.ts";
 
 /** One composer file held outside the model-visible workspace until send. */
@@ -13,7 +15,7 @@ export interface WorkspaceImport {
   readonly localId: string;
   readonly fileName: string;
   readonly size: number;
-  readonly kind: "image" | "pdf" | "text";
+  readonly kind: AttachmentKind;
   readonly status: "importing" | "complete" | "error";
   readonly storedName: string | null;
   readonly error: string | null;
@@ -42,19 +44,6 @@ export interface WorkspaceImports {
 
 let counter = 0;
 const nextLocalId = () => `import-${++counter}`;
-
-const readBase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read that file."));
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") return reject(new Error("Could not read that file."));
-      const comma = result.indexOf(",");
-      resolve(comma === -1 ? result : result.slice(comma + 1));
-    };
-    reader.readAsDataURL(file);
-  });
 
 export function useWorkspaceImports(conversationId: string): WorkspaceImports {
   const [items, setItems] = useState<ReadonlyArray<WorkspaceImport>>([]);
@@ -144,7 +133,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
           localId: nextLocalId(),
           fileName: file.name,
           size: file.size,
-          kind: attachmentKind(file.type),
+          kind: attachmentKindForFileName(file.name),
           status: oversized ? "error" : "importing",
           storedName: null,
           error: oversized

@@ -18,12 +18,17 @@ export const CUSTOM_TOOL_LIMITS = {
   parametersChars: 8_192,
   totalParametersChars: 65_536,
   bundleBytes: 5 * 1024 * 1024,
+  /** Files one call may read through `fileInput`, together; one project file's cap. */
+  inputFileBytes: 50 * 1024 * 1024,
+  inputFiles: 10,
   resultChars: 32_768,
   resultPreviewChars: 500,
   files: MAX_ATTACHMENTS_PER_MESSAGE,
   fileBytes: MAX_ATTACHMENT_BYTES,
   totalFileBytes: MAX_ATTACHMENT_BYTES * 2,
   testFileBytes: 2 * 1024 * 1024,
+  /** Files an admin hands a Test run for its file parameters, together. */
+  testInputBytes: 10 * 1024 * 1024,
   errorChars: 300,
   timeoutMs: 30_000,
   testTimeoutMs: 10_000,
@@ -142,6 +147,17 @@ export const TestCustomToolInput = Schema.Struct({
   ...CheckCustomToolInput.fields,
   functionKey: CustomToolFunctionSlug,
   argumentsJson: Schema.String.check(Schema.isMaxLength(CUSTOM_TOOL_LIMITS.resultChars)),
+  /** Named by the arguments the way a model names a chat file. */
+  files: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+        base64: Schema.String.check(
+          Schema.isMaxLength(Math.ceil(CUSTOM_TOOL_LIMITS.testInputBytes / 3) * 4),
+        ),
+      }),
+    ).check(Schema.isMaxLength(CUSTOM_TOOL_LIMITS.inputFiles)),
+  ),
 });
 
 export interface CustomToolSummary {

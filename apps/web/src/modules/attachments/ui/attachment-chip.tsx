@@ -24,7 +24,12 @@ export interface AttachmentChipItem {
   readonly location?: "workspace" | undefined;
 }
 
-const KIND_ICON = { pdf: Pdf01Icon, text: File01Icon, image: File01Icon } as const;
+const KIND_ICON = {
+  pdf: Pdf01Icon,
+  text: File01Icon,
+  image: File01Icon,
+  file: File01Icon,
+} as const;
 
 /**
  * Shared by the composer (removable, live upload state) and sent messages

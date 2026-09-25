@@ -36,7 +36,6 @@ import {
   type ComposerContext,
 } from "./context-picker.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
-import { ATTACHMENT_ACCEPT } from "~/modules/attachments/constants.ts";
 import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
   type AttachmentUpload,
@@ -565,7 +564,6 @@ export const ChatInput = forwardRef<
             multiple
             // Any type lands in a workspace; the server upload path keeps its
             // allowlist, since the model only reads what the server accepts.
-            {...(workspaceImports ? {} : { accept: ATTACHMENT_ACCEPT })}
             className="sr-only"
             aria-label="Attach files"
             // Selecting the same file twice in a row must re-fire `change`.
@@ -603,11 +601,7 @@ export const ChatInput = forwardRef<
             </DropdownMenuTrigger>
             <TooltipContent>{menuLabel}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent
-            ref={menuPopup}
-            align="start"
-            className={cn(hasTools && "w-64")}
-          >
+          <DropdownMenuContent ref={menuPopup} align="start" className={cn(hasTools && "w-64")}>
             {target ? (
               <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
                 <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
@@ -624,10 +618,7 @@ export const ChatInput = forwardRef<
               />
             ) : null}
             {skills && canChooseSkills ? (
-              <DropdownMenuItem
-                disabled={controlsDisabled}
-                onClick={() => choosePicker("skills")}
-              >
+              <DropdownMenuItem disabled={controlsDisabled} onClick={() => choosePicker("skills")}>
                 <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
                 Skills
                 {skills.selectedIds.length > 0 ? (

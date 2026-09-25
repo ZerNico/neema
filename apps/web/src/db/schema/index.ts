@@ -12,6 +12,7 @@ export * from "./integrations.ts";
 export * from "./knowledge.ts";
 export * from "./memory.ts";
 export * from "./oauth.ts";
+export * from "./project-files.ts";
 export * from "./projects.ts";
 export * from "./providers.ts";
 export * from "./tools.ts";

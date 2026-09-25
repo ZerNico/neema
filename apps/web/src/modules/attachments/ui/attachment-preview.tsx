@@ -79,13 +79,13 @@ export function AttachmentPreviewDialog({
                   rel="noreferrer"
                   className="hover:text-foreground underline underline-offset-2"
                 >
-                  Open original
+                  {target.kind === "file" ? "Download" : "Open original"}
                 </a>
               </>
             )}
           </DialogDescription>
         </DialogHeader>
-        {target.unsupported ? (
+        {target.unsupported || target.kind === "file" ? (
           <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
         ) : target.kind === "image" ? (
           <img

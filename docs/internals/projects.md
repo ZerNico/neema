@@ -1,7 +1,7 @@
 # Projects
 
-A project is a place for continuing work: instructions every chat in it follows, documents
-and memory shared by its members, and the people who may use it. It does not configure
+A project is a place for continuing work: instructions every chat in it follows, documents,
+files and memory shared by its members, and the people who may use it. It does not configure
 the chat: model, agent, collections, skills and search stay ordinary composer choices.
 
 ## Roles and access
@@ -30,8 +30,8 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
 - Project instructions enter the prompt as a user-role `<project-instructions>` block after
   application policy and before an agent's instructions, which refine them.
 - A branch keeps the project while its owner may still use it, and leaves it otherwise.
-- Deleting a project deletes its documents and memory; its chats become ordinary chats and
-  keep their messages.
+- Deleting a project deletes its documents, files and memory; its chats become ordinary
+  chats and keep their messages.
 
 ## Documents and memory
 
@@ -47,3 +47,32 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   to the project like its documents. See [memory](memory.md).
 - Change hints fan out to every member, resolved at publish time; each refetch is
   authorized on its own.
+
+## Files
+
+- A project file is a working file people replace rather than co-edit: a deck, a
+  spreadsheet, a PDF, anything. Each save is a whole new immutable version in
+  `project_file_versions`; the current version is the highest number. Any type is kept and
+  classified by its bytes like every other file ([files](files.md)).
+- A save names the version it started from and is refused when the file moved on, so
+  nobody's version lands unseen on top of a newer one. The same writer saving again within
+  ten minutes (the same answer, for the model) replaces their own unpinned last version
+  instead of stacking near-identical ones.
+- Retention: older unpinned versions go after 30 days or past 25 per file; up to 10 pins
+  per file are kept until unpinned. Past the admin's per-project cap the oldest unpinned
+  history goes first, and a save that still does not fit is refused. The current version
+  of every file is never pruned. Each write prunes in its own transaction; an hourly sweep
+  catches projects nobody wrote to.
+- Bytes are `attachment_blobs` registered under the project owner, deduplicated with the
+  owner's own files. A version is one more owner in the orphan check, so dropping a
+  version, a file or the project records cleanup intents in the same transaction and the
+  [blob ledger](../../AGENTS.md#invariants) settles them.
+- The model gets `list_project_files`, `read_project_file` and, for an editor,
+  `save_project_file`, only in a project chat. A read hands it the file's text when there
+  is a reader for it, for the rest of that answer; the tool row keeps only which file and
+  version. A save takes either text content or a chat file by id or name, and runs under
+  the answer's generation fence, taken before the project row.
+- A custom tool reads a project file through a file parameter, and its result names the
+  version it read, so the model can save the tool's output as the next version under the
+  same check a person's save gets. Nothing saves a tool's output on its own: the version
+  check depends on the model saying what it started from.

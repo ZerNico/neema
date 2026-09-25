@@ -10,7 +10,7 @@ export const Attachment = Schema.Struct({
   fileName: Schema.String,
   size: Schema.Int,
   mediaType: Schema.String,
-  kind: Schema.Literals(["image", "pdf", "text"]),
+  kind: Schema.Literals(["image", "pdf", "text", "file"]),
 });
 export type Attachment = typeof Attachment.Type;
 

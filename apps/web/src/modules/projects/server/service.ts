@@ -5,11 +5,14 @@ import {
   conversations,
   groupMembers,
   groups,
+  projectFiles,
+  projectFileVersions,
   projectGroupGrants,
   projectMembers,
   projects,
   user,
 } from "~/db/schema/index.ts";
+import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -222,8 +225,18 @@ export class ProjectService extends Context.Service<
               .from(conversations)
               .where(eq(conversations.projectId, projectId))
               .pipe(Effect.orDie);
-            // Chats come out as ordinary chats; documents and memory go with it.
+            // Its files' bytes are left to the cleanup ledger: the orphan check
+            // records them in this transaction, and the reconciler deletes them.
+            const blobIds = (yield* tx
+              .select({ blobId: projectFileVersions.blobId })
+              .from(projectFileVersions)
+              .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
+              .where(eq(projectFiles.projectId, projectId))
+              .pipe(Effect.orDie)).map((row) => row.blobId);
+            yield* lockBlobs(tx, blobIds).pipe(Effect.orDie);
+            // Chats come out as ordinary chats; documents, memory and files go with it.
             yield* tx.delete(projects).where(eq(projects.id, projectId)).pipe(Effect.orDie);
+            yield* collectOrphanedBlobs(tx, blobIds).pipe(Effect.orDie);
             return chats;
           }),
         );
