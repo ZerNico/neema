@@ -572,7 +572,9 @@ const send = (
     }),
   );
 const collect = (messageId: string, runId?: string) =>
-  Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(messageId, 0, runId)));
+  Effect.flatMap(StreamEngine, (engine) =>
+    Stream.runCollect(engine.subscribe(messageId, 0, runId)),
+  );
 /**
  * A message no longer points at a run: the run points back, through the tool
  * call it answers. Tests that used to read `message.researchRunId` ask here.
@@ -1114,11 +1116,19 @@ describe("durable deep research", () => {
           }
           const detail = yield* loadConversationDetail(input.userId, input.conversationId);
           expect(detail.compactionEvents).toHaveLength(persisted.length);
-          expect(detail.compactionEvents.every((event) => event.summary === null)).toBe(true);
+          // Research summaries stay server-side; an ordinary chat compaction in
+          // the same window may show its summary by design.
+          const research = detail.compactionEvents.filter((event) => event.researchRunId);
+          expect(research.length).toBeGreaterThan(0);
+          expect(research.every((event) => event.summary === null)).toBe(true);
           const chunks = yield* repo.chunksAfter(sent.assistantMessageId, 0);
           const compactions = chunks.filter((chunk) => chunk.kind === "compaction");
           expect(compactions.length).toBeGreaterThan(0);
-          expect(compactions.every((chunk) => !("summary" in JSON.parse(chunk.delta)))).toBe(true);
+          const researchChunks = compactions
+            .map((chunk) => JSON.parse(chunk.delta) as Record<string, unknown>)
+            .filter((envelope) => envelope.runId);
+          expect(researchChunks.length).toBeGreaterThan(0);
+          expect(researchChunks.every((envelope) => !("summary" in envelope))).toBe(true);
           const branch = yield* repo.cloneConversationPrefix({
             userId: input.userId,
             sourceConversationId: input.conversationId,
@@ -1126,7 +1136,9 @@ describe("durable deep research", () => {
           });
           const branched = yield* loadConversationDetail(input.userId, branch.id);
           expect(branched.compactionEvents).toHaveLength(persisted.length);
-          expect(branched.compactionEvents.every((event) => event.summary === null)).toBe(true);
+          const branchedResearch = branched.compactionEvents.filter((event) => event.researchRunId);
+          expect(branchedResearch.length).toBeGreaterThan(0);
+          expect(branchedResearch.every((event) => event.summary === null)).toBe(true);
         }),
       );
     },
@@ -1590,9 +1602,9 @@ describe("ending a run", () => {
           expect(ledger[0]!.conversationId).toBe(input.conversationId);
           expect(ledger[0]!.messageId).toBe(sent.assistantMessageId);
           yield* repo.research!.reap();
-          expect(yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id))).toHaveLength(
-            1,
-          );
+          expect(
+            yield* db.select().from(usageEvents).where(eq(usageEvents.id, run.id)),
+          ).toHaveLength(1);
         }),
       );
     } finally {
