@@ -1725,7 +1725,10 @@ export class StreamEngine extends Context.Service<
                           return;
                         }
                         case "reasoning-delta": {
-                          pushChunk("reasoning", part.delta);
+                          // The adapter writes encrypted reasoning as the text
+                          // "[REDACTED]"; the encrypted part still rides the
+                          // replay, so the reader gets the bare thinking marker.
+                          pushChunk("reasoning", part.delta === "[REDACTED]" ? "" : part.delta);
                           if (buffer.length >= 16) yield* flush;
                           return;
                         }
