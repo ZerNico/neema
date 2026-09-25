@@ -82,10 +82,14 @@ export const requestTokens = (input: {
     });
     if (!response.ok || typeof json.access_token !== "string") {
       const error = typeof json.error === "string" ? json.error : "";
+      const description = typeof json.error_description === "string" ? json.error_description : "";
       const revoked =
         error === "invalid_grant" ||
         error === "invalid_client" ||
         error === "unauthorized_client" ||
+        // Outline names a spent or unknown refresh token `invalid_request`
+        // with "Invalid grant: …", where the spec says `invalid_grant`.
+        (error === "invalid_request" && /^invalid grant\b/i.test(description)) ||
         response.status === 401;
       const failed: TokenOutcome = { ok: false, revoked };
       return failed;

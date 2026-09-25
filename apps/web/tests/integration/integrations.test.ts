@@ -97,7 +97,13 @@ const startOutline = () =>
         }
         // One use per refresh token, as a rotating provider would allow.
         const next = refreshTokens.get(form.get("refresh_token") ?? "");
-        if (!next) return json(400, { error: "invalid_grant" });
+        // What Outline really answers for a spent or unknown refresh token:
+        // `invalid_request`, not the `invalid_grant` the OAuth spec asks for.
+        if (!next)
+          return json(400, {
+            error: "invalid_request",
+            error_description: "Invalid grant: refresh token is invalid",
+          });
         refreshTokens.delete(form.get("refresh_token") ?? "");
         validTokens.add(next.access);
         return json(200, {
