@@ -1,6 +1,7 @@
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
+import { findTags, tagWords } from "../tags.ts";
+import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
-import { IntegrationMentionText } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
@@ -359,6 +360,11 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   const wrapperRef = useEditSwapHeight(message.editState !== undefined);
   // The stored text keeps its links for the model; people see chips and words.
   const { text, references } = extractReferences(message.content);
+  // Skills and collections named in the text show there as tags; a chip up
+  // here is only for the ones it does not name (older messages, the agent's).
+  const tagged = new Set(findTags(text).map((tag) => `${tag.kind}:${tag.id}`));
+  const chipSkills = message.skills?.filter((skill) => !tagged.has(`skill:${skill.id}`));
+  const chipCollections = message.collectionIds?.filter((id) => !tagged.has(`collection:${id}`));
 
   return (
     <div ref={wrapperRef} className="w-full">
@@ -369,19 +375,19 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {references.length > 0 ||
           (message.attachments && message.attachments.length > 0) ||
           (message.workspaceFiles && message.workspaceFiles.length > 0) ||
-          (message.collectionIds && message.collectionIds.length > 0) ||
-          (message.skills && message.skills.length > 0) ? (
+          (chipCollections && chipCollections.length > 0) ||
+          (chipSkills && chipSkills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
               {references.map((reference) => (
                 <ReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
               ))}
-              {message.skills?.map((skill) => (
+              {chipSkills?.map((skill) => (
                 <ContextChip
                   key={skill.id}
                   item={{ kind: "skill", id: skill.id, name: skill.name }}
                 />
               ))}
-              {message.collectionIds?.map((collectionId) => (
+              {chipCollections?.map((collectionId) => (
                 <CollectionChip key={collectionId} collectionId={collectionId} />
               ))}
               {message.attachments?.map((attachment) => (
@@ -395,7 +401,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* An attachment-only turn has no text bubble to draw. */}
           {text ? (
             <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
-              <IntegrationMentionText text={text} />
+              <MessageTagText text={text} />
             </div>
           ) : null}
           {message.editedAt ? (
@@ -406,7 +412,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* Hover-revealed on pointer devices; always visible on touch, where
               there is no hover. focus-within keeps them keyboard-reachable. */}
           <MessageActions
-            content={text}
+            content={tagWords(text)}
             sources={[]}
             time={message.time}
             timeFirst

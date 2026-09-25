@@ -8,11 +8,17 @@ import type { Attachment } from "~/modules/attachments/schema.ts";
 import { deleteAttachment, uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import {
+  composerTagCount,
   composerText,
   focusComposer,
   setComposerText,
   typeInComposer,
 } from "./composer-test-utils.ts";
+import { tagMarkup } from "../tags.ts";
+
+// A picked skill is a tag in the draft; the text carries its link.
+const REVIEW = tagMarkup({ kind: "skill", id: "review", name: "review" });
+const REWRITE = tagMarkup({ kind: "skill", id: "rewrite", name: "rewrite" });
 
 vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
@@ -117,7 +123,7 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
   );
   const rendered = render(view(onSend));
   const textbox = screen.getByRole("textbox");
-  setComposerText(textbox, "Original draft");
+  setComposerText(textbox, `${REVIEW} Original draft`);
   fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
     target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] },
   });
@@ -133,14 +139,14 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
 }
 
 async function replaceSkill(textbox: HTMLElement) {
-  fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
+  // Clearing the draft takes the review tag, and with it the skill.
   setComposerText(textbox, "");
   focusComposer(textbox);
   typeInComposer(textbox, "/rewrite");
   await screen.findByRole("listbox", { name: "Local skills" });
   fireEvent.keyDown(textbox, { key: "Enter" });
-  expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
-  setComposerText(textbox, "Updated draft");
+  expect(composerText(textbox)).toBe(`${REWRITE} `);
+  setComposerText(textbox, `Updated draft ${REWRITE}`);
 }
 
 describe("upload-queued composer requests", () => {
@@ -149,18 +155,21 @@ describe("upload-queued composer requests", () => {
     await replaceSkill(textbox);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], false, [
-        "rewrite",
-      ]),
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(
+        `Updated draft ${REWRITE}`,
+        [attachment.id],
+        false,
+        ["rewrite"],
+      ),
     );
     expect(composerText(textbox)).toBe("");
-    expect(screen.queryByRole("button", { name: "Remove rewrite" })).not.toBeInTheDocument();
     expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
   });
 
   it("does not send a removed skill when nothing replaces it", async () => {
-    const { upload, onSend } = setup();
-    fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
+    const { upload, onSend, textbox } = setup();
+    // Deleting the tag from the text drops the skill.
+    setComposerText(textbox, "Original draft");
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
       expect(onSend).toHaveBeenCalledExactlyOnceWith("Original draft", [attachment.id], false, []),
@@ -173,9 +182,12 @@ describe("upload-queued composer requests", () => {
     rerender(currentSend);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith("Original draft", [attachment.id], false, [
-        "review",
-      ]),
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(
+        `${REVIEW} Original draft`,
+        [attachment.id],
+        false,
+        ["review"],
+      ),
     );
     expect(currentSend).not.toHaveBeenCalled();
   });
@@ -185,12 +197,15 @@ describe("upload-queued composer requests", () => {
     await replaceSkill(textbox);
     await act(async () => upload.resolve(attachment));
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledExactlyOnceWith("Updated draft", [attachment.id], false, [
-        "rewrite",
-      ]),
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(
+        `Updated draft ${REWRITE}`,
+        [attachment.id],
+        false,
+        ["rewrite"],
+      ),
     );
-    expect(composerText(textbox)).toBe("Updated draft");
-    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+    expect(composerText(textbox)).toBe(`Updated draft ${REWRITE}`);
+    expect(composerTagCount(textbox)).toBe(1);
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 
@@ -204,8 +219,8 @@ describe("upload-queued composer requests", () => {
       ).not.toBeInTheDocument(),
     );
     expect(onSend).not.toHaveBeenCalled();
-    expect(composerText(textbox)).toBe("Updated draft");
-    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
+    expect(composerText(textbox)).toBe(`Updated draft ${REWRITE}`);
+    expect(composerTagCount(textbox)).toBe(1);
   });
 });
 
@@ -293,20 +308,20 @@ describe("editing a queued message", () => {
     const { queue, onSend, onQueue, textbox } = renderEditing();
     await openEdit();
 
-    expect(composerText(textbox)).toBe("Summarise the attached notes");
+    // Queued with the skill but not its tag: the tag is put back at the caret.
+    expect(composerText(textbox)).toBe(`Summarise the attached notes ${REWRITE} `);
     // Its file is back in the composer as a chip, beside the row's own in the strip.
     expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
     expect(queue.onEditStart).toHaveBeenCalledExactlyOnceWith(queued);
 
-    setComposerText(textbox, "Summarise it in three bullets");
+    setComposerText(textbox, `Summarise it in three bullets ${REWRITE}`);
     // A response is running, and saving is still the primary action, not Stop.
     fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
 
     await waitFor(() =>
       expect(queue.onReplace).toHaveBeenCalledExactlyOnceWith(
         "entry-1",
-        "Summarise it in three bullets",
+        `Summarise it in three bullets ${REWRITE}`,
         [attachment.id],
         true,
         ["rewrite"],

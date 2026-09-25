@@ -124,14 +124,21 @@ whatever agent the conversation is associated with.
   edit. Every path that abandons an edit has to release its uploads, not just forget which
   message was open.
 - The composer (`chat-textarea.tsx`) is a Tiptap editor over a plain-text value: one paragraph
-  per line, and an `@integration` mention is an atom node whose text is the typed `@Name`
-  (`composer-doc.tsx`). Everything outside it (send, the stored message, retry, edit, branch,
-  the model) sees only the string, so the tag is presentation and never data. `/` skills, `#`
-  collections and `@` integrations are one `@tiptap/suggestion` plugin each: `/` and `#` delete
-  their token and hand back an id, `@` leaves the tag. A value arriving as a prop is compared
-  with the last one the editor emitted; only a real outside change (send, seed, a queued
-  message opened for editing) replaces the document, outside undo, so an echo never resets the
-  caret.
+  per line, a tag an atom node whose text is what the stored message keeps (`composer-doc.tsx`):
+  the typed `@Name` for an integration, a link for a skill or collection (`tags.ts`,
+  `[/review](/skills/<id>)`, `[#Contracts](/knowledge/<id>)`). Everything outside it (send, the
+  stored message, retry, edit, branch, the model) sees only the string. `/`, `#` and `@` are one
+  `@tiptap/suggestion` plugin each, and every pick leaves a tag; the lists keep offering what is
+  already added. A value arriving as a prop is compared with the last one the editor emitted;
+  only a real outside change (send, seed, a queued message opened for editing) replaces the
+  document, outside undo, so an echo never resets the caret.
+- For skills and collections the selection (`skillIds`, the context selection) still decides
+  what loads; the tags mirror it, kept in step by `useTagSync` in `ChatInput`, shared by the
+  composer and the edit box. Deleting a tag deselects it, a + menu pick puts its tag at the
+  caret, unticking in the picker removes its tags, and a tag that appears unselected (a paste,
+  an edit whose message kept the words) selects it if it is one this person can use. Only the
+  agent's own skills and collections stay chips; a sent message shows as chips only the picks
+  its text does not name.
 
 - A collection can also mirror part of a connected service through a knowledge source.
   Its documents are ordinary note versions marked with their source and are read-only here;

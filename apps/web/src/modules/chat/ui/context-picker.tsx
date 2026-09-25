@@ -407,7 +407,12 @@ export function ContextChips({
     agentCollectionIds,
     collections: collections.data,
     agents: agents.data,
-  }).filter((item) => !(agentLocked && item.kind === "agent"));
+  })
+    .filter((item) => !(agentLocked && item.kind === "agent"))
+    // The user's own collections are tags in the text; only the agent's show here.
+    .filter(
+      (item) => item.kind !== "collection" || (item.id !== null && agentCollectionIds.has(item.id)),
+    );
   return (
     <AnimatePresence initial={false}>
       {items.map((item) => (

@@ -5,6 +5,7 @@ import {
   MoreHorizontalIcon,
   PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
+import { tagWords } from "../tags.ts";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
@@ -33,7 +34,7 @@ export interface QueuedMessage {
 
 /** A row's name for buttons and truncation: its words, or its files when it has none. */
 export const queuedLabel = (entry: QueuedMessage) =>
-  entry.content.trim() || entry.attachments.map((file) => file.fileName).join(", ");
+  tagWords(entry.content).trim() || entry.attachments.map((file) => file.fileName).join(", ");
 
 /**
  * Future turns sit immediately above the composer, not in the virtualized

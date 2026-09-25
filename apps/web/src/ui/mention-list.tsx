@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { cn } from "~/ui/utils";
 
@@ -36,6 +36,7 @@ export function MentionList({
   items,
   selectedIndex,
   caretRect,
+  iconFor,
   onHover,
   onPick,
   onDismiss,
@@ -46,6 +47,8 @@ export function MentionList({
   items: readonly MentionItem[];
   selectedIndex: number;
   caretRect: (() => DOMRect | null) | null;
+  /** The mark a row leads with, the same one its tag carries once picked. */
+  iconFor?: ((item: MentionItem) => ReactNode) | undefined;
   onHover: (index: number) => void;
   onPick: (index: number) => void;
   onDismiss: () => void;
@@ -84,19 +87,26 @@ export function MentionList({
               onPointerMove={() => onHover(index)}
               onClick={() => onPick(index)}
               className={cn(
-                "cursor-pointer rounded-2xl px-3 py-2",
+                "flex cursor-pointer items-start gap-2.5 rounded-2xl px-3 py-2",
                 index === selectedIndex && "bg-accent",
               )}
             >
-              <p className="truncate text-sm font-medium">
-                {item.label}
-                {item.meta ? (
-                  <span className="text-muted-foreground ml-2 text-xs">{item.meta}</span>
-                ) : null}
-              </p>
-              {item.description ? (
-                <p className="text-muted-foreground truncate text-xs">{item.description}</p>
+              {iconFor ? (
+                <span className="text-muted-foreground flex h-5 shrink-0 items-center">
+                  {iconFor(item)}
+                </span>
               ) : null}
+              <span className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {item.label}
+                  {item.meta ? (
+                    <span className="text-muted-foreground ml-2 text-xs">{item.meta}</span>
+                  ) : null}
+                </p>
+                {item.description ? (
+                  <p className="text-muted-foreground truncate text-xs">{item.description}</p>
+                ) : null}
+              </span>
             </div>
           ))}
         </div>

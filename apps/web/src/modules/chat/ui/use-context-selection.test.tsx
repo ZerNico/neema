@@ -246,7 +246,8 @@ describe("composer context selection", () => {
     expect(latest.sendFields).toEqual({ collectionIds: [] });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(latest.sendFields).toEqual({ collectionIds: ["collection-2"] });
-    expect(within(screen.getByLabelText("Chat context")).getByText("Policies")).toBeInTheDocument();
+    // A picked collection is a tag in the composer's text, not a chip here.
+    expect(within(screen.getByLabelText("Chat context")).queryByText("Policies")).toBeNull();
     act(() => latest.settle());
     // Like attached files: gone from the composer once the message left.
     expect(latest.sendFields).toEqual({ collectionIds: [] });
@@ -280,13 +281,15 @@ describe("composer context selection", () => {
     expect(latest.selection.collectionIds).toEqual(["collection-2"]);
   });
 
-  it("drops a standalone collection from its chip", async () => {
+  it("drops a standalone collection unticked in the popup", async () => {
     setup({ mode: "draft", agent: null });
     await openPicker(/Knowledge/, "Search collections…");
     fireEvent.click(screen.getByRole("option", { name: /Contracts/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(latest.sendFields).toEqual({ collectionIds: ["collection-1"] });
-    fireEvent.click(screen.getByRole("button", { name: "Remove Contracts" }));
+    await openPicker(/Knowledge/, "Search collections…");
+    fireEvent.click(screen.getByRole("option", { name: /Contracts/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(latest.sendFields).toEqual({ collectionIds: [] });
   });
 

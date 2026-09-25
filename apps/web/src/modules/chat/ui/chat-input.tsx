@@ -1,4 +1,5 @@
 import type { SkillSummary } from "~/modules/skills/schema.ts";
+import { useTagSync } from "./use-tag-sync.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import {
   AiBrain01Icon,
@@ -14,7 +15,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import { forwardRef, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   chatModelsQuery,
   researchAvailabilityQuery,
@@ -192,8 +201,18 @@ export const ChatInput = forwardRef<
     submitLabel = "Send",
     className,
   },
-  textareaRef,
+  forwardedRef,
 ) {
+  // Callers get the field's handle; the tag sync below needs it too.
+  const textareaRef = useRef<ComposerFieldHandle>(null);
+  useImperativeHandle(forwardedRef, () => ({
+    focus: (options) => textareaRef.current?.focus(options),
+    get value() {
+      return textareaRef.current?.value ?? value;
+    },
+    insertTags: (tags) => textareaRef.current?.insertTags(tags),
+    removeTags: (kind, ids) => textareaRef.current?.removeTags(kind, ids),
+  }));
   const { data: models } = useSuspenseQuery(chatModelsQuery);
   const { data: capabilities } = useQuery(capabilitiesQuery);
   const { data: searchAvailability } = useQuery(webSearchAvailabilityQuery);
@@ -262,22 +281,65 @@ export const ChatInput = forwardRef<
   const mentionableCollections = useMemo(() => {
     if (!context || controlsDisabled || !canChooseKnowledge) return undefined;
     const selected = new Set(context.selection.collectionIds);
-    if (selected.size >= MAX_SELECTED_COLLECTIONS) return undefined;
+    const full = selected.size >= MAX_SELECTED_COLLECTIONS;
     return {
+      // Added ones stay listed, to be named again in the text; at the cap only
+      // they are. The agent's own are not the user's to add.
       items: (knowledge.data ?? [])
         .filter(
           (collection) =>
-            !selected.has(collection.id) && !context.agentCollectionIds.has(collection.id),
+            !context.agentCollectionIds.has(collection.id) &&
+            (!full || selected.has(collection.id)),
         )
         .map((collection) => ({
           id: collection.id,
           label: collection.name,
           description: collection.description || collectionStatus(collection),
         })),
-      onSelect: (id: string) =>
-        context.onCollectionsChange([...context.selection.collectionIds, id], [id]),
+      onSelect: (id: string) => {
+        if (!context.selection.collectionIds.includes(id))
+          context.onCollectionsChange([...context.selection.collectionIds, id], [id]);
+      },
     };
   }, [context, controlsDisabled, canChooseKnowledge, knowledge.data]);
+  useTagSync(value, textareaRef, [
+    ...(skills
+      ? [
+          {
+            kind: "skill" as const,
+            selected: skills.selectedIds,
+            nameOf: (id: string) => skills.items.find((item) => item.id === id)?.name,
+            canSelect: (id: string) => skills.items.some((item) => item.id === id),
+            select: (ids: readonly string[]) =>
+              skills.onChange([...new Set([...skills.selectedIds, ...ids])].slice(0, 5)),
+            deselect: (ids: readonly string[]) =>
+              skills.onChange(skills.selectedIds.filter((id) => !ids.includes(id))),
+          },
+        ]
+      : []),
+    ...(context
+      ? [
+          {
+            kind: "collection" as const,
+            selected: context.selection.collectionIds.filter(
+              (id) => !context.agentCollectionIds.has(id),
+            ),
+            nameOf: (id: string) =>
+              knowledge.data?.find((collection) => collection.id === id)?.name ??
+              (knowledge.isSuccess ? "Unavailable collection" : undefined),
+            canSelect: (id: string) =>
+              !!knowledge.data?.some((collection) => collection.id === id) &&
+              !context.agentCollectionIds.has(id),
+            select: (ids: readonly string[]) =>
+              context.onCollectionsChange([...context.selection.collectionIds, ...ids], ids),
+            deselect: (ids: readonly string[]) =>
+              context.onCollectionsChange(
+                context.selection.collectionIds.filter((id) => !ids.includes(id)),
+              ),
+          },
+        ]
+      : []),
+  ]);
   // A context row closes the menu first and opens its popup once the menu is
   // gone, anchored to the same "+" button: two overlays returning focus to
   // each other is what a submenu would have avoided and this avoids too.
@@ -413,12 +475,11 @@ export const ChatInput = forwardRef<
       <AnimatePresence initial={false}>
         {(references && references.items.length > 0) ||
         (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
-        (skills && skills.selectedIds.length > 0) ||
         (attachments && items.length > 0) ||
         (workspaceImports && importItems.length > 0) ||
         (context &&
           ((context.selection.agent && !context.agentLocked) ||
-            context.selection.collectionIds.length > 0)) ? (
+            context.selection.collectionIds.some((id) => context.agentCollectionIds.has(id)))) ? (
           <m.div key="chips" {...rowMotion}>
             <AttachmentChipRow className="px-3 pt-3">
               <AnimatePresence initial={false}>
@@ -431,37 +492,17 @@ export const ChatInput = forwardRef<
                     />
                   </CollapseItem>
                 ))}
-                {[...(context?.agentSkillIds ?? [])]
-                  .filter((id) => !skills?.selectedIds.includes(id))
-                  .map((id) => (
-                    <CollapseItem key={`agent-skill:${id}`}>
-                      <ContextChip
-                        item={{
-                          kind: "skill",
-                          id,
-                          name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
-                          note: "From agent",
-                        }}
-                      />
-                    </CollapseItem>
-                  ))}
-                {skills?.selectedIds.map((id) => (
-                  <CollapseItem key={`skill:${id}`}>
+                {/* The user's own skills and collections are tags in the text; only
+                    what the agent brings stays up here, not the user's to remove. */}
+                {[...(context?.agentSkillIds ?? [])].map((id) => (
+                  <CollapseItem key={`agent-skill:${id}`}>
                     <ContextChip
                       item={{
                         kind: "skill",
                         id,
-                        name: skills.items.find((skill) => skill.id === id)?.name ?? null,
-                        note: "Skill",
+                        name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
+                        note: "From agent",
                       }}
-                      onRemove={
-                        controlsDisabled
-                          ? undefined
-                          : () =>
-                              skills.onChange(
-                                skills.selectedIds.filter((selected) => selected !== id),
-                              )
-                      }
                     />
                   </CollapseItem>
                 ))}
@@ -520,10 +561,10 @@ export const ChatInput = forwardRef<
         skills={
           skills && canChooseSkills && !controlsDisabled
             ? {
+                // Added ones stay listed; at five only they are.
                 items: skills.items
                   .filter(
-                    (item) =>
-                      !skills.selectedIds.includes(item.id) && skills.selectedIds.length < 5,
+                    (item) => skills.selectedIds.length < 5 || skills.selectedIds.includes(item.id),
                   )
                   .map((item) => ({
                     id: item.id,

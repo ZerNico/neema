@@ -63,7 +63,7 @@ function setup() {
   return { textbox, submit, select, cancel };
 }
 describe("composer skill suggestions", () => {
-  it("keeps a textbox and selects the skill without sending", async () => {
+  it("selects the skill as a tag in the text without sending", async () => {
     const { textbox, submit, select } = setup();
     await screen.findByRole("listbox", { name: "Local skills" });
     expect(screen.queryByRole("combobox")).toBeNull();
@@ -71,7 +71,8 @@ describe("composer skill suggestions", () => {
     fireEvent.keyDown(textbox, { key: "Enter" });
     expect(submit).not.toHaveBeenCalled();
     expect(select).toHaveBeenCalledWith("skill-1");
-    expect(composerText(textbox)).toBe("Before  after");
+    // The pick stays in the text as a tag, linked to the skill it loads.
+    expect(composerText(textbox)).toBe("Before [/review](/skills/skill-1) after");
   });
   it("dismisses suggestions before cancelling an edit", async () => {
     const { textbox, cancel } = setup();

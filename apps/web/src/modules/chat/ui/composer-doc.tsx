@@ -1,28 +1,35 @@
 import { InputRule, Node, type Editor, type JSONContent } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
-import {
-  integrationForName,
-  integrationNamePattern,
-  splitIntegrationMentions,
-} from "~/modules/integrations/mentions.ts";
+import { integrationForName, integrationNamePattern } from "~/modules/integrations/mentions.ts";
 import { IntegrationTag } from "~/modules/integrations/ui/integration-mention-text.tsx";
+import { splitMessageTags, tagMarkup, type ContextTag } from "../tags.ts";
+import { ContextTagView } from "./message-tag.tsx";
 
 /*
  * The composer edits a document but hands everyone else a string: one paragraph
- * per line, an integration mention as its typed "@Name". The model, the stored
- * message, retry and branch never see the document.
+ * per line, an integration mention as its typed "@Name", a skill or collection
+ * as its link (`tags.ts`). The model, the stored message, retry and branch never
+ * see the document.
  */
 
 export const MENTION_NODE = "integrationMention";
+export const TAG_NODE = "contextTag";
+
+export const contextTagContent = (tag: ContextTag): JSONContent => ({
+  type: TAG_NODE,
+  attrs: { kind: tag.kind, id: tag.id, name: tag.name },
+});
 
 const lineContent = (line: string): JSONContent[] =>
-  splitIntegrationMentions(line).map((segment) =>
-    segment.kind === "mention"
+  splitMessageTags(line).map((segment) =>
+    segment.kind === "integration"
       ? {
           type: MENTION_NODE,
           attrs: { integrationId: segment.integrationId, text: segment.text },
         }
-      : { type: "text", text: segment.text },
+      : segment.kind === "tag"
+        ? contextTagContent(segment.tag)
+        : { type: "text", text: segment.text },
   );
 
 const paragraph = (line: string): JSONContent =>
@@ -120,15 +127,80 @@ export const IntegrationMention = Node.create<IntegrationMentionOptions>({
   },
 
   addKeyboardShortcuts() {
-    // One key removes the whole tag, whichever side the caret is on.
-    const remove = (side: "before" | "after") => () => {
-      const { selection } = this.editor.state;
-      if (!selection.empty) return false;
-      const node = side === "before" ? selection.$from.nodeBefore : selection.$from.nodeAfter;
-      if (node?.type !== this.type) return false;
-      const from = side === "before" ? selection.from - node.nodeSize : selection.from;
-      return this.editor.commands.deleteRange({ from, to: from + node.nodeSize });
-    };
-    return { Backspace: remove("before"), Delete: remove("after") };
+    return wholeTagKeys(this.editor, this.type.name);
+  },
+});
+
+/** One key removes a whole tag, whichever side of it the caret is on. */
+function wholeTagKeys(editor: Editor, type: string) {
+  const remove = (side: "before" | "after") => () => {
+    const { selection } = editor.state;
+    if (!selection.empty) return false;
+    const node = side === "before" ? selection.$from.nodeBefore : selection.$from.nodeAfter;
+    if (node?.type.name !== type) return false;
+    const from = side === "before" ? selection.from - node.nodeSize : selection.from;
+    return editor.commands.deleteRange({ from, to: from + node.nodeSize });
+  };
+  return { Backspace: remove("before"), Delete: remove("after") };
+}
+
+function ContextTagNodeView({ node }: NodeViewProps) {
+  return (
+    <NodeViewWrapper as="span" contentEditable={false}>
+      <ContextTagView tag={node.attrs as ContextTag} tone="field" />
+    </NodeViewWrapper>
+  );
+}
+
+/**
+ * A /skill or #collection picked into the text. An atom like the integration
+ * mention; its text is the link the stored message keeps (`tags.ts`).
+ */
+export const ContextTagNode = Node.create({
+  name: TAG_NODE,
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: false,
+
+  addAttributes() {
+    return { kind: { default: "skill" }, id: { default: "" }, name: { default: "" } };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "span[data-context-tag]",
+        getAttrs: (element) => ({
+          kind: element.getAttribute("data-context-tag"),
+          id: element.getAttribute("data-id"),
+          name: element.getAttribute("data-name"),
+        }),
+      },
+    ];
+  },
+
+  renderHTML({ node }) {
+    return [
+      "span",
+      {
+        "data-context-tag": node.attrs.kind,
+        "data-id": node.attrs.id,
+        "data-name": node.attrs.name,
+      },
+      node.attrs.name,
+    ];
+  },
+
+  renderText({ node }) {
+    return tagMarkup(node.attrs as ContextTag);
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(ContextTagNodeView, { as: "span" });
+  },
+
+  addKeyboardShortcuts() {
+    return wholeTagKeys(this.editor, this.type.name);
   },
 });

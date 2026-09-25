@@ -1,16 +1,16 @@
 import { act } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
-import { MENTION_NODE, docToText, textToDoc } from "./composer-doc.tsx";
+import { MENTION_NODE, TAG_NODE, docToText, textToDoc } from "./composer-doc.tsx";
 
 /** Tiptap keeps its editor on the editable element, which is how tests reach it. */
 export const composerEditor = (field: HTMLElement) =>
   (field as HTMLElement & { editor: Editor }).editor;
 
-/** How many @integration tags the draft holds, read from the document. */
+/** How many tags (@integration, /skill, #collection) the draft holds, from the document. */
 export function composerTagCount(field: HTMLElement) {
   let count = 0;
   composerEditor(field).state.doc.descendants((node) => {
-    if (node.type.name === MENTION_NODE) count += 1;
+    if (node.type.name === MENTION_NODE || node.type.name === TAG_NODE) count += 1;
   });
   return count;
 }

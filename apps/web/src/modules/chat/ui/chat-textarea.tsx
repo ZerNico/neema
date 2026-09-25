@@ -1,4 +1,7 @@
 import { Extension } from "@tiptap/core";
+import { Book02Icon, FolderLibraryIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import { Placeholder } from "@tiptap/extensions";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -15,13 +18,18 @@ import {
   useState,
   type Dispatch,
   type RefObject,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { MentionList, filterMentionItems, type MentionItem } from "~/ui/mention-list.tsx";
 import { cn } from "~/ui/utils";
+import type { ContextTag } from "../tags.ts";
 import {
+  ContextTagNode,
   IntegrationMention,
   MENTION_NODE,
+  TAG_NODE,
+  contextTagContent,
   docToText,
   textToDoc,
   textToSlice,
@@ -43,6 +51,10 @@ export interface ComposerFieldHandle {
   focus: (options?: { preventScroll?: boolean; atEnd?: boolean }) => void;
   /** The draft as the string everyone else sees. */
   readonly value: string;
+  /** Puts tags at the caret without taking focus: a pick made outside the text. */
+  insertTags: (tags: readonly ContextTag[]) => void;
+  /** Takes out every tag of these ids: a deselection made outside the text. */
+  removeTags: (kind: ContextTag["kind"], ids: ReadonlySet<string>) => void;
 }
 
 type Trigger = "/" | "#" | "@";
@@ -56,6 +68,13 @@ const suggestionKeys: Record<Trigger, PluginKey> = {
   "/": new PluginKey("composer-mention-/"),
   "#": new PluginKey("composer-mention-#"),
   "@": new PluginKey("composer-mention-@"),
+};
+
+/** A list row leads with the mark its tag will carry. */
+const LIST_ICON: Record<Trigger, (item: MentionItem) => ReactNode> = {
+  "/": () => <HugeiconsIcon icon={Book02Icon} strokeWidth={2} className="size-4" />,
+  "#": () => <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} className="size-4" />,
+  "@": (item) => <IntegrationLogo integrationId={item.id} className="size-4" />,
 };
 
 interface OpenList {
@@ -125,32 +144,34 @@ const mentionSuggestions = (
           command: ({ editor, range, props: item }) => {
             const source = latest.current.sources[trigger];
             if (!source) return;
-            if (trigger === "@") {
-              // A space follows the tag unless the text already has one there.
-              const next = editor.state.doc.textBetween(
-                range.to,
-                Math.min(range.to + 1, editor.state.doc.content.size),
-              );
-              editor
-                .chain()
-                .focus()
-                .insertContentAt(range, [
-                  {
-                    type: MENTION_NODE,
-                    attrs: { integrationId: item.id, text: `@${item.label}` },
-                  },
-                  ...(next === " " ? [] : [{ type: "text", text: " " }]),
-                ])
-                // Either way the caret lands past that space, as after typing it.
-                .command(({ tr }) => {
-                  if (next === " ")
-                    tr.setSelection(TextSelection.create(tr.doc, tr.selection.from + 1));
-                  return true;
-                })
-                .run();
-            } else {
-              editor.chain().focus().deleteRange(range).run();
-            }
+            // A tag replaces the typed token, with a space after it unless the
+            // text already has one there; either way the caret lands past it.
+            const next = editor.state.doc.textBetween(
+              range.to,
+              Math.min(range.to + 1, editor.state.doc.content.size),
+            );
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(range, [
+                trigger === "@"
+                  ? {
+                      type: MENTION_NODE,
+                      attrs: { integrationId: item.id, text: `@${item.label}` },
+                    }
+                  : contextTagContent({
+                      kind: trigger === "/" ? "skill" : "collection",
+                      id: item.id,
+                      name: item.label,
+                    }),
+                ...(next === " " ? [] : [{ type: "text", text: " " }]),
+              ])
+              .command(({ tr }) => {
+                if (next === " ")
+                  tr.setSelection(TextSelection.create(tr.doc, tr.selection.from + 1));
+                return true;
+              })
+              .run();
             source.onSelect(item.id);
           },
           render: () => {
@@ -314,6 +335,7 @@ export const ChatTextarea = forwardRef<
       trailingNode: false,
     }),
     Placeholder.configure({ placeholder: () => latest.current.placeholder ?? "" }),
+    ContextTagNode,
     IntegrationMention.configure({
       // A typed-out mention is the same keyboard route as picking it.
       onTyped: (integrationId) => {
@@ -432,6 +454,40 @@ export const ChatTextarea = forwardRef<
       get value() {
         return editor && !editor.isDestroyed ? docToText(editor) : emitted.current;
       },
+      insertTags: (tags) => {
+        if (!editor || editor.isDestroyed || tags.length === 0) return;
+        const at = editor.state.selection.to;
+        const before = at > 1 ? editor.state.doc.textBetween(at - 1, at) : "";
+        editor
+          .chain()
+          .insertContentAt(at, [
+            ...(before && before !== " " ? [{ type: "text", text: " " }] : []),
+            ...tags.flatMap((tag) => [contextTagContent(tag), { type: "text", text: " " }]),
+          ])
+          .run();
+      },
+      removeTags: (kind, ids) => {
+        if (!editor || editor.isDestroyed || ids.size === 0) return;
+        const ranges: { from: number; to: number }[] = [];
+        const { doc } = editor.state;
+        doc.descendants((node, position) => {
+          if (node.type.name !== TAG_NODE || node.attrs.kind !== kind || !ids.has(node.attrs.id))
+            return;
+          // The space a pick added after the tag goes with it.
+          const end = position + node.nodeSize;
+          const space = end < doc.content.size && doc.textBetween(end, end + 1) === " ";
+          ranges.push({ from: position, to: space ? end + 1 : end });
+        });
+        if (ranges.length === 0) return;
+        // Last first, so the earlier positions still hold.
+        editor
+          .chain()
+          .command(({ tr }) => {
+            for (const range of ranges.toReversed()) tr.delete(range.from, range.to);
+            return true;
+          })
+          .run();
+      },
     }),
     [editor],
   );
@@ -446,6 +502,7 @@ export const ChatTextarea = forwardRef<
           items={list.items}
           selectedIndex={selectedIndex}
           caretRect={list.caretRect}
+          iconFor={LIST_ICON[list.trigger]}
           onHover={setActive}
           onPick={(index) => {
             const item = list.items[index];

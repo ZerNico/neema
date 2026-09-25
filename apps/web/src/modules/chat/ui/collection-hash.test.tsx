@@ -50,12 +50,12 @@ const setup = (initial: string, caret: number) => {
 };
 
 describe("collection # mentions", () => {
-  it("adds the collection and removes the token, leaving the message text", async () => {
+  it("adds the collection as a tag in place of the typed token", async () => {
     const { textbox, select } = setup("Check #con please", 10);
     await screen.findByRole("listbox", { name: "Knowledge collections" });
     fireEvent.keyDown(textbox, { key: "Enter" });
     expect(select).toHaveBeenCalledWith("col-1");
-    expect(composerText(textbox)).toBe("Check  please");
+    expect(composerText(textbox)).toBe("Check [#Contracts](/knowledge/col-1) please");
   });
 
   it("filters as the query narrows and lets the arrow keys pick another", async () => {
@@ -80,7 +80,7 @@ describe("collection # mentions", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("offers the same collection again after it is added and removed", async () => {
+  it("opens the list again right after a pick", async () => {
     const select = vi.fn();
     render(<Harness select={select} initial="" />);
     const textbox = screen.getByRole("textbox");
@@ -90,11 +90,10 @@ describe("collection # mentions", () => {
     await screen.findByRole("listbox", { name: "Knowledge collections" });
     fireEvent.keyDown(textbox, { key: "Enter" });
     expect(select).toHaveBeenCalledWith("col-1");
-    expect(composerText(textbox)).toBe("");
+    expect(composerText(textbox)).toBe("[#Contracts](/knowledge/col-1) ");
 
-    // The chip is removed elsewhere, so the row is offered again, and typing
-    // the trigger at the same caret must reopen the list, not stay suppressed
-    // because an identical token was accepted there a moment ago.
+    // Typing the trigger again right after a pick reopens the list: it must
+    // not stay suppressed because a token was accepted there a moment ago.
     typeInComposer(textbox, "#");
     expect(await screen.findByRole("listbox", { name: "Knowledge collections" })).toBeVisible();
   });
