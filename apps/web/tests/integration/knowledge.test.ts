@@ -63,6 +63,9 @@ let embedFails = false;
 let beforeEmbedDispatch: (() => Promise<void>) | null = null;
 let onEmbed: ((inputs: ReadonlyArray<string>) => Promise<void>) | null = null;
 let embedFailure: ProviderUnreachable | null = null;
+/** Answers any request with more than one input the way Gemini on Vertex AI does. */
+let refuseArrays = false;
+let batchSizes: number[] = [];
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
@@ -77,7 +80,16 @@ const FakeGateway = Layer.succeed(AiGateway, {
       if (beforeEmbedDispatch) yield* Effect.promise(beforeEmbedDispatch);
       if (input.beforeDispatch) yield* input.beforeDispatch();
       embedCalls += 1;
+      batchSizes.push(input.inputs.length);
       if (embedFailure) return yield* Effect.fail(embedFailure);
+      if (refuseArrays && input.inputs.length > 1)
+        return yield* Effect.fail(
+          new ProviderUnreachable({
+            providerId: "fake",
+            message: "the embedding provider answered 400",
+            diagnostic: { kind: "InvalidRequestError", status: 400 },
+          }),
+        );
       if (embedFails)
         return yield* Effect.fail(
           new ProviderUnreachable({ providerId: "fake", message: "the fake provider is down" }),
@@ -2211,6 +2223,56 @@ describe("knowledge ingestion safety", () => {
     } finally {
       embedFailure = null;
     }
+  });
+
+  it("sends one input at a time to a route that refuses arrays, and finishes the page", async () => {
+    await configureEmbeddings({
+      spaceId: "single-input",
+      enabled: true,
+      modelId: embeddingModelId,
+    });
+    await drainIndexer();
+    const owner = await createUser();
+    const collectionId = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.createCollection(owner, { name: "Handbook", description: "" }),
+      ),
+    );
+    const paragraph = "Invoice payments are due monthly and travel is booked ahead. ";
+    await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.addNoteDocument(owner, {
+          collectionId,
+          title: "Long page",
+          content: Array.from(
+            { length: 12 },
+            (_, i) => `## Part ${i}\n\n${paragraph.repeat(40)}`,
+          ).join("\n\n"),
+        }),
+      ),
+    );
+    refuseArrays = true;
+    batchSizes = [];
+    try {
+      await drainIndexer();
+    } finally {
+      refuseArrays = false;
+    }
+    const [document] = (
+      await run(Effect.flatMap(KnowledgeService, (service) => service.detail(owner, collectionId)))
+    ).documents;
+    expect(document).toMatchObject({ status: "ready", semanticStatus: "ready" });
+    // One refused batch, then every chunk alone: no attempt spent, nothing skipped.
+    const chunks = Number(
+      (
+        await exec(
+          `select count(*) as n from knowledge_chunks where version_id = '${document!.versionId}'`,
+        )
+      ).rows[0]!.n,
+    );
+    expect(chunks).toBeGreaterThan(1);
+    expect(batchSizes[0]).toBeGreaterThan(1);
+    expect(batchSizes.slice(1)).toEqual(Array.from({ length: chunks }, () => 1));
   });
 
   it("does not retry deterministic embedding input rejections or lose lexical readiness", async () => {

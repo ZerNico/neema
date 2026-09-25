@@ -216,6 +216,10 @@ export class KnowledgeIndexer extends Context.Service<
       // job; `rateLimits` counts them in a row to grow the pause.
       let pausedUntil = 0;
       let rateLimits = 0;
+      // Some routes refuse an array of inputs with a 400 (Gemini embeddings on
+      // Vertex AI through OpenRouter). Learned per connection on the first
+      // refused batch and kept for the life of the process.
+      const singleInput = new Set<string>();
       const runEmbedding = Effect.fn("KnowledgeIndexer.runEmbedding")(function* () {
         // Paused: report nothing to do; the recovery tick or the next wake
         // checks again, so a pause lasts at least as long as asked.
@@ -251,7 +255,10 @@ export class KnowledgeIndexer extends Context.Service<
           const batch: (typeof chunks)[number][] = [];
           const inputs: string[] = [];
           let chars = 0;
-          while (index < chunks.length && batch.length < KNOWLEDGE_LIMITS.embeddingBatchSize) {
+          const batchSize = singleInput.has(target.connectionRevision)
+            ? 1
+            : KNOWLEDGE_LIMITS.embeddingBatchSize;
+          while (index < chunks.length && batch.length < batchSize) {
             const chunk = chunks[index]!;
             // Include the title and breadcrumb, but count them in the batch cap.
             const text = [chunk.title, chunk.headingPath, chunk.content].filter(Boolean).join("\n");
@@ -287,6 +294,19 @@ export class KnowledgeIndexer extends Context.Service<
             })
             .pipe(Effect.result);
           if (result._tag === "Failure") {
+            const diagnostic =
+              result.failure instanceof ProviderUnreachable ? result.failure.diagnostic : undefined;
+            if (
+              batch.length > 1 &&
+              diagnostic?.kind === "InvalidRequestError" &&
+              diagnostic.status === 400
+            ) {
+              // The same chunks again, one per request; a single input that
+              // still fails settles below like any other refusal.
+              singleInput.add(target.connectionRevision);
+              index -= batch.length;
+              continue;
+            }
             const retry = embeddingRetry(result.failure, claim.attempts, rateLimits);
             if (retry.kind === "pause") {
               rateLimits += 1;

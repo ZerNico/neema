@@ -43,6 +43,17 @@ export const parseRetryAfter = (header: string | undefined, now = Date.now()): n
  * it, a provider fault is retried later, anything else is the request's own
  * fault and would fail the same way again.
  */
+const ProviderErrorBody = Schema.Struct({
+  error: Schema.Struct({ message: Schema.String }),
+});
+const safeJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
 const embeddingDiagnostic = (status: number, retryAfter: string | undefined) => {
   if (status === 429) {
     const retryAfterMs = parseRetryAfter(retryAfter);
@@ -837,7 +848,18 @@ export class AiGateway extends Context.Service<
           }).pipe(
             Effect.flatMap((res) =>
               Effect.gen(function* () {
-                if (res.status < 200 || res.status >= 300)
+                if (res.status < 200 || res.status >= 300) {
+                  // The provider's own words go to the server log only: bodies
+                  // may echo inputs, so they never reach a stored error.
+                  const body = yield* res.text.pipe(Effect.orElseSucceed(() => ""));
+                  const said = Option.getOrUndefined(
+                    Schema.decodeUnknownOption(ProviderErrorBody)(safeJson(body)),
+                  )?.error.message;
+                  yield* Effect.logWarning("embedding request refused", {
+                    providerId,
+                    status: res.status,
+                    ...(said ? { detail: said.slice(0, 300) } : {}),
+                  });
                   return yield* Effect.fail(
                     new ProviderUnreachable({
                       providerId,
@@ -848,6 +870,7 @@ export class AiGateway extends Context.Service<
                       diagnostic: embeddingDiagnostic(res.status, res.headers["retry-after"]),
                     }),
                   );
+                }
                 let length = 0;
                 const parts: Uint8Array[] = [];
                 yield* Stream.runForEach(res.stream, (part) =>
