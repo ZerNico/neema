@@ -21,7 +21,7 @@ export interface PublicHttpTarget {
 const isPrivateIpv4 = (ip: string): boolean => {
   const octets = ip.split(".").map(Number);
   if (octets.length !== 4 || octets.some((o) => Number.isNaN(o))) return true;
-  const [a, b] = octets as [number, number, number, number];
+  const [a, b, c] = octets as [number, number, number, number];
   return (
     a === 0 || // 0.0.0.0/8
     a === 10 || // 10/8
@@ -30,7 +30,9 @@ const isPrivateIpv4 = (ip: string): boolean => {
     (a === 169 && b === 254) || // link-local + cloud metadata
     (a === 172 && b! >= 16 && b! <= 31) || // 172.16/12
     (a === 192 && b === 168) || // 192.168/16
-    (a === 192 && b === 0) || // 192.0.0/24 special
+    // Only the /24 is special; the rest of 192.0/16 is public (WordPress.com
+    // serves from 192.0.78.x), and matching on two octets refused all of it.
+    (a === 192 && b === 0 && c === 0) || // 192.0.0/24 special
     (a === 198 && (b === 18 || b === 19)) || // benchmarking
     a >= 224 // multicast + reserved
   );

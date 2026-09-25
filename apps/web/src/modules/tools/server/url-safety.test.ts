@@ -28,6 +28,7 @@ describe("assertPublicHttpUrl", () => {
   it.effect("rejects rfc1918 192.168/16", () => rejects("http://192.168.1.1/"));
   it.effect("rejects link-local / cloud metadata", () => rejects("http://169.254.169.254/latest"));
   it.effect("rejects CGNAT", () => rejects("http://100.100.1.1/"));
+  it.effect("rejects the 192.0.0/24 special block", () => rejects("http://192.0.0.8/"));
   it.effect("rejects 0.0.0.0", () => rejects("http://0.0.0.0/"));
   it.effect("rejects ipv6 loopback", () => rejects("http://[::1]/"));
   it.effect("rejects ipv6 ULA", () => rejects("http://[fd00::1]/"));
@@ -48,6 +49,18 @@ describe("assertPublicHttpUrl", () => {
     Effect.gen(function* () {
       const url = yield* assertPublicHttpUrl("https://1.1.1.1/dns");
       expect(url.hostname).toBe("1.1.1.1");
+    }),
+  );
+
+  it.effect("accepts public addresses beside the 192.0.0/24 special block", () =>
+    Effect.gen(function* () {
+      // WordPress.com hosting; a two-octet match once refused every site on it.
+      lookupMock.mockResolvedValueOnce([
+        { address: "192.0.78.223", family: 4 },
+        { address: "192.0.78.155", family: 4 },
+      ]);
+      const url = yield* assertPublicHttpUrl("https://openchannels.fm/episode/");
+      expect(url.hostname).toBe("openchannels.fm");
     }),
   );
 
