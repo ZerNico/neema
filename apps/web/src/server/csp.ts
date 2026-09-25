@@ -1,18 +1,15 @@
-import { createHash } from "node:crypto";
-import { desktopChromeInitScript, themeInitScript } from "~/ui/boot-scripts.ts";
-
-const scriptHash = (source: string) =>
-  `'sha256-${createHash("sha256").update(source).digest("base64")}'`;
-
-const productionScripts = `script-src 'self' ${scriptHash(themeInitScript)} ${scriptHash(desktopChromeInitScript)}`;
-// Vite's React Refresh preamble is inline, and HMR speaks WebSocket.
+// Vite's React Refresh preamble is inline, and HMR speaks WebSocket. A nonce
+// here would switch 'unsafe-inline' off, so development names none.
 const devScripts = "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 
-/** Document-shell CSP. Production hashes the boot scripts; dev lets Vite inject. */
-export const documentCsp = (production: boolean) =>
+/**
+ * Document-shell CSP. Production admits inline script only by this request's
+ * nonce (src/start.ts); without one, no inline script runs at all.
+ */
+export const documentCsp = (production: boolean, nonce?: string) =>
   [
     "default-src 'self'",
-    production ? productionScripts : devScripts,
+    !production ? devScripts : nonce ? `script-src 'self' 'nonce-${nonce}'` : "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
@@ -27,5 +24,3 @@ export const documentCsp = (production: boolean) =>
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
-
-export const DOCUMENT_CSP = documentCsp(process.env.NODE_ENV === "production");

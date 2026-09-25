@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
+import { getGlobalStartContext } from "@tanstack/react-start";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { routeTree } from "./routeTree.gen";
 import { RouteError, RouteNotFound } from "./ui/route-error.tsx";
@@ -15,6 +16,7 @@ export function getRouter() {
     },
   });
 
+  const nonce = getGlobalStartContext()?.cspNonce;
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -26,6 +28,8 @@ export function getRouter() {
     defaultErrorComponent: RouteError,
     defaultNotFoundComponent: RouteNotFound,
     defaultPendingMinMs: 0,
+    // Server only; the client reads it back from the `csp-nonce` meta tag.
+    ...(nonce === undefined ? {} : { ssr: { nonce } }),
   });
 
   setupRouterSsrQueryIntegration({ router, queryClient });

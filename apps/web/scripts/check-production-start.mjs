@@ -79,8 +79,17 @@ try {
     );
     const csp = response.headers.get("content-security-policy") ?? "";
     assert.match(csp, /default-src 'self'/);
-    assert.match(csp, /script-src 'self' 'sha256-/);
     assert.doesNotMatch(csp, /script-src [^;]*'unsafe-inline'/);
+    // Every inline script must carry this response's nonce, or the browser
+    // refuses it and the shell never boots. Serving HTML proves nothing more.
+    const nonce = /script-src 'self' 'nonce-([^']+)'/.exec(csp)?.[1];
+    assert.ok(nonce, `${path}: no script nonce in ${csp}`);
+    const inline = [...html.matchAll(/<script\b(?![^>]*\bsrc=)([^>]*)>/g)];
+    assert.ok(inline.length > 0, `${path}: no inline scripts`);
+    for (const [tag, attributes] of inline) {
+      assert.ok(attributes.includes(`nonce="${nonce}"`), `${path}: ${tag}`);
+    }
+    assert.equal(response.headers.get("cache-control"), "no-store");
     assert.match(html, /data-slot="spinner"/);
     assert.match(html, /id="desktop-titlebar-content"/);
     console.log(`Shell: ${path}`);

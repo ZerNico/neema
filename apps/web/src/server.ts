@@ -1,5 +1,7 @@
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
-import { DOCUMENT_CSP } from "./server/csp.ts";
+import { documentCsp } from "./server/csp.ts";
+
+const production = process.env.NODE_ENV === "production";
 
 export default {
   fetch: createStartHandler((context) => {
@@ -14,7 +16,12 @@ export default {
       // one back. Copying its body into a new Response drops the last chunk
       // and never closes the stream, which leaves a shell that loads forever.
       const response = result instanceof Response ? result : result.response;
-      response.headers.set("Content-Security-Policy", DOCUMENT_CSP);
+      response.headers.set(
+        "Content-Security-Policy",
+        documentCsp(production, context.router.options.ssr?.nonce),
+      );
+      // The nonce is this response's alone; a cached copy would carry a stale one.
+      response.headers.set("Cache-Control", "no-store");
       return result;
     });
   }),

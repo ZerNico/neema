@@ -56,8 +56,11 @@ className={buttonVariants({...})}>`.
   personalized SSR page. Early scripts apply theme and native-control clearance before paint; one
   permanent titlebar target survives hydration. A client-only boundary mounts desktop detection and
   theme-dependent UI before the application, so controls do not first render browser defaults. The
-  document response sets a Content-Security-Policy: production hashes those two boot scripts,
-  development leaves Vite's inline preamble and HMR socket room. Auth checks and route loaders
+  document response sets a Content-Security-Policy. Production admits inline script only by a
+  per-request nonce: request middleware in `src/start.ts` mints it, the router's `ssr.nonce` puts
+  it on every script Start streams, and `__root` puts it on the two boot scripts. Hashes cannot
+  work, as Start's stream scripts differ on every render; for the same reason the document is
+  `no-store`. Development leaves Vite's inline preamble and HMR socket room. Auth checks and route loaders
   still use authorized server functions. Startup shows `StartupPending`.
   Uncaught route errors and unmatched URLs go through TanStack Start’s root
   `errorComponent` / `notFoundComponent` and the matching router defaults
