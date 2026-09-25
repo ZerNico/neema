@@ -42,7 +42,9 @@ const SaveParams = Schema.Struct({
 // from the handler instead of failing the whole stream at decode.
 const optional = <S extends Schema.Top>(schema: S) =>
   Schema.optionalKey(
-    Schema.Unknown.check(
+    // Any, not Unknown: the JSON Schema generator drops this annotation on
+    // Unknown, which sent every parameter to the model with no type at all.
+    Schema.Any.check(
       Schema.makeFilter(() => true, {
         toJsonSchema: () => Schema.toJsonSchemaDocument(schema).schema,
       }),

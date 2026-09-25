@@ -305,7 +305,10 @@ Differs from most Effect 3 material online.
   `Schema.optionalKey`. `streamText` decodes each part against the toolkit, so a
   required key the model omits or renames fails the whole generation with
   `Invalid output: Missing key` before any handler or alias table runs. A
-  permissive value type does not cover an absent key.
+  permissive value type does not cover an absent key. Build that permissive value on
+  `Schema.Any` with a `toJsonSchema` filter declaring the real type: on `Schema.Unknown`
+  the generator drops the annotation and the model is offered `{}` for every parameter,
+  which smaller models answer with empty calls. `advertised-schemas.test.ts` guards it.
 - `capabilities.tools` means native tool calling and gates nothing; a model
   without it goes through the Hermes polyfill (`hermes-tools.ts`), which must stay
   inside the provider boundary and return encoded parts. Malformed JSON and fenced

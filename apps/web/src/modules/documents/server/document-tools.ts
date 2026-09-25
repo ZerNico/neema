@@ -86,7 +86,9 @@ const FIELD_ALIASES: Record<string, string> = {
 // Advertise the real schema, but let handlers explain malformed model inputs
 // instead of failing the provider stream during parameter decoding.
 const transport = (schema: Schema.Top) =>
-  Schema.Unknown.check(
+  // Any, not Unknown: the JSON Schema generator drops this annotation on
+  // Unknown, which sent every parameter to the model with no type at all.
+  Schema.Any.check(
     Schema.makeFilter(() => true, {
       toJsonSchema: () => Schema.toJsonSchemaDocument(schema).schema,
     }),
