@@ -16,3 +16,6 @@ coverage
 
 # Electron shell bundle
 apps/desktop/dist/
+
+# Packaged desktop builds
+apps/desktop/release/

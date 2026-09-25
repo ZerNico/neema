@@ -1,0 +1,54 @@
+# Packaging for release builds (`pnpm package`). Unsigned: macOS gets an
+# ad-hoc signature so Apple Silicon will run it, and Gatekeeper still asks on
+# first launch; Windows shows SmartScreen. Signing needs certificates, not code.
+#
+# Only `dependencies` are packed. esbuild bundles everything else into dist/,
+# which is why effect, diff and friends are devDependencies of this package.
+appId: app.neema.desktop
+productName: neema
+copyright: Copyright © Nico Franke
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build-resources
+
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - static/**/*
+  - "!static/icons/*.svg"
+  - package.json
+
+# sandbox-runtime spawns its vendored helpers (srt-win.exe, apply-seccomp, the
+# JVM agent) from paths beside its own modules. Inside an asar those paths
+# cannot be executed, so the app stays a plain directory, as it is in dev.
+asar: false
+
+protocols:
+  - name: neema sign-in
+    schemes: [chat-desktop]
+
+mac:
+  icon: static/icons/icon.png
+  category: public.app-category.productivity
+  target: [dmg, zip]
+  identity: "-"
+  hardenedRuntime: false
+
+win:
+  icon: static/icons/icon.png
+  target: [nsis]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  icon: static/icons/icon.png
+  category: Utility
+  target: [AppImage, deb]
+  maintainer: Nico Franke <nico.franke01@gmail.com>
+  synopsis: neema desktop shell
+
+publish: null

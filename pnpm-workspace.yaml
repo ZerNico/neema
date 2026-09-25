@@ -45,6 +45,9 @@ allowBuilds:
   msgpackr-extract: false
   protobufjs: false
   ssh2: false
+  # Squirrel.Windows tooling pulled in by electron-builder; the NSIS target
+  # used for releases never runs it.
+  electron-winstaller: false
 
 # Behaviour @effect/ai-openrouter does not have upstream; see CLAUDE.md.
 patchedDependencies:

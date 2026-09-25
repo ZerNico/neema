@@ -1,6 +1,9 @@
 {
   "name": "@chat/desktop",
+  "version": "0.0.0",
   "private": true,
+  "description": "neema desktop shell",
+  "author": "Nico Franke",
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
@@ -8,19 +11,21 @@
     "test": "pnpm exec vitest run",
     "dev": "node dev.mjs",
     "build": "node build.mjs",
-    "start": "pnpm build && node electron-app.mjs"
+    "start": "pnpm build && node electron-app.mjs",
+    "package": "pnpm build && electron-builder --publish never"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.77",
-    "@chat/desktop-rpc": "workspace:*",
-    "diff": "9.0.0",
-    "effect": "catalog:",
-    "ignore": "7.0.10"
+    "@anthropic-ai/sandbox-runtime": "^0.0.77"
   },
   "devDependencies": {
+    "@chat/desktop-rpc": "workspace:*",
     "@types/node": "^26.6.2",
+    "diff": "9.0.0",
+    "effect": "catalog:",
     "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
+    "ignore": "7.0.10",
     "typescript": "^7.0.2"
   }
 }
