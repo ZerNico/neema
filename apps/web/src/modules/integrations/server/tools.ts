@@ -133,7 +133,10 @@ export function prepareIntegrationTools(input: {
           const after = yield* currentConsent;
           if (after.consent === "refuse") return refused(after.permission);
           if (after.consent === "ask" && before.consent !== "ask")
-            return failure("This action now needs approval. Ask the user before trying again.", true);
+            return failure(
+              "This action now needs approval. Ask the user before trying again.",
+              true,
+            );
           const session = yield* input.sessionFor(offer.integrationId);
           if (!session || session.connectionId !== offer.session.connectionId)
             return failure(`${manifest.name} is no longer connected or available.`, true);

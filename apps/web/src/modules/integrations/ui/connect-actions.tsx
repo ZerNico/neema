@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -31,7 +31,6 @@ export function ConnectActions({
   returnTo?: string;
 }) {
   const manifest = findIntegration(integration.id);
-  const desktop = useDesktop();
   const [keyOpen, setKeyOpen] = useState(false);
   if (!manifest) return null;
   const reconnect = integration.connection?.status === "needs_reauth";
@@ -47,26 +46,41 @@ export function ConnectActions({
         </Button>
       ) : null}
       {integration.methods.oauth ? (
-        <Button
-          size="sm"
-          // In the desktop app a new-window link goes to the system browser,
-          // which is where the sign-in has to happen; a browser tab just goes.
-          render={
-            <a
-              href={connectUrl(integration.id, returnTo)}
-              target={desktop ? "_blank" : undefined}
-            />
-          }
-        >
+        <SignInButton integration={integration} returnTo={returnTo}>
           {reconnect ? "Reconnect" : `Sign in with ${manifest.name}`}
-        </Button>
+        </SignInButton>
       ) : null}
       {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
     </div>
   );
 }
 
-function ApiKeyDialog({
+/** Leaves the page for the service's sign-in; `returnTo` is where it comes back to. */
+export function SignInButton({
+  integration,
+  returnTo,
+  children,
+}: {
+  integration: UserIntegration;
+  returnTo?: string | undefined;
+  children: ReactNode;
+}) {
+  const desktop = useDesktop();
+  return (
+    <Button
+      size="sm"
+      // In the desktop app a new-window link goes to the system browser,
+      // which is where the sign-in has to happen; a browser tab just goes.
+      render={
+        <a href={connectUrl(integration.id, returnTo)} target={desktop ? "_blank" : undefined} />
+      }
+    >
+      {children}
+    </Button>
+  );
+}
+
+export function ApiKeyDialog({
   integration,
   open,
   onOpenChange,

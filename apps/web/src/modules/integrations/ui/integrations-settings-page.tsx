@@ -1,21 +1,27 @@
-import { ArrowRight01Icon, PlugSocketIcon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, MoreHorizontalIcon, PlugSocketIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { ToolPermission } from "../consent.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
-import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
+import { Button } from "~/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
 import { findIntegration } from "../catalog.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
-import { ConnectActions } from "./connect-actions.tsx";
+import { ApiKeyDialog, ConnectActions, SignInButton } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
@@ -23,7 +29,8 @@ function StatusBadge({ integration }: { integration: UserIntegration }) {
   const { connection } = integration;
   if (!connection) return null;
   if (!integration.available) return <Badge variant="outline">Turned off</Badge>;
-  if (connection.status === "needs_reauth") return <Badge variant="destructive">Reconnect</Badge>;
+  // Says what happened; the button beside it says what to do.
+  if (connection.status === "needs_reauth") return <Badge variant="destructive">Signed out</Badge>;
   return <Badge variant="secondary">Connected</Badge>;
 }
 
@@ -195,15 +202,34 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
     plural(dependents.schedules, "schedule"),
   ].filter(Boolean);
 
+  const confirmDisconnect = async () => {
+    if (
+      await confirm({
+        title: `Disconnect ${manifest.name}?`,
+        description: affected.length
+          ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
+          : "Chats lose its tools until you connect again.",
+        confirmLabel: "Disconnect",
+      })
+    )
+      disconnect.mutate();
+  };
+  const [keyOpen, setKeyOpen] = useState(false);
+  const canConnect = integration.available;
+  // A lapsed sign-in gets one way back in; the other method and Disconnect wait in the menu.
+  const reconnectWithOAuth = needsReauth && canConnect && integration.methods.oauth;
+
   return (
-    <ListRow className="flex-wrap">
+    <ListRow>
       <IntegrationLogo integrationId={integration.id} variant="tile" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          {connection ? connection.accountLabel : "Not connected"}
+        <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span className="truncate" title={connection?.accountLabel}>
+            {connection ? connection.accountLabel : "Not connected"}
+          </span>
           <StatusBadge integration={integration} />
         </span>
-        <span className="text-muted-foreground text-xs">
+        <span className="text-muted-foreground truncate text-xs">
           {!integration.available
             ? "An admin turned this integration off."
             : needsReauth
@@ -213,30 +239,46 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
                 : `Connect your ${manifest.name} account to use it in chats.`}
         </span>
       </div>
-      {integration.available && (!connection || needsReauth) ? (
-        <ConnectActions integration={integration} />
+      {canConnect && !connection ? <ConnectActions integration={integration} /> : null}
+      {reconnectWithOAuth ? (
+        <SignInButton integration={integration}>Reconnect</SignInButton>
+      ) : needsReauth && canConnect && integration.methods.apiKey ? (
+        <Button size="sm" onClick={() => setKeyOpen(true)}>
+          Reconnect
+        </Button>
       ) : null}
       {connection ? (
-        <PendingButton
-          size="sm"
-          variant="ghost"
-          pending={disconnect.isPending}
-          onClick={async () => {
-            if (
-              await confirm({
-                title: `Disconnect ${manifest.name}?`,
-                description: affected.length
-                  ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
-                  : "Chats lose its tools until you connect again.",
-                confirmLabel: "Disconnect",
-              })
-            )
-              disconnect.mutate();
-          }}
-        >
-          Disconnect
-        </PendingButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Account actions"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            {reconnectWithOAuth && integration.methods.apiKey ? (
+              <DropdownMenuItem onClick={() => setKeyOpen(true)}>
+                Use an API key instead
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem
+              variant="destructive"
+              // A menu item cannot hold a spinner; disabled is its pending state.
+              disabled={disconnect.isPending}
+              onClick={() => void confirmDisconnect()}
+            >
+              Disconnect
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
+      {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
     </ListRow>
   );
 }
