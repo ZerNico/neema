@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { cp, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Served from a copy outside the repository, as a deployment would be: here a
+// module missing from .output still resolves from apps/web/node_modules.
+const deployment = await mkdtemp(join(tmpdir(), "chat-production-start-"));
+await cp(fileURLToPath(new URL("../.output", import.meta.url)), join(deployment, ".output"), {
+  recursive: true,
+  verbatimSymlinks: true,
+});
+await cp(
+  fileURLToPath(new URL("./start.mjs", import.meta.url)),
+  join(deployment, "scripts", "start.mjs"),
+);
+
 // No database is needed to serve a generic shell, even on a protected deep link.
-const child = spawn(process.execPath, [fileURLToPath(new URL("./start.mjs", import.meta.url))], {
+const child = spawn(process.execPath, [join(deployment, "scripts", "start.mjs")], {
   env: {
     ...process.env,
     DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/disabled",
@@ -141,5 +156,6 @@ try {
 } finally {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
   await closed;
+  await rm(deployment, { recursive: true, force: true });
 }
 console.log("Checked production SPA startup without database access.");
