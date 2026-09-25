@@ -125,8 +125,9 @@ pnpm dev:destroy --orphans # report and optionally clean up removed tagged workt
 pnpm dev            # Portless web app and desktop shell, rebuilt and relaunched on change
 pnpm dev:web        # the web app alone
 pnpm dev:desktop    # the shell alone, using this checkout’s last web origin
-pnpm build          # production build (nitro) -> .output/
+pnpm build          # production build (nitro) -> .output/, with .output/migrate.mjs
 pnpm start          # run production server
+pnpm --filter @chat/desktop package  # unsigned installers for this OS -> apps/desktop/release/
 pnpm test           # all vitest projects (unit, integration*, ui)
 pnpm typecheck
 pnpm lint / format
@@ -138,6 +139,30 @@ The browser and Electron use the same SPA frontend. `pnpm start` enables Start�
 shell mode before loading the Nitro server. Deployments invoking
 `apps/web/.output/server/index.mjs` directly must set `TSS_SHELL=true`; the backend
 still serves authentication, server functions, API routes and SSE. `pnpm build`
-checks the emitted shell and production deep links with database access disabled.
+checks the emitted shell and production deep links with database access disabled,
+serving a copy of `.output` from outside the repository so a module missing from
+the build cannot resolve from `node_modules`.
 
 \* integration tests start a disposable Postgres via Testcontainers (Docker required).
+
+## Deploying and releasing
+
+The root `Dockerfile` builds the production image. On start it applies pending
+migrations (`.output/migrate.mjs`, under an advisory lock) and then serves on port
+3000; set `MIGRATE_ON_START=false` to run that step yourself. Uploads and custom tool
+builds live in `/data`. `infra/production/compose.yaml` is a single-host example
+with Postgres and SearXNG.
+
+GitHub Actions runs format, lint, typecheck and tests on every pull request (`ci-ok`
+is the one check to require), builds the image, and publishes it to GHCR as `edge`
+from `main`. To release, push a tag:
+
+```sh
+git tag v1.2.3 && git push origin v1.2.3   # v1.2.3-rc.1 makes a prerelease
+```
+
+That creates a draft release with generated notes, reruns CI, publishes the
+multi-arch image (`1.2.3`, `1.2`, `1`, `latest`), packages the desktop shell for
+macOS, Windows and Linux, and publishes the release only once every asset is attached.
+The installers are unsigned: macOS asks for approval under System Settings → Privacy
+& Security on first launch, and Windows SmartScreen warns once.

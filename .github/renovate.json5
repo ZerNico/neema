@@ -1,0 +1,37 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"],
+  // Matches pnpm's minimumReleaseAge: no PR for a release younger than a day.
+  minimumReleaseAge: "1 day",
+  internalChecksFilter: "strict",
+  postUpdateOptions: ["pnpmDedupe"],
+  lockFileMaintenance: { enabled: true },
+  packageRules: [
+    {
+      // Every effect package shares one rc, and @effect/ai-openrouter's patch
+      // has to be regenerated on each bump (AGENTS.md, Version pins), so the
+      // group waits for approval on the dependency dashboard.
+      groupName: "effect",
+      matchPackageNames: ["effect", "@effect/**"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // Same-day rc builds kept as a matched pair, and their `-<sha>` suffixes
+      // do not sort as versions. Bumped by hand; the dashboard can still ask.
+      groupName: "drizzle",
+      matchPackageNames: ["drizzle-orm", "drizzle-kit"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // Node majors move .node-version, the Dockerfile and engines together.
+      matchDepNames: ["node"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      groupName: "GitHub Actions",
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+    },
+  ],
+}

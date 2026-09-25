@@ -1,0 +1,90 @@
+name: Release
+
+# Push a tag like v1.2.3 (or v1.2.3-rc.1 for a prerelease). The release stays a
+# draft until CI, the image and every installer have succeeded, so a published
+# release is never missing an asset. A failed run leaves the draft to re-run.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists; reusing it."
+            exit 0
+          fi
+          flags=(--draft --verify-tag --generate-notes --title "$TAG")
+          [[ "$TAG" == *-* ]] && flags+=(--prerelease)
+          gh release create "$TAG" "${flags[@]}"
+
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  docker:
+    needs: [draft, ci]
+    uses: ./.github/workflows/docker.yml
+    permissions:
+      contents: read
+      packages: write
+
+  desktop:
+    needs: [draft, ci]
+    uses: ./.github/workflows/desktop.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.draft.outputs.version }}
+
+  publish:
+    needs: [docker, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-*
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum -- * > SHA256SUMS.txt
+
+      - name: Upload assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" assets/* --clobber
+          gh release edit "$TAG" --draft=false

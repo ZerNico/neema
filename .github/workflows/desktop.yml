@@ -1,0 +1,76 @@
+name: Desktop
+
+# Unsigned installers for every platform, uploaded as workflow artifacts.
+# release.yml attaches them to the release; a manual run is for trying a build.
+# No native modules are rebuilt, so one runner cross-packages both architectures
+# of its OS.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: App version without the leading v.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # electron-builder downloads the Electron it packages; npm's copy is unused.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            runner: macos-15
+            targets: --mac --arm64 --x64
+          - os: windows
+            runner: windows-2025
+            targets: --win --x64
+          - os: linux
+            runner: ubuntu-24.04
+            targets: --linux --x64 --arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          cache: ${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Build shell
+        run: pnpm --filter @chat/desktop build
+
+      - name: Package
+        shell: bash
+        working-directory: apps/desktop
+        env:
+          VERSION: ${{ inputs.version || format('0.0.0-dev.{0}', github.run_number) }}
+          TARGETS: ${{ matrix.targets }}
+          # Never pick up a signing identity by accident; macOS gets ad-hoc.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          read -ra targets <<< "$TARGETS"
+          pnpm exec electron-builder --publish never "${targets[@]}" -c.extraMetadata.version="$VERSION"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+          if-no-files-found: error
+          retention-days: 7

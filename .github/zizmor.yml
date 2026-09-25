@@ -1,0 +1,5 @@
+rules:
+  # GitHub's `uses: $/...` form (July 2026) is what this wants, but actionlint
+  # 1.7.12 still rejects it. Switch once actionlint accepts it, then drop this.
+  self-repository:
+    disable: true
