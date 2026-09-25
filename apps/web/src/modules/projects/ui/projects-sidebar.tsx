@@ -112,6 +112,10 @@ function ProjectItem({
     setWasCurrent(current);
     if (current) setOpen(true);
   }
+  // Loaded on first open, then kept: removing the list as the panel closes
+  // left it nothing to collapse, so closing had no motion.
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
   const routeParams = useParams({ strict: false });
   const onProjectPage = "projectId" in routeParams && routeParams.projectId === project.id;
   return (
@@ -134,7 +138,7 @@ function ProjectItem({
         />
       </SidebarMenuAction>
       <DisclosureContent>
-        {open ? (
+        {opened ? (
           <ProjectChats projectId={project.id} activeConversationId={activeConversationId} />
         ) : null}
       </DisclosureContent>
@@ -160,7 +164,10 @@ function ProjectChats({
     <SidebarMenu className="mt-0.5 ml-6 w-auto">
       {rows.length === 0 ? (
         <SidebarMenuItem>
-          <span className="text-muted-foreground px-2 text-xs">No chats yet</span>
+          {/* A row's height and inset, so it lines up with chat titles. */}
+          <span className="text-muted-foreground flex h-9 items-center px-3 text-sm">
+            No chats yet
+          </span>
         </SidebarMenuItem>
       ) : null}
       {rows.slice(0, SIDEBAR_CHATS).map((chat) => (
