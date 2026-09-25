@@ -126,6 +126,7 @@ export function DocumentPanelBody({
                 content={source}
                 components={documentTaskMarkdownComponents}
                 streaming={false}
+                lineBreaks
               />
             </DocumentTaskScope>
           ) : controller.sync ? (

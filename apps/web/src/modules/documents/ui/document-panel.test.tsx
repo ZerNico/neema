@@ -130,6 +130,22 @@ describe("document panel", () => {
     expect(await screen.findByText(/^Document · 1 of 3 tasks done$/)).toBeInTheDocument();
   });
 
+  it("shows each typed line break in the preview, and leaves code alone", async () => {
+    server.seed({ ...fresh(), content: "first line\nsecond line\n\n```\na\nb\n```" });
+    await fixture();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview" }));
+    const paragraph = (await screen.findByText(/first line/)).closest("p")!;
+    expect(paragraph.querySelector("br")).not.toBeNull();
+    expect(paragraph).toHaveTextContent(/first line\s?second line/);
+    // The fence keeps its own lines rather than gaining a <br>.
+    const block = await waitFor(() => {
+      const pre = document.querySelector("pre");
+      expect(pre).toHaveTextContent(/a\s*b/);
+      return pre!;
+    });
+    expect(block.querySelector("br")).toBeNull();
+  });
+
   it("ticks the marker of the addressed nested task and nothing else", async () => {
     await fixture();
     const boxes = await liveCheckboxes();
