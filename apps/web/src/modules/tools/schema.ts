@@ -67,7 +67,16 @@ const ReadableUrl = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLengt
  */
 export const WebSearchParams = Schema.Struct({
   queries: Schema.Array(SearchQuery).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
-  timeRange: Schema.optionalKey(Schema.Literals(["day", "month", "year"])),
+  // Only one of the configured search engines filters by date, so a dated
+  // search is answered by that engine alone and loses the others' results.
+  timeRange: Schema.optionalKey(
+    Schema.Literals(["day", "month", "year"]).annotate({
+      description:
+        "Only for questions about very recent events (today's news, this week's releases). " +
+        "It narrows the search to far fewer sources, so leave it out otherwise; " +
+        "put a year or version in the query instead.",
+    }),
+  ),
   language: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10))),
 });
 export type WebSearchParams = typeof WebSearchParams.Type;
