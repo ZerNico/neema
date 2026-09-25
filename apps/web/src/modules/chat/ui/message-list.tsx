@@ -459,6 +459,14 @@ function StoredAttachmentChip({
 function AssistantFileAttachment({ file }: { file: AssistantFile }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // The virtual list remounts rows on scroll; an image already in the cache is
+  // shown at once, so only a first network load fades in.
+  const [cached, setCached] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    if (image?.complete && image.naturalWidth > 0) setCached(true);
+  }, []);
   const url = attachmentUrl(file.attachment.id);
   const { attachment } = file;
   if (attachment.kind !== "image")
@@ -493,11 +501,16 @@ function AssistantFileAttachment({ file }: { file: AssistantFile }) {
           }}
         >
           <img
+            ref={imageRef}
             src={url}
             alt={file.origin ? attachment.fileName : "Generated image"}
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
-            className="max-h-144 max-w-full rounded-2xl object-contain"
+            className={cn(
+              "max-h-144 max-w-full rounded-2xl object-contain",
+              !cached && "transition-opacity duration-300 motion-reduce:transition-none",
+              !cached && state !== "ready" && "opacity-0",
+            )}
           />
         </a>
       )}
