@@ -27,7 +27,7 @@ vi.mock("../server/document-functions.ts", () => ({
   pushDocument: vi.fn(),
   listDocuments: vi.fn(),
 }));
-vi.mock("./document-source-editor.tsx", async () => ({
+vi.mock("./rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
 }));
 vi.mock("@tanstack/react-router", () => ({
@@ -79,7 +79,6 @@ const fixture = async (onGone = vi.fn()) => {
     </QueryClientProvider>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Open document: Notes" }));
-  fireEvent.click(screen.getByRole("button", { name: "Source" }));
   return { client, ref, onGone };
 };
 

@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { pushDocument } from "../server/document-functions.ts";
-import { taskMarkerOffset } from "../task-items.ts";
 import { documentQuery } from "./document-queries.ts";
 import { DocumentSync } from "./document-sync.ts";
 
@@ -98,27 +97,15 @@ export function useDocument(documentId: string, live: boolean) {
   }, [sync, user]);
 
   const synced = sync?.synced ?? false;
-  const content = synced ? sync!.text.toString() : (query.data?.content ?? "");
+  // The stored Markdown, which follows typing within a second. Reading the
+  // live tree as Markdown would load the editor's schema with every chat.
+  const content = query.data?.content ?? "";
 
   /** Persist everything typed so far, including editors that just closed. */
   const flush = useCallback(async () => {
     const results = await Promise.all([...connections.all].map((each) => each.flush()));
     return results.every(Boolean);
   }, [connections]);
-
-  /** A tick is the one marker character, so it merges beside anyone's typing. */
-  const toggleTask = useCallback(
-    (ordinal: number, checked: boolean) => {
-      if (!sync?.synced) return;
-      const offset = taskMarkerOffset(sync.text.toString(), ordinal);
-      if (offset === null) return;
-      sync.doc.transact(() => {
-        sync.text.delete(offset, 1);
-        sync.text.insert(offset, checked ? "x" : " ");
-      });
-    },
-    [sync],
-  );
 
   const unpersisted = useCallback(
     () => [...connections.all].some((each) => each.pending()),
@@ -133,7 +120,6 @@ export function useDocument(documentId: string, live: boolean) {
     status: sync?.status ?? null,
     error: sync?.error ?? null,
     flush,
-    toggleTask,
     unpersisted,
   };
 }

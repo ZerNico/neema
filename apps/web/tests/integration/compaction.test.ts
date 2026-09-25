@@ -428,10 +428,11 @@ const historyOf = Effect.fn("test.historyOf")(function* (conversationId: string)
 const TINY_CONTEXT = 4_000;
 /**
  * The engine subtracts the measured schema of every always-offered tool
- * (drafts, documents, skills) before the history budget; this keeps a summary
- * plus the newest turn fitting after that reserve.
+ * (drafts, documents, skills) before the history budget. Mid-range on purpose:
+ * near 6,000 one sentence more in a tool description leaves no room for a
+ * summary, and by 20,000 the history fits and nothing compacts.
  */
-const SMALL_ENGINE_CONTEXT = 6_000;
+const SMALL_ENGINE_CONTEXT = 10_000;
 
 const prepare = Effect.fn("test.prepare")(function* (input: {
   userId: string;

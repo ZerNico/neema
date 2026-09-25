@@ -16,7 +16,7 @@ import {
 } from "~/db/schema/index.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { DOCUMENT_TEXT } from "~/modules/documents/text.ts";
+import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
@@ -107,12 +107,11 @@ const openEditor = async (userId: string, documentId: string) => {
   const frame = Option.getOrThrow(await run(Stream.runHead(feed)));
   if (frame.type !== "sync") throw new Error(`expected sync, got ${frame.type}`);
   Y.applyUpdate(doc, fromBase64(frame.update));
-  const text = doc.getText(DOCUMENT_TEXT);
-  const type = (change: (text: Y.Text) => void) => {
+  const type = (change: (markdown: string) => string) => {
     const updates: Uint8Array[] = [];
     const collect = (update: Uint8Array) => updates.push(update);
     doc.on("update", collect);
-    change(text);
+    writeMarkdown(doc, change(readMarkdown(doc)));
     doc.off("update", collect);
     return docs((s) =>
       s.push(userId, {
@@ -122,7 +121,7 @@ const openEditor = async (userId: string, documentId: string) => {
       }),
     );
   };
-  return { doc, text, type };
+  return { doc, markdown: () => readMarkdown(doc), type };
 };
 
 describe("roles", () => {
@@ -378,15 +377,15 @@ describe("project documents", () => {
     const ownerEditor = (await openEditor(owner, document.id))!;
     const editorEditor = (await openEditor(editor, document.id))!;
     await Promise.all([
-      ownerEditor.type((text) => text.insert(text.length, "\n- [ ] announce")),
-      editorEditor.type((text) => text.insert(0, "# Plan\n")),
+      ownerEditor.type((markdown) => `${markdown}\n- [ ] announce`),
+      editorEditor.type((markdown) => `# Plan\n\n${markdown}`),
     ]);
     const stored = await docs((s) => s.get(viewer, document.id));
-    expect(stored!.content).toBe("# Plan\n- [ ] ship\n- [ ] announce");
+    expect(stored!.content).toBe("# Plan\n\n- [ ] ship\n- [ ] announce");
 
     const viewerEditor = (await openEditor(viewer, document.id))!;
-    expect(viewerEditor.text.toString()).toBe(stored!.content);
-    await expect(viewerEditor.type((text) => text.insert(0, "sneaky "))).rejects.toMatchObject({
+    expect(viewerEditor.markdown()).toBe(stored!.content);
+    await expect(viewerEditor.type((markdown) => `sneaky ${markdown}`)).rejects.toMatchObject({
       _tag: "DocumentRejected",
     });
     expect((await docs((s) => s.get(owner, document.id)))!.content).toBe(stored!.content);

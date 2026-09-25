@@ -1,25 +1,21 @@
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { CodeIcon, Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { Suspense, lazy, useMemo, useState } from "react";
-import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
+import { Suspense, lazy, useState } from "react";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
+import { Toggle } from "~/ui/primitives/toggle";
 import { motionEase, useAppReducedMotion } from "~/ui/motion";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-import { ViewToggle } from "~/ui/view-toggle.tsx";
-import {
-  DocumentTaskScope,
-  documentTaskMarkdownComponents,
-  renderedDocumentSource,
-} from "./document-task-markdown.tsx";
+import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
+import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
 
-// CodeMirror and its Yjs binding load with the first source view, not the chat.
-const DocumentSourceEditor = lazy(() => import("./document-source-editor.tsx"));
+// The editor and its schema load with the first open document, not the chat.
+const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
 
 export const documentSubtitle = (controller: Controller, userId?: string) => {
   const document = controller.document;
@@ -43,20 +39,54 @@ export const documentSubtitle = (controller: Controller, userId?: string) => {
     .join(" · ");
 };
 
+/**
+ * What is on screen, not the stored copy a second behind it: an open
+ * connection's tree is read as Markdown, loading the schema only then.
+ */
+const copyMarkdown = async (controller: Controller) => {
+  const sync = controller.sync;
+  const text = sync
+    ? (await import("../editor/markdown.ts")).readMarkdown(sync.doc)
+    : controller.content;
+  await navigator.clipboard.writeText(text);
+};
+
 export function DocumentPanelActions({
   controller,
-  preview,
-  onPreviewChange,
+  mode,
+  onModeChange,
+  toolbarSlot,
 }: {
   controller: Controller;
-  preview: boolean;
-  onPreviewChange: (preview: boolean) => void;
+  mode: DocumentEditorMode;
+  onModeChange: (mode: DocumentEditorMode) => void;
+  /** Receives the element the editor puts its formatting controls in. */
+  toolbarSlot: (element: HTMLElement | null) => void;
 }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-center justify-between gap-2">
-      <ViewToggle preview={preview} sourceLabel="Source" onChange={onPreviewChange} />
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="flex items-center gap-2">
+      {/* The editor's formatting fills the row; the view and Copy sit at its end. */}
+      <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
+      <div className="flex shrink-0 items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                size="icon"
+                variant="toolbar"
+                aria-label="Show Markdown"
+                pressed={mode === "source"}
+                onPressedChange={(pressed) => onModeChange(pressed ? "source" : "live")}
+              />
+            }
+          >
+            <HugeiconsIcon icon={CodeIcon} strokeWidth={2} />
+          </TooltipTrigger>
+          <TooltipContent>
+            {mode === "source" ? "Back to the editor" : "Show Markdown"}
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -64,8 +94,9 @@ export function DocumentPanelActions({
                 size="icon-sm"
                 variant="ghost"
                 aria-label="Copy document"
+                className="text-muted-foreground"
                 onClick={() => {
-                  void navigator.clipboard.writeText(controller.content).then(() => {
+                  void copyMarkdown(controller).then(() => {
                     setCopied(true);
                     window.setTimeout(() => setCopied(false), 1_500);
                   });
@@ -84,14 +115,14 @@ export function DocumentPanelActions({
 
 export function DocumentPanelBody({
   controller,
-  preview,
+  mode,
+  toolbarSlot,
 }: {
   controller: Controller;
-  preview: boolean;
+  mode: DocumentEditorMode;
+  toolbarSlot: HTMLElement | null;
 }) {
   const reducedMotion = useAppReducedMotion();
-  // Marker spans are injected for rendering only; the stored source never has them.
-  const source = useMemo(() => renderedDocumentSource(controller.content), [controller.content]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -117,37 +148,28 @@ export function DocumentPanelBody({
       <div className="flex min-w-0 flex-1 flex-col space-y-3">
         {controller.error ? <FieldError>{controller.error}</FieldError> : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          {preview ? (
-            <DocumentTaskScope
-              disabled={!controller.sync || !controller.document?.canEdit}
-              onToggle={controller.toggleTask}
-            >
-              <AssistantMarkdown
-                content={source}
-                components={documentTaskMarkdownComponents}
-                streaming={false}
-                lineBreaks
-              />
-            </DocumentTaskScope>
-          ) : controller.sync ? (
-            // The editor carries its own 1rem gutter, which on top of the panel's
-            // padding indented source a step further than the preview beside it.
-            // Pulling only the editor to the panel edge lets that gutter be the
-            // padding; the fallback has none, so it keeps the panel's.
+          {controller.sync ? (
+            // The editor pads its own text, so it is pulled to the panel's
+            // edges; the fallback keeps the panel's padding.
             <Suspense
-              fallback={
-                <Spinner aria-label="Loading source editor" className="text-muted-foreground" />
-              }
+              fallback={<Spinner aria-label="Loading editor" className="text-muted-foreground" />}
             >
-              {/* Fills the rest of the panel whatever the text's length, so the
-              editor's own scrollbars, the sideways one included, sit on the
-              panel's bottom edge instead of under the last line. */}
-              <div className="relative -mx-4 min-h-48 flex-1">
-                <div className="absolute inset-0 [--editor-max-height:100%] [--editor-min-height:0px] [&_.cm-editor]:h-full [&_.cm-theme]:h-full">
-                  <DocumentSourceEditor
+              {/* Fills the rest of the panel, edge to edge, whatever the text's
+              length, so the editor's own scrollbars sit on the panel's edges
+              instead of under the last line. A notice above keeps its gap. */}
+              <div
+                className={cn(
+                  "relative -mx-4 -mb-4 min-h-48 flex-1",
+                  !controller.error && controller.status !== "offline" && "-mt-4",
+                )}
+              >
+                <div className="absolute inset-0">
+                  <DocumentEditor
                     key={controller.sync.doc.guid}
                     sync={controller.sync}
+                    mode={mode}
                     readOnly={!controller.document?.canEdit}
+                    toolbarSlot={toolbarSlot}
                   />
                 </div>
               </div>

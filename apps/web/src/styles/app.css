@@ -317,3 +317,123 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
     animation: none;
   }
 }
+
+/* The document editor's content. ProseMirror renders plain elements, so the
+   typography lives here, scoped to the editor, in the app's own scale. */
+@layer components {
+  /* Documents read at the panel's scale; blocks follow chat answers. */
+  .rich-editor {
+    @apply text-foreground min-h-full text-sm leading-6 outline-none;
+    & > * + * {
+      @apply mt-3;
+    }
+    & h1 {
+      @apply mt-6 text-xl leading-7 font-semibold tracking-tight first:mt-0;
+    }
+    & h2 {
+      @apply mt-6 text-base leading-6 font-semibold first:mt-0;
+    }
+    & h3 {
+      @apply mt-5 text-sm leading-6 font-semibold first:mt-0;
+    }
+    & :is(h1, h2, h3) + * {
+      @apply mt-1.5;
+    }
+    & strong {
+      @apply font-semibold;
+    }
+    & a {
+      @apply decoration-foreground/30 hover:decoration-foreground underline underline-offset-2 transition-colors;
+    }
+    & :not(pre) > code {
+      @apply bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.8125rem];
+    }
+    & pre {
+      @apply bg-sidebar overflow-x-auto rounded-2xl border px-4 py-3 font-mono text-[0.8125rem] leading-relaxed;
+      & code {
+        @apply bg-transparent p-0 text-inherit;
+      }
+    }
+    & blockquote {
+      @apply border-muted-foreground/30 text-muted-foreground border-l-4 pl-4 italic;
+    }
+    & hr {
+      @apply border-border my-6;
+    }
+    & ul:not([data-type="taskList"]) {
+      @apply marker:text-muted-foreground list-disc pl-5;
+    }
+    & ol {
+      @apply marker:text-muted-foreground list-decimal pl-5;
+    }
+    & li > p {
+      @apply m-0;
+    }
+    & li + li,
+    & li > :is(ul, ol) {
+      @apply mt-1;
+    }
+    & ul[data-type="taskList"] {
+      @apply pl-0;
+      & li {
+        @apply flex items-start gap-2.5;
+      }
+      & .task-item-check {
+        /* Centres the checkbox on the first line of the task. */
+        @apply flex h-6 shrink-0 items-center select-none;
+        & [data-slot="checkbox"]:not([data-disabled]) {
+          @apply cursor-pointer;
+        }
+      }
+      & .task-item-body {
+        @apply min-w-0 flex-1;
+      }
+      & li[data-checked="true"] > .task-item-body > p {
+        @apply text-muted-foreground decoration-muted-foreground/50 line-through;
+      }
+      & ul[data-type="taskList"] {
+        @apply mt-1;
+      }
+    }
+    & .tableWrapper {
+      @apply my-4 overflow-x-auto rounded-xl border;
+    }
+    & table {
+      @apply w-full border-collapse text-sm;
+    }
+    & th,
+    & td {
+      @apply border-border relative min-w-24 border-r border-b px-3 py-2 text-left align-top last:border-r-0;
+      & p {
+        @apply m-0;
+      }
+    }
+    & tr:last-child td {
+      @apply border-b-0;
+    }
+    & th {
+      @apply bg-muted/60 font-medium;
+    }
+    & .selectedCell::after {
+      @apply bg-primary/10 pointer-events-none absolute inset-0 content-[""];
+    }
+    & img {
+      @apply inline max-w-full rounded-xl;
+    }
+    & .ProseMirror-selectednode {
+      @apply ring-ring/50 rounded-sm ring-2;
+    }
+    & p.is-editor-empty:first-child::before {
+      @apply text-muted-foreground pointer-events-none float-left h-0;
+      content: attr(data-placeholder);
+    }
+  }
+  /* Other people's carets, as Tiptap's collaboration caret draws them. */
+  .collaboration-carets__caret {
+    @apply pointer-events-none relative -mx-px border-x;
+    word-break: normal;
+  }
+  .collaboration-carets__label {
+    @apply absolute bottom-full -left-px rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-white select-none;
+  }
+}

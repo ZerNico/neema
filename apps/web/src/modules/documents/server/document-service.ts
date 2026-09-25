@@ -11,7 +11,6 @@ import {
   Stream,
 } from "effect";
 import { fromBase64, toBase64 } from "lib0/buffer";
-import { simpleDiffString } from "lib0/diff";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -37,7 +36,7 @@ import {
   type PushDocumentResult,
   type WriteDocumentResult,
 } from "../schema.ts";
-import { DOCUMENT_TEXT } from "../text.ts";
+import { normalizeMarkdown, readMarkdown, writeMarkdown } from "../editor/markdown.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
@@ -104,29 +103,22 @@ const withinCap = (length: number) =>
         new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.chars} characters` }),
       )
     : Effect.void;
-/** Replaces `from` at `at` with `to` as the smallest single change, so nearby typing survives. */
-const patch = (text: Y.Text, at: number, from: string, to: string) => {
-  const change = simpleDiffString(from, to);
-  if (change.remove) text.delete(at + change.index, change.remove);
-  if (change.insert) text.insert(at + change.index, change.insert);
-};
-/** One streamed model edit: where its region starts, and what it holds now. */
+/**
+ * One streamed model edit, anchored in the document's Markdown: the region
+ * it rewrites is found again each time by the text it now holds, with the
+ * Markdown just before it to tell repeats apart.
+ */
 export interface LiveEdit {
   readonly userId: string;
   readonly documentId: string;
   readonly old: string;
-  /** Left-associated, so rewriting the region never moves its own start. */
-  readonly start: Y.RelativePosition;
+  /** Up to this much Markdown before the region, as it read when the edit began. */
+  before: string;
   current: string;
   /** Someone else's typing landed inside the region; it is left to them. */
   broken: boolean;
 }
-/** How the assistant shows up in a document while it writes. */
-const ASSISTANT = {
-  name: "Assistant",
-  color: "var(--muted-foreground)",
-  colorLight: "color-mix(in oklab, var(--muted-foreground) 20%, transparent)",
-};
+const ANCHOR_CHARS = 80;
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
 
@@ -144,11 +136,14 @@ const lockProjectForEditing = (tx: DbTx, userId: string, projectId: string) =>
     if (!projectCan.edit(role))
       return yield* new DocumentRejected({ reason: "this project is read-only for you" });
   });
-const liveRegion = (live: LiveEdit, text: Y.Text) => {
-  const start = Y.createAbsolutePositionFromRelativePosition(live.start, text.doc!);
-  if (!start || start.type !== text) return null;
-  const from = start.index;
-  return text.toString().slice(from, from + live.current.length) === live.current ? from : null;
+/** Where a live edit's region sits in `markdown` now, or null when it cannot be told apart. */
+const liveRegion = (live: LiveEdit, markdown: string) => {
+  const anchored = live.before + live.current;
+  if (anchored && countOccurrences(markdown, anchored) === 1)
+    return markdown.indexOf(anchored) + live.before.length;
+  return live.current && countOccurrences(markdown, live.current) === 1
+    ? markdown.indexOf(live.current)
+    : null;
 };
 
 export class DocumentService extends Context.Service<
@@ -180,10 +175,10 @@ export class DocumentService extends Context.Service<
     ): Effect.Effect<WriteDocumentResult, DocumentError | E, R>;
     /**
      * A model edit written as it streams. `beginLive` finds `old` exactly once
-     * and pins where it starts; each `updateLive` rewrites that region to the
-     * text streamed so far; `finishLive` settles it and takes the assistant's
-     * cursor away. Null from `beginLive` means no unique anchor: the ordinary
-     * edit then runs when the call completes, and says why.
+     * and notes the Markdown before it; each `updateLive` finds that region
+     * again and rewrites it to the text streamed so far; `finishLive` reads the
+     * result. Null from `beginLive` means no unique anchor: the ordinary edit
+     * then runs when the call completes, and says why.
      */
     beginLive(
       userId: string,
@@ -360,6 +355,8 @@ export class DocumentService extends Context.Service<
         entry: Entry,
         update: Uint8Array,
         author: Author,
+        /** The tree as Markdown after this batch, read once by the caller. */
+        content: string,
       ) =>
         Effect.gen(function* () {
           const revision = entry.revision + 1;
@@ -376,7 +373,7 @@ export class DocumentService extends Context.Service<
           if (compacting)
             yield* documents.compact(tx, documentId, Y.encodeStateAsUpdate(entry.doc), revision);
           const document = yield* documents.write(tx, author.userId, documentId, {
-            content: entry.doc.getText(DOCUMENT_TEXT).toString(),
+            content,
             revision,
             lastEditedBy: author.origin,
             lastEditorUserId: author.userId,
@@ -416,9 +413,9 @@ export class DocumentService extends Context.Service<
         documentId: string,
         guard: DocumentWriteGuard<E, R> | undefined,
         decide: (
-          text: Y.Text,
+          markdown: string,
           document: EditableDocument,
-        ) => Effect.Effect<{ result: A; change: (() => void) | null }, DocumentRejected>,
+        ) => Effect.Effect<{ result: A; next: string | null }, DocumentRejected>,
       ) => {
         const attempt = exclusive(documentId)(
           Effect.gen(function* () {
@@ -429,15 +426,21 @@ export class DocumentService extends Context.Service<
                 yield* requireDocuments(userId, tx);
                 const locked = yield* documents.lock(tx, userId, documentId);
                 if (locked.revision !== entry.revision) return yield* new StaleEntry();
-                const text = entry.doc.getText(DOCUMENT_TEXT);
-                const decided = yield* decide(text, locked);
-                const update = decided.change ? capture(entry.doc, decided.change) : null;
+                const decided = yield* decide(readMarkdown(entry.doc), locked);
+                const next = decided.next;
+                const update =
+                  next === null ? null : capture(entry.doc, () => writeMarkdown(entry.doc, next));
                 if (!update) return { result: decided.result, stored: null };
-                const stored = yield* store(tx, documentId, entry, update, {
-                  origin: "model",
-                  userId,
-                  clientId: null,
-                });
+                const content = readMarkdown(entry.doc);
+                yield* withinCap(content.length);
+                const stored = yield* store(
+                  tx,
+                  documentId,
+                  entry,
+                  update,
+                  { origin: "model", userId, clientId: null },
+                  content,
+                );
                 return {
                   result: { ...decided.result, document: stored.document },
                   stored: { ...stored, update },
@@ -466,11 +469,13 @@ export class DocumentService extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
-          yield* withinCap(parsed.content.length);
           const doc = new Y.Doc();
-          doc.getText(DOCUMENT_TEXT).insert(0, parsed.content);
+          writeMarkdown(doc, parsed.content);
+          // Stored as the editor will write it back, so the model's next read matches.
+          const content = readMarkdown(doc);
           const snapshot = Y.encodeStateAsUpdate(doc);
           doc.destroy();
+          yield* withinCap(content.length);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
             : parsed.conversationId
@@ -490,7 +495,7 @@ export class DocumentService extends Context.Service<
               else yield* lockProjectForEditing(tx, userId, owner.projectId);
               return yield* documents.create(tx, userId, owner, {
                 title: parsed.title,
-                content: parsed.content,
+                content,
                 // Only a chat's document dies with the answer that made it.
                 createdByMessageId:
                   "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,
@@ -514,12 +519,11 @@ export class DocumentService extends Context.Service<
             userId,
             parsed.documentId,
             guard,
-            (text, document) =>
+            (current, document) =>
               Effect.gen(function* () {
                 const staleRead =
                   parsed.expectedRevision !== undefined &&
                   parsed.expectedRevision !== document.revision;
-                const current = text.toString();
                 const count = countOccurrences(current, parsed.old);
                 if (count === 0)
                   return {
@@ -529,23 +533,23 @@ export class DocumentService extends Context.Service<
                       preview: preview(current),
                       staleRead,
                     },
-                    change: null,
+                    next: null,
                   };
                 if (count > 1)
                   return {
                     result: { outcome: "ambiguous" as const, document, count, staleRead },
-                    change: null,
+                    next: null,
                   };
                 if (parsed.old === parsed.new)
                   return {
                     result: { outcome: "unchanged" as const, document, staleRead },
-                    change: null,
+                    next: null,
                   };
                 yield* withinCap(current.length - parsed.old.length + parsed.new.length);
                 const at = current.indexOf(parsed.old);
                 return {
                   result: { outcome: "updated" as const, document, staleRead },
-                  change: () => patch(text, at, parsed.old, parsed.new),
+                  next: current.slice(0, at) + parsed.new + current.slice(at + parsed.old.length),
                 };
               }),
           );
@@ -563,15 +567,15 @@ export class DocumentService extends Context.Service<
             userId,
             parsed.documentId,
             guard,
-            (text, document) =>
+            (current, document) =>
               Effect.succeed(
                 document.revision !== parsed.expectedRevision
-                  ? { result: { outcome: "conflict" as const, document }, change: null }
-                  : document.content === parsed.content
-                    ? { result: { outcome: "unchanged" as const, document }, change: null }
+                  ? { result: { outcome: "conflict" as const, document }, next: null }
+                  : normalizeMarkdown(parsed.content) === current
+                    ? { result: { outcome: "unchanged" as const, document }, next: null }
                     : {
                         result: { outcome: "updated" as const, document },
-                        change: () => patch(text, 0, text.toString(), parsed.content),
+                        next: parsed.content,
                       },
               ),
           );
@@ -618,14 +622,15 @@ export class DocumentService extends Context.Service<
                 return yield* new DocumentRejected({ reason: "document update is out of order" });
               // A batch the server already holds, such as a resend after a lost reply.
               if (!update) return null;
-              yield* withinCap(entry.doc.getText(DOCUMENT_TEXT).length);
+              const content = readMarkdown(entry.doc);
+              yield* withinCap(content.length);
               return yield* transaction((tx) =>
                 Effect.gen(function* () {
                   const locked = yield* documents.lock(tx, userId, parsed.documentId);
                   if (locked.revision !== entry.revision) return yield* new StaleEntry();
                   return {
                     update,
-                    stored: yield* store(tx, parsed.documentId, entry, update, author),
+                    stored: yield* store(tx, parsed.documentId, entry, update, author, content),
                   };
                 }),
               );
@@ -723,27 +728,6 @@ export class DocumentService extends Context.Service<
         );
       });
 
-      /** Shows or clears the assistant's cursor, and tells every open editor. */
-      const assistantCursor = (entry: Entry, at: number | null) =>
-        Effect.suspend(() => {
-          const text = entry.doc.getText(DOCUMENT_TEXT);
-          if (at === null) entry.awareness.setLocalState(null);
-          else {
-            const position = Y.createRelativePositionFromTypeIndex(text, at);
-            entry.awareness.setLocalState({
-              user: ASSISTANT,
-              cursor: { anchor: position, head: position },
-            });
-          }
-          return PubSub.publish(entry.frames, {
-            type: "awareness",
-            update: toBase64(
-              awarenessProtocol.encodeAwarenessUpdate(entry.awareness, [entry.doc.clientID]),
-            ),
-            clientId: null,
-          });
-        });
-
       const beginLive = Effect.fn("DocumentService.beginLive")(function* (
         userId: string,
         input: { documentId: string; old: string },
@@ -752,15 +736,14 @@ export class DocumentService extends Context.Service<
           Effect.gen(function* () {
             const { entry, document } = yield* load(userId, input.documentId);
             if (!document.canEdit || !input.old) return null;
-            const text = entry.doc.getText(DOCUMENT_TEXT);
-            const current = text.toString();
+            const current = readMarkdown(entry.doc);
+            if (countOccurrences(current, input.old) !== 1) return null;
             const at = current.indexOf(input.old);
-            if (at === -1 || current.indexOf(input.old, at + 1) !== -1) return null;
             const live: LiveEdit = {
               userId,
               documentId: input.documentId,
               old: input.old,
-              start: Y.createRelativePositionFromTypeIndex(text, at, -1),
+              before: current.slice(Math.max(0, at - ANCHOR_CHARS), at),
               current: input.old,
               broken: false,
             };
@@ -773,35 +756,44 @@ export class DocumentService extends Context.Service<
         Effect.gen(function* () {
           if (live.broken) return false;
           if (next === live.current) return true;
+          let around: { before: string; after: string } | null = null;
           const result = yield* modelWrite<
-            { outcome: "updated" | "broken"; document: EditableDocument; at: number },
+            { outcome: "updated" | "broken"; document: EditableDocument },
             E,
             R
-          >(live.userId, live.documentId, guard, (text, document) =>
+          >(live.userId, live.documentId, guard, (markdown, document) =>
             Effect.gen(function* () {
-              const from = liveRegion(live, text);
+              const from = liveRegion(live, markdown);
               if (from === null)
-                return { result: { outcome: "broken" as const, document, at: 0 }, change: null };
-              yield* withinCap(text.length - live.current.length + next.length);
+                return { result: { outcome: "broken" as const, document }, next: null };
+              const before = markdown.slice(0, from);
+              const after = markdown.slice(from + live.current.length);
+              yield* withinCap(before.length + next.length + after.length);
+              around = { before, after };
               return {
-                result: { outcome: "updated" as const, document, at: from + next.length },
-                change: () => patch(text, from, live.current, next),
+                result: { outcome: "updated" as const, document },
+                next: before + next + after,
               };
             }),
           );
-          if (result.outcome === "broken") {
+          if (result.outcome === "broken" || !around) {
             live.broken = true;
             return false;
           }
-          live.current = next;
-          const entry = entries.get(live.documentId);
-          if (entry) yield* assistantCursor(entry, result.at);
+          // The stored Markdown is the tree written back, which may normalise
+          // the partial text; the region is whatever now sits between the
+          // unchanged text around it.
+          const { before, after } = around as { before: string; after: string };
+          const stored = result.document.content;
+          live.current =
+            stored.startsWith(before) && stored.endsWith(after)
+              ? stored.slice(before.length, stored.length - after.length)
+              : next;
+          live.before = before.slice(-ANCHOR_CHARS);
           return true;
         });
 
       const finishLive = Effect.fn("DocumentService.finishLive")(function* (live: LiveEdit) {
-        const entry = entries.get(live.documentId);
-        if (entry) yield* assistantCursor(entry, null);
         return yield* documents.get(live.userId, live.documentId);
       });
 

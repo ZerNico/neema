@@ -64,7 +64,7 @@ vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   pushDocument: vi.fn(),
   listDocuments: vi.fn(),
 }));
-vi.mock("~/modules/documents/ui/document-source-editor.tsx", async () => ({
+vi.mock("~/modules/documents/ui/rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
 }));
 vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
@@ -1921,14 +1921,6 @@ describe("ChatView documents", () => {
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.queryByRole("textbox", { name: "Document source" })).not.toBeInTheDocument();
     fireEvent.click(widget);
-    // Opens in the source for an editor. In this harness the panel shows the
-    // connected editor only after a later state change, so pass through Preview.
-    expect(await screen.findByRole("button", { name: "Source" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",
     );
@@ -1968,7 +1960,6 @@ describe("ChatView documents", () => {
     // The compact row for the edit opens the same document as the card.
     const update = await screen.findByRole("button", { name: /Updated Trip plan/ });
     fireEvent.click(update);
-    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",
     );
@@ -1989,7 +1980,6 @@ describe("ChatView documents", () => {
         }),
       ),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
     const source = await screen.findByRole("textbox", { name: "Document source" });
     expect(source).not.toHaveAttribute("readonly");
     fireEvent.change(source, { target: { value: "Original source, reviewed" } });
@@ -2058,7 +2048,6 @@ describe("ChatView documents", () => {
       editMock.mockResolvedValueOnce({} as never);
       answerMock.mockResolvedValueOnce({} as never);
       fireEvent.click(await screen.findByRole("button", { name: "Open document: Trip plan" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Source" }));
       const source = await screen.findByRole("textbox", { name: "Document source" });
       const release = server.holdPushes();
       fireEvent.change(source, { target: { value: "Reviewed source" } });

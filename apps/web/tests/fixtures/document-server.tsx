@@ -1,5 +1,4 @@
 import { fromBase64, toBase64 } from "lib0/buffer";
-import { simpleDiffString } from "lib0/diff";
 import { useEffect, useState } from "react";
 import * as Y from "yjs";
 import type { DocumentSync } from "~/modules/documents/client/document-sync.ts";
@@ -8,7 +7,7 @@ import type {
   DocumentFrame,
   PushDocumentInput,
 } from "~/modules/documents/schema.ts";
-import { DOCUMENT_TEXT } from "~/modules/documents/text.ts";
+import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 
 /**
  * The server half of live documents for jsdom tests: a real Y.Doc per
@@ -40,7 +39,7 @@ export function fakeDocumentServer() {
     const found = entry(documentId);
     found.row = {
       ...found.row,
-      content: found.doc.getText(DOCUMENT_TEXT).toString(),
+      content: readMarkdown(found.doc),
       revision: found.row.revision + 1,
       lastEditedBy: by,
     };
@@ -101,12 +100,12 @@ export function fakeDocumentServer() {
     pushes,
     seed(row: EditableDocument) {
       const doc = new Y.Doc();
-      doc.getText(DOCUMENT_TEXT).insert(0, row.content);
+      writeMarkdown(doc, row.content);
       documents.set(row.id, { doc, row, feeds: new Set() });
     },
     /** The stored row, as `getDocument` would return it. */
     row: (documentId: string) => documents.get(documentId)?.row ?? null,
-    content: (documentId: string) => entry(documentId).doc.getText(DOCUMENT_TEXT).toString(),
+    content: (documentId: string) => readMarkdown(entry(documentId).doc),
     remove(documentId: string) {
       const found = documents.get(documentId);
       documents.delete(documentId);
@@ -126,14 +125,14 @@ export function fakeDocumentServer() {
     /** An edit made elsewhere (the assistant, another tab), sent to every open editor. */
     editElsewhere(
       documentId: string,
-      change: (text: Y.Text) => void,
+      change: (markdown: string) => string,
       by: "user" | "model" = "model",
     ) {
       const found = entry(documentId);
       const updates: Uint8Array[] = [];
       const collect = (update: Uint8Array) => updates.push(update);
       found.doc.on("update", collect);
-      change(found.doc.getText(DOCUMENT_TEXT));
+      writeMarkdown(found.doc, change(readMarkdown(found.doc)));
       found.doc.off("update", collect);
       commit(documentId, Y.mergeUpdates(updates), null, by);
     },
@@ -151,26 +150,23 @@ export function fakeDocumentServer() {
 }
 
 /**
- * Stands in for the CodeMirror editor: a textarea that turns each change into
- * the smallest Y.Text edit, which is what the Yjs binding does.
+ * Stands in for the rich editor: a textarea over the document's Markdown,
+ * writing each change back to the tree the way the server applies an edit.
  */
-export function FakeSourceEditor({ sync }: { sync: DocumentSync }) {
-  const [value, setValue] = useState(() => sync.text.toString());
+export function FakeSourceEditor({ sync }: { sync: Pick<DocumentSync, "doc"> }) {
+  const [value, setValue] = useState(() => readMarkdown(sync.doc));
   useEffect(() => {
-    const observe = () => setValue(sync.text.toString());
-    sync.text.observe(observe);
-    return () => sync.text.unobserve(observe);
+    const observe = () => setValue(readMarkdown(sync.doc));
+    sync.doc.on("update", observe);
+    return () => sync.doc.off("update", observe);
   }, [sync]);
   return (
     <textarea
       aria-label="Document source"
       value={value}
       onChange={(event) => {
-        const change = simpleDiffString(sync.text.toString(), event.target.value);
-        sync.doc.transact(() => {
-          if (change.remove) sync.text.delete(change.index, change.remove);
-          if (change.insert) sync.text.insert(change.index, change.insert);
-        });
+        setValue(event.target.value);
+        writeMarkdown(sync.doc, event.target.value);
       }}
     />
   );

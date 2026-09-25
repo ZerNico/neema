@@ -48,7 +48,7 @@ import {
   type CustomToolRunResult,
 } from "~/modules/custom-tools/server/runtime.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { DOCUMENT_TEXT } from "~/modules/documents/text.ts";
+import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -1411,7 +1411,7 @@ describe("conversational agent authoring", () => {
 });
 
 describe("conversation documents", () => {
-  const CHECKLIST = "# Release\n- [ ] write notes\n- [ ] tag build\n- [ ] ship";
+  const CHECKLIST = "# Release\n\n- [ ] write notes\n- [ ] tag build\n- [ ] ship";
   const ordinaryChat = Effect.gen(function* () {
     const seed = yield* setupConversation;
     const conversation = yield* (yield* ChatRepo).createConversation({
@@ -1628,11 +1628,6 @@ describe("conversation documents", () => {
       // Written while streaming, then settled: more than the one write a plain edit makes.
       const updates = frames.filter((frame) => frame.type === "update");
       expect(updates.length).toBeGreaterThanOrEqual(2);
-      // The assistant's cursor showed while it wrote and was taken away after.
-      const cursors = frames.filter(
-        (frame) => frame.type === "awareness" && frame.clientId === null,
-      );
-      expect(cursors.length).toBeGreaterThanOrEqual(2);
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
@@ -1699,12 +1694,10 @@ describe("conversation documents", () => {
           const frame = Option.getOrThrow(yield* Stream.runHead(feed!));
           if (frame.type !== "sync") throw new Error("expected sync");
           Y.applyUpdate(doc, fromBase64(frame.update));
-          const text = doc.getText(DOCUMENT_TEXT);
           const updates: Uint8Array[] = [];
           doc.on("update", (update: Uint8Array) => updates.push(update));
-          const at = text.toString().indexOf("[ ]") + 1;
-          text.delete(at, 1);
-          text.insert(at, "x");
+          // Ticks the first task, which in the tree is its checked attribute.
+          writeMarkdown(doc, readMarkdown(doc).replace("[ ]", "[x]"));
           return yield* service.push(seed.userId, {
             documentId: document!.id,
             clientId: doc.clientID,
@@ -1741,7 +1734,7 @@ describe("conversation documents", () => {
         revision: 3,
         lastEditedBy: "user",
         editedSinceYourLastWrite: true,
-        content: "# Release\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
+        content: "# Release\n\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
       });
       // Having seen the current revision through the failed edit, the flag clears.
       expect(trailing(prompts[3]!)!.focused).toMatchObject({

@@ -14,8 +14,9 @@ import {
   useRef,
 } from "react";
 import { useDocument } from "../client/use-document.ts";
-import { listTaskItems } from "../task-items.ts";
+import { taskProgress } from "../task-items.ts";
 import { DocumentPanelActions, DocumentPanelBody, documentSubtitle } from "./document-panel.tsx";
+import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
 import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 
 export interface DocumentOwnerHandle {
@@ -53,12 +54,6 @@ interface DocumentPanelScope {
   entries: ReadonlyMap<string, DocumentPanelEntry>;
 }
 const EMPTY_DOCUMENT_IDS = new Set<string>();
-const taskProgress = (source: string) => {
-  const items = listTaskItems(source);
-  return items.length
-    ? { done: items.filter((item) => item.checked).length, total: items.length }
-    : null;
-};
 const DocumentPanelContext = createContext<DocumentPanelScope>({
   owned: EMPTY_DOCUMENT_IDS,
   gone: EMPTY_DOCUMENT_IDS,
@@ -162,13 +157,13 @@ function DocumentSession({
 }) {
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
-  // Null until the person picks: someone who may edit starts in the source,
-  // a viewer in the preview, and that follows access once the document loads.
-  const [chosen, setChosen] = useState<boolean | null>(null);
+  // The editor for everyone (read-only for a viewer) until they pick the Markdown.
+  const [mode, setMode] = useState<DocumentEditorMode>("live");
+  // The actions row the editor portals its formatting controls into.
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const id = `document:${documentId}`;
   // Only the document open in the panel holds a live connection.
   const controller = useDocument(documentId, selected === id);
-  const rendered = chosen ?? !controller.document?.canEdit;
   useBlocker({
     shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
     enableBeforeUnload: controller.unpersisted,
@@ -183,15 +178,21 @@ function DocumentSession({
       actions: (
         <DocumentPanelActions
           controller={controller}
-          preview={rendered}
-          onPreviewChange={setChosen}
+          mode={mode}
+          onModeChange={setMode}
+          toolbarSlot={setToolbarSlot}
         />
       ),
-      body: <DocumentPanelBody controller={controller} preview={rendered} />,
+      body: <DocumentPanelBody controller={controller} mode={mode} toolbarSlot={toolbarSlot} />,
     }),
-    [controller, id, rendered, subtitle],
+    [controller, id, mode, subtitle, toolbarSlot],
   );
+  // The card opens the request this session last committed, not the one its
+  // own render captured: a card published just before the connection landed
+  // would otherwise reopen the panel on the body without the editor.
+  const latestRequest = useRef(request);
   useEffect(() => {
+    latestRequest.current = request;
     panel.refresh(request);
   }, [panel, request]);
   useEffect(() => () => panel.closeIfSelected(id), [id, panel]);
@@ -219,14 +220,14 @@ function DocumentSession({
       inProject: available ? controller.document?.projectId != null : null,
       chars: controller.content.length,
       expanded: selected === id,
-      open: available ? () => panel.open(request) : null,
+      open: available ? () => panel.open(latestRequest.current) : null,
       retry: failed
         ? () => {
             void controller.query.refetch();
           }
         : null,
     }),
-    [available, controller, failed, id, panel, request, selected, subtitle],
+    [available, controller, failed, id, panel, selected, subtitle],
   );
   const flush = controller.flush;
   useEffect(() => {

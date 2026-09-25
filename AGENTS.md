@@ -44,8 +44,8 @@ edit the wrong thing.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
 - **document** (conversation or project document): editable Markdown owned by one chat or
-  one project, edited live by people and the model as a Yjs text. Never knowledge versions
-  or transcript content.
+  one project, edited live by people and the model as a rich-text tree in Yjs, stored beside
+  its Markdown. Never knowledge versions or transcript content.
 - **project**: instructions, documents, files and memory shared by members (owner,
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,

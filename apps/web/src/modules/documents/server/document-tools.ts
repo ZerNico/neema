@@ -132,7 +132,7 @@ const decode = <S extends Schema.Codec<unknown, unknown, never, never>>(
 
 const createTool = Tool.make("create_document", {
   description:
-    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Never use this for an ordinary answer. In a chat that belongs to a project the person may edit, scope defaults to project, where every member sees it; pass scope chat only for private scratch material. Elsewhere the document belongs to this chat.",
+    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Write tasks as bullet items, `- [ ] step` or `- [x] done`; a numbered item cannot hold a checkbox. Never use this for an ordinary answer. In a chat that belongs to a project the person may edit, scope defaults to project, where every member sees it; pass scope chat only for private scratch material. Elsewhere the document belongs to this chat.",
   parameters: Schema.Struct({
     title: Schema.optionalKey(transport(CreateParams.fields.title)),
     content: Schema.optionalKey(transport(CreateParams.fields.content)),
@@ -142,7 +142,7 @@ const createTool = Tool.make("create_document", {
 });
 const editTool = Tool.make("edit_document", {
   description:
-    "Patch one document by replacing the single exact occurrence of old with new. Patch, never rewrite: copy old verbatim from the current content (whitespace and list markers included) with enough surrounding lines to occur exactly once. no_match means the text is not there as written and returns the opening lines; ambiguous means old occurs more than once. Both mean re-read the current content in the trailing application data and re-anchor, not retry blindly. documentId may be omitted only when this chat has exactly one document, and expectedRevision is advisory. Do not repeat document content in your reply; say what changed.",
+    "Patch one document by replacing the single exact occurrence of old with new. Patch, never rewrite: copy old verbatim from the current content (whitespace and list markers included) with enough surrounding lines to occur exactly once. no_match means the text is not there as written and returns the opening lines; ambiguous means old occurs more than once. Both mean re-read the current content in the trailing application data and re-anchor, not retry blindly. Tasks in new are bullet items, `- [ ] step`; a numbered item cannot hold a checkbox. documentId may be omitted only when this chat has exactly one document, and expectedRevision is advisory. Do not repeat document content in your reply; say what changed.",
   parameters: Schema.Struct({
     documentId: Schema.optionalKey(transport(DocumentId)),
     old: Schema.optionalKey(transport(EditParams.fields.old)),
@@ -390,8 +390,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     });
   /**
    * Ends every preview no decoded call claimed: its region goes back to the
-   * text it replaced, since the call it previewed never happened, and no
-   * assistant cursor lingers.
+   * text it replaced, since the call it previewed never happened.
    */
   const closeLive = Effect.suspend(() => {
     const open = [...live.values()].flatMap((state) => (state.edit ? [state] : []));

@@ -1,2 +1,6 @@
-/** The one shared type in every document's Y.Doc; server and editor must agree on it. */
-export const DOCUMENT_TEXT = "content";
+/**
+ * Where each document's tree lives in its Y.Doc (Tiptap's default). Server,
+ * connection and editor must agree; kept apart from the editor schema so the
+ * connection can name it without loading the editor.
+ */
+export const DOCUMENT_FIELD = "default";

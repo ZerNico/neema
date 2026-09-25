@@ -2,7 +2,7 @@ import { fromBase64, toBase64 } from "lib0/buffer";
 import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { DocumentFrame, PushDocumentInput, PushDocumentResult } from "../schema.ts";
-import { DOCUMENT_TEXT } from "../text.ts";
+import { DOCUMENT_FIELD } from "../text.ts";
 
 export type DocumentSyncStatus = "connecting" | "live" | "offline" | "gone";
 export interface DocumentSyncOptions {
@@ -34,7 +34,8 @@ const frameTypes = ["sync", "update", "awareness", "gone"] as const;
  */
 export class DocumentSync {
   readonly doc = new Y.Doc();
-  readonly text = this.doc.getText(DOCUMENT_TEXT);
+  /** The document's tree, as the editor binds it. */
+  readonly fragment = this.doc.getXmlFragment(DOCUMENT_FIELD);
   readonly awareness = new Awareness(this.doc);
   #status: DocumentSyncStatus = "connecting";
   #error: string | null = null;
@@ -73,7 +74,7 @@ export class DocumentSync {
         this.#schedule(Math.max(BATCH_MS, this.#lastCursorPush + CURSOR_MS - Date.now()));
       },
     );
-    this.text.observe(() => this.#notify());
+    this.fragment.observeDeep(() => this.#notify());
     this.#connect();
   }
 

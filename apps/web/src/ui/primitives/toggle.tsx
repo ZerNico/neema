@@ -13,6 +13,9 @@ const toggleVariants = cva(
         // item has to read as chosen, not as hovered.
         solid:
           "bg-transparent aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/80 aria-pressed:hover:text-primary-foreground",
+        // A formatting toolbar's icons: quiet like the ghost buttons around
+        // them until pressed, then as strong as the text they format.
+        toolbar: "bg-transparent text-muted-foreground aria-pressed:text-foreground",
         choice:
           "bg-foreground/10 text-foreground hover:bg-foreground/15 aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/80 aria-pressed:hover:text-primary-foreground",
       },
