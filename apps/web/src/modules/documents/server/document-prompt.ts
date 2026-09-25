@@ -9,4 +9,4 @@ Never repeat a document's content in your reply. The panel shows it; say briefly
 
 /** Added beside the policy only in a project chat, so plain chats keep their prompt. */
 export const projectDocumentPolicy = (project: string) =>
-  `This chat belongs to the project "${project}". Documents with scope "project" belong to the project: every member sees and edits them, and they outlive this chat. Keep private working material in this chat's own documents, and create with scope "project" only what the whole project should keep. A document marked readOnly may be read but not changed by this person.`;
+  `This chat belongs to the project "${project}". A new document goes into the project by default: every member sees and edits it, and it outlives this chat. Pass scope "chat" only for private scratch material the person wants to keep to themselves. A document marked readOnly may be read but not changed by this person.`;

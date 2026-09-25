@@ -33,7 +33,12 @@ export const documentSubtitle = (controller: Controller, userId?: string) => {
       : !document.projectId || !document.lastEditorUserId || document.lastEditorUserId === userId
         ? "by you"
         : null;
-  return [document.canEdit ? null : "View only", ["Edited", editor, age].filter(Boolean).join(" ")]
+  return [
+    // One word, so a shared document reads apart from this chat's own.
+    document.projectId ? "Project" : null,
+    document.canEdit ? null : "View only",
+    ["Edited", editor, age].filter(Boolean).join(" "),
+  ]
     .filter(Boolean)
     .join(" · ");
 };

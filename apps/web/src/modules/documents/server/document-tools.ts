@@ -130,7 +130,7 @@ const decode = <S extends Schema.Codec<unknown, unknown, never, never>>(
 
 const createTool = Tool.make("create_document", {
   description:
-    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Never use this for an ordinary answer. scope defaults to chat; scope project, only in a chat that belongs to a project, puts it where every project member sees it.",
+    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Never use this for an ordinary answer. In a chat that belongs to a project the person may edit, scope defaults to project, where every member sees it; pass scope chat only for private scratch material. Elsewhere the document belongs to this chat.",
   parameters: Schema.Struct({
     title: Schema.optionalKey(transport(CreateParams.fields.title)),
     content: Schema.optionalKey(transport(CreateParams.fields.content)),
@@ -417,7 +417,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         outcome: "invalid",
         message: `Provide a title and markdown content. ${decoded.issue}`,
       };
-    const { scope, ...fields } = decoded.value;
+    const { scope: requested, ...fields } = decoded.value;
+    // In a project someone may edit, a document is shared work unless asked otherwise.
+    const scope = requested ?? (input.project?.canEdit ? "project" : "chat");
     if (scope === "project" && !input.project)
       return {
         outcome: "invalid",

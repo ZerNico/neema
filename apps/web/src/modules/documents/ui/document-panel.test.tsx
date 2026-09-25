@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
@@ -114,6 +114,22 @@ beforeEach(() => {
 });
 
 describe("document panel", () => {
+  it("tells a project document apart from the chat's own, on the card and in the panel", async () => {
+    server.seed({
+      ...fresh(),
+      conversationId: null,
+      createdByMessageId: null,
+      projectId: "project-1",
+    });
+    await fixture();
+    expect(await screen.findByText(/^Project document · 1 of 3 tasks done$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Project · Edited/)).toBeInTheDocument();
+    cleanup();
+    server.seed(fresh());
+    await fixture();
+    expect(await screen.findByText(/^Document · 1 of 3 tasks done$/)).toBeInTheDocument();
+  });
+
   it("ticks the marker of the addressed nested task and nothing else", async () => {
     await fixture();
     const boxes = await liveCheckboxes();

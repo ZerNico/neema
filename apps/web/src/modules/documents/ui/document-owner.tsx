@@ -36,6 +36,8 @@ interface DocumentPanelEntry {
   status: string;
   /** Rendered as the card's meta line, so the transcript shows checklist progress. */
   tasks: { done: number; total: number } | null;
+  /** Shared with the project rather than kept in this chat; null until loaded. */
+  inProject: boolean | null;
   chars: number;
   expanded: boolean;
   open: (() => void) | null;
@@ -211,6 +213,7 @@ function DocumentSession({
           ? "Changes not saved yet"
           : subtitle,
       tasks: available ? taskProgress(controller.content) : null,
+      inProject: available ? controller.document?.projectId != null : null,
       chars: controller.content.length,
       expanded: selected === id,
       open: available ? () => panel.open(request) : null,

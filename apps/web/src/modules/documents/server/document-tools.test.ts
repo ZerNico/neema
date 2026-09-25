@@ -152,6 +152,48 @@ describe("document tools parameter transport", () => {
 });
 
 describe("document tools trailing data", () => {
+  it("puts a new document in the project when the person may edit it, unless asked for the chat", async () => {
+    const inProject = (canEdit: boolean) => {
+      const { service, rows } = fakeService();
+      return Effect.runPromise(
+        prepareDocumentTools({
+          service,
+          userId: "user",
+          conversationId: CONVERSATION,
+          messageId: "message-1",
+          writeGuard: () => Effect.void,
+          project: { id: "project-1", name: "Launch", canEdit },
+        }),
+      ).then((tools) => ({ tools, rows }));
+    };
+    const editor = await inProject(true);
+    await Effect.runPromise(
+      editor.tools.group.handlers.create_document({ title: "Plan", content: "- [ ] one" }),
+    );
+    await Effect.runPromise(
+      editor.tools.group.handlers.create_document({
+        title: "Scratch",
+        content: "x",
+        scope: "chat",
+      }),
+    );
+    expect(
+      [...editor.rows.values()].map((row) => [row.title, row.projectId, row.conversationId]),
+    ).toEqual([
+      ["Plan", "project-1", null],
+      ["Scratch", null, CONVERSATION],
+    ]);
+    // A viewer's answer cannot write to the project, so its documents stay in the chat.
+    const viewer = await inProject(false);
+    await Effect.runPromise(
+      viewer.tools.group.handlers.create_document({ title: "Notes", content: "y" }),
+    );
+    expect([...viewer.rows.values()][0]).toMatchObject({
+      projectId: null,
+      conversationId: CONVERSATION,
+    });
+  });
+
   it("sends nothing until a document exists, then the policy and the manifest", async () => {
     const { service } = fakeService();
     const tools = await prepare(service);

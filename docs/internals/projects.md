@@ -39,9 +39,12 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   document outlives any answer and is deleted explicitly by an editor; a chat's still goes
   with its answer. Editors write, viewers follow along read-only, cursor included. See
   [documents](documents.md).
-- In a project chat the model's manifest lists both kinds with a `scope`, and
-  `create_document` takes `scope: "project"`. A viewer's model sees project documents as
-  read-only. Plain chats keep the manifest they had.
+- In a project chat the model's manifest lists both kinds with a `scope`. A new document
+  goes into the project by default when the person may edit it: someone working in a
+  project means the shared copy, and nothing moves a document between the two later.
+  `scope: "chat"` keeps private scratch in the chat; a viewer's documents always stay in
+  the chat, and their model sees project documents as read-only. Plain chats keep the
+  manifest they had. The card and the panel say "Project" so the two never look alike.
 - Project memory holds facts about the work (decisions, conventions, status), never facts
   about a person. It follows the project role, not the personal memory feature: it belongs
   to the project like its documents. See [memory](memory.md).

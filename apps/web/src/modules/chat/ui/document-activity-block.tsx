@@ -1,4 +1,4 @@
-import { ArrowRight01Icon, File01Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, File01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useDocumentPanel } from "~/modules/documents/ui/document-owner.tsx";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
@@ -38,10 +38,12 @@ export function documentActivityLabel(activity: DocumentToolActivity) {
 export function DocumentWidget({ documentId, title }: { documentId: string; title?: string }) {
   const { owned, gone, entry } = useDocumentPanel(documentId);
   const name = entry?.title ?? title ?? "Document";
+  // A project document is shared with every member; say so where it appears.
+  const kind = entry?.inProject ? "Project document" : "Document";
   const status = entry
     ? entry.tasks
-      ? `Document · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
-      : "Document"
+      ? `${kind} · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
+      : kind
     : gone
       ? "Document deleted"
       : owned
@@ -51,7 +53,7 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
     <>
       <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-xl">
         <HugeiconsIcon
-          icon={File01Icon}
+          icon={entry?.inProject ? Folder01Icon : File01Icon}
           strokeWidth={2}
           className="text-muted-foreground size-4"
           aria-hidden
