@@ -7,8 +7,6 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { hydrateRoot } from "react-dom/client";
-import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "~/routes/_app.index.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
@@ -17,6 +15,7 @@ import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
+import { composerText, setComposerText } from "./composer-test-utils.ts";
 
 vi.mock("../server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -167,7 +166,7 @@ describe("one-shot new-chat prefill", () => {
   it("seeds editable unsent text, preserves history state, and sends only through the normal composer", async () => {
     const { history } = await fixture();
     const textbox = await screen.findByRole("textbox");
-    await waitFor(() => expect(textbox).toHaveValue("Help me create an agent."));
+    await waitFor(() => expect(composerText(textbox)).toBe("Help me create an agent."));
     await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
     expect(history.location.state).toMatchObject({
       __TSR_index: 1,
@@ -177,7 +176,7 @@ describe("one-shot new-chat prefill", () => {
     expect(screen.getByRole("combobox")).toHaveTextContent("Normal default");
     expect(screen.getByRole("textbox")).toBe(textbox);
     expect(sendMessage).not.toHaveBeenCalled();
-    fireEvent.change(textbox, { target: { value: "Make it a writing coach instead." } });
+    setComposerText(textbox, "Make it a writing coach instead.");
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({
@@ -195,7 +194,7 @@ describe("one-shot new-chat prefill", () => {
     await fixture({ prefill: request });
     const textbox = await screen.findByRole("textbox");
     await waitFor(() =>
-      expect(textbox).toHaveValue(
+      expect(composerText(textbox)).toBe(
         "Help me change this schedule. Ask what I’d like to change, then prepare a draft for me to review before saving.",
       ),
     );
@@ -210,19 +209,19 @@ describe("one-shot new-chat prefill", () => {
     const { router, history, tree, view } = await fixture();
     const textbox = await screen.findByRole("textbox");
     await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
-    fireEvent.change(textbox, { target: { value: "" } });
+    setComposerText(textbox, "");
     await act(async () => {
       await router.invalidate();
     });
     expect(screen.getByRole("textbox")).toBe(textbox);
-    expect(textbox).toHaveValue("");
+    expect(composerText(textbox)).toBe("");
     act(() => history.back());
     await screen.findByText("Agents destination");
     act(() => history.forward());
-    expect(await screen.findByRole("textbox")).toHaveValue("");
+    expect(composerText(await screen.findByRole("textbox"))).toBe("");
     view!.unmount();
     render(tree);
-    expect(await screen.findByRole("textbox")).toHaveValue("");
+    expect(composerText(await screen.findByRole("textbox"))).toBe("");
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -231,8 +230,8 @@ describe("one-shot new-chat prefill", () => {
     async (value) => {
       const { history, view } = await fixture({ prefill: null });
       const textbox = await screen.findByRole("textbox");
-      fireEvent.change(textbox, { target: { value: "Started typing" } });
-      fireEvent.change(textbox, { target: { value } });
+      setComposerText(textbox, "Started typing");
+      setComposerText(textbox, value);
       fireEvent.change(view!.container.querySelector('input[type="file"]')!, {
         target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] },
       });
@@ -242,7 +241,7 @@ describe("one-shot new-chat prefill", () => {
       );
       await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
       expect(screen.getByRole("textbox")).toBe(textbox);
-      expect(textbox).toHaveValue(value);
+      expect(composerText(textbox)).toBe(value);
       await waitFor(() =>
         expect(screen.getByRole("button", { name: /Remove notes.txt/ })).toBeVisible(),
       );
@@ -254,33 +253,21 @@ describe("one-shot new-chat prefill", () => {
     "ignores and consumes invalid state %#",
     async (prefill) => {
       const { history } = await fixture({ prefill });
-      expect(await screen.findByRole("textbox")).toHaveValue("");
+      expect(composerText(await screen.findByRole("textbox"))).toBe("");
       await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
       expect(sendMessage).not.toHaveBeenCalled();
     },
   );
 
-  it("keeps pre-hydration typing and never raises the mobile keyboard while consuming a seed", async () => {
+  it("never raises the mobile keyboard while consuming a seed", async () => {
     mobile = true;
-    const { history, tree } = await fixture({ mount: false });
-    const container = document.createElement("div");
-    container.innerHTML = renderToString(tree);
-    document.body.append(container);
-    const textbox = container.querySelector("textarea")!;
-    expect(textbox).toHaveValue("");
-    textbox.value = "Typed before hydration";
-    const recoverable = vi.fn();
-    let root!: ReturnType<typeof hydrateRoot>;
-    await act(async () => {
-      root = hydrateRoot(container, tree, { onRecoverableError: recoverable });
-    });
+    const { history } = await fixture();
     await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
-    expect(screen.getByRole("textbox")).toHaveValue("Typed before hydration");
+    expect(composerText(screen.getByRole("textbox"))).toBe("Help me create an agent.");
+    // The editor focuses a frame after asking; let one pass so this proves something.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     expect(screen.getByRole("textbox")).not.toHaveFocus();
-    expect(recoverable).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
-    await act(async () => root.unmount());
-    container.remove();
   });
 });
 
@@ -288,7 +275,7 @@ describe("temporary new chat", () => {
   it("keeps the draft when switched on, records it in the address and sends it", async () => {
     const { history } = await fixture({ prefill: null });
     const textbox = await screen.findByRole("textbox");
-    fireEvent.change(textbox, { target: { value: "Something private" } });
+    setComposerText(textbox, "Something private");
     const toggle = screen.getByRole("button", { name: "Temporary chat" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
@@ -300,7 +287,7 @@ describe("temporary new chat", () => {
     // Presence only: both enter from opacity 0, and jsdom runs no animation.
     expect(screen.getByRole("heading", { name: "Temporary chat" })).toBeInTheDocument();
     expect(screen.getByText(/won’t appear in your history/)).toBeInTheDocument();
-    expect(screen.getByRole("textbox")).toHaveValue("Something private");
+    expect(composerText(screen.getByRole("textbox"))).toBe("Something private");
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({

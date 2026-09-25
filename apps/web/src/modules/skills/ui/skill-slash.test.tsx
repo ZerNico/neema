@@ -2,6 +2,11 @@ import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTextarea } from "~/modules/chat/ui/chat-textarea.tsx";
+import {
+  composerText,
+  focusComposer,
+  setComposerCaret,
+} from "~/modules/chat/ui/composer-test-utils.ts";
 import type { SkillSummary } from "../schema.ts";
 
 vi.stubGlobal(
@@ -12,7 +17,6 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
-vi.mock("textarea-caret", () => ({ default: () => ({ top: 20, left: 80, height: 24 }) }));
 const item: SkillSummary = {
   id: "skill-1",
   name: "review",
@@ -53,13 +57,12 @@ function setup() {
     select = vi.fn(),
     cancel = vi.fn();
   render(<Harness submit={submit} select={select} cancel={cancel} />);
-  const textbox = screen.getByRole("textbox") as HTMLTextAreaElement;
-  textbox.focus();
-  textbox.setSelectionRange(11, 11);
-  fireEvent.select(textbox);
+  const textbox = screen.getByRole("textbox");
+  focusComposer(textbox);
+  setComposerCaret(textbox, 11);
   return { textbox, submit, select, cancel };
 }
-describe("native textarea skill suggestions", () => {
+describe("composer skill suggestions", () => {
   it("keeps a textbox and selects the skill without sending", async () => {
     const { textbox, submit, select } = setup();
     await screen.findByRole("listbox", { name: "Local skills" });
@@ -68,7 +71,7 @@ describe("native textarea skill suggestions", () => {
     fireEvent.keyDown(textbox, { key: "Enter" });
     expect(submit).not.toHaveBeenCalled();
     expect(select).toHaveBeenCalledWith("skill-1");
-    expect(textbox.value).toBe("Before  after");
+    expect(composerText(textbox)).toBe("Before  after");
   });
   it("dismisses suggestions before cancelling an edit", async () => {
     const { textbox, cancel } = setup();

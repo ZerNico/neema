@@ -7,6 +7,12 @@ import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { deleteAttachment, uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
+import {
+  composerText,
+  focusComposer,
+  setComposerText,
+  typeInComposer,
+} from "./composer-test-utils.ts";
 
 vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
@@ -23,7 +29,6 @@ vi.mock("~/modules/attachments/server/functions.ts", () => ({
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
-vi.mock("textarea-caret", () => ({ default: () => ({ top: 20, left: 80, height: 24 }) }));
 
 const skills: SkillSummary[] = ["review", "rewrite"].map((name) => ({
   id: name,
@@ -112,7 +117,7 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
   );
   const rendered = render(view(onSend));
   const textbox = screen.getByRole("textbox");
-  fireEvent.change(textbox, { target: { value: "Original draft" } });
+  setComposerText(textbox, "Original draft");
   fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
     target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] },
   });
@@ -129,15 +134,13 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
 
 async function replaceSkill(textbox: HTMLElement) {
   fireEvent.click(screen.getByRole("button", { name: "Remove review" }));
-  fireEvent.change(textbox, { target: { value: "/rewrite" } });
-  const textarea = textbox as HTMLTextAreaElement;
-  textarea.focus();
-  textarea.setSelectionRange(8, 8);
-  fireEvent.select(textarea);
+  setComposerText(textbox, "");
+  focusComposer(textbox);
+  typeInComposer(textbox, "/rewrite");
   await screen.findByRole("listbox", { name: "Local skills" });
-  fireEvent.keyDown(textarea, { key: "Enter" });
+  fireEvent.keyDown(textbox, { key: "Enter" });
   expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
-  fireEvent.change(textarea, { target: { value: "Updated draft" } });
+  setComposerText(textbox, "Updated draft");
 }
 
 describe("upload-queued composer requests", () => {
@@ -150,7 +153,7 @@ describe("upload-queued composer requests", () => {
         "rewrite",
       ]),
     );
-    expect(textbox).toHaveValue("");
+    expect(composerText(textbox)).toBe("");
     expect(screen.queryByRole("button", { name: "Remove rewrite" })).not.toBeInTheDocument();
     expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
   });
@@ -186,7 +189,7 @@ describe("upload-queued composer requests", () => {
         "rewrite",
       ]),
     );
-    expect(textbox).toHaveValue("Updated draft");
+    expect(composerText(textbox)).toBe("Updated draft");
     expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
@@ -201,7 +204,7 @@ describe("upload-queued composer requests", () => {
       ).not.toBeInTheDocument(),
     );
     expect(onSend).not.toHaveBeenCalled();
-    expect(textbox).toHaveValue("Updated draft");
+    expect(composerText(textbox)).toBe("Updated draft");
     expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
   });
 });
@@ -290,13 +293,13 @@ describe("editing a queued message", () => {
     const { queue, onSend, onQueue, textbox } = renderEditing();
     await openEdit();
 
-    expect(textbox).toHaveValue("Summarise the attached notes");
+    expect(composerText(textbox)).toBe("Summarise the attached notes");
     // Its file is back in the composer as a chip, beside the row's own in the strip.
     expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove rewrite" })).toBeInTheDocument();
     expect(queue.onEditStart).toHaveBeenCalledExactlyOnceWith(queued);
 
-    fireEvent.change(textbox, { target: { value: "Summarise it in three bullets" } });
+    setComposerText(textbox, "Summarise it in three bullets");
     // A response is running, and saving is still the primary action, not Stop.
     fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
 
@@ -311,7 +314,7 @@ describe("editing a queued message", () => {
     );
     expect(onQueue).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
-    await waitFor(() => expect(textbox).toHaveValue(""));
+    await waitFor(() => expect(composerText(textbox)).toBe(""));
     expect(queue.onEditEnd).toHaveBeenCalledOnce();
     // The queued message still owns its file; clearing the chip deletes nothing.
     expect(deleteAttachment).not.toHaveBeenCalled();
@@ -323,7 +326,7 @@ describe("editing a queued message", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(textbox).toHaveValue("");
+    expect(composerText(textbox)).toBe("");
     expect(queue.onReplace).not.toHaveBeenCalled();
     expect(queue.onEditEnd).toHaveBeenCalledOnce();
     expect(deleteAttachment).not.toHaveBeenCalled();
@@ -331,7 +334,7 @@ describe("editing a queued message", () => {
 
   it("will not discard a draft to open a queued message", async () => {
     const { queue, textbox } = renderEditing();
-    fireEvent.change(textbox, { target: { value: "Half-written thought" } });
+    setComposerText(textbox, "Half-written thought");
     fireEvent.click(
       screen.getByRole("button", { name: "More actions: Summarise the attached notes" }),
     );
@@ -340,6 +343,6 @@ describe("editing a queued message", () => {
       "true",
     );
     expect(queue.onEditStart).not.toHaveBeenCalled();
-    expect(textbox).toHaveValue("Half-written thought");
+    expect(composerText(textbox)).toBe("Half-written thought");
   });
 });

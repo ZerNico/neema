@@ -21,7 +21,11 @@ import {
   webSearchAvailabilityQuery,
 } from "../client/queries.ts";
 import { resolveChatModel } from "../client/selected-model.ts";
-import { CHAT_INPUT_SHELL_CLASS, ChatTextarea } from "./chat-textarea.tsx";
+import {
+  CHAT_INPUT_SHELL_CLASS,
+  ChatTextarea,
+  type ComposerFieldHandle,
+} from "./chat-textarea.tsx";
 import { ModelPicker } from "./model-picker.tsx";
 import {
   AgentPicker,
@@ -87,7 +91,7 @@ const effortLabels: Record<ReasoningEffort, string> = {
 };
 
 export const ChatInput = forwardRef<
-  HTMLTextAreaElement,
+  ComposerFieldHandle,
   {
     value: string;
     onValueChange: (value: string) => void;
@@ -403,22 +407,6 @@ export const ChatInput = forwardRef<
         setDragging(false);
         target?.addFiles(event.dataTransfer.files);
       }}
-      onPaste={(event) => {
-        if (!target || controlsDisabled) return;
-        const files = Array.from(event.clipboardData.files);
-        if (files.length > 0) {
-          event.preventDefault();
-          target.addFiles(files);
-          return;
-        }
-        // A pasted wall of text reads far better as an attachment than as a
-        // draft nobody can scroll past.
-        const text = event.clipboardData.getData("text/plain");
-        if (text && shouldPasteAsFile(text)) {
-          event.preventDefault();
-          target.addFiles([createPastedTextFile(text)]);
-        }
-      }}
     >
       {/* Present on the first render when an edit opens with files or skills, so
           the row is already full height for the edit swap's measurement. */}
@@ -564,11 +552,24 @@ export const ChatInput = forwardRef<
                   if (!integrations.items.find((item) => item.integrationId === id)?.enabled)
                     integrations.setEnabled(id, true);
                 },
-                // Stays in the message, so the model knows which service is meant.
-                insertText: (item) => `@${item.label} `,
               }
             : undefined
         }
+        // The field sees a paste before anything around it, so it asks first.
+        onPasteData={(data) => {
+          if (!target || controlsDisabled) return false;
+          const files = Array.from(data.files);
+          if (files.length > 0) {
+            target.addFiles(files);
+            return true;
+          }
+          // A pasted wall of text reads far better as an attachment than as a
+          // draft nobody can scroll past.
+          const text = data.getData("text/plain");
+          if (!text || !shouldPasteAsFile(text)) return false;
+          target.addFiles([createPastedTextFile(text)]);
+          return true;
+        }}
         value={value}
         onValueChange={onValueChange}
         onSubmit={submit}

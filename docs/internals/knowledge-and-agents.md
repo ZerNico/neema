@@ -123,15 +123,15 @@ whatever agent the conversation is associated with.
   (the abandoned draft goes with its unmounted row), and sending from the composer ends the
   edit. Every path that abandons an edit has to release its uploads, not just forget which
   message was open.
-- Composer mention type-ahead (`useTextareaMentions`, `src/ui/textarea-mention.tsx`, shared by
-  `/` skills and `#` collections) never owns the textarea value, only deletes the token and
-  hands back an id. Accepting a row falls back to `setRangeText` when native delete isn't
-  available, which edits the DOM behind React's back and leaves React's value tracker holding
-  the pre-accept string — the next keystroke that recreates that string is silently swallowed
-  until a synthetic `input` event resyncs it. Its twin: the dismissal key returns the caret to
-  where the token started, so retyping the trigger rebuilds a byte-identical signature and a
-  signature-only dismissal check kept the list closed. Both together show as one symptom: add a
-  collection, remove the chip, type `#` again, nothing happens.
+- The composer (`chat-textarea.tsx`) is a Tiptap editor over a plain-text value: one paragraph
+  per line, and an `@integration` mention is an atom node whose text is the typed `@Name`
+  (`composer-doc.tsx`). Everything outside it (send, the stored message, retry, edit, branch,
+  the model) sees only the string, so the tag is presentation and never data. `/` skills, `#`
+  collections and `@` integrations are one `@tiptap/suggestion` plugin each: `/` and `#` delete
+  their token and hand back an id, `@` leaves the tag. A value arriving as a prop is compared
+  with the last one the editor emitted; only a real outside change (send, seed, a queued
+  message opened for editing) replaces the document, outside undo, so an echo never resets the
+  caret.
 
 - A collection can also mirror part of a connected service through a knowledge source.
   Its documents are ordinary note versions marked with their source and are read-only here;

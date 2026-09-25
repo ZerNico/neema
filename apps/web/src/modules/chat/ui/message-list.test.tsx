@@ -9,6 +9,7 @@ import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import { composerText, setComposerText } from "./composer-test-utils.ts";
 
 // The panel closes on navigation; the citation tests render outside a router.
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
@@ -918,9 +919,9 @@ describe("MessageBubble actions", () => {
     });
 
     const editor = screen.getByRole("textbox", { name: "Edit message" });
-    expect(editor).toHaveValue("updated message");
-    fireEvent.change(editor, { target: { value: "new draft" } });
-    expect(editor).toHaveValue("new draft");
+    expect(composerText(editor)).toBe("updated message");
+    setComposerText(editor, "new draft");
+    expect(composerText(editor)).toBe("new draft");
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search the web" })).toBeInTheDocument();
     expect(screen.getByText("Test Model")).toBeInTheDocument();

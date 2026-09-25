@@ -2,6 +2,13 @@ import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTextarea } from "./chat-textarea.tsx";
+import {
+  composerEditor,
+  composerTagCount,
+  composerText,
+  focusComposer,
+  setComposerCaret,
+} from "./composer-test-utils.ts";
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -11,7 +18,6 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
-vi.mock("textarea-caret", () => ({ default: () => ({ top: 20, left: 80, height: 24 }) }));
 
 function Harness({ select, initial }: { select: (id: string) => void; initial: string }) {
   const [value, setValue] = useState(initial);
@@ -31,21 +37,17 @@ function Harness({ select, initial }: { select: (id: string) => void; initial: s
           },
         ],
         onSelect: select,
-        insertText: (item) => `@${item.label} `,
       }}
     />
   );
 }
 
-const waitForAnimationFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
-
 const setup = (initial: string, caret: number) => {
   const select = vi.fn();
   render(<Harness select={select} initial={initial} />);
-  const textbox = screen.getByRole("textbox") as HTMLTextAreaElement;
-  textbox.focus();
-  textbox.setSelectionRange(caret, caret);
-  fireEvent.select(textbox);
+  const textbox = screen.getByRole("textbox");
+  focusComposer(textbox);
+  setComposerCaret(textbox, caret);
   return { textbox, select };
 };
 
@@ -55,12 +57,13 @@ describe("integration @ mentions", () => {
     await screen.findByRole("listbox", { name: "Integrations" });
     fireEvent.keyDown(textbox, { key: "Enter" });
     expect(select).toHaveBeenCalledWith("outline");
-    expect(textbox.value).toBe("Search @Outline for the plan");
+    // Kept as a tag, whose text is the words the model reads.
+    expect(composerText(textbox)).toBe("Search @Outline for the plan");
+    expect(composerTagCount(textbox)).toBe(1);
     // The caret sits past the space, so the list does not reopen on the
     // mention it just inserted and Enter sends instead of re-picking.
-    await waitForAnimationFrame();
-    expect(textbox.selectionStart).toBe("Search @Outline ".length);
-    fireEvent.select(textbox);
+    const { selection } = composerEditor(textbox).state;
+    expect(selection.from).toBe(1 + "Search ".length + 1 + 1);
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 

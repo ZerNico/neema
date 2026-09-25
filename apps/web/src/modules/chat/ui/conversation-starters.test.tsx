@@ -4,6 +4,7 @@ import { getAgentSelection } from "~/modules/agents/server/functions.ts";
 import { describe, expect, it, vi } from "vitest";
 import { NewChatView } from "./chat-view.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
+import { composerText } from "./composer-test-utils.ts";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 vi.mock("../server/functions.ts", () => ({
@@ -117,15 +118,16 @@ describe("new chat composer", () => {
 });
 
 describe("conversation starters", () => {
-  it("shows the selected agent's starters and seeds the draft without sending", () => {
+  it("shows the selected agent's starters and seeds the draft without sending", async () => {
     renderNewChat(AGENT.id);
     const list = screen.getByRole("list", { name: "Conversation starters" });
     expect(list).toHaveTextContent("Summarize this contract");
     fireEvent.click(screen.getByRole("button", { name: "List the key risks" }));
-    // The composer textarea has no accessible name of its own; it is the only one.
-    const draft = screen.getByRole("textbox") as HTMLTextAreaElement;
-    expect(draft.value).toBe("List the key risks");
-    expect(document.activeElement).toBe(draft);
+    // The composer field has no accessible name of its own; it is the only one.
+    const draft = screen.getByRole("textbox");
+    expect(composerText(draft)).toBe("List the key risks");
+    // The editor takes focus on the next frame.
+    await waitFor(() => expect(document.activeElement).toBe(draft));
   });
 
   it("applies the available agent model instead of the ordinary default", () => {

@@ -445,6 +445,13 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
       content: attr(data-placeholder);
     }
   }
+  /* The chat composer: plain lines, so paragraphs carry no spacing of their own. */
+  .composer-editor {
+    & p.is-editor-empty:first-child::before {
+      @apply text-muted-foreground pointer-events-none float-left h-0;
+      content: attr(data-placeholder);
+    }
+  }
   /* Other people's carets, as Tiptap's collaboration caret draws them. */
   .collaboration-carets__caret {
     @apply pointer-events-none relative -mx-px border-x;

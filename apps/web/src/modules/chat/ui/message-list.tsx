@@ -1,4 +1,6 @@
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
+import type { ComposerFieldHandle } from "./chat-textarea.tsx";
+import { IntegrationMentionText } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
@@ -309,15 +311,12 @@ function InlineMessageEditor({
   const [initial] = useState(() => extractReferences(editState.initialDraft));
   const [draft, setDraft] = useState(initial.text);
   const [references, setReferences] = useState(initial.references);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerFieldHandle>(null);
 
-  // ChatTextarea sizes itself in its child layout effect first. Focus without
-  // scrolling afterwards so the virtualizer, not the browser, owns row position.
+  // Focus without scrolling so the virtualizer, not the browser, owns row
+  // position; the caret starts after the words being edited.
   useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textareaRef.current?.focus({ preventScroll: true, atEnd: true });
   }, []);
 
   return (
@@ -396,7 +395,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* An attachment-only turn has no text bubble to draw. */}
           {text ? (
             <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
-              {text}
+              <IntegrationMentionText text={text} />
             </div>
           ) : null}
           {message.editedAt ? (

@@ -1,4 +1,5 @@
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -180,7 +181,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // files stay claimed by it, until the replacement commits.
   const [editingId, setEditingId] = useState<string | null>(null);
   const queueCollapse = collapseMotion(useAppReducedMotion());
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerFieldHandle>(null);
   const touched = useRef(false);
   const attachments = useAttachmentUploads();
   // A work chat inside the desktop app keeps files local: drops and pastes
@@ -203,7 +204,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       prefillDraft: (text) => {
         if (touched.current) return;
         touched.current = true;
-        // A user may have typed into the server-rendered textarea before hydration.
+        // Someone may already have typed before the prefill arrived.
         const typed = textareaRef.current?.value;
         if (typed) {
           setDraft(typed);

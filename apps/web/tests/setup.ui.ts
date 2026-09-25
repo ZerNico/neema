@@ -12,3 +12,11 @@ afterEach(cleanup);
 if (typeof globalThis.PointerEvent === "undefined") {
   globalThis.PointerEvent = class PointerEvent extends MouseEvent {} as never;
 }
+
+// jsdom lays nothing out, and has no layout methods on ranges; ProseMirror (the
+// composer, the document editor) measures the selection to keep it in view.
+// An element's empty rect list stands in.
+Range.prototype.getClientRects = () => document.createElement("div").getClientRects();
+Range.prototype.getBoundingClientRect = () => new DOMRect();
+// A click in an editor asks what lies under the pointer; with no layout, nothing does.
+if (typeof document.elementFromPoint !== "function") document.elementFromPoint = () => null;

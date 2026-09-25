@@ -16,6 +16,7 @@ import {
   useAttachmentUploads,
   type AttachmentUploads,
 } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import { composerText } from "./composer-test-utils.ts";
 
 // The queries reach for server functions; the harness seeds their caches, so
 // the modules only have to exist.
@@ -483,7 +484,7 @@ it("keeps one focused action button while Send becomes Stop and back", () => {
   expect(send).not.toHaveBeenCalled();
   rerender(input(false));
   expect(screen.getByRole("button", { name: "Send" })).toBe(button);
-  expect(screen.getByRole("textbox")).toHaveValue("Kept draft");
+  expect(composerText(screen.getByRole("textbox"))).toBe("Kept draft");
   fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
   expect(send).toHaveBeenCalledTimes(1);
 });
@@ -714,12 +715,13 @@ describe("ChatInput attachment picking", () => {
 });
 
 describe("ChatInput paste", () => {
-  const paste = (harness: Harness, data: { files?: File[]; text?: string }) => {
+  // The field sees a paste first, so that is where one lands.
+  const paste = (_harness: Harness, data: { files?: File[]; text?: string }) => {
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
       value: { files: data.files ?? [], getData: () => data.text ?? "" },
     });
-    fireEvent(harness.container.firstElementChild!, event);
+    fireEvent(screen.getByRole("textbox"), event);
     return event;
   };
 
@@ -738,11 +740,11 @@ describe("ChatInput paste", () => {
     expect((harness.upload.mock.calls[0]![0] as File).name).toBe("pasted-text.txt");
   });
 
-  it("leaves a small text paste to the textarea", () => {
+  it("types a small text paste into the draft as plain words", () => {
     const harness = setup();
-    const event = paste(harness, { text: "short" });
+    paste(harness, { text: "short" });
 
-    expect(event.defaultPrevented).toBe(false);
+    expect(composerText(screen.getByRole("textbox"))).toBe("short");
     expect(harness.upload).not.toHaveBeenCalled();
   });
 });
@@ -859,7 +861,7 @@ describe("ChatInput submitting", () => {
 
     expect(harness.onSubmit).not.toHaveBeenCalled();
     // Draft and chip survive so the user can retry.
-    expect(screen.getByRole("textbox")).toHaveValue("keep me");
+    expect(composerText(screen.getByRole("textbox"))).toBe("keep me");
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 });

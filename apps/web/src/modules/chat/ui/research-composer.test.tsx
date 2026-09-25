@@ -10,6 +10,7 @@ import { Composer } from "./composer.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { ChatInput } from "./chat-input.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import { composerText, setComposerText } from "./composer-test-utils.ts";
 
 vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
@@ -104,7 +105,7 @@ describe("research composer", () => {
     );
     expect(screen.queryByRole("menuitemcheckbox", { name: "Deep research" })).toBeNull();
     expect(searchPill()).toBeNull();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    setComposerText(screen.getByRole("textbox"), "Investigate this");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], false, []));
   });
@@ -121,7 +122,7 @@ describe("research composer", () => {
     await act(async () => {
       cache.setQueryData(["capabilities"], { ...ALL_CAPABILITIES, webSearch: false });
     });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    setComposerText(screen.getByRole("textbox"), "Investigate this");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], false, []));
   });
@@ -208,19 +209,17 @@ describe("research composer", () => {
       </QueryClientProvider>,
     );
     await enableResearch();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    setComposerText(screen.getByRole("textbox"), "Investigate this");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Investigate this", [], true, []));
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Investigate this");
+    expect(composerText(screen.getByRole("textbox"))).toBe("Investigate this");
     expect(await researchItem()).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""),
-    );
+    await waitFor(() => expect(composerText(screen.getByRole("textbox"))).toBe(""));
     await waitFor(async () =>
       expect(await researchItem()).toHaveAttribute("aria-checked", "false"),
     );
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Thanks" } });
+    setComposerText(screen.getByRole("textbox"), "Thanks");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("Thanks", [], false, []));
   });
@@ -234,7 +233,7 @@ describe("research composer", () => {
       </QueryClientProvider>,
     );
     await enableResearch();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Investigate this" } });
+    setComposerText(screen.getByRole("textbox"), "Investigate this");
     await act(async () => {
       cache.setQueryData(["tools", "research", "availability"], {
         configured: true,
