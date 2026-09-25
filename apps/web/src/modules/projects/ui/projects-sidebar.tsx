@@ -155,8 +155,9 @@ function ProjectChats({
   if (!chats.data) return null;
   return (
     // The same rows as the chat list, indented under their project, so they
-    // read at the same size and keep the same menu.
-    <SidebarMenu className="ml-6 w-auto">
+    // read at the same size and keep the same menu; the top margin is the
+    // menu's own row gap, which a nested list does not get from its parent.
+    <SidebarMenu className="mt-0.5 ml-6 w-auto">
       {rows.length === 0 ? (
         <SidebarMenuItem>
           <span className="text-muted-foreground px-2 text-xs">No chats yet</span>
