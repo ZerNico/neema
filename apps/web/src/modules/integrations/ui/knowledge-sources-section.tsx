@@ -9,7 +9,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import type { KnowledgeDocument } from "~/modules/knowledge/schema.ts";
+import { toast } from "sonner";
+import { searchState, type KnowledgeDocument } from "~/modules/knowledge/schema.ts";
+import { rebuildKnowledgeIndex } from "~/modules/knowledge/server/functions.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useDetailPanel } from "~/ui/detail-panel.tsx";
 import { toastError } from "~/ui/error-toast.ts";
@@ -136,6 +138,23 @@ function SourceRow({
   const failed = documents.filter(
     (document) => document.status === "failed" || document.replacement?.status === "failed",
   ).length;
+  const preparingSearch = documents.filter(
+    (document) => searchState(document) === "preparing",
+  ).length;
+  const basicSearch = documents.filter((document) => searchState(document) === "basic").length;
+  // Re-queues only embeddings that failed or are out of date; the rest stay.
+  const retrySearch = useMutation({
+    mutationFn: () => rebuildKnowledgeIndex({ data: { collectionId: source.collectionId } }),
+    onSuccess: async ({ reembedded }) => {
+      await refresh();
+      toast.success(
+        reembedded === 0
+          ? "Nothing needed preparing again."
+          : `Preparing search again for ${pages(reembedded)}.`,
+      );
+    },
+    onError: (error) => toastError("Could not prepare search again.", error),
+  });
   const status = !source.connected
     ? source.canEdit
       ? `Paused: ${name} isn’t connected. Pages already synced stay searchable.`
@@ -145,6 +164,8 @@ function SourceRow({
         selectionSummary(source.root),
         preparing ? `${preparing} preparing` : null,
         failed ? `${failed} couldn’t be prepared` : null,
+        preparingSearch ? `${preparingSearch} preparing search` : null,
+        basicSearch ? `${basicSearch} on basic search only` : null,
         source.stats?.elsewhere
           ? `${pages(source.stats.elsewhere)} already synced by another source`
           : null,
@@ -170,6 +191,16 @@ function SourceRow({
         </span>
         <span className="text-muted-foreground text-xs">{status}</span>
       </div>
+      {source.canEdit && basicSearch > 0 ? (
+        <PendingButton
+          size="sm"
+          variant="outline"
+          pending={retrySearch.isPending}
+          onClick={() => retrySearch.mutate()}
+        >
+          Retry failed
+        </PendingButton>
+      ) : null}
       {documents.length ? (
         <Button
           size="sm"

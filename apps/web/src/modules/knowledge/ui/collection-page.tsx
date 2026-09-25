@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { knowledgeCollectionQuery } from "../client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import { KNOWLEDGE_LIMITS, type KnowledgeDocument } from "../schema.ts";
+import { KNOWLEDGE_LIMITS, searchState, type KnowledgeDocument } from "../schema.ts";
 import {
   addKnowledgeNote,
   deleteKnowledgeCollection,
@@ -104,13 +104,9 @@ const statusBadge = (document: KnowledgeDocument) => {
         {document.replacement.status === "failed" ? "Update failed" : "Updating"}
       </Badge>
     );
-  if (document.semanticStatus === "failed") return <Badge variant="outline">Basic search</Badge>;
-  if (
-    document.semanticStatus === "needs_reindex" ||
-    document.semanticStatus === "queued" ||
-    document.semanticStatus === "running"
-  )
-    return <Badge variant="outline">Preparing search</Badge>;
+  const search = searchState(document);
+  if (search === "basic") return <Badge variant="outline">Basic search</Badge>;
+  if (search === "preparing") return <Badge variant="outline">Preparing search</Badge>;
   return null;
 };
 

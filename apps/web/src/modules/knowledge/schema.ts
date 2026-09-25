@@ -185,3 +185,18 @@ export const ReplaceKnowledgeNoteInput = Schema.Struct({
   ...AddKnowledgeNoteInput.fields,
   ...KnowledgeDocumentIdInput.fields,
 });
+
+/**
+ * Where a published document stands with semantic search, once its text is
+ * ready: still embedding, or left on keyword search after embedding failed.
+ * Null when there is nothing to say (ready, disabled, or still extracting).
+ */
+export const searchState = (document: KnowledgeDocument): "preparing" | "basic" | null => {
+  if (document.status !== "ready" || document.replacement) return null;
+  if (document.semanticStatus === "failed") return "basic";
+  return document.semanticStatus === "needs_reindex" ||
+    document.semanticStatus === "queued" ||
+    document.semanticStatus === "running"
+    ? "preparing"
+    : null;
+};

@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { knowledgeCollectionQuery } from "~/modules/knowledge/client/queries.ts";
-import type { KnowledgeDocument } from "~/modules/knowledge/schema.ts";
+import { searchState, type KnowledgeDocument } from "~/modules/knowledge/schema.ts";
 import { DocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
 import { useDetailPanel, type DetailPanelApi } from "~/ui/detail-panel.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -134,6 +134,10 @@ function SyncedPagesPanel({
                   <span className="text-destructive shrink-0 text-xs">Couldn’t prepare</span>
                 ) : isPreparing(document) ? (
                   <span className="text-muted-foreground shrink-0 text-xs">Preparing</span>
+                ) : searchState(document) === "basic" ? (
+                  <span className="text-muted-foreground shrink-0 text-xs">Basic search</span>
+                ) : searchState(document) === "preparing" ? (
+                  <span className="text-muted-foreground shrink-0 text-xs">Preparing search</span>
                 ) : null}
                 {document.source?.url ? (
                   <a
