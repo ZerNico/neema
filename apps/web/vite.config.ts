@@ -45,13 +45,7 @@ export default defineConfig({
       // The custom tool builder resolves these from disk at runtime: tsc, and
       // the effect and Node declarations it checks tool modules against. A full
       // trace copies one package, so the declarations' own dependency is listed.
-      traceDeps: [
-        "@npmcli/arborist*",
-        "typescript*",
-        "effect*",
-        "@types/node*",
-        "undici-types*",
-      ],
+      traceDeps: ["@npmcli/arborist*", "typescript*", "effect*", "@types/node*", "undici-types*"],
     }),
     viteReact(),
     tailwindcss(),

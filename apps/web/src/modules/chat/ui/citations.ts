@@ -12,7 +12,9 @@ export const FOOTNOTE_HREF = /^#user-content-fn-(\d+(?:-\d+)*)$/;
 
 /** The source indexes a footnote href stands for, first cited first. */
 export const footnoteIndexes = (href: string | undefined): number[] =>
-  FOOTNOTE_HREF.exec(href ?? "")?.[1]!.split("-").map(Number) ?? [];
+  FOOTNOTE_HREF.exec(href ?? "")?.[1]!
+    .split("-")
+    .map(Number) ?? [];
 
 /** Adjacent markers, optionally spaced, such as `[^1][^4]` or `[^1] [^4]`. */
 const MARKER_RUN = /\[\^\d+\](?:[ \t]*\[\^\d+\])*/g;

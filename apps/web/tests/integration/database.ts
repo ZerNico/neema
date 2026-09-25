@@ -30,15 +30,18 @@ export const createTestDatabase = async ({ migrated = true } = {}): Promise<Test
     // Postgres refuses a clone while another clone reads the same template.
     await client.query("select pg_advisory_lock(hashtext('clone-test-template'))");
     await client.query(
-      migrated ? `CREATE DATABASE ${name} TEMPLATE ${TEMPLATE_DATABASE}` : `CREATE DATABASE ${name}`,
+      migrated
+        ? `CREATE DATABASE ${name} TEMPLATE ${TEMPLATE_DATABASE}`
+        : `CREATE DATABASE ${name}`,
     );
   });
   const url = new URL(inject("postgresAdminUrl"));
   url.pathname = `/${name}`;
   return {
     url: url.toString(),
-    drop: () => admin((client) => client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)).then(
-      () => undefined,
-    ),
+    drop: () =>
+      admin((client) => client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)).then(
+        () => undefined,
+      ),
   };
 };

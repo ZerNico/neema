@@ -298,13 +298,17 @@ export class ScheduleDraftService extends Context.Service<
         discard: (userId, draftId) =>
           core
             .discard(userId, draftId, "schedule", (tx) =>
-              policy.can(userId, "schedules", tx).pipe(
-                Effect.flatMap((allowed) =>
-                  allowed
-                    ? Effect.void
-                    : Effect.fail(new DraftRejected({ reason: "schedule editing is unavailable" })),
+              policy
+                .can(userId, "schedules", tx)
+                .pipe(
+                  Effect.flatMap((allowed) =>
+                    allowed
+                      ? Effect.void
+                      : Effect.fail(
+                          new DraftRejected({ reason: "schedule editing is unavailable" }),
+                        ),
+                  ),
                 ),
-              ),
             )
             .pipe(Effect.asVoid),
       });

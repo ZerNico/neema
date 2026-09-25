@@ -51,4 +51,4 @@ allowBuilds:
 
 # Behaviour @effect/ai-openrouter does not have upstream; see CLAUDE.md.
 patchedDependencies:
-  '@effect/ai-openrouter@4.0.0-rc.117': patches/@effect__ai-openrouter@4.0.0-rc.117.patch
+  "@effect/ai-openrouter@4.0.0-rc.117": patches/@effect__ai-openrouter@4.0.0-rc.117.patch

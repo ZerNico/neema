@@ -109,7 +109,10 @@ export const checkScheduleResources = (
       const [connection] = yield* tx
         .select({ status: integrationConnections.status })
         .from(integrationConnections)
-        .innerJoin(integrationConfigs, eq(integrationConfigs.id, integrationConnections.integrationId))
+        .innerJoin(
+          integrationConfigs,
+          eq(integrationConfigs.id, integrationConnections.integrationId),
+        )
         .where(
           and(
             eq(integrationConnections.userId, userId),

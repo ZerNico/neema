@@ -372,9 +372,14 @@ describe("tool-created agent drafts", () => {
   it("cannot read, save, patch or discard another kind of draft through the agent service", async () => {
     const owner = await createUser();
     const draft = await initialize(owner);
-    await run(Effect.flatMap(Db, (db) =>
-      db.update(conversationDrafts).set({ kind: "schedule" }).where(eq(conversationDrafts.id, draft.id)),
-    ));
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(conversationDrafts)
+          .set({ kind: "schedule" })
+          .where(eq(conversationDrafts.id, draft.id)),
+      ),
+    );
     expect(await get(owner, draft)).toBeNull();
     await expect(save(owner, draft)).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
     await expect(patch(owner, draft, { name: "Wrong kind" })).rejects.toMatchObject({
@@ -383,10 +388,14 @@ describe("tool-created agent drafts", () => {
     await expect(
       run(Effect.flatMap(AgentDraftService, (service) => service.discard(owner, draft.id))),
     ).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
-    const [row] = await run(Effect.flatMap(Db, (db) =>
-      db.select({ kind: conversationDrafts.kind }).from(conversationDrafts)
-        .where(eq(conversationDrafts.id, draft.id)),
-    ));
+    const [row] = await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .select({ kind: conversationDrafts.kind })
+          .from(conversationDrafts)
+          .where(eq(conversationDrafts.id, draft.id)),
+      ),
+    );
     expect(row?.kind).toBe("schedule");
   });
 
@@ -394,22 +403,28 @@ describe("tool-created agent drafts", () => {
     const owner = await createUser();
     const draft = await initialize(owner);
     const groupId = uuidv7();
-    await run(Effect.gen(function* () {
-      const db = yield* Db;
-      yield* db.insert(groups).values({
-        id: groupId,
-        name: groupId,
-        capabilities: { ...ALL_CAPABILITIES, agentsCreate: false },
-      });
-      yield* db.insert(groupMembers).values({ groupId, userId: owner });
-    }));
+    await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.insert(groups).values({
+          id: groupId,
+          name: groupId,
+          capabilities: { ...ALL_CAPABILITIES, agentsCreate: false },
+        });
+        yield* db.insert(groupMembers).values({ groupId, userId: owner });
+      }),
+    );
     await expect(
       run(Effect.flatMap(AgentDraftService, (service) => service.discard(owner, draft.id))),
     ).rejects.toMatchObject({ _tag: "DraftNotAvailable" });
-    const [row] = await run(Effect.flatMap(Db, (db) =>
-      db.select({ id: conversationDrafts.id }).from(conversationDrafts)
-        .where(eq(conversationDrafts.id, draft.id)),
-    ));
+    const [row] = await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .select({ id: conversationDrafts.id })
+          .from(conversationDrafts)
+          .where(eq(conversationDrafts.id, draft.id)),
+      ),
+    );
     expect(row?.id).toBe(draft.id);
     expect(events.filter(({ event }) => event.type === "draft.changed")).toHaveLength(0);
   });

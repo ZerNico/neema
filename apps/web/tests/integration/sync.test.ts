@@ -166,9 +166,7 @@ it("ends open feeds when the bus is disposed, so a tab reconnects to its replace
   // A second runtime stands in for the one a dev hot swap throws away.
   const replaced = ManagedRuntime.make(
     SyncBus.layer.pipe(
-      Layer.provide(
-        PgClient.layer({ url: Redacted.make(database.url), maxConnections: 2 }),
-      ),
+      Layer.provide(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 2 })),
     ),
   );
   const feed = await replaced.runPromise(Effect.map(SyncBus, (bus) => bus.subscribe("reader")));

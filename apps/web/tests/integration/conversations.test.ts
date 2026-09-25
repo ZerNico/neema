@@ -389,16 +389,14 @@ describe("temporary chat expiry", () => {
           updatedAt: new Date(created),
           lastMessageAt: last === null ? null : new Date(last),
         });
-        yield* db
-          .insert(conversations)
-          .values([
-            row(ids.expired, true, now - 48 * HOUR, now - 25 * HOUR),
-            row(ids.expiredNeverUsed, true, now - 25 * HOUR, null),
-            // Created long ago but active recently: the day runs from activity.
-            row(ids.fresh, true, now - 48 * HOUR, now - 1 * HOUR),
-            row(ids.ordinary, false, now - 48 * HOUR, now - 25 * HOUR),
-            row(ids.live, true, now - 48 * HOUR, now - 25 * HOUR),
-          ]);
+        yield* db.insert(conversations).values([
+          row(ids.expired, true, now - 48 * HOUR, now - 25 * HOUR),
+          row(ids.expiredNeverUsed, true, now - 25 * HOUR, null),
+          // Created long ago but active recently: the day runs from activity.
+          row(ids.fresh, true, now - 48 * HOUR, now - 1 * HOUR),
+          row(ids.ordinary, false, now - 48 * HOUR, now - 25 * HOUR),
+          row(ids.live, true, now - 48 * HOUR, now - 25 * HOUR),
+        ]);
         yield* db.insert(messages).values({
           id: uuidv7(),
           conversationId: ids.live,

@@ -57,7 +57,11 @@ export type OpenDraftResult<S> =
 export class DraftService extends Context.Service<
   DraftService,
   {
-    get<S>(userId: string, draftId: string, kind: DraftKind): Effect.Effect<ConversationDraft<S> | null>;
+    get<S>(
+      userId: string,
+      draftId: string,
+      kind: DraftKind,
+    ): Effect.Effect<ConversationDraft<S> | null>;
     list<S>(
       userId: string,
       conversationId: string,
@@ -181,7 +185,8 @@ export class DraftService extends Context.Service<
                       targetId === null &&
                       input.changes &&
                       Object.entries(input.changes).some(
-                        ([field, value]) => JSON.stringify(value) !== JSON.stringify(current[field]),
+                        ([field, value]) =>
+                          JSON.stringify(value) !== JSON.stringify(current[field]),
                       );
                     return settingsChanged
                       ? {

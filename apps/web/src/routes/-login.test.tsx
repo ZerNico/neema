@@ -44,9 +44,9 @@ async function renderAt(path: "/login" | "/register") {
       getParentRoute: () => root,
       path: at,
       // Both pages declare it as a function; the option's type also admits schemas.
-      validateSearch: route.options.validateSearch as (
-        search: Record<string, unknown>,
-      ) => { redirect?: string },
+      validateSearch: route.options.validateSearch as (search: Record<string, unknown>) => {
+        redirect?: string;
+      },
       beforeLoad: async (options) => {
         await route.options.beforeLoad!(options as never);
       },
@@ -85,7 +85,9 @@ async function renderAt(path: "/login" | "/register") {
 beforeEach(() => {
   vi.clearAllMocks();
   // Signed out while the page's own guard runs; signed in once the form posts.
-  vi.mocked(getSessionUser).mockResolvedValueOnce(null).mockResolvedValue(user as never);
+  vi.mocked(getSessionUser)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValue(user as never);
   vi.mocked(getSessionIdentity).mockResolvedValue({ userId: "u1", impersonatedBy: null });
   vi.mocked(getApprovalStatus).mockResolvedValue("approved");
 });

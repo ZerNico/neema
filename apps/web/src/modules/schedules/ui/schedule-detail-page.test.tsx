@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { deleteSchedule, listScheduleRuns, runScheduleNow, updateSchedule } from "../server/functions.ts";
+import {
+  deleteSchedule,
+  listScheduleRuns,
+  runScheduleNow,
+  updateSchedule,
+} from "../server/functions.ts";
 import { ScheduleDetailPage } from "./schedule-detail-page.tsx";
 
 vi.mock("../server/functions.ts", () => ({
@@ -123,7 +128,9 @@ describe("ScheduleDetailPage delete", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schedule actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete schedule" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete schedule" }));
-    await waitFor(() => expect(deleteSchedule).toHaveBeenCalledWith({ data: { scheduleId: "s1" } }));
+    await waitFor(() =>
+      expect(deleteSchedule).toHaveBeenCalledWith({ data: { scheduleId: "s1" } }),
+    );
     expect(navigation.navigate).not.toHaveBeenCalled();
 
     await act(async () => finishDelete());
