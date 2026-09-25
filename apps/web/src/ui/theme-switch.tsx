@@ -2,6 +2,7 @@ import { ComputerIcon, Moon02Icon, Sun03Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { IconSvgElement } from "@hugeicons/react";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
+import { cn } from "~/ui/utils";
 import { type Theme, setTheme, useTheme } from "./theme.tsx";
 
 const OPTIONS: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
@@ -28,7 +29,7 @@ export function ThemeSwitch({ className }: { className?: string }) {
         const next = OPTIONS.find((option) => option.value === value[0]);
         if (next) setTheme(next.value);
       }}
-      className={className}
+      className={cn("view-transition-live", className)}
     >
       {OPTIONS.map((option) => (
         <SegmentedControlItem

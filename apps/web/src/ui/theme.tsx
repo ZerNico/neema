@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { THEME_STORAGE_KEY, themeInitScript } from "./boot-scripts.ts";
+import { prefersReducedMotion } from "./motion.tsx";
 
 export type Theme = "light" | "dark" | "system";
 export { themeInitScript };
@@ -12,11 +13,12 @@ function readTheme(): Theme {
   return stored === "light" || stored === "dark" ? stored : "system";
 }
 
+const willBeDark = (theme: Theme) =>
+  theme === "dark" ||
+  (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
 function applyTheme(theme: Theme) {
-  const dark =
-    theme === "dark" ||
-    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.classList.toggle("dark", willBeDark(theme));
 }
 
 const listeners = new Set<() => void>();
@@ -38,7 +40,18 @@ function subscribe(listener: () => void) {
 export function setTheme(theme: Theme) {
   if (theme === "system") localStorage.removeItem(STORAGE_KEY);
   else localStorage.setItem(STORAGE_KEY, theme);
-  applyTheme(theme);
+  const wasDark = document.documentElement.classList.contains("dark");
+  const apply = () => applyTheme(theme);
+  // A chosen switch crossfades the page. OS-driven changes in system mode stay
+  // instant: nobody asked for them while looking. Browsers without view
+  // transitions, and reduced motion, just switch.
+  if (
+    typeof document.startViewTransition === "function" &&
+    !prefersReducedMotion() &&
+    wasDark !== willBeDark(theme)
+  )
+    document.startViewTransition(apply);
+  else apply();
   for (const listener of listeners) listener();
 }
 

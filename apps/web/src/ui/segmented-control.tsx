@@ -61,7 +61,12 @@ export function SegmentedControl({
       size={size}
       spacing={spacing}
       data-indicator={indicator ? "" : undefined}
-      className={cn("bg-muted relative rounded-full p-0.5", className)}
+      // Colours ease over the theme crossfade's 250ms, so a control kept live
+      // through it (view-transition-live) fades with the page instead of popping.
+      className={cn(
+        "bg-muted relative rounded-full p-0.5 transition-colors duration-250 motion-reduce:transition-none",
+        className,
+      )}
       {...props}
     >
       {indicator ? (
@@ -69,8 +74,11 @@ export function SegmentedControl({
           aria-hidden
           className={cn(
             "bg-background pointer-events-none absolute top-0 left-0 rounded-full shadow-sm",
-            indicator.moved &&
-              "transition-[translate,width] duration-200 ease-out motion-reduce:transition-none",
+            "ease-out motion-reduce:transition-none",
+            // The first placement lands without sliding; colours always ease.
+            indicator.moved
+              ? "transition-[translate,width,background-color,box-shadow] [transition-duration:200ms,200ms,250ms,250ms]"
+              : "transition-[background-color,box-shadow] duration-250",
           )}
           style={{
             translate: `${indicator.x}px ${indicator.y}px`,
