@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import CodeMirror, { EditorView, type Extension } from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription, LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 
@@ -38,7 +38,8 @@ const theme = EditorView.theme({
 // A package is not only Markdown: `scripts/*.py` and other code files travel
 // with it, so the grammar follows the file name. `language-data` loads each
 // one on demand, which also highlights fenced code inside SKILL.md.
-const markdownExtensions = [markdown({ codeLanguages: languages })];
+// GFM, so task lists, strikethrough and tables parse as the renderer reads them.
+const markdownExtensions = [markdown({ base: markdownLanguage, codeLanguages: languages })];
 // Module constants: the wrapper reconfigures the whole editor whenever this
 // object's identity changes, which a literal in render would do every time.
 const basicSetup = {
