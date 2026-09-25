@@ -1,0 +1,18 @@
+**/node_modules
+**/.output
+**/.nitro
+**/.tanstack
+**/dist
+**/coverage
+**/.data
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+.git
+.github
+docs
+# The desktop shell is not part of the image; its manifest stays so the
+# workspace still matches the lockfile.
+apps/desktop/*
+!apps/desktop/package.json

@@ -1,0 +1,55 @@
+# Example single-host deployment: the app, Postgres with pgvector, and SearXNG
+# for web search. Copy .env.example to .env beside this file, fill it in, then:
+#   docker compose up -d
+# Put a TLS-terminating reverse proxy in front of port 3000; BETTER_AUTH_URL
+# must be the public origin it serves, and its request body limit must admit
+# 20 MB attachments (nginx allows 1 MB by default: client_max_body_size 25m;),
+# and it must not buffer responses, which would stall streaming answers.
+# After the first sign-up (who becomes
+# admin), set Admin → Tools → search to http://searxng:8080.
+name: neema
+
+services:
+  app:
+    # Pin a release (e.g. :1.2.3) rather than following latest.
+    image: ghcr.io/zernico/neema:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://neema:${POSTGRES_PASSWORD:?}@postgres:5432/neema
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - app-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neema
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: neema
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neema -d neema"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Reachable only from the app on the compose network.
+  searxng:
+    image: docker.io/searxng/searxng@sha256:bcfaed4091d59f7ce85670bd701a2d0295872196dc19908a3965a8353b149f83
+    restart: unless-stopped
+    environment:
+      # Overrides the development secret in the shared settings file.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?}
+    volumes:
+      - ../searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+volumes:
+  app-data:
+  postgres-data:

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && node scripts/check-production-build.mjs && node scripts/check-production-start.mjs",
+    "build": "vite build && node scripts/build-migrate.mjs && node scripts/check-production-build.mjs && node scripts/check-production-start.mjs",
     "start": "node scripts/start.mjs",
     "routes:generate": "node scripts/generate-routes.mjs",
     "test": "vitest run",
@@ -110,6 +110,7 @@
     "@types/textarea-caret": "3.0.4",
     "@vitejs/plugin-react": "^6.1.1",
     "drizzle-kit": "1.0.0-rc.5-5935859",
+    "esbuild": "^0.28.2",
     "eslint-plugin-slop": "^0.1.3",
     "jsdom": "^30.1.1",
     "nitro": "3.0.260903-beta",
