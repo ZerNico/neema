@@ -2,7 +2,10 @@ import type { ComposerIntegrations } from "~/modules/integrations/client/use-cha
 import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
 import { ChatInput } from "./chat-input.tsx";
 import { extractReferences, restoreReferences, type MessageReference } from "../references.ts";
 import type { ComposerContext } from "./context-picker.tsx";
@@ -176,6 +179,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // The queued message open for editing. Its row stays in the queue, and its
   // files stay claimed by it, until the replacement commits.
   const [editingId, setEditingId] = useState<string | null>(null);
+  const queueCollapse = collapseMotion(useAppReducedMotion());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const touched = useRef(false);
   const attachments = useAttachmentUploads();
@@ -342,22 +346,26 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   return (
     <div className="flex flex-col">
-      {queue && queue.entries.length > 0 ? (
-        <QueueStrip
-          entries={queue.entries}
-          generating={!!onStop}
-          steeringIds={queue.steeringIds}
-          editingId={editingId}
-          editBlocked={editBlocked}
-          paused={queue.paused}
-          onSteer={queue.onSteer}
-          onRemove={queue.onRemove}
-          onEdit={startEdit}
-          onSendNow={queue.onSendNow}
-          sendNowBlocked={queue.sendNowBlocked}
-          onDispatch={queue.onDispatch}
-        />
-      ) : null}
+      <AnimatePresence initial={false}>
+        {queue && queue.entries.length > 0 ? (
+          <m.div key="queue" {...queueCollapse}>
+            <QueueStrip
+              entries={queue.entries}
+              generating={!!onStop}
+              steeringIds={queue.steeringIds}
+              editingId={editingId}
+              editBlocked={editBlocked}
+              paused={queue.paused}
+              onSteer={queue.onSteer}
+              onRemove={queue.onRemove}
+              onEdit={startEdit}
+              onSendNow={queue.onSendNow}
+              sendNowBlocked={queue.sendNowBlocked}
+              onDispatch={queue.onDispatch}
+            />
+          </m.div>
+        ) : null}
+      </AnimatePresence>
       <ChatInput
         ref={textareaRef}
         {...(capabilities?.skillsUse

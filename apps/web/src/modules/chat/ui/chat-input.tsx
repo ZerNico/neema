@@ -64,8 +64,9 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { MotionSwap, useAppReducedMotion } from "~/ui/motion.tsx";
+import { MotionSwap, collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
@@ -214,6 +215,8 @@ export const ChatInput = forwardRef<
   const canResearch = !!capabilities?.deepResearch && !!capabilities.webSearch;
   const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
+  // Width, not scale: a chip that only faded would leave its neighbours to jump.
+  const chipMotion = collapseMotion(reduced, "width");
   // Queueing owns the primary button only while there is something to queue,
   // so an empty composer still offers Stop where people expect it. Files
   // dropped into a Work chat's workspace never queue: their send reserves the
@@ -475,28 +478,36 @@ export const ChatInput = forwardRef<
               disabled={controlsDisabled}
             />
           ) : null}
-          {workspaceImports
-            ? importItems.map((item) => (
-                <AttachmentChip
-                  key={item.localId}
-                  item={{ ...item, location: "workspace" }}
-                  onRemove={
-                    controlsDisabled ? undefined : () => workspaceImports.remove(item.localId)
-                  }
-                />
-              ))
-            : null}
-          {attachments
-            ? items.map((item) => (
-                <AttachmentChip
-                  key={item.localId}
-                  item={item}
-                  warning={warningFor(item)}
-                  onRemove={controlsDisabled ? undefined : () => attachments.remove(item.localId)}
-                  preview={previewFor(item)}
-                />
-              ))
-            : null}
+          <AnimatePresence initial={false}>
+            {workspaceImports
+              ? importItems.map((item) => (
+                  <m.div key={item.localId} {...chipMotion} className="flex">
+                    <AttachmentChip
+                      item={{ ...item, location: "workspace" }}
+                      onRemove={
+                        controlsDisabled ? undefined : () => workspaceImports.remove(item.localId)
+                      }
+                      className="shrink-0"
+                    />
+                  </m.div>
+                ))
+              : null}
+            {attachments
+              ? items.map((item) => (
+                  <m.div key={item.localId} {...chipMotion} className="flex">
+                    <AttachmentChip
+                      item={item}
+                      warning={warningFor(item)}
+                      onRemove={
+                        controlsDisabled ? undefined : () => attachments.remove(item.localId)
+                      }
+                      preview={previewFor(item)}
+                      className="shrink-0"
+                    />
+                  </m.div>
+                ))
+              : null}
+          </AnimatePresence>
         </AttachmentChipRow>
       ) : null}
       {target?.notice ? (

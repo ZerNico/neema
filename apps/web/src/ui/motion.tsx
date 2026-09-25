@@ -20,6 +20,24 @@ export const useAppReducedMotion = () =>
 export const motionEase = [0.22, 1, 0.36, 1] as const;
 export const motionTransition = { duration: 0.16, ease: motionEase };
 
+/**
+ * Enter and exit for an item inside `AnimatePresence` whose neighbours should
+ * close the gap rather than jump. `MotionConfig`'s reduced motion only drops
+ * transforms, so size is switched off here. Overflow clips only while moving,
+ * since a resting item may hold focus rings or an attached popover.
+ */
+export function collapseMotion(reduced: boolean, axis: "height" | "width" = "height") {
+  const closed = { opacity: 0, overflow: "hidden" } as const;
+  const open = { opacity: 1, transitionEnd: { overflow: "visible" } } as const;
+  const vertical = axis === "height";
+  return {
+    initial: vertical ? { ...closed, height: 0 } : { ...closed, width: 0 },
+    animate: vertical ? { ...open, height: "auto" } : { ...open, width: "auto" },
+    exit: vertical ? { ...closed, height: 0 } : { ...closed, width: 0 },
+    transition: reduced ? { duration: 0 } : { duration: 0.2, ease: motionEase },
+  };
+}
+
 export function AppMotionProvider({ children }: { children: ReactNode }) {
   return (
     <LazyMotion features={domAnimation} strict>
