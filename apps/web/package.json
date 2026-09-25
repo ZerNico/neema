@@ -6,6 +6,7 @@
     "dev": "vite dev",
     "build": "vite build && node scripts/check-production-build.mjs && node scripts/check-production-start.mjs",
     "start": "node scripts/start.mjs",
+    "routes:generate": "node scripts/generate-routes.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
