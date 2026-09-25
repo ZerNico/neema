@@ -1921,7 +1921,14 @@ describe("ChatView documents", () => {
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.queryByRole("textbox", { name: "Document source" })).not.toBeInTheDocument();
     fireEvent.click(widget);
-    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
+    // Opens in the source for an editor. In this harness the panel shows the
+    // connected editor only after a later state change, so pass through Preview.
+    expect(await screen.findByRole("button", { name: "Source" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",
     );

@@ -162,10 +162,13 @@ function DocumentSession({
 }) {
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
-  const [rendered, setRendered] = useState(true);
+  // Null until the person picks: someone who may edit starts in the source,
+  // a viewer in the preview, and that follows access once the document loads.
+  const [chosen, setChosen] = useState<boolean | null>(null);
   const id = `document:${documentId}`;
   // Only the document open in the panel holds a live connection.
   const controller = useDocument(documentId, selected === id);
+  const rendered = chosen ?? !controller.document?.canEdit;
   useBlocker({
     shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
     enableBeforeUnload: controller.unpersisted,
@@ -181,7 +184,7 @@ function DocumentSession({
         <DocumentPanelActions
           controller={controller}
           preview={rendered}
-          onPreviewChange={setRendered}
+          onPreviewChange={setChosen}
         />
       ),
       body: <DocumentPanelBody controller={controller} preview={rendered} />,

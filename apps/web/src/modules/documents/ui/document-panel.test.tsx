@@ -76,6 +76,7 @@ const fixture = async () => {
 };
 /** Rendered boxes are enabled once the live document has synced. */
 const liveCheckboxes = async () => {
+  fireEvent.click(await screen.findByRole("button", { name: "Preview" }));
   await waitFor(() =>
     expect(
       screen.getAllByRole("checkbox").every((box) => box.getAttribute("aria-disabled") !== "true"),
@@ -114,6 +115,16 @@ beforeEach(() => {
 });
 
 describe("document panel", () => {
+  it("opens in the source for someone who may edit, and in the preview for a viewer", async () => {
+    await fixture();
+    expect(await screen.findByRole("textbox", { name: "Document source" })).toBeInTheDocument();
+    cleanup();
+    server.seed({ ...fresh(), canEdit: false });
+    await fixture();
+    expect(await screen.findAllByRole("checkbox")).toHaveLength(3);
+    expect(screen.queryByRole("textbox", { name: "Document source" })).not.toBeInTheDocument();
+  });
+
   it("tells a project document apart from the chat's own, on the card and in the panel", async () => {
     server.seed({
       ...fresh(),

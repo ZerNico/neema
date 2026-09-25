@@ -94,7 +94,7 @@ export function DocumentPanelBody({
   const source = useMemo(() => renderedDocumentSource(controller.content), [controller.content]);
 
   return (
-    <div className="min-w-0">
+    <div className="flex min-w-0 flex-1 flex-col">
       {/* Outside the spacing rhythm below: a collapsing sibling margin would
           drop the body by a step the moment the notice starts leaving. */}
       <AnimatePresence initial={false}>
@@ -114,9 +114,9 @@ export function DocumentPanelBody({
           </m.div>
         ) : null}
       </AnimatePresence>
-      <div className="min-w-0 space-y-3">
+      <div className="flex min-w-0 flex-1 flex-col space-y-3">
         {controller.error ? <FieldError>{controller.error}</FieldError> : null}
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col">
           {preview ? (
             <DocumentTaskScope
               disabled={!controller.sync || !controller.document?.canEdit}
@@ -139,15 +139,17 @@ export function DocumentPanelBody({
                 <Spinner aria-label="Loading source editor" className="text-muted-foreground" />
               }
             >
-              {/* Bounded to the rail rather than the editor's default 40rem: it
-              uses the height it has while keeping its own scrollbars, the
-              sideways one included, on screen. */}
-              <div className="-mx-4 [--editor-max-height:calc(100vh-13rem)] [--editor-min-height:12rem]">
-                <DocumentSourceEditor
-                  key={controller.sync.doc.guid}
-                  sync={controller.sync}
-                  readOnly={!controller.document?.canEdit}
-                />
+              {/* Fills the rest of the panel whatever the text's length, so the
+              editor's own scrollbars, the sideways one included, sit on the
+              panel's bottom edge instead of under the last line. */}
+              <div className="relative -mx-4 min-h-48 flex-1">
+                <div className="absolute inset-0 [--editor-max-height:100%] [--editor-min-height:0px] [&_.cm-editor]:h-full [&_.cm-theme]:h-full">
+                  <DocumentSourceEditor
+                    key={controller.sync.doc.guid}
+                    sync={controller.sync}
+                    readOnly={!controller.document?.canEdit}
+                  />
+                </div>
               </div>
             </Suspense>
           ) : (
