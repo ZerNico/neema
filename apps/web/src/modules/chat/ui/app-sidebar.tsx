@@ -12,6 +12,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
 import { conversationQuery, conversationsInfiniteQuery } from "../client/queries.ts";
@@ -38,6 +40,7 @@ import {
 } from "~/ui/primitives/sidebar";
 import { ProjectsSidebarGroup } from "~/modules/projects/ui/projects-sidebar.tsx";
 import { ClosesOnLink } from "~/ui/sidebar-links.tsx";
+import { collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
 
 export function AppSidebar({
@@ -180,6 +183,8 @@ function ConversationList() {
   // One registry for the whole shell: rows come and go with refetches, the
   // record of which titles already played their reveal must not.
   const [revealRegistry] = useState(createTitleRevealRegistry);
+  const [mountedAt] = useState(Date.now);
+  const rowMotion = collapseMotion(useAppReducedMotion());
   const actions = useConversationActions();
   // The rows are already bucketed by recency, so an inline stamp would only
   // repeat the group heading in a 16rem column. The exact time lives in the
@@ -216,38 +221,49 @@ function ConversationList() {
           <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {group.conversations.map((conversation) => (
-                <SidebarMenuItem key={conversation.id}>
-                  <SidebarMenuButton
-                    isActive={conversation.id === activeId}
-                    // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between status icon and title
-                    className="gap-0 [&>span:last-child]:!text-clip"
-                    render={
-                      <Link
-                        to="/chat/$conversationId"
-                        params={{ conversationId: conversation.id }}
-                      />
-                    }
-                  >
-                    <ConversationStatusTitle
-                      generating={conversation.generating}
-                      branched={!!conversation.branchedFrom}
-                      scheduled={conversation.scheduled}
-                      conversationId={conversation.id}
-                      title={conversation.title}
-                      registry={revealRegistry}
-                      createdAt={conversation.createdAt}
-                    />
-                  </SidebarMenuButton>
-                  <ConversationMenu
-                    conversation={conversation}
-                    actions={actions}
-                    trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
-                  >
-                    <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-                  </ConversationMenu>
-                </SidebarMenuItem>
-              ))}
+              <AnimatePresence initial={false}>
+                {group.conversations.map((conversation) => (
+                  <SidebarMenuItem key={conversation.id}>
+                    <m.div
+                      {...rowMotion}
+                      // Only a chat created since the list mounted grows in; one
+                      // arriving from a later page or another group just appears.
+                      {...(new Date(conversation.createdAt).getTime() > mountedAt
+                        ? {}
+                        : { initial: false })}
+                    >
+                      <SidebarMenuButton
+                        isActive={conversation.id === activeId}
+                        // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between status icon and title
+                        className="gap-0 [&>span:last-child]:!text-clip"
+                        render={
+                          <Link
+                            to="/chat/$conversationId"
+                            params={{ conversationId: conversation.id }}
+                          />
+                        }
+                      >
+                        <ConversationStatusTitle
+                          generating={conversation.generating}
+                          branched={!!conversation.branchedFrom}
+                          scheduled={conversation.scheduled}
+                          conversationId={conversation.id}
+                          title={conversation.title}
+                          registry={revealRegistry}
+                          createdAt={conversation.createdAt}
+                        />
+                      </SidebarMenuButton>
+                      <ConversationMenu
+                        conversation={conversation}
+                        actions={actions}
+                        trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
+                      >
+                        <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                      </ConversationMenu>
+                    </m.div>
+                  </SidebarMenuItem>
+                ))}
+              </AnimatePresence>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
