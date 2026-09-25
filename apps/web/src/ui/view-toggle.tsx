@@ -1,9 +1,7 @@
 import { CodeIcon, EyeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-import { ToggleGroupItem } from "~/ui/primitives/toggle-group";
-import { SegmentedControl } from "~/ui/segmented-control.tsx";
-import { cn } from "~/ui/utils";
+import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 
 export function ViewToggle({
   preview,
@@ -27,28 +25,15 @@ export function ViewToggle({
         if (value[0]) onChange(value[0] === "preview");
       }}
       spacing={0}
-      className="relative"
     >
-      <span
-        aria-hidden
-        className={cn(
-          "bg-background pointer-events-none absolute top-0.5 left-0.5 size-7 rounded-full shadow-sm",
-          "transition-transform duration-200 ease-out motion-reduce:transition-none",
-          preview && "translate-x-7",
-        )}
-      />
       {options.map((option) => (
         <Tooltip key={option.value}>
           <TooltipTrigger
             render={
-              <ToggleGroupItem
+              <SegmentedControlItem
                 value={option.value}
                 aria-label={option.label}
-                className={cn(
-                  "relative z-10 size-7 min-w-0 rounded-full bg-transparent px-0 transition-colors",
-                  "text-muted-foreground hover:bg-transparent aria-pressed:bg-transparent",
-                  "aria-pressed:text-foreground hover:text-foreground",
-                )}
+                className="size-7 min-w-0 px-0"
               />
             }
           >
