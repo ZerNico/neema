@@ -66,7 +66,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { MotionSwap, collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
+import { CollapseItem, MotionSwap, collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
@@ -215,8 +215,7 @@ export const ChatInput = forwardRef<
   const canResearch = !!capabilities?.deepResearch && !!capabilities.webSearch;
   const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
-  // Width, not scale: a chip that only faded would leave its neighbours to jump.
-  const chipMotion = collapseMotion(reduced, "width");
+  const rowMotion = collapseMotion(reduced);
   // Queueing owns the primary button only while there is something to queue,
   // so an empty composer still offers Stop where people expect it. Files
   // dropped into a Work chat's workspace never queue: their send reserves the
@@ -421,95 +420,109 @@ export const ChatInput = forwardRef<
         }
       }}
     >
-      {(references && references.items.length > 0) ||
-      (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
-      (skills && skills.selectedIds.length > 0) ||
-      (attachments && items.length > 0) ||
-      (workspaceImports && importItems.length > 0) ||
-      (context &&
-        ((context.selection.agent && !context.agentLocked) ||
-          context.selection.collectionIds.length > 0)) ? (
-        <AttachmentChipRow className="px-3 pt-3">
-          {/* What the message is about comes first. */}
-          {references?.items.map((reference) => (
-            <ReferenceChip
-              key={`${reference.kind}:${reference.id}`}
-              reference={reference}
-              onRemove={controlsDisabled ? undefined : () => references.onRemove(reference)}
-            />
-          ))}
-          {[...(context?.agentSkillIds ?? [])]
-            .filter((id) => !skills?.selectedIds.includes(id))
-            .map((id) => (
-              <ContextChip
-                key={`agent-skill:${id}`}
-                item={{
-                  kind: "skill",
-                  id,
-                  name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
-                  note: "From agent",
-                }}
-              />
-            ))}
-          {skills?.selectedIds.map((id) => (
-            <ContextChip
-              key={`skill:${id}`}
-              item={{
-                kind: "skill",
-                id,
-                name: skills.items.find((skill) => skill.id === id)?.name ?? null,
-                note: "Skill",
-              }}
-              onRemove={
-                controlsDisabled
-                  ? undefined
-                  : () => skills.onChange(skills.selectedIds.filter((selected) => selected !== id))
-              }
-            />
-          ))}
-          {/* Context first: it frames the files that follow. */}
-          {context ? (
-            <ContextChips
-              selection={context.selection}
-              agentCollectionIds={context.agentCollectionIds}
-              agentLocked={context.agentLocked}
-              onAgentChange={context.onAgentChange}
-              onCollectionsChange={context.onCollectionsChange}
-              disabled={controlsDisabled}
-            />
-          ) : null}
-          <AnimatePresence initial={false}>
-            {workspaceImports
-              ? importItems.map((item) => (
-                  <m.div key={item.localId} {...chipMotion} className="flex">
-                    <AttachmentChip
-                      item={{ ...item, location: "workspace" }}
-                      onRemove={
-                        controlsDisabled ? undefined : () => workspaceImports.remove(item.localId)
-                      }
-                      className="shrink-0"
+      {/* Present on the first render when an edit opens with files or skills, so
+          the row is already full height for the edit swap's measurement. */}
+      <AnimatePresence initial={false}>
+        {(references && references.items.length > 0) ||
+        (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
+        (skills && skills.selectedIds.length > 0) ||
+        (attachments && items.length > 0) ||
+        (workspaceImports && importItems.length > 0) ||
+        (context &&
+          ((context.selection.agent && !context.agentLocked) ||
+            context.selection.collectionIds.length > 0)) ? (
+          <m.div key="chips" {...rowMotion}>
+            <AttachmentChipRow className="px-3 pt-3">
+              <AnimatePresence initial={false}>
+                {/* What the message is about comes first. */}
+                {references?.items.map((reference) => (
+                  <CollapseItem key={`${reference.kind}:${reference.id}`}>
+                    <ReferenceChip
+                      reference={reference}
+                      onRemove={controlsDisabled ? undefined : () => references.onRemove(reference)}
                     />
-                  </m.div>
-                ))
-              : null}
-            {attachments
-              ? items.map((item) => (
-                  <m.div key={item.localId} {...chipMotion} className="flex">
-                    <AttachmentChip
-                      item={item}
-                      warning={warningFor(item)}
+                  </CollapseItem>
+                ))}
+                {[...(context?.agentSkillIds ?? [])]
+                  .filter((id) => !skills?.selectedIds.includes(id))
+                  .map((id) => (
+                    <CollapseItem key={`agent-skill:${id}`}>
+                      <ContextChip
+                        item={{
+                          kind: "skill",
+                          id,
+                          name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
+                          note: "From agent",
+                        }}
+                      />
+                    </CollapseItem>
+                  ))}
+                {skills?.selectedIds.map((id) => (
+                  <CollapseItem key={`skill:${id}`}>
+                    <ContextChip
+                      item={{
+                        kind: "skill",
+                        id,
+                        name: skills.items.find((skill) => skill.id === id)?.name ?? null,
+                        note: "Skill",
+                      }}
                       onRemove={
-                        controlsDisabled ? undefined : () => attachments.remove(item.localId)
+                        controlsDisabled
+                          ? undefined
+                          : () =>
+                              skills.onChange(
+                                skills.selectedIds.filter((selected) => selected !== id),
+                              )
                       }
-                      preview={previewFor(item)}
-                      className="shrink-0"
                     />
-                  </m.div>
-                ))
-              : null}
-          </AnimatePresence>
-        </AttachmentChipRow>
-      ) : null}
+                  </CollapseItem>
+                ))}
+              </AnimatePresence>
+              {/* Context first: it frames the files that follow. */}
+              {context ? (
+                <ContextChips
+                  selection={context.selection}
+                  agentCollectionIds={context.agentCollectionIds}
+                  agentLocked={context.agentLocked}
+                  onAgentChange={context.onAgentChange}
+                  onCollectionsChange={context.onCollectionsChange}
+                  disabled={controlsDisabled}
+                />
+              ) : null}
+              <AnimatePresence initial={false}>
+                {workspaceImports
+                  ? importItems.map((item) => (
+                      <CollapseItem key={item.localId}>
+                        <AttachmentChip
+                          item={{ ...item, location: "workspace" }}
+                          onRemove={
+                            controlsDisabled
+                              ? undefined
+                              : () => workspaceImports.remove(item.localId)
+                          }
+                        />
+                      </CollapseItem>
+                    ))
+                  : null}
+                {attachments
+                  ? items.map((item) => (
+                      <CollapseItem key={item.localId}>
+                        <AttachmentChip
+                          item={item}
+                          warning={warningFor(item)}
+                          onRemove={
+                            controlsDisabled ? undefined : () => attachments.remove(item.localId)
+                          }
+                          preview={previewFor(item)}
+                        />
+                      </CollapseItem>
+                    ))
+                  : null}
+              </AnimatePresence>
+            </AttachmentChipRow>
+          </m.div>
+        ) : null}
+      </AnimatePresence>
       {target?.notice ? (
         <p className="text-muted-foreground px-4 pt-2 text-xs">{target.notice}</p>
       ) : null}

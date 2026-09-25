@@ -16,6 +16,7 @@ import { sendMessage } from "../server/functions.ts";
 import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
+import { AppMotionProvider } from "~/ui/motion.tsx";
 
 vi.mock("../server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -148,12 +149,14 @@ async function fixture({
   await router.load();
   const tree = (
     <QueryClientProvider client={client}>
-      <HeaderSlotProvider>
-        <header>
-          <HeaderSlot />
-        </header>
-        <RouterProvider router={router} />
-      </HeaderSlotProvider>
+      <AppMotionProvider>
+        <HeaderSlotProvider>
+          <header>
+            <HeaderSlot />
+          </header>
+          <RouterProvider router={router} />
+        </HeaderSlotProvider>
+      </AppMotionProvider>
     </QueryClientProvider>
   );
   const view = mount ? render(tree) : null;
@@ -196,7 +199,8 @@ describe("one-shot new-chat prefill", () => {
         "Help me change this schedule. Ask what I’d like to change, then prepare a draft for me to review before saving.",
       ),
     );
-    expect(screen.getByText("Morning digest")).toBeVisible();
+    // The chip arrives after mount, so it grows in rather than appearing at once.
+    await waitFor(() => expect(screen.getByText("Morning digest")).toBeVisible());
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({ content: request });
@@ -239,7 +243,9 @@ describe("one-shot new-chat prefill", () => {
       await waitFor(() => expect(history.location.state).not.toHaveProperty("chatPrefill"));
       expect(screen.getByRole("textbox")).toBe(textbox);
       expect(textbox).toHaveValue(value);
-      expect(screen.getByRole("button", { name: /Remove notes.txt/ })).toBeVisible();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /Remove notes.txt/ })).toBeVisible(),
+      );
       expect(sendMessage).not.toHaveBeenCalled();
     },
   );

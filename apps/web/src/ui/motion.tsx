@@ -38,6 +38,18 @@ export function collapseMotion(reduced: boolean, axis: "height" | "width" = "hei
   };
 }
 
+/**
+ * One chip in a wrapping row, inside `AnimatePresence`. The child keeps its own
+ * width while the wrapper grows or shrinks around it, so the text never squeezes.
+ */
+export function CollapseItem({ children }: { children: ReactNode }) {
+  return (
+    <m.div {...collapseMotion(useAppReducedMotion(), "width")} className="flex *:shrink-0">
+      {children}
+    </m.div>
+  );
+}
+
 export function AppMotionProvider({ children }: { children: ReactNode }) {
   return (
     <LazyMotion features={domAnimation} strict>

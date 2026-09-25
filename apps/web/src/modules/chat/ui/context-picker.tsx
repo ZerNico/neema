@@ -1,4 +1,6 @@
 import { matchesWords } from "~/modules/search/match.ts";
+import { AnimatePresence } from "motion/react";
+import { CollapseItem } from "~/ui/motion.tsx";
 import {
   Book02Icon,
   BriefcaseIcon,
@@ -407,31 +409,32 @@ export function ContextChips({
     agents: agents.data,
   }).filter((item) => !(agentLocked && item.kind === "agent"));
   return (
-    <>
+    <AnimatePresence initial={false}>
       {items.map((item) => (
-        <ContextChip
-          key={`${item.kind}:${item.id ?? "deleted"}`}
-          item={
-            item.name === null &&
-            (item.kind === "collection" ? !collections.isSuccess : !agents.isSuccess)
-              ? {
-                  ...item,
-                  name: (item.kind === "collection" ? collections.isError : agents.isError)
-                    ? "Could not load selection"
-                    : "Loading…",
-                }
-              : item
-          }
-          onRemove={
-            disabled || (item.kind === "collection" && agentCollectionIds.has(item.id!))
-              ? undefined
-              : item.kind === "agent"
-                ? () => onAgentChange(null)
-                : () => onCollectionsChange(selection.collectionIds.filter((c) => c !== item.id))
-          }
-        />
+        <CollapseItem key={`${item.kind}:${item.id ?? "deleted"}`}>
+          <ContextChip
+            item={
+              item.name === null &&
+              (item.kind === "collection" ? !collections.isSuccess : !agents.isSuccess)
+                ? {
+                    ...item,
+                    name: (item.kind === "collection" ? collections.isError : agents.isError)
+                      ? "Could not load selection"
+                      : "Loading…",
+                  }
+                : item
+            }
+            onRemove={
+              disabled || (item.kind === "collection" && agentCollectionIds.has(item.id!))
+                ? undefined
+                : item.kind === "agent"
+                  ? () => onAgentChange(null)
+                  : () => onCollectionsChange(selection.collectionIds.filter((c) => c !== item.id))
+            }
+          />
+        </CollapseItem>
       ))}
-    </>
+    </AnimatePresence>
   );
 }
 
