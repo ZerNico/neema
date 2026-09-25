@@ -16,6 +16,7 @@ import {
   disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
+import { MotionSwap } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
 
 const QUERY_LIMIT = 2;
@@ -107,7 +108,11 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
       <span className="text-muted-foreground/70 hidden shrink-0 text-xs sm:inline">
         {hostOf(page.url)}
       </span>
-      <span className="ml-auto shrink-0">
+      <MotionSwap
+        value={active || page.status === "done" || page.status === "error" ? page.status : "idle"}
+        kind="icon"
+        className="ml-auto shrink-0"
+      >
         {page.status === "done" ? (
           <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="size-3.5 text-success" />
         ) : page.status === "error" ? (
@@ -122,7 +127,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
             {page.status === "reading" ? "reading…" : "queued"}
           </span>
         ) : null}
-      </span>
+      </MotionSwap>
     </li>
   );
 }

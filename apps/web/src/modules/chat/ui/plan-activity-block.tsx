@@ -10,6 +10,7 @@ import {
   disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
+import { MotionSwap } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
 
@@ -70,7 +71,11 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
         <ol className={disclosureBodyRailClassName}>
           {steps.map((step) => (
             <li key={step.step} className="flex items-start gap-2 py-0.5 text-xs">
-              <span className="flex h-lh shrink-0 items-center">
+              <MotionSwap
+                value={step.status === "completed" ? "completed" : "open"}
+                kind="icon"
+                className="h-lh w-3.5 shrink-0"
+              >
                 {step.status === "completed" ? (
                   <HugeiconsIcon
                     icon={Tick02Icon}
@@ -81,16 +86,16 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
                 ) : (
                   <span
                     className={cn(
-                      "size-1.5 rounded-full",
+                      "size-1.5 rounded-full transition-colors duration-200",
                       step.status === "in_progress" ? "bg-foreground" : "bg-muted-foreground/40",
                     )}
                     aria-hidden
                   />
                 )}
-              </span>
+              </MotionSwap>
               <span
                 className={cn(
-                  "[overflow-wrap:anywhere]",
+                  "transition-colors duration-200 [overflow-wrap:anywhere]",
                   step.status === "completed" && "text-muted-foreground/70",
                   step.status === "in_progress" && "text-foreground",
                 )}
