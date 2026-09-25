@@ -24,22 +24,26 @@ outgoing:
   retries: 0
 
 # Every query fans out to every enabled engine in the general category at once.
-# From a home connection Bing and Yandex are the two that answer; DuckDuckGo,
-# Brave, Google CSE, Qwant and Startpage get rate-limited or CAPTCHA'd on the
-# first burst and only add suspensions and latency. Bing alone is not enough:
-# under bot suspicion it serves unrelated pages instead of an error, so a run
-# fed only Bing collects hundreds of off-topic "sources". Yandex was the one
-# engine that returned on-topic results for German-language queries.
+# Measured from a home connection with a 15-query burst (Sept 2026): Google CSE
+# answered 15/15 with nearly all results on topic, Yep 14/15, Yandex 15/15 with
+# some noise. Bing answers but, under bot suspicion, serves unrelated pages
+# instead of an error; the other engines kept it from dominating a run. It stays
+# as a fallback. DuckDuckGo, Qwant and Startpage returned CAPTCHAs and Brave
+# rate limits on the first query, so they only add suspensions and latency.
+# Google CSE was CAPTCHA'd on bursts in an earlier test; if it is again, the
+# others still carry the query.
 engines:
-  - name: bing
+  - name: google cse
+    disabled: false
+  - name: yep
     disabled: false
   - name: yandex
+    disabled: false
+  - name: bing
     disabled: false
   - name: duckduckgo
     disabled: true
   - name: brave
-    disabled: true
-  - name: google cse
     disabled: true
   - name: wikidata
     disabled: true

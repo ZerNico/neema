@@ -323,7 +323,7 @@ Differs from most Effect 3 material online.
 - `web_search` caches per generation by query, time range and language; failures
   are evicted. Research shares `RESEARCH_LIMITS.externalOps` (3) permits, and
   SearXNG fans each query to every enabled engine, so that is the burst upstreams
-  see. `infra/searxng/settings.yml` enables only Bing and Yandex on purpose.
+  see. `infra/searxng/settings.yml` enables Google CSE, Yep, Yandex and Bing on purpose; its comment has the measurements.
 - Search follows the composer toggle, which rests on the installed agent's "web
   search by default" (plain chat rests on true) and returns there after each send.
   The reader is armed with search, and also when user text or prior sources seed
