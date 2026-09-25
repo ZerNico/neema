@@ -102,6 +102,16 @@ describe("fallbackTitle", () => {
     ).toBe("compare postgres and sqlite for a");
   });
 
+  it("reads tags and references as their words, never their links", () => {
+    expect(
+      fallbackTitle({
+        content:
+          "[#Q3 Contracts](/knowledge/col-1) with [/review](/skills/skill-1) for [Reviewer](/agents/agent-1)",
+        attachmentFileNames: [],
+      }),
+    ).toBe("#Q3 Contracts with /review for Reviewer");
+  });
+
   it("uses the first attachment when there is no text", () => {
     expect(fallbackTitle({ content: "  ", attachmentFileNames: ["", "invoice.pdf"] })).toBe(
       "invoice.pdf",

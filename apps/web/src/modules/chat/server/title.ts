@@ -1,4 +1,6 @@
 import { Cause, Duration, Effect } from "effect";
+import { extractReferences } from "../references.ts";
+import { tagWords } from "../tags.ts";
 import { Prompt } from "effect/unstable/ai";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
@@ -54,12 +56,18 @@ const capLength = (value: string): string => {
   return lastSpace >= MAX_TITLE_LENGTH / 2 ? hard.slice(0, lastSpace) : hard;
 };
 
+/**
+ * The message as a reader sees it: tags and references as their words, not the
+ * links the stored text keeps for the model. A title is read, never followed.
+ */
+const readableText = (content: string) => extractReferences(tagWords(content)).text;
+
 export const buildTitlePrompt = (input: {
   content: string;
   attachmentFileNames: ReadonlyArray<string>;
   workspaceFileNames?: ReadonlyArray<string>;
 }): Prompt.Prompt => {
-  const content = collapse(input.content).slice(0, PROMPT_CONTENT_CAP);
+  const content = collapse(readableText(input.content)).slice(0, PROMPT_CONTENT_CAP);
   const files = [...input.attachmentFileNames, ...(input.workspaceFileNames ?? [])]
     .map((name) => `- ${collapse(name)}`)
     .join("\n");
@@ -102,7 +110,7 @@ export const fallbackTitle = (input: {
   attachmentFileNames: ReadonlyArray<string>;
   workspaceFileNames?: ReadonlyArray<string>;
 }): string => {
-  const content = collapse(input.content);
+  const content = collapse(readableText(input.content));
   if (/\p{L}|\p{N}/u.test(content)) {
     return capLength(content.split(" ").slice(0, TITLE_WORDS).join(" "));
   }
