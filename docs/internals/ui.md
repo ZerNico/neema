@@ -215,10 +215,9 @@ false`), so a page body is written against data already there. This includes loc
   widgets keep canonical resources reachable after retry/edit removes their tool rows. Branch
   references stay historical and inert even if the branch later acquires a resource of its own.
 - Agent-draft reconciliation accepts clean remote fields and disjoint edits, but differing edits
-  to one field require an inline choice. Conversation-document source uses whole-document CAS:
-  clean source adopts a remote revision, while dirty source shows **Keep mine** and **Take theirs**.
-  Document task ticks patch their own source line optimistically and serialize behind source saves.
-  A document panel is read-only while its assistant answer is generating. Flush every owned editor
+  to one field require an inline choice. Conversation-document source is a live Yjs document, so
+  concurrent edits merge with no choice to make and the panel stays editable while the assistant
+  answers ([documents](documents.md)). Flush every owned editor
   before send, structured answer, retry, edit, branch or save, never Stop. A document or draft
   belongs to its creating answer, so rewinding that answer removes it; its card stays at the
   creating tool call's text offset, or at the end of that answer while no tool row names it yet,

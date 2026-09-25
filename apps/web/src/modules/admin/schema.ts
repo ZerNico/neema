@@ -144,6 +144,7 @@ export const UpdateGroupMemberSharingInput = Schema.Struct({
     agents: Schema.Boolean,
     knowledge: Schema.Boolean,
     skills: Schema.Boolean,
+    projects: Schema.Boolean,
   }),
 });
 

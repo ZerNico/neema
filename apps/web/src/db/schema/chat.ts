@@ -7,6 +7,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -19,6 +20,7 @@ import {
 import { models } from "./providers.ts";
 import type { JsonValue } from "./providers.ts";
 import { user } from "./auth.ts";
+import { projects } from "./projects.ts";
 
 export const conversations = pgTable(
   "conversations",
@@ -65,8 +67,17 @@ export const conversations = pgTable(
     // without activity. Cleared by Keep, never set later. See
     // docs/internals/temporary-chats.md.
     temporary: boolean().notNull().default(false),
+    // The project whose instructions, documents and memory this chat works
+    // with. The chat itself stays its owner's alone; deleting the project
+    // turns it back into an ordinary chat.
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
   },
   (t) => [
+    check(
+      "conversations_project_not_temporary",
+      sql`not (${t.temporary} and ${t.projectId} is not null)`,
+    ),
+    index("conversations_project_id_idx").on(t.projectId),
     index("conversations_user_id_idx").on(t.userId),
     // Postgres does not index the referencing side of a foreign key, and
     // `on delete set null` scans it for every deleted conversation.

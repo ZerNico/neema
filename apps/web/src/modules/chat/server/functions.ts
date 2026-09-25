@@ -45,6 +45,7 @@ export const listConversations = createServerFn({ method: "GET" })
             userId: context.session.user.id,
             limit: data.limit ?? CONVERSATIONS_DEFAULT_LIMIT,
             ...(data.query === undefined ? {} : { query: data.query }),
+            ...(data.outsideProjects ? { outsideProjects: true } : {}),
             ...(data.cursor === undefined
               ? {}
               : { cursor: { activity: new Date(data.cursor.activity), id: data.cursor.id } }),

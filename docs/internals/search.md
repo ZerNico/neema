@@ -1,7 +1,7 @@
 # Search
 
-The Cmd/Ctrl+K palette (`modules/search/ui/command-palette.tsx`) searches chats, agents,
-knowledge collections, skills, schedules and app pages, and runs actions. `>` narrows it to
+The Cmd/Ctrl+K palette (`modules/search/ui/command-palette.tsx`) searches chats, projects,
+agents, knowledge collections, skills, schedules and app pages, and runs actions. `>` narrows it to
 actions.
 
 ## Sources
@@ -14,7 +14,7 @@ actions.
 - Each source owns its matching, its cap and its permission check. A source must never return
   anything its own pages would not show: gate on `capabilitiesQuery` and the session role, and
   keep server queries scoped to the signed-in user as the module's other reads are.
-- Kinds whose whole list the browser already loads (agents, collections, skills, schedules) use
+- Kinds whose whole list the browser already loads (projects, agents, collections, skills, schedules) use
   `listSource` and filter locally. Only chats search on the server, and never find a
   [temporary chat](temporary-chats.md).
 - Results stay grouped by source and are never merged into one ranking: scores from different

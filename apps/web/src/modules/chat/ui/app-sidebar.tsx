@@ -2,6 +2,7 @@ import {
   BubbleChatIcon,
   Book02Icon,
   Calendar03Icon,
+  Folder01Icon,
   FolderLibraryIcon,
   Robot01Icon,
   MoreHorizontalIcon,
@@ -13,7 +14,7 @@ import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
-import { conversationsInfiniteQuery } from "../client/queries.ts";
+import { conversationQuery, conversationsInfiniteQuery } from "../client/queries.ts";
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
 import { createTitleRevealRegistry } from "./conversation-title.tsx";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
@@ -35,6 +36,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSkeleton,
 } from "~/ui/primitives/sidebar";
+import { ProjectsSidebarGroup } from "~/modules/projects/ui/projects-sidebar.tsx";
 import { ClosesOnLink } from "~/ui/sidebar-links.tsx";
 import { cn } from "~/ui/utils";
 
@@ -71,6 +73,17 @@ export function AppSidebar({
             New chat
           </Link>
           <SidebarMenu>
+            {capabilities?.projectsUse ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={trimmed.startsWith("/projects")}
+                  render={<Link to="/projects" />}
+                >
+                  <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} />
+                  Projects
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
             {capabilities?.agentsUse ? (
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
@@ -158,7 +171,10 @@ function ConversationListSkeleton() {
 // The suspending half of the sidebar: everything above and below it renders
 // while the first page of conversations is still on its way.
 function ConversationList() {
-  const conversationsPages = useSuspenseInfiniteQuery(conversationsInfiniteQuery(""));
+  const conversationsPages = useSuspenseInfiniteQuery(
+    // A project's chats sit under the project, never also in the dated list.
+    conversationsInfiniteQuery("", true),
+  );
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
   // One registry for the whole shell: rows come and go with refetches, the
@@ -184,8 +200,17 @@ function ConversationList() {
   // and any activity (or a navigation) refetches long before that matters.
   const groups = useMemo(() => groupConversationsByDate(conversations), [conversations]);
 
+  // The open chat's detail is already loaded by its route; its project opens
+  // that project's entry, so the chat is always visible somewhere.
+  const { data: activeDetail } = useQuery({
+    ...conversationQuery(activeId ?? ""),
+    enabled: false,
+  });
+  const activeProjectId = activeDetail?.project?.id ?? null;
+
   return (
     <>
+      <ProjectsSidebarGroup activeConversationId={activeId} activeProjectId={activeProjectId} />
       {groups.map((group) => (
         <SidebarGroup key={group.label}>
           <SidebarGroupLabel>{group.label}</SidebarGroupLabel>

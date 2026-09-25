@@ -35,12 +35,9 @@ import {
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { applyToolChunk, type ToolActivity } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
-import type { ConversationDocument } from "~/modules/documents/schema.ts";
-import {
-  getDocument,
-  saveDocument,
-  toggleDocumentTask,
-} from "~/modules/documents/server/document-functions.ts";
+import type { EditableDocument } from "~/modules/documents/schema.ts";
+import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
+import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 
@@ -64,9 +61,11 @@ vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
 }));
 vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   getDocument: vi.fn(),
-  saveDocument: vi.fn(),
-  toggleDocumentTask: vi.fn(),
+  pushDocument: vi.fn(),
   listDocuments: vi.fn(),
+}));
+vi.mock("~/modules/documents/ui/document-source-editor.tsx", async () => ({
+  default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
 }));
 vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
   default: ({
@@ -1854,41 +1853,41 @@ const documentReference = (
 });
 
 describe("ChatView documents", () => {
-  let current: ConversationDocument;
+  let server: ReturnType<typeof fakeDocumentServer>;
   beforeEach(() => {
     for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
       rpc.mockReset();
-    current = {
+    const current: EditableDocument = {
       id: "document-1",
       conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       title: "Trip plan",
       content: "Original source",
       revision: 1,
       lastEditedBy: "model",
+      projectId: null,
+      canEdit: true,
       createdAt: BASE.toISOString(),
       updatedAt: BASE.toISOString(),
     };
+    server = fakeDocumentServer();
+    server.seed(current);
+    server.seed({ ...current, id: "document-2", title: "Meeting notes" });
+    // Message and sync feeds keep the suite's scripted source; documents get the fake server.
+    const DocumentFeed = server.EventSource;
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        constructor(url: string) {
+          return url.startsWith("/api/documents/")
+            ? new DocumentFeed(url)
+            : new FakeEventSource(url);
+        }
+      },
+    );
     vi.mocked(getDocument)
       .mockReset()
-      .mockImplementation(async ({ data }) =>
-        data.documentId === "document-2"
-          ? { ...current, id: "document-2", title: "Meeting notes" }
-          : current,
-      );
-    vi.mocked(saveDocument)
-      .mockReset()
-      .mockImplementation(async ({ data }) => {
-        if (data.expectedRevision !== current.revision)
-          return { outcome: "conflict" as const, document: current };
-        current = {
-          ...current,
-          content: data.content,
-          revision: current.revision + 1,
-          lastEditedBy: "user",
-        };
-        return { outcome: "updated" as const, document: current };
-      });
-    vi.mocked(toggleDocumentTask).mockReset().mockRejectedValue(new Error("not used"));
+      .mockImplementation(async ({ data }) => server.row(data.documentId));
+    vi.mocked(pushDocument).mockReset().mockImplementation(server.push);
     vi.stubGlobal(
       "matchMedia",
       vi.fn((query: string) => ({
@@ -1943,7 +1942,7 @@ describe("ChatView documents", () => {
     expect(getDocument).toHaveBeenCalledWith({ data: { documentId: "document-2" } });
   });
 
-  it("opens the document from a later update row, and locks the panel only while a row streams", async () => {
+  it("opens the document from a later update row", async () => {
     const editRow = {
       ...documentReference(),
       id: "document-edit",
@@ -1966,38 +1965,11 @@ describe("ChatView documents", () => {
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",
     );
-    // Nothing is generating, so the panel is editable.
-    expect(
-      screen.queryByText("Read-only while the assistant is answering."),
-    ).not.toBeInTheDocument();
   });
 
-  it("holds the document lock from the send until the streaming row appears", async () => {
+  it("keeps the document editable while an answer is generating", async () => {
     const { client } = renderView(null, { toolCalls: [documentReference()] });
     fireEvent.click(await screen.findByRole("button", { name: "Open document: Trip plan" }));
-    expect(
-      screen.queryByText("Read-only while the assistant is answering."),
-    ).not.toBeInTheDocument();
-
-    // The send resolves before the refetch reports the row it started; the lock
-    // must not drop in that gap.
-    const gate = draftWriteGate();
-    sendMock.mockImplementationOnce((async () => {
-      await gate.promise;
-      return {};
-    }) as never);
-    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
-    // Presence, not visibility: the notice animates its height in.
-    expect(
-      await screen.findByText("Read-only while the assistant is answering."),
-    ).toBeInTheDocument();
-    await act(async () => {
-      gate.release();
-      await Promise.resolve();
-    });
-    expect(screen.getByText("Read-only while the assistant is answering.")).toBeInTheDocument();
-
-    // Only a read that shows no streaming row releases it.
     act(() =>
       client.setQueryData(
         ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
@@ -2010,18 +1982,12 @@ describe("ChatView documents", () => {
         }),
       ),
     );
-    expect(screen.getByText("Read-only while the assistant is answering.")).toBeInTheDocument();
-    act(() =>
-      client.setQueryData(
-        ["conversation", "01990f4e-6650-7a33-a768-611e2e4bf4c7"],
-        payload(null, { toolCalls: [documentReference()] }),
-      ),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Read-only while the assistant is answering."),
-      ).not.toBeInTheDocument(),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Source" }));
+    const source = await screen.findByRole("textbox", { name: "Document source" });
+    expect(source).not.toHaveAttribute("readonly");
+    fireEvent.change(source, { target: { value: "Original source, reviewed" } });
+    await waitFor(() => expect(server.content("document-1")).toBe("Original source, reviewed"));
+    expect(screen.queryByText(/Read-only/)).not.toBeInTheDocument();
   });
 
   it("drops the card once a retry has deleted the document that answer created", async () => {
@@ -2031,6 +1997,7 @@ describe("ChatView documents", () => {
     // Retrying the creating answer deletes its document server-side, so the
     // row the card was reading is gone.
     vi.mocked(getDocument).mockResolvedValue(null);
+    server.remove("document-1");
     conversationMock.mockResolvedValueOnce(payload(null) as never);
     fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
     await waitFor(() => expect(retryMock).toHaveBeenCalled());
@@ -2085,20 +2052,9 @@ describe("ChatView documents", () => {
       answerMock.mockResolvedValueOnce({} as never);
       fireEvent.click(await screen.findByRole("button", { name: "Open document: Trip plan" }));
       fireEvent.click(await screen.findByRole("button", { name: "Source" }));
-      const blocked = draftWriteGate();
-      vi.mocked(saveDocument).mockImplementationOnce(async ({ data }) => {
-        await blocked.promise;
-        current = {
-          ...current,
-          content: data.content,
-          revision: 2,
-          lastEditedBy: "user",
-        };
-        return { outcome: "updated", document: current };
-      });
-      fireEvent.change(screen.getByRole("textbox", { name: "Document source" }), {
-        target: { value: "Reviewed source" },
-      });
+      const source = await screen.findByRole("textbox", { name: "Document source" });
+      const release = server.holdPushes();
+      fireEvent.change(source, { target: { value: "Reviewed source" } });
       const rpc =
         action === "send"
           ? sendMock
@@ -2121,11 +2077,11 @@ describe("ChatView documents", () => {
         "answer edit": "Save answers",
       }[action];
       fireEvent.click(screen.getByRole("button", { name: label }));
-      await waitFor(() => expect(saveDocument).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(pushDocument).toHaveBeenCalled());
       expect(rpc).not.toHaveBeenCalled();
-      await act(async () => blocked.release());
+      await act(async () => release());
       await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
-      expect(current.content).toBe("Reviewed source");
+      expect(server.content("document-1")).toBe("Reviewed source");
       if (action !== "branch")
         expect(rpc).toHaveBeenCalledWith({
           data: expect.objectContaining({ openDocumentId: "document-1" }),

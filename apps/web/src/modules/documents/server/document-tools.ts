@@ -1,11 +1,12 @@
-import { Effect, Result as EffectResult, Schema } from "effect";
+import { Cause, Clock, Effect, Result as EffectResult, Schema, Semaphore } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
-import { DocumentTitle, type ConversationDocument } from "../schema.ts";
+import { DocumentTitle, type EditableDocument } from "../schema.ts";
 import { DocumentActivityResult } from "../tool-schema.ts";
-import { DOCUMENT_POLICY } from "./document-prompt.ts";
-import type { DocumentService } from "./document-service.ts";
+import { DOCUMENT_POLICY, projectDocumentPolicy } from "./document-prompt.ts";
+import type { DocumentService, LiveEdit } from "./document-service.ts";
+import { readPartialObject, type PartialField } from "./partial-json.ts";
 
 /** Above this the focused document is sent as a window of lines, not whole. */
 export const FOCUS_CHARS = 24_000;
@@ -13,14 +14,22 @@ export const FOCUS_LINES = 200;
 
 const DocumentId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+const Scope = Schema.Literals(["chat", "project"]);
 const DocumentSummary = Schema.Struct({
   id: DocumentId,
   title: Schema.String,
+  /** Only in a project chat: the chat's own document, or the project's. */
+  scope: Schema.optionalKey(Scope),
+  readOnly: Schema.optionalKey(Schema.Literal(true)),
   revision: Schema.Int,
   lastEditedBy: Schema.Literals(["user", "model"]),
   chars: Schema.Int,
 });
-const CreateParams = Schema.Struct({ title: DocumentTitle, content: Schema.String });
+const CreateParams = Schema.Struct({
+  title: DocumentTitle,
+  content: Schema.String,
+  scope: Schema.optionalKey(Scope),
+});
 const EditParams = Schema.Struct({
   documentId: Schema.optionalKey(DocumentId),
   old: Schema.String.check(Schema.isMinLength(1)),
@@ -71,6 +80,7 @@ const FIELD_ALIASES: Record<string, string> = {
   body: "content",
   markdown: "content",
   name: "title",
+  owner: "scope",
 };
 
 // Advertise the real schema, but let handlers explain malformed model inputs
@@ -120,10 +130,11 @@ const decode = <S extends Schema.Codec<unknown, unknown, never, never>>(
 
 const createTool = Tool.make("create_document", {
   description:
-    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Never use this for an ordinary answer.",
+    "Create one markdown document beside this chat: a checklist, draft, plan, notes or specification the person will edit, tick, keep or reuse. It opens in a panel; do not repeat its content in your reply, describe it briefly and name the title. One document per distinct thing: extend an existing document for the same subject instead of creating another. Never use this for an ordinary answer. scope defaults to chat; scope project, only in a chat that belongs to a project, puts it where every project member sees it.",
   parameters: Schema.Struct({
     title: Schema.optionalKey(transport(CreateParams.fields.title)),
     content: Schema.optionalKey(transport(CreateParams.fields.content)),
+    scope: Schema.optionalKey(transport(Scope)),
   }),
   success: Result,
 });
@@ -167,8 +178,33 @@ const listTool = Tool.make("list_chat_documents", {
 
 export type DocumentToolService = Pick<
   DocumentService["Service"],
-  "list" | "create" | "edit" | "replace"
+  "list" | "create" | "edit" | "replace" | "beginLive" | "updateLive" | "finishLive"
 >;
+/** A live edit is rewritten at most this often while its text streams in. */
+const LIVE_INTERVAL_MS = 80;
+/** The project a chat belongs to, as this attempt resolved it. */
+export interface DocumentProject {
+  id: string;
+  name: string;
+  canEdit: boolean;
+}
+const fieldsOf = (raw: string) => {
+  const fields = new Map<string, PartialField>();
+  for (const [key, field] of readPartialObject(raw)) fields.set(FIELD_ALIASES[key] ?? key, field);
+  return fields;
+};
+/** Anything but losing the fence only ends the live preview, never the answer. */
+const quietly = (effect: Effect.Effect<unknown, unknown>, state: { failed: boolean }) =>
+  effect.pipe(
+    Effect.catchCause((cause) =>
+      Cause.hasInterrupts(cause)
+        ? Effect.failCause(cause)
+        : Effect.sync(() => {
+            state.failed = true;
+          }).pipe(Effect.andThen(Effect.logWarning("live document edit stopped"))),
+    ),
+  );
+
 export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function* (input: {
   service: DocumentToolService;
   userId: string;
@@ -178,6 +214,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   /** The document the person has open, so it is what the model reads. */
   openDocumentId?: string | undefined;
   writeGuard: (tx: DbTx) => Effect.Effect<unknown>;
+  /** The lighter fence for the many small writes of an edit streaming in. */
+  liveGuard?: ((tx: DbTx) => Effect.Effect<unknown>) | undefined;
+  project?: DocumentProject | null | undefined;
 }) {
   const { service } = input;
   const rejected = (tool: string, issue: string) =>
@@ -189,22 +228,29 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   // Every document this chat owns, oldest first. Only the focused one is sent
   // in full; the rest are summaries, so several long documents cannot inflate
   // every later request.
-  let known: ConversationDocument[] = [];
+  let known: EditableDocument[] = [];
   let focusedId: string | null = null;
   // The revision the model last saw through a tool result this generation.
   // A newer revision by the person is the signal to re-read before editing.
   const seen = new Map<string, number>();
   const windows = new Map<string, { fromLine: number; fromCharacter: number }>();
-  const summary = (document: ConversationDocument): typeof DocumentSummary.Type => ({
+  const summary = (document: EditableDocument): typeof DocumentSummary.Type => ({
     id: document.id,
     title: document.title,
+    // Plain chats keep the manifest they always had.
+    ...(input.project
+      ? { scope: document.projectId ? ("project" as const) : ("chat" as const) }
+      : {}),
+    ...(document.canEdit ? {} : { readOnly: true as const }),
     revision: document.revision,
     lastEditedBy: document.lastEditedBy,
     chars: document.content.length,
   });
-  const reference = (document: ConversationDocument) => ({
+  const reference = (document: EditableDocument) => ({
     documentId: document.id,
-    documentConversationId: document.conversationId,
+    ...(document.conversationId
+      ? { documentConversationId: document.conversationId }
+      : { documentProjectId: document.projectId! }),
     title: document.title,
     revision: document.revision,
   });
@@ -231,7 +277,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     known.at(-1) ??
     null;
   /** One document means no id is needed; several make an unaddressed call ambiguous. */
-  const resolve = (documentId: string | undefined): ConversationDocument | Result => {
+  const resolve = (documentId: string | undefined): EditableDocument | Result => {
     if (documentId !== undefined)
       return (
         known.find((document) => document.id === documentId) ?? {
@@ -247,12 +293,16 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     };
   };
   const refresh = Effect.fn(function* () {
-    known = yield* service.list(input.userId, input.conversationId);
+    const own = yield* service.list(input.userId, { conversationId: input.conversationId });
+    const shared = input.project
+      ? yield* service.list(input.userId, { projectId: input.project.id })
+      : [];
+    known = [...own, ...shared];
     if (!known.some((document) => document.id === focusedId)) focusedId = null;
     return known;
   });
   /** Keeps the in-memory list in step with a write or read we just made. */
-  const remember = (document: ConversationDocument) => {
+  const remember = (document: EditableDocument) => {
     const index = known.findIndex((row) => row.id === document.id);
     known =
       index === -1 ? [...known, document] : known.map((row, at) => (at === index ? document : row));
@@ -260,6 +310,104 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     seen.set(document.id, document.revision);
   };
   yield* refresh();
+
+  // Edits whose arguments are still streaming, by tool call id. The handler
+  // finds its own by content once the call is decoded, since it gets no id.
+  const live = new Map<
+    string,
+    { raw: string; edit: LiveEdit | null; failed: boolean; appliedAt: number }
+  >();
+  // The SDK runs a decoded call's handler alongside the stream still being read,
+  // so the handler can arrive before its own arguments have been previewed.
+  // One lock orders the two: whichever comes second sees what the first did.
+  const liveLock = Semaphore.makeUnsafe(1);
+  const liveDelta = (id: string, delta: string) =>
+    Effect.gen(function* () {
+      const state = live.get(id);
+      if (!state || state.failed || !input.liveGuard) return;
+      state.raw += delta;
+      const fields = fieldsOf(state.raw);
+      const old = fields.get("old");
+      const next = fields.get("new");
+      if (!old?.complete || !next) return;
+      if (!state.edit) {
+        const documentId = fields.get("documentId");
+        const target = resolve(documentId?.complete ? documentId.value : undefined);
+        if (!("id" in target) || !target.canEdit) {
+          state.failed = true;
+          return;
+        }
+        state.edit = yield* service.beginLive(input.userId, {
+          documentId: target.id,
+          old: old.value,
+        });
+        if (!state.edit) {
+          state.failed = true;
+          return;
+        }
+      }
+      // While the new text still matches the old, the old stays; once they part,
+      // the region shows what has streamed so far.
+      const text = old.value.startsWith(next.value) ? old.value : next.value;
+      if (text === state.edit.current) return;
+      const now = yield* Clock.currentTimeMillis;
+      if (now - state.appliedAt < LIVE_INTERVAL_MS) return;
+      state.appliedAt = now;
+      yield* service.updateLive(state.edit, text, input.liveGuard);
+    }).pipe((effect) => {
+      const state = live.get(id);
+      return state ? quietly(effect, state) : effect;
+    }, liveLock.withPermits(1));
+  /**
+   * The decoded call's own edit, if it streamed in live: its final text goes
+   * in under the full fence, and the result reads like any other edit.
+   */
+  const settleLive = (documentId: string, old: string, next: string) =>
+    Effect.gen(function* () {
+      const found = [...live].find(
+        ([, state]) =>
+          state.edit &&
+          !state.failed &&
+          state.edit.documentId === documentId &&
+          state.edit.old === old,
+      );
+      if (!found) {
+        // Arrived before its preview anchored: the preview must not start now,
+        // or it would rewrite the text this ordinary edit is about to change.
+        for (const state of live.values())
+          if (!state.edit && old.startsWith(fieldsOf(state.raw).get("old")?.value ?? ""))
+            state.failed = true;
+        return null;
+      }
+      const [id, state] = found;
+      live.delete(id);
+      const edit = state.edit!;
+      const written = yield* service.updateLive(edit, next, input.writeGuard);
+      const document = yield* service.finishLive(edit);
+      return written && document ? document : null;
+    });
+  /**
+   * Ends every preview no decoded call claimed: its region goes back to the
+   * text it replaced, since the call it previewed never happened, and no
+   * assistant cursor lingers.
+   */
+  const closeLive = Effect.suspend(() => {
+    const open = [...live.values()].flatMap((state) => (state.edit ? [state] : []));
+    live.clear();
+    return Effect.forEach(
+      open,
+      (state) =>
+        quietly(
+          (input.liveGuard
+            ? service.updateLive(state.edit!, state.edit!.old, input.liveGuard)
+            : Effect.void
+          ).pipe(Effect.andThen(service.finishLive(state.edit!))),
+          state,
+        ),
+      { discard: true },
+      // A stopped answer cannot write any more; its preview stays as it stopped.
+    ).pipe(Effect.catchCause(() => Effect.void));
+  }).pipe(liveLock.withPermits(1));
 
   const create = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
     const decoded = decode(CreateParams, raw);
@@ -269,14 +417,28 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         outcome: "invalid",
         message: `Provide a title and markdown content. ${decoded.issue}`,
       };
+    const { scope, ...fields } = decoded.value;
+    if (scope === "project" && !input.project)
+      return {
+        outcome: "invalid",
+        message: "This chat is not in a project. Create the document in this chat instead.",
+      };
+    if (scope === "project" && !input.project!.canEdit)
+      return {
+        outcome: "invalid",
+        message:
+          "The project is read-only for this person. Create the document in this chat instead.",
+      };
     const result = yield* service
       .create(
         input.userId,
-        {
-          conversationId: input.conversationId,
-          createdByMessageId: input.messageId,
-          ...decoded.value,
-        },
+        scope === "project"
+          ? { projectId: input.project!.id, ...fields }
+          : {
+              conversationId: input.conversationId,
+              createdByMessageId: input.messageId,
+              ...fields,
+            },
         input.writeGuard,
       )
       .pipe(
@@ -300,6 +462,22 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       };
     const target = resolve(decoded.value.documentId);
     if (!("id" in target)) return target;
+    return yield* applyEdit(target, decoded.value).pipe(liveLock.withPermits(1));
+  });
+  /** Settles the call's live preview if it has one, else edits as usual. Runs under the live lock. */
+  const applyEdit = Effect.fn(function* (
+    target: EditableDocument,
+    value: { old: string; new: string; expectedRevision?: number | undefined },
+  ): Effect.fn.Return<Result> {
+    const settled = yield* settleLive(target.id, value.old, value.new).pipe(
+      Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
+      Effect.catchTag("DocumentRejected", () => Effect.succeed(null)),
+    );
+    if (settled) {
+      remember(settled);
+      return { outcome: "updated", ...reference(settled), staleRead: false };
+    }
+    const decoded = { value };
     const result = yield* service
       .edit(
         input.userId,
@@ -448,9 +626,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       list_chat_documents: () => bounded(list()),
     },
   } satisfies ToolGroup;
-  const editedSinceYourLastWrite = (document: ConversationDocument) =>
+  const editedSinceYourLastWrite = (document: EditableDocument) =>
     document.lastEditedBy === "user" && document.revision > (seen.get(document.id) ?? 0);
-  const focusedData = (document: ConversationDocument) => {
+  const focusedData = (document: EditableDocument) => {
     const head = {
       ...summary(document),
       editedSinceYourLastWrite: editedSinceYourLastWrite(document),
@@ -513,6 +691,14 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   return {
     group,
     refresh,
+    live: {
+      start: (id: string, name: string) => {
+        if (name === "edit_document")
+          live.set(id, { raw: "", edit: null, failed: false, appliedAt: 0 });
+      },
+      delta: liveDelta,
+      close: closeLive,
+    },
     // The long policy costs every turn if it sits in the fixed prefix, so it
     // rides with the document data and appears only once a document exists.
     messages: (): Prompt.MessageEncoded[] => {
@@ -524,7 +710,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         // moment a document appears.
         {
           role: "user",
-          content: `<application-policy>\n${DOCUMENT_POLICY}\n</application-policy>`,
+          content: `<application-policy>\n${DOCUMENT_POLICY}${
+            input.project ? `\n${projectDocumentPolicy(input.project.name)}` : ""
+          }\n</application-policy>`,
         },
         {
           role: "assistant",

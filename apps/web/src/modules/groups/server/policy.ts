@@ -42,7 +42,9 @@ export function capabilityAllowedSql(
         ? [key, "knowledgeCreate"]
         : key === "skillsUse"
           ? [key, "skillsCreate"]
-          : [key];
+          : key === "projectsUse"
+            ? [key, "projectsCreate"]
+            : [key];
   const allowed = (column: SQL) =>
     sql`(${column} ->> ${keys[0]})::boolean${
       keys[1] ? sql` or (${column} ->> ${keys[1]})::boolean` : sql``

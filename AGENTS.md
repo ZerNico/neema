@@ -43,8 +43,13 @@ edit the wrong thing.
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
-- **conversation document**: editable Markdown owned by one chat. It has one current row
-  and a revision token, never knowledge versions or transcript content.
+- **document** (conversation or project document): editable Markdown owned by one chat or
+  one project, edited live by people and the model as a Yjs text. Never knowledge versions
+  or transcript content.
+- **project**: instructions, documents and memory shared by members (owner, editor,
+  viewer) for continuing work. Chats in it stay their owner's alone; each attempt
+  re-resolves the project like an agent. Project memory holds facts about the work,
+  never about a person.
 - **custom tool**: an admin-authored TypeScript module containing one or more
   model-callable functions named `custom_<module>__<function>`. Offered in every
   chat the sender may use it in; an agent narrows the offer to what it attached.
@@ -209,8 +214,10 @@ skipped one on purpose.
   run conversations, model fallback, delete-mid-run.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
-- `docs/internals/documents.md`: editable conversation Markdown, transcript boundaries,
-  exact-match patches, focus and client reconciliation.
+- `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,
+  exact-match and streamed model edits, live sync and the one-writer hub.
+- `docs/internals/projects.md`: roles, private chats in a shared project, attempt-time
+  access, project documents and memory, deletion.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
   model, the `custom_` prefix contract, current module bundles and worker
   containment.

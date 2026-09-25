@@ -159,6 +159,13 @@ const resourceRows: ReadonlyArray<{
     use: "skillsUse",
     create: "skillsCreate",
   },
+  {
+    label: "Projects",
+    description:
+      "Use works in projects shared with them. Create also starts projects and invites people.",
+    use: "projectsUse",
+    create: "projectsCreate",
+  },
 ];
 
 /** Personal features: nothing to share, so there is only on or off. */

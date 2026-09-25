@@ -44,6 +44,7 @@ export const groupMembers = pgTable(
     shareAgents: boolean("share_agents").notNull().default(false),
     shareKnowledge: boolean("share_knowledge").notNull().default(false),
     shareSkills: boolean("share_skills").notNull().default(false),
+    shareProjects: boolean("share_projects").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

@@ -358,6 +358,7 @@ describe("branching a conversation", () => {
         const repo = yield* ChatRepo;
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
           mode: "chat",
+          projectId: null,
           agent: { agentId: null },
           agentDrafts: [],
           scheduleDrafts: [],
@@ -369,6 +370,7 @@ describe("branching a conversation", () => {
         );
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
           mode: "chat",
+          projectId: null,
           agent: { agentId: null },
           agentDrafts: [],
           scheduleDrafts: [],

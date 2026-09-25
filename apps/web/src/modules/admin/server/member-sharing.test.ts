@@ -72,7 +72,7 @@ vi.mock("~/server/runtime.ts", async () => {
     },
   };
 });
-const sharing = { agents: true, knowledge: false, skills: true };
+const sharing = { agents: true, knowledge: false, skills: true, projects: false };
 const data = { groupId: "g1", userId: "u1", sharing };
 beforeEach(() => {
   vi.resetAllMocks();

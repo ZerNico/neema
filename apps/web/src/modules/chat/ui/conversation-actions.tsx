@@ -1,6 +1,12 @@
-import { Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
+import {
+  Delete02Icon,
+  Folder01Icon,
+  FolderTransferIcon,
+  PencilEdit02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { deleteConversation, renameConversation } from "../server/functions.ts";
@@ -19,8 +25,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
+import { projectsQuery } from "~/modules/projects/client/queries.ts";
+import { moveConversationToProject } from "~/modules/projects/server/functions.ts";
 import { Input } from "~/ui/primitives/input";
 import { useConfirm } from "~/ui/confirm.tsx";
 import type { ReactElement, ReactNode } from "react";
@@ -29,6 +42,9 @@ import { toastError } from "~/ui/error-toast.ts";
 export interface ActionableConversation {
   readonly id: string;
   readonly title: string | null;
+  /** Present on list rows; a temporary chat never joins a project. */
+  readonly projectId?: string | null;
+  readonly temporary?: boolean;
 }
 
 export interface ConversationActions {
@@ -150,6 +166,7 @@ export function ConversationMenuItems({
         <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
         Rename
       </DropdownMenuItem>
+      {conversation.temporary ? null : <MoveToProject conversation={conversation} />}
       <DropdownMenuItem variant="destructive" onClick={() => actions.confirmDelete(conversation)}>
         <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         Delete
@@ -181,5 +198,56 @@ export function ConversationMenu({
         <ConversationMenuItems conversation={conversation} actions={actions} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Moves a chat into one of the person's projects, or back out. */
+function MoveToProject({ conversation }: { conversation: ActionableConversation }) {
+  const queryClient = useQueryClient();
+  const { data: capabilities } = useQuery(capabilitiesQuery);
+  const projects = useQuery({ ...projectsQuery, enabled: !!capabilities?.projectsUse });
+  const move = useMutation({
+    mutationFn: (projectId: string | null) =>
+      moveConversationToProject({ data: { conversationId: conversation.id, projectId } }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversation.id] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      ]),
+    onError: (error) => toastError("Could not move the chat.", error),
+  });
+  if (!capabilities?.projectsUse || (!projects.data?.length && !conversation.projectId))
+    return null;
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger disabled={move.isPending}>
+        <HugeiconsIcon icon={FolderTransferIcon} strokeWidth={2} />
+        Move to project
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-64">
+        {(projects.data ?? []).map((project) => (
+          <DropdownMenuItem
+            key={project.id}
+            disabled={project.id === conversation.projectId}
+            onClick={() => move.mutate(project.id)}
+          >
+            <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} />
+            <span className="min-w-0 flex-1 truncate">{project.name}</span>
+            {project.id === conversation.projectId ? (
+              <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+        {conversation.projectId ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => move.mutate(null)}>
+              Remove from project
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }

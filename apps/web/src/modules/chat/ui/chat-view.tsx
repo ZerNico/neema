@@ -33,10 +33,11 @@ import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
-import { IncognitoIcon } from "@hugeicons/core-free-icons";
+import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { projectQuery } from "~/modules/projects/client/queries.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { conversationQuery } from "../client/queries.ts";
@@ -346,9 +347,10 @@ export function toActivity(row: {
     };
   }
   if (row.toolName === "save_memory") {
-    const result = (row.result ?? {}) as { outcome?: unknown; reason?: unknown };
+    const result = (row.result ?? {}) as { outcome?: unknown; reason?: unknown; scope?: unknown };
     const outcome = toMemoryActivityOutcome(result.outcome);
     const reason = toMemoryActivityReason(result.reason);
+    const scope = result.scope === "project" ? ({ scope: "project" } as const) : {};
     return {
       family: "memory",
       ...position,
@@ -359,6 +361,7 @@ export function toActivity(row: {
       status: row.status,
       ...(outcome ? { outcome } : {}),
       ...(reason ? { reason } : {}),
+      ...scope,
       ...(row.error ? { error: row.error.message } : {}),
     };
   }
@@ -713,10 +716,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       if (activity.family === "schedule-draft" && activity.result) mine(activity.result);
     return ids;
   }, [conversationId, data.scheduleDrafts, data.toolCalls, stream.tools]);
+  // The chat's own documents, and its project's while the person may still use it.
+  const projectId = data.project?.role ? data.project.id : null;
   const discoveredDocuments = useMemo(() => {
     const ids = new Set((data.documents ?? []).map((document) => document.id));
-    const mine = (result: { documentId?: string; documentConversationId?: string }) => {
-      if (result.documentId && result.documentConversationId === conversationId)
+    const mine = (result: DocumentOwnerFields) => {
+      if (result.documentId && ownsDocument(result, conversationId, projectId))
         ids.add(result.documentId);
     };
     for (const row of data.toolCalls)
@@ -724,7 +729,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     for (const activity of stream.tools)
       if (activity.family === "document" && activity.result) mine(activity.result);
     return ids;
-  }, [conversationId, data.documents, data.toolCalls, stream.tools]);
+  }, [conversationId, data.documents, data.toolCalls, projectId, stream.tools]);
   // What the answer being watched just created, as opposed to what the page
   // loaded with: only these open their panel by themselves. A phone shows the
   // panel as a sheet over the answer, so it never opens one on its own there.
@@ -748,8 +753,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         add(fresh.agent, activity.result.draftId, activity.result.draftConversationId);
       else if (activity.family === "schedule-draft" && activity.result)
         add(fresh.schedule, activity.result.draftId, activity.result.draftConversationId);
-      else if (activity.family === "document" && activity.result)
-        add(fresh.document, activity.result.documentId, activity.result.documentConversationId);
+      else if (
+        activity.family === "document" &&
+        activity.result &&
+        ownsDocument(activity.result, conversationId, projectId)
+      )
+        add(fresh.document, activity.result.documentId, conversationId);
     }
     return fresh;
   }, [
@@ -758,6 +767,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     data.documents,
     data.scheduleDrafts,
     isMobile,
+    projectId,
     stream.tools,
   ]);
   const desktopApprovals = useWorkApprovals(conversationId);
@@ -1167,8 +1177,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     (streamingMessage !== undefined || dataUpdatedAt > awaitingGeneration)
   )
     setAwaitingGeneration(null);
-  const documentsLocked =
-    streamingMessage !== undefined || generationRequested || awaitingGeneration !== null;
   const mutationPending =
     answerMutation.isPending ||
     questionNeedsRefresh ||
@@ -1875,8 +1883,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       : undefined,
   );
   const shownDocuments = shownIds(display, (activity) =>
-    activity.family === "document" && activity.name === "create_document"
-      ? mine(activity.result?.documentId, activity.result?.documentConversationId)
+    activity.family === "document" &&
+    activity.name === "create_document" &&
+    activity.result &&
+    ownsDocument(activity.result, conversationId, data.project?.role ? data.project.id : null)
+      ? activity.result.documentId
       : undefined,
   );
   const origin = new Map(
@@ -1940,7 +1951,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     <DocumentOwner
       documentIds={documentIds}
       goneIds={scopedForgottenDocuments}
-      locked={documentsLocked}
       onGone={forgetDocument}
       autoOpenIds={liveCreated.document}
       ref={documents}
@@ -1965,6 +1975,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               branchedFrom={data.branchedFrom}
               agent={data.agent}
               temporary={data.conversation.temporary}
+              project={data.project}
             />
             {foreignMachine ? (
               <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
@@ -2070,6 +2081,20 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 // How long the composer takes to travel from the middle of the column down to
 // the bottom. Navigation waits this out, so a fast first response cannot swap
 // the route in mid-slide, which would read as a jump rather than a move.
+interface DocumentOwnerFields {
+  documentId?: string;
+  documentConversationId?: string;
+  documentProjectId?: string;
+}
+/** A tool row's document is live here when this chat or its current project owns it. */
+const ownsDocument = (
+  result: DocumentOwnerFields,
+  conversationId: string,
+  projectId: string | null,
+) =>
+  result.documentConversationId === conversationId ||
+  (projectId !== null && result.documentProjectId === projectId);
+
 const SLIDE_MS = 380;
 
 export function NewChatView({
@@ -2080,10 +2105,13 @@ export function NewChatView({
   onPrefillConsumed,
   temporary = false,
   onTemporaryChange,
+  projectId = null,
 }: {
   user: { name: string };
   /** Starts the chat as temporary; the route keeps it in the address. */
   temporary?: boolean;
+  /** Starts the chat inside this project; never temporary. */
+  projectId?: string | null;
   onTemporaryChange?: (temporary: boolean) => void;
   /** Pre-selected from an agent page; sent as an explicit install. */
   initialAgentId?: string | null;
@@ -2162,7 +2190,8 @@ export function NewChatView({
         kind: "new" as const,
         id: conversationId,
         mode: input.mode,
-        ...(input.mode === "chat" && temporary ? { temporary: true } : {}),
+        ...(input.mode === "chat" && temporary && !projectId ? { temporary: true } : {}),
+        ...(projectId ? { projectId } : {}),
       };
       const fields = {
         modelId: modelId!,
@@ -2223,8 +2252,10 @@ export function NewChatView({
     },
   });
 
-  // A work chat keeps grants and folders on the machine, so it is never temporary.
-  const offerTemporary = mode === "chat" && !!onTemporaryChange;
+  // A work chat keeps grants and folders on the machine, so it is never
+  // temporary; nor is a project chat, which the project lists.
+  const offerTemporary = mode === "chat" && !!onTemporaryChange && !projectId;
+  const project = useQuery({ ...projectQuery(projectId ?? ""), enabled: !!projectId });
   const isTemporary = offerTemporary && temporary;
   const reducedMotion = useAppReducedMotion();
 
@@ -2297,6 +2328,16 @@ export function NewChatView({
               </MotionSwap>
             </h1>
           )}
+          {projectId && project.data ? (
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId }}
+              className="text-muted-foreground hover:text-foreground mt-2 flex items-center gap-1.5 text-sm"
+            >
+              <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-4" aria-hidden />
+              In {project.data.name}
+            </Link>
+          ) : null}
           <AnimatePresence initial={false}>
             {isTemporary ? (
               <motion.div

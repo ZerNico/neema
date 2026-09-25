@@ -153,6 +153,8 @@ export const MemoryActivityReason = Schema.Literals([
   "disabled",
   "repeated",
   "failed",
+  "invalid_scope",
+  "read_only",
 ]);
 export type MemoryActivityReason = typeof MemoryActivityReason.Type;
 
@@ -302,6 +304,8 @@ export const ToolChunkEnvelope = Schema.Union([
     ok: Schema.Boolean,
     outcome: Schema.optionalKey(MemoryActivityOutcome),
     reason: Schema.optionalKey(MemoryActivityReason),
+    /** Set when the save went to the chat's project instead of the person. */
+    scope: Schema.optionalKey(Schema.Literal("project")),
     error: Schema.optionalKey(Schema.String),
   }),
 ]);

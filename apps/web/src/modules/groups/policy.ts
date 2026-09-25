@@ -5,6 +5,8 @@ export const CAPABILITY_KEYS = [
   "knowledgeCreate",
   "skillsUse",
   "skillsCreate",
+  "projectsUse",
+  "projectsCreate",
   "schedules",
   "webSearch",
   "deepResearch",
@@ -26,7 +28,8 @@ export function validCapabilities(value: Capabilities): boolean {
   return (
     (!value.agentsCreate || value.agentsUse) &&
     (!value.knowledgeCreate || value.knowledgeUse) &&
-    (!value.skillsCreate || value.skillsUse)
+    (!value.skillsCreate || value.skillsUse) &&
+    (!value.projectsCreate || value.projectsUse)
   );
 }
 
@@ -36,5 +39,6 @@ export function effectiveCapabilities(value: Capabilities): Capabilities {
     agentsUse: value.agentsUse || value.agentsCreate,
     knowledgeUse: value.knowledgeUse || value.knowledgeCreate,
     skillsUse: value.skillsUse || value.skillsCreate,
+    projectsUse: value.projectsUse || value.projectsCreate,
   };
 }

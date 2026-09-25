@@ -3,6 +3,7 @@ import {
   BubbleChatIcon,
   Calendar03Icon,
   ComputerIcon,
+  Folder01Icon,
   FolderLibraryIcon,
   HelpCircleIcon,
   IncognitoIcon,
@@ -17,6 +18,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ADMIN_SECTIONS } from "~/modules/admin/sections.ts";
 import { useAgentSearch } from "~/modules/agents/client/search.ts";
+import { useProjectSearch } from "~/modules/projects/client/search.ts";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { useChatSearch } from "~/modules/chat/client/search.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -136,6 +138,7 @@ const usePageSearch: SearchSource = (query, active) => {
       ? matching(
           [
             page("/chats", "Chats", BubbleChatIcon),
+            can("projectsUse") && page("/projects", "Projects", Folder01Icon),
             can("agentsUse") && page("/agents", "Agents", Robot01Icon),
             can("knowledgeUse") && page("/knowledge", "Knowledge", FolderLibraryIcon),
             can("schedules") && page("/schedules", "Schedules", Calendar03Icon),
@@ -173,6 +176,7 @@ export function useSearchGroups(input: string, open: boolean) {
     useChatSearch(query, everything),
     useActionSearch(query, open),
     usePageSearch(query, everything),
+    useProjectSearch(query, everything),
     useAgentSearch(query, everything),
     useCollectionSearch(query, everything),
     useSkillSearch(query, everything),

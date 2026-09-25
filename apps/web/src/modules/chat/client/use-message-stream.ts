@@ -98,6 +98,8 @@ export interface MemoryToolActivity extends ToolActivityBase {
   outcome?: MemoryActivityOutcome;
   /** Why a save was refused; only ever one of the handler's fixed reasons. */
   reason?: MemoryActivityReason;
+  /** The chat's project kept it rather than the person's own memory. */
+  scope?: "project";
 }
 
 export interface AskToolActivity extends ToolActivityBase {
@@ -300,6 +302,7 @@ export function applyToolChunk(
     ok?: boolean;
     outcome?: unknown;
     reason?: unknown;
+    scope?: unknown;
     summary?: {
       targets?: string[];
       resultCount?: number;
@@ -673,6 +676,7 @@ export function applyToolChunk(
       status: e.ok ? "complete" : "error",
       ...(outcome ? { outcome } : {}),
       ...(reason ? { reason } : {}),
+      ...(e.scope === "project" ? { scope: "project" as const } : {}),
       ...(typeof e.error === "string" ? { error: e.error } : {}),
     };
     return index === -1
@@ -976,9 +980,8 @@ export function useMessageStream(
     });
   }
   const activeRef = useRef<string | null>(null);
-  const terminalFailure = canonicalStatus === "error" || canonicalStatus === "aborted"
-    ? canonicalStatus
-    : null;
+  const terminalFailure =
+    canonicalStatus === "error" || canonicalStatus === "aborted" ? canonicalStatus : null;
 
   useEffect(() => {
     if (!messageId) {

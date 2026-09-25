@@ -25,11 +25,15 @@ export const SyncEvent = Schema.Union([
     scheduleId: Schema.String,
     runId: Schema.String,
   }),
+  // Exactly one owner: the chat, or the project whose members all hear of it.
   Schema.Struct({
     type: Schema.Literal("document.changed"),
-    conversationId: Schema.String,
+    conversationId: Schema.optionalKey(Schema.String),
+    projectId: Schema.optionalKey(Schema.String),
     documentId: Schema.String,
   }),
+  // Settings, members, memory or the set of chats moved in or out.
+  Schema.Struct({ type: Schema.Literal("project.changed"), projectId: Schema.String }),
   // No resource ids or titles: every client refetches only its authorized view.
   Schema.Struct({ type: Schema.Literal("resources.changed") }),
   // Frequent worker transitions affect knowledge status only, not access policy.

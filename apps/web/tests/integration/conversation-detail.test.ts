@@ -3,7 +3,7 @@ import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversationDocuments, conversations, models } from "~/db/schema/index.ts";
+import { conversations, documents, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -157,13 +157,14 @@ describe("loadConversationDetail", () => {
     const secondId = uuidv7();
     await run(
       Effect.flatMap(Db, (db) =>
-        db.insert(conversationDocuments).values([
+        db.insert(documents).values([
           {
             id: secondId,
             conversationId: thread.conversationId,
             title: "Second",
             content: "PRIVATE SECOND SOURCE",
             lastEditedBy: "model",
+            snapshot: Buffer.alloc(0),
           },
           {
             id: firstId,
@@ -171,6 +172,7 @@ describe("loadConversationDetail", () => {
             title: "First",
             content: "PRIVATE FIRST SOURCE",
             lastEditedBy: "user",
+            snapshot: Buffer.alloc(0),
           },
         ]),
       ),

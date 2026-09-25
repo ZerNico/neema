@@ -14,6 +14,7 @@ export interface MemberSharing {
   agents: boolean;
   knowledge: boolean;
   skills: boolean;
+  projects: boolean;
 }
 export interface GroupMember {
   userId: string;
@@ -178,6 +179,7 @@ export class GroupRepo extends Context.Service<
                 shareAgents: sharing.agents,
                 shareKnowledge: sharing.knowledge,
                 shareSkills: sharing.skills,
+                shareProjects: sharing.projects,
               })
               .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
               .returning({ id: groupMembers.userId })
@@ -211,6 +213,7 @@ export class GroupRepo extends Context.Service<
               agents: groupMembers.shareAgents,
               knowledge: groupMembers.shareKnowledge,
               skills: groupMembers.shareSkills,
+              projects: groupMembers.shareProjects,
             })
             .from(groupMembers)
             .innerJoin(user, eq(user.id, groupMembers.userId))
@@ -222,7 +225,12 @@ export class GroupRepo extends Context.Service<
             name: row.name,
             email: row.email,
             role: row.role,
-            sharing: { agents: row.agents, knowledge: row.knowledge, skills: row.skills },
+            sharing: {
+              agents: row.agents,
+              knowledge: row.knowledge,
+              skills: row.skills,
+              projects: row.projects,
+            },
           }));
         }),
 

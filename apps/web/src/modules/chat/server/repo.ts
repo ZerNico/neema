@@ -41,7 +41,7 @@ import {
   conversationAgents,
   conversationCompactionCheckpoints,
   conversationDrafts,
-  conversationDocuments,
+  documents,
   conversations,
   conversationQueueEntries,
   messageChunks,
@@ -59,6 +59,8 @@ import {
   conversationIntegrations,
 } from "~/db/schema/index.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
+import type { ResolvedProject } from "~/modules/projects/schema.ts";
+import { projectRole } from "~/modules/projects/server/access.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
@@ -103,6 +105,7 @@ export type EditContent =
 export interface GenerationConfig {
   readonly agentId: string | null;
   readonly resolvedAgent: ResolvedAgentConfig | null;
+  readonly resolvedProject?: ResolvedProject | null;
   readonly standaloneCollectionIds: ReadonlyArray<string>;
   readonly collectionIds: ReadonlyArray<string>;
   readonly standaloneSkillIds?: ReadonlyArray<string>;
@@ -155,6 +158,8 @@ const listedBy = (userId: string) =>
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
+  /** The chat's project, re-authorized by every attempt; null outside one. */
+  readonly projectId?: string | null;
   /** Fixed at creation. Read by the resolver, which refuses a work send without a folder. */
   readonly mode?: "chat" | "work";
   /**
@@ -201,6 +206,7 @@ export type ConversationReference =
       readonly id: string;
       readonly mode: "chat" | "work";
       readonly temporary?: boolean | undefined;
+      readonly projectId?: string | undefined;
     }
   | { readonly kind: "existing"; readonly id: string };
 
@@ -490,6 +496,7 @@ const toConfig = (
 ): GenerationConfig => ({
   agentId: row.agentId,
   resolvedAgent: row.resolvedAgent,
+  resolvedProject: row.resolvedProject,
   standaloneCollectionIds: row.standaloneCollectionIds,
   collectionIds: row.collectionIds,
   standaloneSkillIds: row.standaloneSkillIds,
@@ -536,20 +543,20 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(conversationDrafts.conversationId, conversationId))
     .orderBy(asc(conversationDrafts.id))
     .pipe(Effect.orDie);
-  const documents = yield* tx
+  const documentRows = yield* tx
     .select({
-      id: conversationDocuments.id,
-      title: conversationDocuments.title,
+      id: documents.id,
+      title: documents.title,
       // The answer it belongs to, so the transcript can place a card whose
       // creating tool row a rewind took with it. Never any content.
-      messageId: conversationDocuments.createdByMessageId,
+      messageId: documents.createdByMessageId,
     })
-    .from(conversationDocuments)
-    .where(eq(conversationDocuments.conversationId, conversationId))
-    .orderBy(asc(conversationDocuments.id))
+    .from(documents)
+    .where(eq(documents.conversationId, conversationId))
+    .orderBy(asc(documents.id))
     .pipe(Effect.orDie);
   const [conversation] = yield* tx
-    .select({ mode: conversations.mode })
+    .select({ mode: conversations.mode, projectId: conversations.projectId })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .pipe(Effect.orDie);
@@ -557,8 +564,9 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     agent: agent ? { agentId: agent.agentId } : null,
     agentDrafts: drafts.filter((draft) => draft.kind === "agent").map(draftSummary),
     scheduleDrafts: drafts.filter((draft) => draft.kind === "schedule").map(draftSummary),
-    documents,
+    documents: documentRows,
     mode: conversation?.mode ?? "chat",
+    projectId: conversation?.projectId ?? null,
   } satisfies ConversationDefaults;
 });
 
@@ -607,6 +615,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       messageId,
       agentId: config.agentId,
       resolvedAgent: config.resolvedAgent,
+      resolvedProject: config.resolvedProject ?? null,
       standaloneCollectionIds: [...config.standaloneCollectionIds],
       standaloneSkillIds: [...(config.standaloneSkillIds ?? [])],
       skills: [...(config.skills ?? [])],
@@ -677,6 +686,8 @@ export class ChatRepo extends Context.Service<
       cursor?: ConversationCursor | undefined;
       /** Case-insensitive substring match on the title; blank matches all. */
       query?: string | undefined;
+      /** Leaves out chats in a project, which the sidebar lists under it. */
+      outsideProjects?: boolean | undefined;
     }): Effect.Effect<{
       conversations: ConversationListRow[];
       nextCursor: ConversationCursor | null;
@@ -1325,6 +1336,7 @@ export class ChatRepo extends Context.Service<
                 // A title still being generated is null, so it matches nothing,
                 // which is correct: there is not yet anything to match against.
                 title ? ilike(conversations.title, `%${escapeLike(title)}%`) : undefined,
+                input.outsideProjects ? isNull(conversations.projectId) : undefined,
               ),
             )
             .orderBy(desc(activity), desc(conversations.id))
@@ -1352,10 +1364,7 @@ export class ChatRepo extends Context.Service<
             .select({ conversationId: conversations.id, title: conversations.title })
             .from(conversations)
             .where(
-              and(
-                listedBy(input.userId),
-                ilike(conversations.title, `%${escapeLike(needle)}%`),
-              ),
+              and(listedBy(input.userId), ilike(conversations.title, `%${escapeLike(needle)}%`)),
             )
             .orderBy(desc(activity), desc(conversations.id))
             .limit(input.limit)
@@ -1703,6 +1712,7 @@ export class ChatRepo extends Context.Service<
                       title: null,
                       mode: input.conversation.mode,
                       temporary: input.conversation.temporary ?? false,
+                      projectId: input.conversation.projectId ?? null,
                       ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
                     })
                     .returning()
@@ -1762,9 +1772,13 @@ export class ChatRepo extends Context.Service<
                   ? { agentId: input.associateAgentId }
                   : null;
                 const defaults: ConversationDefaults = association
-                  ? { agent: association, mode: conversation.mode }
+                  ? {
+                      agent: association,
+                      mode: conversation.mode,
+                      projectId: conversation.projectId,
+                    }
                   : conversationCreated
-                    ? { agent: null, mode: conversation.mode }
+                    ? { agent: null, mode: conversation.mode, projectId: conversation.projectId }
                     : yield* readDefaults(tx, conversation.id);
                 const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
                 if (association)
@@ -2281,10 +2295,7 @@ export class ChatRepo extends Context.Service<
 
         deleteConversation: Effect.fn("ChatRepo.deleteConversation")(
           function* (userId, conversationId) {
-            const deleted = yield* deleteLocked(
-              conversationId,
-              eq(conversations.userId, userId),
-            );
+            const deleted = yield* deleteLocked(conversationId, eq(conversations.userId, userId));
             return deleted?.keys ?? [];
           },
         ),
@@ -2300,7 +2311,6 @@ export class ChatRepo extends Context.Service<
         }),
 
         deleteExpiredTemporary: (conversationId) => deleteLocked(conversationId, expiredTemporary),
-
 
         cloneConversationPrefix: Effect.fn("ChatRepo.cloneConversationPrefix")(function* (input) {
           return yield* db
@@ -2362,11 +2372,17 @@ export class ChatRepo extends Context.Service<
                   });
                 }
 
+                // A branch stays in the project only while its owner may still use it.
+                const branchProjectId =
+                  source.projectId && (yield* projectRole(tx, source.userId, source.projectId))
+                    ? source.projectId
+                    : null;
                 const branchRows = yield* tx
                   .insert(conversations)
                   .values({
                     id: uuidv7(),
                     userId: source.userId,
+                    projectId: branchProjectId,
                     // Whatever the locked row says is used: a title that resolved
                     // between the service's read and this lock counts.
                     title: source.title,
@@ -3254,8 +3270,8 @@ export class ChatRepo extends Context.Service<
                 // documents and drafts through the foreign key instead; retry
                 // keeps the row id, so those have to be removed explicitly.
                 yield* tx
-                  .delete(conversationDocuments)
-                  .where(eq(conversationDocuments.createdByMessageId, input.messageId))
+                  .delete(documents)
+                  .where(eq(documents.createdByMessageId, input.messageId))
                   .pipe(Effect.orDie);
                 yield* tx
                   .delete(conversationDrafts)

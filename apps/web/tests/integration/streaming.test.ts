@@ -15,6 +15,8 @@ import {
   Stream,
 } from "effect";
 import { uuidv7 } from "uuidv7";
+import { fromBase64, toBase64 } from "lib0/buffer";
+import * as Y from "yjs";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -46,6 +48,8 @@ import {
   type CustomToolRunResult,
 } from "~/modules/custom-tools/server/runtime.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
+import { DOCUMENT_TEXT } from "~/modules/documents/text.ts";
+import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -168,6 +172,37 @@ const authoringFinish = (reason: "stop" | "tool-calls" = "stop") =>
     reason,
     usage: new AiResponse.Usage({ inputTokens: { total: 100 }, outputTokens: { total: 10 } }),
   });
+/** A native call whose arguments stream in pieces first, the way providers send them. */
+const streamedTool = (input: GatewayInput, name: string, params: unknown, pieces = 12) => {
+  const id = uuidv7();
+  const json = JSON.stringify(params);
+  const size = Math.ceil(json.length / pieces);
+  const deltas = Array.from({ length: pieces }, (_, index) =>
+    AiResponse.makePart("tool-params-delta", {
+      id,
+      delta: json.slice(index * size, (index + 1) * size),
+    }),
+  );
+  const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+  return Stream.unwrap(
+    LanguageModel.make({
+      generateText: () => Effect.die("only streaming is used here"),
+      streamText: () =>
+        Stream.make(
+          AiResponse.makePart("tool-params-start", { id, name, providerExecuted: false }),
+          ...deltas,
+          AiResponse.makePart("tool-params-end", { id }),
+          AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
+          authoringFinish("tool-calls"),
+        ).pipe(
+          Stream.mapEffect((part) => encodePart(part)),
+          Stream.orDie,
+        ),
+    }).pipe(
+      Effect.map((model) => model.streamText({ prompt: input.prompt, toolkit: input.toolkit! })),
+    ),
+  ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+};
 const authoringTool = (input: GatewayInput, name: string, params: unknown, hermes = false) => {
   const id = uuidv7();
   const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
@@ -1411,7 +1446,9 @@ describe("conversation documents", () => {
     );
   const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
     runtime.runPromise(
-      Effect.flatMap(DocumentService, (service) => service.list(seed.userId, seed.conversation.id)),
+      Effect.flatMap(DocumentService, (service) =>
+        service.list(seed.userId, { conversationId: seed.conversation.id }),
+      ),
     );
   // The tool-role messages of a prompt: what the continuation transcript feeds
   // back, as opposed to the trailing data, which carries the document on purpose.
@@ -1537,23 +1574,143 @@ describe("conversation documents", () => {
     },
   );
 
+  it("writes an edit into the open document while its arguments stream, then settles it once", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const frames: DocumentFrame[] = [];
+    let watcher: Fiber.Fiber<void> | null = null;
+    // Someone has the document open before the edit starts.
+    const watch = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            stateVector: null,
+            clientId: 7,
+          });
+          watcher = Effect.runFork(
+            Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
+          );
+        }),
+      ),
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      if (prompts.length === 2)
+        return Stream.fromEffectDrain(watch).pipe(
+          Stream.concat(
+            streamedTool(input, "edit_document", {
+              old: "- [ ] tag build",
+              new: "- [ ] tag the build and publish the release notes for everyone",
+            }),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toBe(
+        CHECKLIST.replace(
+          "- [ ] tag build",
+          "- [ ] tag the build and publish the release notes for everyone",
+        ),
+      );
+      // Written while streaming, then settled: more than the one write a plain edit makes.
+      const updates = frames.filter((frame) => frame.type === "update");
+      expect(updates.length).toBeGreaterThanOrEqual(2);
+      // The assistant's cursor showed while it wrote and was taken away after.
+      const cursors = frames.filter(
+        (frame) => frame.type === "awareness" && frame.clientId === null,
+      );
+      expect(cursors.length).toBeGreaterThanOrEqual(2);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+      ]);
+    } finally {
+      authoringScript = null;
+      if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("puts the text back when a streamed edit's decoded call is refused", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      if (prompts.length === 2)
+        // A revision that is not a number: the preview streams, the call is refused.
+        return streamedTool(input, "edit_document", {
+          old: "- [ ] tag build",
+          new: "- [ ] tag a completely different build instead",
+          expectedRevision: "soon",
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toBe(CHECKLIST);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect((detail.toolCalls[1]!.result as { outcome: string }).outcome).toBe("invalid");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("shows a person's edit between rounds and returns a preview when the anchor is gone", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];
     // Resolved when it runs: the document only exists once round one has landed.
     const personTicks = Effect.promise(() =>
       runtime.runPromise(
-        Effect.flatMap(DocumentService, (service) =>
-          service.list(seed.userId, seed.conversation.id).pipe(
-            Effect.flatMap(([document]) =>
-              service.toggleTask(seed.userId, {
-                documentId: document!.id,
-                ordinal: 0,
-                checked: true,
-              }),
-            ),
-          ),
-        ),
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          // The panel's tick: one marker character in a synced Y.Doc, pushed as a batch.
+          const doc = new Y.Doc();
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            stateVector: null,
+            clientId: doc.clientID,
+          });
+          const frame = Option.getOrThrow(yield* Stream.runHead(feed!));
+          if (frame.type !== "sync") throw new Error("expected sync");
+          Y.applyUpdate(doc, fromBase64(frame.update));
+          const text = doc.getText(DOCUMENT_TEXT);
+          const updates: Uint8Array[] = [];
+          doc.on("update", (update: Uint8Array) => updates.push(update));
+          const at = text.toString().indexOf("[ ]") + 1;
+          text.delete(at, 1);
+          text.insert(at, "x");
+          return yield* service.push(seed.userId, {
+            documentId: document!.id,
+            clientId: doc.clientID,
+            update: toBase64(Y.mergeUpdates(updates)),
+          });
+        }),
       ),
     );
     authoringScript = (input) => {

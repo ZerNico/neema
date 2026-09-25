@@ -4,6 +4,10 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo, type QueueGate } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
+import { eq } from "drizzle-orm";
+import { projects } from "~/db/schema/index.ts";
+import { projectRoleSql } from "~/modules/projects/server/access.ts";
+import { Db } from "~/server/db.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 
 const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
@@ -133,6 +137,18 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   const liveAgent = defaults.agent?.agentId
     ? yield* agentRepo.get(userId, defaults.agent.agentId)
     : null;
+  // Named even when access was lost, so the chat can say where it was.
+  const project = conversation.projectId
+    ? yield* Effect.flatMap(Db, (db) =>
+        db
+          .select({ id: projects.id, name: projects.name, role: projectRoleSql(userId) })
+          .from(projects)
+          .where(eq(projects.id, conversation.projectId!)),
+      ).pipe(
+        Effect.orDie,
+        Effect.map(([row]) => row ?? null),
+      )
+    : null;
   return {
     conversation,
     agentDrafts: defaults.agentDrafts ?? [],
@@ -162,5 +178,6 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     generations,
     queue,
     queueState: queueStateOf(queue, queueGate),
+    project: project ? { id: project.id, name: project.name, role: project.role } : null,
   };
 });

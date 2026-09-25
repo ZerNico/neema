@@ -1,12 +1,30 @@
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Cause, Deferred, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Redacted,
+  Stream,
+} from "effect";
+import { fromBase64, toBase64 } from "lib0/buffer";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
+import * as Y from "yjs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { conversationDocuments, conversations, messages, user } from "~/db/schema/index.ts";
+import { conversations, documents, documentUpdates, messages, user } from "~/db/schema/index.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
-import { DOCUMENT_LIMITS, type ConversationDocument } from "~/modules/documents/schema.ts";
+import {
+  DOCUMENT_LIMITS,
+  type EditableDocument,
+  type DocumentFrame,
+} from "~/modules/documents/schema.ts";
+import { DOCUMENT_TEXT } from "~/modules/documents/text.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
@@ -18,6 +36,7 @@ import { createTestDatabase, type TestDatabase } from "./database.ts";
 let database: TestDatabase;
 type Services = Db | DocumentRepo | DocumentService;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
+let appLayer: Layer.Layer<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const events: Array<{ userId: string | null; event: SyncEvent }> = [];
 let publishingFails = false;
@@ -46,7 +65,8 @@ beforeAll(async () => {
     Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(infrastructure),
   );
-  runtime = ManagedRuntime.make(DocumentService.layer.pipe(Layer.provideMerge(core)));
+  appLayer = DocumentService.layer.pipe(Layer.provideMerge(core));
+  runtime = ManagedRuntime.make(appLayer);
 }, 180_000);
 afterAll(async () => {
   await runtime?.dispose();
@@ -99,15 +119,58 @@ const service = <A, E>(f: (service: DocumentService["Service"]) => Effect.Effect
   run(Effect.flatMap(DocumentService, f));
 const create = (userId: string, conversationId: string, content = CHECKLIST, title = "Release") =>
   service((s) => s.create(userId, { conversationId, title, content })).then((r) => r.document);
-const get = (userId: string, document: Pick<ConversationDocument, "id">) =>
+const get = (userId: string, document: Pick<EditableDocument, "id">) =>
   service((s) => s.get(userId, document.id));
 const edit = (
   userId: string,
-  document: ConversationDocument,
+  document: EditableDocument,
   patch: { old: string; new: string; expectedRevision?: number },
 ) => service((s) => s.edit(userId, { documentId: document.id, ...patch }));
-const toggle = (userId: string, document: ConversationDocument, ordinal: number, checked = true) =>
-  service((s) => s.toggleTask(userId, { documentId: document.id, ordinal, checked }));
+/**
+ * A person's editor: a Y.Doc seeded from the live feed's first frame. `type`
+ * changes its text and pushes the batch that change produced.
+ */
+const openEditor = async (userId: string, document: Pick<EditableDocument, "id">) => {
+  const doc = new Y.Doc();
+  const text = doc.getText(DOCUMENT_TEXT);
+  const feed = await service((s) =>
+    s.subscribe(userId, document.id, { stateVector: null, clientId: doc.clientID }),
+  );
+  if (!feed) throw new Error("expected a feed");
+  const first = await run(Stream.runHead(feed));
+  const frame = Option.getOrThrow(first);
+  if (frame.type !== "sync") throw new Error(`expected sync, got ${frame.type}`);
+  Y.applyUpdate(doc, fromBase64(frame.update));
+  const batch = (change: (text: Y.Text) => void) => {
+    const updates: Uint8Array[] = [];
+    const collect = (update: Uint8Array) => updates.push(update);
+    doc.on("update", collect);
+    change(text);
+    doc.off("update", collect);
+    return toBase64(Y.mergeUpdates(updates));
+  };
+  const push = (update: string) =>
+    service((s) => s.push(userId, { documentId: document.id, clientId: doc.clientID, update }));
+  return {
+    doc,
+    text,
+    batch,
+    push,
+    type: (change: (text: Y.Text) => void) => push(batch(change)),
+  };
+};
+/** Ticks one task the way the panel does: the single marker character. */
+const tick = (text: Y.Text, line: string) => {
+  const at = text.toString().indexOf(line) + line.indexOf("[ ]") + 1;
+  text.delete(at, 1);
+  text.insert(at, "x");
+};
+const storedUpdates = (documentId: string) =>
+  run(
+    Effect.flatMap(Db, (db) =>
+      db.select().from(documentUpdates).where(eq(documentUpdates.documentId, documentId)),
+    ),
+  );
 
 const interrupted = (exit: Exit.Exit<unknown, unknown>) => {
   expect(Exit.isFailure(exit)).toBe(true);
@@ -118,19 +181,6 @@ const controller = async () => {
   await client.connect();
   const { rows } = await client.query<{ pid: number }>("select pg_backend_pid() as pid");
   return { client, pid: rows[0]!.pid };
-};
-const waitForBlocked = async (client: Client, blocker?: number) => {
-  await expect
-    .poll(async () => {
-      const { rows } = await client.query<{ count: number }>(
-        blocker === undefined
-          ? "select count(*)::int as count from pg_stat_activity where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0"
-          : "select count(*)::int as count from pg_stat_activity where $1::int = any(pg_blocking_pids(pid))",
-        blocker === undefined ? [] : [blocker],
-      );
-      return rows[0]!.count;
-    })
-    .toBeGreaterThan(0);
 };
 
 describe("model patches", () => {
@@ -186,8 +236,8 @@ describe("model patches", () => {
   it("flags a stale expectedRevision on edit without refusing it", async () => {
     const owner = await createUser();
     const created = await create(owner, await createConversation(owner));
-    const ticked = await toggle(owner, created, 0);
-    expect(ticked).toMatchObject({ outcome: "updated", document: { revision: 2 } });
+    const editor = await openEditor(owner, created);
+    expect(await editor.type((text) => tick(text, "- [ ] write notes"))).toEqual({ revision: 2 });
     const result = await edit(owner, created, {
       old: "- [ ] ship",
       new: "- [ ] ship it",
@@ -244,20 +294,22 @@ describe("model patches", () => {
     interrupted(await runtime.runPromiseExit(write));
     interrupted(await runtime.runPromiseExit(creating));
     expect(await get(owner, created)).toEqual(created);
-    expect(await service((s) => s.list(owner, conversationId))).toEqual([created]);
+    expect(await service((s) => s.list(owner, { conversationId: conversationId }))).toEqual([
+      created,
+    ]);
     expect(changedEvents()).toHaveLength(1);
   });
 });
 
 describe("person and model writing together", () => {
-  it("lands a tick on one line while a model edit to another is held open", async () => {
+  it("merges a person's concurrent batch with a model edit held open", async () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
     const created = await create(owner, conversationId);
+    const editor = await openEditor(owner, created);
     const fence = await generation(owner, conversationId);
     const reached = Deferred.makeUnsafe<void>();
     const release = Deferred.makeUnsafe<void>();
-    const { client } = await controller();
     try {
       const model = run(
         Effect.flatMap(DocumentService, (s) =>
@@ -273,17 +325,14 @@ describe("person and model writing together", () => {
         ),
       );
       await run(Deferred.await(reached));
-      // Ordinal 5 is "- [ ] announce", the eighth line of the source.
-      const tick = toggle(owner, created, 5);
-      await waitForBlocked(client);
+      // Typed against the text before the model's edit, and sent while it is held.
+      const typed = editor.type((text) => tick(text, "- [ ] announce"));
       await run(Deferred.succeed(release, undefined));
       expect((await model).outcome).toBe("updated");
-      const ticked = await tick;
-      expect(ticked).toMatchObject({
-        outcome: "updated",
-        document: { revision: 3, lastEditedBy: "user" },
-      });
-      expect(ticked.document.content.split("\n")).toEqual([
+      expect(await typed).toEqual({ revision: 3 });
+      const stored = await get(owner, created);
+      expect(stored).toMatchObject({ revision: 3, lastEditedBy: "user", lastEditorUserId: owner });
+      expect(stored!.content.split("\n")).toEqual([
         "# Release",
         "- [ ] write the notes",
         "- [ ] tag build",
@@ -293,59 +342,94 @@ describe("person and model writing together", () => {
         "- [ ] ship",
         "- [x] announce",
       ]);
-      expect(changedEvents()).toHaveLength(3);
     } finally {
       await run(Deferred.succeed(release, undefined));
+    }
+  });
+
+  it("stores a person's batch while another transaction holds the conversation lock", async () => {
+    const owner = await createUser();
+    const conversationId = await createConversation(owner);
+    const created = await create(owner, conversationId);
+    const editor = await openEditor(owner, created);
+    const { client } = await controller();
+    try {
+      await client.query("begin");
+      await client.query("select id from conversations where id = $1 for update", [conversationId]);
+      expect(await editor.type((text) => tick(text, "- [ ] ship"))).toEqual({ revision: 2 });
+      expect((await get(owner, created))!.content).toContain("- [x] ship");
+    } finally {
+      await client.query("rollback");
       await client.end();
     }
   });
 
-  it("toggles by ordinal across nested and numbered items and refuses a missing one", async () => {
+  it("sends each batch to every other open editor and never back to its own", async () => {
     const owner = await createUser();
     const created = await create(owner, await createConversation(owner));
-    const nested = await toggle(owner, created, 2);
-    expect(nested.document.content).toContain("  - [x] nested step");
-    const numbered = await toggle(owner, nested.document, 3);
-    expect(numbered.document.content).toContain("1. [x] numbered step");
-    expect(numbered.document.content).toContain("- [ ] ship");
-    const untick = await toggle(owner, numbered.document, 2, false);
-    expect(untick.document.content).toContain("  - [ ] nested step");
-    expect(untick.document.revision).toBe(4);
-    expect(await toggle(owner, untick.document, 3, true)).toEqual({
-      outcome: "unchanged",
-      document: untick.document,
-    });
-    expect(await toggle(owner, untick.document, 99)).toEqual({
-      outcome: "no_match",
-      document: untick.document,
-    });
-    expect(
-      await service((s) =>
-        s.toggleTask(owner, {
-          documentId: created.id,
-          ordinal: 0,
-          checked: true,
-          expectedRevision: 1,
-        }),
-      ),
-    ).toEqual({ outcome: "conflict", document: untick.document });
+    const first = await openEditor(owner, created);
+    const second = await openEditor(owner, created);
+    const feed = await service((s) =>
+      s.subscribe(owner, created.id, {
+        stateVector: Y.encodeStateVector(second.doc),
+        clientId: second.doc.clientID,
+      }),
+    );
+    const received = Effect.runFork(feed!.pipe(Stream.take(2), Stream.runCollect));
+    // Both editors type at once, each against the same starting text.
+    await Promise.all([
+      first.type((text) => tick(text, "- [ ] write notes")),
+      second.type((text) => tick(text, "- [ ] ship")),
+    ]);
+    const frames = [...(await Effect.runPromise(Fiber.join(received)))] as DocumentFrame[];
+    expect(frames[0]).toMatchObject({ type: "sync" });
+    expect(frames[1]).toMatchObject({ type: "update", clientId: first.doc.clientID });
+    if (frames[1]!.type !== "update") throw new Error("expected update");
+    Y.applyUpdate(second.doc, fromBase64(frames[1]!.update));
+    const stored = await get(owner, created);
+    expect(second.text.toString()).toBe(stored!.content);
+    expect(stored!.content).toContain("- [x] write notes");
+    expect(stored!.content).toContain("- [x] ship");
+    expect(stored!.revision).toBe(3);
   });
 
-  it("saves the person's editor under CAS and marks the document theirs", async () => {
+  it("treats a resent batch as already stored", async () => {
     const owner = await createUser();
     const created = await create(owner, await createConversation(owner));
-    const results = await Promise.all([
-      service((s) =>
-        s.writeUser(owner, { documentId: created.id, content: "A", expectedRevision: 1 }),
-      ),
-      service((s) =>
-        s.writeUser(owner, { documentId: created.id, content: "B", expectedRevision: 1 }),
-      ),
-    ]);
-    expect(results.map(({ outcome }) => outcome).sort()).toEqual(["conflict", "updated"]);
-    expect(results[0]!.document).toEqual(results[1]!.document);
-    expect(results[0]!.document).toMatchObject({ revision: 2, lastEditedBy: "user" });
-    expect(changedEvents()).toHaveLength(2);
+    const editor = await openEditor(owner, created);
+    const batch = editor.batch((text) => tick(text, "- [ ] ship"));
+    expect(await editor.push(batch)).toEqual({ revision: 2 });
+    expect(await editor.push(batch)).toEqual({ revision: 2 });
+    expect(await storedUpdates(created.id)).toHaveLength(1);
+  });
+
+  it("folds batches into the snapshot and rebuilds the same text in a new process", async () => {
+    const owner = await createUser();
+    const created = await create(owner, await createConversation(owner), "");
+    const editor = await openEditor(owner, created);
+    for (let index = 0; index < 70; index++)
+      // oxlint-disable-next-line eslint/no-await-in-loop -- One batch per round trip, like typing.
+      await editor.type((text) => text.insert(text.length, `${index}\n`));
+    const stored = await get(owner, created);
+    expect(stored!.revision).toBe(71);
+    expect((await storedUpdates(created.id)).length).toBeLessThan(64);
+    // A fresh runtime has no entry in memory and must rebuild from storage alone.
+    const fresh = ManagedRuntime.make(appLayer);
+    try {
+      const feed = await fresh.runPromise(
+        Effect.flatMap(DocumentService, (s) =>
+          s.subscribe(owner, created.id, { stateVector: null, clientId: null }),
+        ),
+      );
+      const frame = Option.getOrThrow(await fresh.runPromise(Stream.runHead(feed!)));
+      if (frame.type !== "sync") throw new Error("expected sync");
+      const rebuilt = new Y.Doc();
+      Y.applyUpdate(rebuilt, fromBase64(frame.update));
+      expect(rebuilt.getText(DOCUMENT_TEXT).toString()).toBe(stored!.content);
+      expect(frame.revision).toBe(71);
+    } finally {
+      await fresh.dispose();
+    }
   });
 });
 
@@ -356,7 +440,7 @@ describe("ownership, limits and sync", () => {
     const conversationId = await createConversation(owner);
     const created = await create(owner, conversationId);
     expect(await get(stranger, created)).toBeNull();
-    expect(await service((s) => s.list(stranger, conversationId))).toEqual([]);
+    expect(await service((s) => s.list(stranger, { conversationId: conversationId }))).toEqual([]);
     await Promise.all(
       [
         service((s) => s.create(stranger, { conversationId, title: "Intruder", content: "" })),
@@ -364,14 +448,28 @@ describe("ownership, limits and sync", () => {
         service((s) =>
           s.replace(stranger, { documentId: created.id, content: "", expectedRevision: 1 }),
         ),
-        service((s) =>
-          s.writeUser(stranger, { documentId: created.id, content: "", expectedRevision: 1 }),
-        ),
-        toggle(stranger, created, 0),
+        (async () => {
+          const editor = await openEditor(owner, created);
+          const batch = editor.batch((text) => tick(text, "- [ ] ship"));
+          return service((s) =>
+            s.push(stranger, {
+              documentId: created.id,
+              clientId: editor.doc.clientID,
+              update: batch,
+            }),
+          );
+        })(),
       ].map((action) => expect(action).rejects.toThrow()),
     );
+    expect(
+      await service((s) =>
+        s.subscribe(stranger, created.id, { stateVector: null, clientId: null }),
+      ),
+    ).toBeNull();
     expect(await get(owner, created)).toEqual(created);
-    expect(await service((s) => s.list(owner, conversationId))).toEqual([created]);
+    expect(await service((s) => s.list(owner, { conversationId: conversationId }))).toEqual([
+      created,
+    ]);
   });
 
   it("rejects content over the cap as invalid before and after a patch", async () => {
@@ -384,13 +482,16 @@ describe("ownership, limits and sync", () => {
     ).rejects.toMatchObject(overCap);
     const created = await create(owner, conversationId, "small");
     await expect(edit(owner, created, { old: "small", new: huge })).rejects.toMatchObject(overCap);
-    await expect(
-      service((s) =>
-        s.writeUser(owner, { documentId: created.id, content: huge, expectedRevision: 1 }),
-      ),
-    ).rejects.toMatchObject(overCap);
+    const editor = await openEditor(owner, created);
+    await expect(editor.type((text) => text.insert(0, huge))).rejects.toMatchObject(overCap);
     expect(await get(owner, created)).toEqual(created);
-    expect(await service((s) => s.list(owner, conversationId))).toEqual([created]);
+    // The refused batch left nothing behind in memory: a fresh editor starts from storage.
+    const next = await openEditor(owner, created);
+    expect(next.text.toString()).toBe("small");
+    expect(await service((s) => s.list(owner, { conversationId: conversationId }))).toEqual([
+      created,
+    ]);
+    expect(await next.type((text) => text.insert(5, "er"))).toEqual({ revision: 2 });
   });
 
   it("publishes exactly one event per successful write and survives a bus failure", async () => {
@@ -450,10 +551,7 @@ describe("ownership, limits and sync", () => {
     expect(
       await run(
         Effect.flatMap(Db, (db) =>
-          db
-            .select()
-            .from(conversationDocuments)
-            .where(eq(conversationDocuments.conversationId, conversationId)),
+          db.select().from(documents).where(eq(documents.conversationId, conversationId)),
         ),
       ),
     ).toEqual([]);

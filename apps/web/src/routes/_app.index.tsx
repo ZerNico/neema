@@ -16,7 +16,7 @@ export const Route = createFileRoute("/_app/")({
   // server still authorizes the install at send time.
   validateSearch: (
     search: Record<string, unknown>,
-  ): { agent?: string; skill?: string; temporary?: 1 } => ({
+  ): { agent?: string; skill?: string; temporary?: 1; project?: string } => ({
     ...(typeof search["agent"] === "string" && search["agent"].length <= 128
       ? { agent: search["agent"] }
       : {}),
@@ -25,6 +25,10 @@ export const Route = createFileRoute("/_app/")({
       : {}),
     // In the address so a reload keeps the choice.
     ...(search["temporary"] === 1 || search["temporary"] === "1" ? { temporary: 1 as const } : {}),
+    // `?project=<id>` starts the chat inside a project; the send authorizes it.
+    ...(typeof search["project"] === "string" && search["project"].length <= 128
+      ? { project: search["project"] }
+      : {}),
   }),
   loader: async ({ context }) => {
     await Promise.all([
@@ -45,7 +49,7 @@ export const Route = createFileRoute("/_app/")({
 function NewChatPage() {
   // `user` comes from the parent `_app` route's beforeLoad context.
   const { user } = Route.useRouteContext();
-  const { agent, skill, temporary } = Route.useSearch();
+  const { agent, skill, temporary, project } = Route.useSearch();
   const router = useRouter();
   const location = useLocation();
   // oxlint-disable eslint/no-underscore-dangle -- TanStack owns this history entry key.
@@ -60,15 +64,17 @@ function NewChatPage() {
   // oxlint-enable eslint/no-underscore-dangle
   return (
     <NewChatView
-      key={JSON.stringify([agent, skill])}
+      key={JSON.stringify([agent, skill, project])}
       user={user}
       temporary={temporary === 1}
+      projectId={project ?? null}
       onTemporaryChange={(next) =>
         void router.navigate({
           to: "/",
-          search: ({ agent: a, skill: s }) => ({
+          search: ({ agent: a, skill: s, project: p }) => ({
             ...(a !== undefined ? { agent: a } : {}),
             ...(s !== undefined ? { skill: s } : {}),
+            ...(p !== undefined ? { project: p } : {}),
             ...(next ? { temporary: 1 as const } : {}),
           }),
           replace: true,

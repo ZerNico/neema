@@ -3,6 +3,8 @@ import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
+import { projectCan } from "~/modules/projects/schema.ts";
+import { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
 import {
   prepareResearchTool,
   RESEARCH_APP_POLICY,
@@ -46,6 +48,7 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
 import { fileForModel } from "./file-for-model.ts";
 import {
+  ensureGenerationLive,
   GenerationFence,
   GenerationSettled,
   lockGeneration,
@@ -320,6 +323,7 @@ export class StreamEngine extends Context.Service<
       const documentService = yield* DocumentService;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
+      const projectMemory = yield* ProjectMemoryService;
       const knowledgeSearch = yield* KnowledgeSearch;
       const knowledgeService = yield* KnowledgeService;
       const skillReader = yield* SkillReader;
@@ -727,6 +731,14 @@ export class StreamEngine extends Context.Service<
             messageId: input.messageId,
             openDocumentId: input.openDocumentId,
             writeGuard,
+            liveGuard: (tx: DbTx) => (fence ? ensureGenerationLive(tx, fence) : Effect.interrupt),
+            project: config.resolvedProject
+              ? {
+                  id: config.resolvedProject.id,
+                  name: config.resolvedProject.name,
+                  canEdit: projectCan.edit(config.resolvedProject.role),
+                }
+              : null,
           });
           // One indexer and one URL authority for the whole generation. Search
           // hits extend the reader's authority immediately, while user URLs and
@@ -874,6 +886,8 @@ export class StreamEngine extends Context.Service<
           );
           const conversationContext = yield* prepareConversationContext({
             memory,
+            projectMemory,
+            project: config.resolvedProject ?? null,
             userId: input.userId,
             conversationId: input.conversationId,
             history: completed,
@@ -1165,8 +1179,17 @@ export class StreamEngine extends Context.Service<
                 ]
               : []),
             ...conversationContext.messages(),
-            // Agent instructions are user-level configuration: they shape the
-            // answer but cannot override application policy above them.
+            // Project and agent instructions are user-level configuration: they
+            // shape the answer but cannot override application policy above
+            // them. The project's come first; an agent picked in it refines them.
+            ...(config.resolvedProject?.instructions.trim()
+              ? [
+                  {
+                    role: "user" as const,
+                    content: `<project-instructions name=${JSON.stringify(config.resolvedProject.name)}>\n${config.resolvedProject.instructions}\n</project-instructions>`,
+                  },
+                ]
+              : []),
             ...(config.resolvedAgent?.instructions.trim()
               ? [
                   {
@@ -2217,10 +2240,12 @@ export class StreamEngine extends Context.Service<
                             const result = Option.getOrUndefined(decodedMemory);
                             const outcome = result?.outcome ?? "rejected";
                             const reason = result?.reason;
+                            const scope =
+                              result?.scope === "project" ? { scope: "project" as const } : {};
                             const ok = !part.isFailure && result?.ok === true;
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: { outcome, ...(reason ? { reason } : {}) },
+                              result: { outcome, ...(reason ? { reason } : {}), ...scope },
                               status: ok ? "complete" : "error",
                               ...(ok
                                 ? {}
@@ -2240,6 +2265,7 @@ export class StreamEngine extends Context.Service<
                               ok,
                               outcome,
                               ...(reason ? { reason } : {}),
+                              ...scope,
                               ...(ok ? {} : { error: "memory was not saved" }),
                             });
                             return;
@@ -2583,12 +2609,22 @@ export class StreamEngine extends Context.Service<
                         case "error": {
                           return yield* Effect.fail(part.error);
                         }
+                        // An edit_document call's arguments, as they stream: the
+                        // open document shows the edit being written. The
+                        // decoded call settles it.
+                        case "tool-params-start":
+                          documents.live.start(part.id, part.name);
+                          return;
+                        case "tool-params-delta":
+                          yield* documents.live.delta(part.id, part.delta);
+                          return;
                         default:
                           return;
                       }
                     }),
                   ),
                   Stream.runDrain,
+                  Effect.ensuring(documents.live.close),
                 );
             });
 
@@ -3047,6 +3083,7 @@ export class StreamEngine extends Context.Service<
     Layer.provideMerge(ScheduleDraftService.layer),
     Layer.provideMerge(AgentDraftService.layer),
     Layer.provideMerge(DocumentService.layer),
+    Layer.provideMerge(ProjectMemoryService.layer),
     Layer.provideMerge(AgentRepo.layer),
     Layer.provideMerge(KnowledgeRepo.layer),
     Layer.provideMerge(SkillReader.layer),

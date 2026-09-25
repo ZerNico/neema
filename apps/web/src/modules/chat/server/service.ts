@@ -32,6 +32,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
+import { resolveProject } from "~/modules/projects/server/access.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
@@ -637,6 +638,20 @@ function makeChatService() {
       ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
         Effect.gen(function* () {
+          // Read here like an agent, so retry and edit meet the project as it is
+          // now, and a person who lost access cannot keep working in it.
+          const resolvedProject = defaults.projectId
+            ? yield* resolveProject(tx, input.userId, defaults.projectId).pipe(
+                Effect.catchTag("ProjectNotAvailable", () =>
+                  Effect.fail(
+                    new InvalidMessage({
+                      reason:
+                        "This chat’s project is no longer available to you. Remove the chat from the project to continue.",
+                    }),
+                  ),
+                ),
+              )
+            : null;
           const allowedSearch = yield* policy.can(input.userId, "webSearch", tx);
           const allowedResearch = yield* policy.can(input.userId, "deepResearch", tx);
           const searchEnabled =
@@ -719,6 +734,7 @@ function makeChatService() {
               // Only a fresh send adds files; retry and edit replay the list.
               workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
               integrationGrants: input.integrationGrants ?? null,
+              resolvedProject,
             };
           }
           const agent = defaults.agent
@@ -752,7 +768,11 @@ function makeChatService() {
             model: input.model,
             searchAvailable: input.searchAvailable,
           });
-          return { ...resolved, integrationGrants: input.integrationGrants ?? null };
+          return {
+            ...resolved,
+            integrationGrants: input.integrationGrants ?? null,
+            resolvedProject,
+          };
         }).pipe(
           Effect.provideService(KnowledgeRepo, knowledge),
           Effect.provideService(AgentRepo, agents),
@@ -1064,6 +1084,12 @@ function makeChatService() {
         input.conversation.mode === "work"
       )
         return yield* new InvalidMessage({ reason: "a work chat cannot be temporary" });
+      if (
+        input.conversation.kind === "new" &&
+        input.conversation.temporary &&
+        input.conversation.projectId
+      )
+        return yield* new InvalidMessage({ reason: "a temporary chat cannot join a project" });
 
       // The association is fixed at creation; its configuration is live for
       // every subsequent attempt. Swapping or removal is not a chat setting.

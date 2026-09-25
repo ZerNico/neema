@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { describe, expect, it } from "vitest";
-import type { ConversationDocument } from "../schema.ts";
+import type { EditableDocument } from "../schema.ts";
 import {
   FOCUS_CHARS,
   FOCUS_LINES,
@@ -16,17 +16,22 @@ const countOccurrences = (haystack: string, needle: string) => {
   for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) count++;
   return count;
 };
-function fakeService(initial: ConversationDocument[] = []) {
+function fakeService(initial: EditableDocument[] = []) {
   nextId = 0;
   const rows = new Map(initial.map((document) => [document.id, document]));
   const stamp = new Date(0).toISOString();
   const service: DocumentToolService = {
     list: () => Effect.sync(() => [...rows.values()]),
+    beginLive: () => Effect.succeed(null),
+    updateLive: () => Effect.succeed(false),
+    finishLive: () => Effect.succeed(null),
     create: (_userId, input) =>
       Effect.sync(() => {
-        const document: ConversationDocument = {
+        const document: EditableDocument = {
           id: `doc-${++nextId}`,
-          conversationId: input.conversationId,
+          conversationId: input.conversationId ?? null,
+          projectId: input.projectId ?? null,
+          canEdit: true,
           title: input.title,
           content: input.content,
           revision: 1,

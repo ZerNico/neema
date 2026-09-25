@@ -1,4 +1,9 @@
-import { Calendar03Icon, GitBranchIcon, IncognitoIcon } from "@hugeicons/core-free-icons";
+import {
+  Calendar03Icon,
+  Folder01Icon,
+  GitBranchIcon,
+  IncognitoIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -34,8 +39,11 @@ export function ConversationCrumbs({
   branchedFrom,
   agent,
   temporary = false,
+  project,
 }: {
   conversationId: string;
+  /** The project this chat works in; a null role means access was lost. */
+  project?: { id: string; name: string; role: string | null } | null | undefined;
   /** Hidden from lists and without memory until kept. */
   temporary?: boolean;
   title: string | null;
@@ -51,6 +59,7 @@ export function ConversationCrumbs({
         <h1 className="flex min-w-0 text-sm">
           <ConversationTitle conversationId={conversationId} title={title} registry={registry} />
         </h1>
+        {project ? <ProjectTag project={project} /> : null}
         {agent ? <AgentTag agent={agent} /> : null}
         {schedule ? <ScheduleTag schedule={schedule} /> : null}
         {branchedFrom ? (
@@ -176,6 +185,22 @@ function AgentTag({ agent }: { agent: { id: string | null; name: string | null; 
       <HugeiconsIcon icon={agentIcon(agent.icon ?? "robot")} strokeWidth={2} aria-hidden />
       <span className="sr-only">Agent:</span>
       <span className="truncate">{name}</span>
+    </Badge>
+  );
+}
+
+function ProjectTag({ project }: { project: { id: string; name: string; role: string | null } }) {
+  return (
+    <Badge
+      variant={project.role ? "secondary" : "destructive"}
+      className={tagClassName}
+      render={<Link to="/projects/$projectId" params={{ projectId: project.id }} />}
+    >
+      <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} aria-hidden />
+      <span className="sr-only">Project:</span>
+      <span className="truncate">
+        {project.role ? project.name : `${project.name} (no access)`}
+      </span>
     </Badge>
   );
 }

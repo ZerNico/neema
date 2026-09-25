@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
@@ -139,6 +140,8 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
     .references(() => messages.id, { onDelete: "cascade" }),
   agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
   resolvedAgent: jsonb("resolved_agent").$type<ResolvedAgentConfig>(),
+  /** The project this attempt ran in, as it stood then; null outside a project. */
+  resolvedProject: jsonb("resolved_project").$type<ResolvedProject>(),
   /** Original standalone inputs, including overlaps with agent dependencies. */
   standaloneCollectionIds: jsonb("standalone_collection_ids")
     .$type<string[]>()

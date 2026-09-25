@@ -21,13 +21,14 @@ export interface ConversationCursorValue {
  * Keyed under the existing `["conversations"]` prefix so the sync bus's
  * prefix invalidation still covers every search variant.
  */
-export const conversationsInfiniteQuery = (query = "") =>
+export const conversationsInfiniteQuery = (query = "", outsideProjects = false) =>
   infiniteQueryOptions({
-    queryKey: ["conversations", { query }],
+    queryKey: ["conversations", { query, outsideProjects }],
     queryFn: ({ pageParam }) =>
       listConversations({
         data: {
           query,
+          ...(outsideProjects ? { outsideProjects } : {}),
           limit: CONVERSATIONS_PAGE_SIZE,
           ...(pageParam === null ? {} : { cursor: pageParam }),
         },

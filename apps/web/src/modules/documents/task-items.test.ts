@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listTaskItems, toggleTaskItem } from "./task-items.ts";
+import { listTaskItems, taskMarkerOffset } from "./task-items.ts";
 
 const source = [
   "# Plan",
@@ -25,19 +25,21 @@ describe("task items", () => {
     ]);
   });
 
-  it("rewrites exactly the addressed line", () => {
-    const toggled = toggleTaskItem(source, 2, true)!;
+  it("points at the marker character of exactly the addressed task", () => {
+    const marker = (ordinal: number) => source[taskMarkerOffset(source, ordinal)!];
+    expect(marker(0)).toBe(" ");
+    expect(marker(1)).toBe("x");
+    expect(marker(3)).toBe("X");
+    const offset = taskMarkerOffset(source, 2)!;
+    const ticked = `${source.slice(0, offset)}x${source.slice(offset + 1)}`;
     const before = source.split("\n");
-    const after = toggled.split("\n");
-    expect(after[4]).toBe("1. [x] numbered");
-    expect(after.filter((line, i) => line !== before[i])).toEqual(["1. [x] numbered"]);
-    expect(toggleTaskItem(source, 3, false)!.split("\n")[5]).toBe("2) [ ] paren");
-    expect(toggleTaskItem(source, 1, true)).toBe(source);
+    expect(ticked.split("\n").filter((line, i) => line !== before[i])).toEqual(["1. [x] numbered"]);
   });
 
-  it("preserves CRLF endings and refuses an ordinal out of range", () => {
-    expect(toggleTaskItem("- [ ] a\r\n- [ ] b\r\n", 1, true)).toBe("- [ ] a\r\n- [x] b\r\n");
-    expect(toggleTaskItem(source, 6, true)).toBeNull();
-    expect(toggleTaskItem("", 0, true)).toBeNull();
+  it("counts CRLF lines and refuses an ordinal out of range", () => {
+    const crlf = "- [ ] a\r\n- [ ] b\r\n";
+    expect(taskMarkerOffset(crlf, 1)).toBe(crlf.lastIndexOf("[ ]") + 1);
+    expect(taskMarkerOffset(source, 6)).toBeNull();
+    expect(taskMarkerOffset("", 0)).toBeNull();
   });
 });

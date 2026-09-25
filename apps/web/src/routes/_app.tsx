@@ -39,7 +39,7 @@ export const Route = createFileRoute("/_app")({
     return { user, identity };
   },
   loader: async ({ context }) => {
-    await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery(""));
+    await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery("", true));
     return { user: context.user, identity: context.identity };
   },
   component: AppLayout,

@@ -2,8 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationDocument } from "../schema.ts";
-import { getDocument, saveDocument, toggleDocumentTask } from "../server/document-functions.ts";
+import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
+import type { EditableDocument } from "../schema.ts";
+import { getDocument, pushDocument } from "../server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -23,22 +24,11 @@ const blocker = vi.hoisted(() => ({
 }));
 vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
-  saveDocument: vi.fn(),
-  toggleDocumentTask: vi.fn(),
+  pushDocument: vi.fn(),
   listDocuments: vi.fn(),
 }));
-vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
-  default: ({
-    value,
-    onChange,
-    label,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-    label: string;
-  }) => (
-    <textarea aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />
-  ),
+vi.mock("./document-source-editor.tsx", async () => ({
+  default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useRouterState: () => "/chat/conversation",
@@ -48,9 +38,9 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => false }));
 
-let server: ConversationDocument | null;
+let server: ReturnType<typeof fakeDocumentServer>;
 let panel: DetailPanelApi;
-const fresh = (): ConversationDocument => ({
+const fresh = (): EditableDocument => ({
   id: "document-1",
   conversationId: "conversation",
   createdByMessageId: "m-answer",
@@ -58,6 +48,8 @@ const fresh = (): ConversationDocument => ({
   content: "Original",
   revision: 1,
   lastEditedBy: "model",
+  projectId: null,
+  canEdit: true,
   createdAt: "2026-09-15T10:00:00Z",
   updatedAt: "2026-09-15T10:00:00Z",
 });
@@ -93,33 +85,28 @@ const fixture = async (onGone = vi.fn()) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  server = fresh();
+  server = fakeDocumentServer();
+  server.seed(fresh());
+  vi.stubGlobal("EventSource", server.EventSource);
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   );
-  vi.mocked(getDocument).mockImplementation(async () => server);
-  vi.mocked(saveDocument).mockImplementation(async ({ data }) => {
-    if (data.expectedRevision !== server!.revision)
-      return { outcome: "conflict" as const, document: server! };
-    server = {
-      ...server!,
-      content: data.content,
-      revision: server!.revision + 1,
-      lastEditedBy: "user",
-    };
-    return { outcome: "updated" as const, document: server };
-  });
-  vi.mocked(toggleDocumentTask).mockRejectedValue(new Error("not used"));
+  vi.mocked(getDocument).mockImplementation(async ({ data }) => server.row(data.documentId));
+  vi.mocked(pushDocument).mockImplementation(server.push);
 });
 
 describe("conversation-owned document", () => {
-  it("retains source when the panel closes or another detail replaces it", async () => {
+  it("keeps typing made just before the panel closes, and reopens on the stored text", async () => {
     await fixture();
     const source = await screen.findByRole("textbox", { name: "Document source" });
+    const release = server.holdPushes();
     fireEvent.change(source, { target: { value: "Persistent local source" } });
     act(() => panel.open({ id: "sources", title: "Sources", body: <p>Source detail</p> }));
     expect(screen.getByText("Source detail")).toBeVisible();
+    // The closed editor's connection stays until its last batch is stored.
+    await act(async () => release());
+    await waitFor(() => expect(server.content("document-1")).toBe("Persistent local source"));
 
     fireEvent.click(screen.getByRole("button", { name: "Open document: Notes" }));
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
@@ -127,37 +114,32 @@ describe("conversation-owned document", () => {
     );
   });
 
-  it("flushes before dependent actions and blocks on an unresolved remote edit", async () => {
-    const { client, ref } = await fixture();
+  it("flushes before dependent actions and holds navigation until typing is stored", async () => {
+    const { ref } = await fixture();
     const source = await screen.findByRole("textbox", { name: "Document source" });
+    const release = server.holdPushes();
     fireEvent.change(source, { target: { value: "Saved before send" } });
-    await act(async () => {
-      expect(await ref.current!.flush()).toBe(true);
+    await waitFor(() => expect(blocker.current!.enableBeforeUnload()).toBe(true));
+    let flushed: Promise<boolean> | undefined;
+    act(() => {
+      flushed = ref.current!.flush();
     });
-    expect(server!.content).toBe("Saved before send");
-
-    fireEvent.change(source, { target: { value: "Local conflict" } });
-    server = { ...server!, content: "Remote conflict", revision: server!.revision + 1 };
-    act(() => client.setQueryData(["documents", "document-1"], server));
+    await act(async () => release());
     await act(async () => {
-      expect(await ref.current!.flush()).toBe(false);
+      expect(await flushed).toBe(true);
     });
-    expect(source).toHaveValue("Local conflict");
-    expect(blocker.current!.enableBeforeUnload()).toBe(true);
+    expect(server.content("document-1")).toBe("Saved before send");
+    expect(blocker.current!.enableBeforeUnload()).toBe(false);
     await act(async () => {
-      expect(await blocker.current!.shouldBlockFn()).toBe(true);
+      expect(await blocker.current!.shouldBlockFn()).toBe(false);
     });
-    await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Document conflict" })).toBeVisible(),
-    );
   });
 
   it("forgets a document the conversation rewound away", async () => {
     const onGone = vi.fn();
-    const { client } = await fixture(onGone);
+    await fixture(onGone);
     await screen.findByRole("textbox", { name: "Document source" });
-    server = null;
-    act(() => client.setQueryData(["documents", "document-1"], null));
+    act(() => server.remove("document-1"));
 
     await waitFor(() => expect(onGone).toHaveBeenCalledWith("document-1"));
   });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import CodeMirror, { EditorView } from "@uiw/react-codemirror";
+import CodeMirror, { EditorView, type Extension } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { LanguageDescription, LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -39,6 +39,16 @@ const theme = EditorView.theme({
 // with it, so the grammar follows the file name. `language-data` loads each
 // one on demand, which also highlights fenced code inside SKILL.md.
 const markdownExtensions = [markdown({ codeLanguages: languages })];
+// Module constants: the wrapper reconfigures the whole editor whenever this
+// object's identity changes, which a literal in render would do every time.
+const basicSetup = {
+  lineNumbers: false,
+  foldGutter: false,
+  highlightActiveLine: false,
+  highlightActiveLineGutter: false,
+};
+// A shared document's undo belongs to its Yjs binding, never CodeMirror's history.
+const collaborativeSetup = { ...basicSetup, history: false, historyKeymap: false };
 const plainText: never[] = [];
 export default function SkillTextEditor({
   value,
@@ -48,16 +58,25 @@ export default function SkillTextEditor({
   autoFocus = false,
   readOnly = false,
   focusRequest,
+  collaboration,
 }: {
+  /** Read once when the editor mounts if `collaboration` owns the text. */
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   /** Relative path in the package; picks the grammar. */
   path: string;
   label: string;
   autoFocus?: boolean;
   readOnly?: boolean;
   focusRequest?: { line: number; sequence: number } | undefined;
+  /**
+   * A binding that owns the text and its undo history (a shared document).
+   * The editor then stops being controlled: `value` seeds it once, and
+   * CodeMirror's own history is off so undo never reverts someone else.
+   */
+  collaboration?: Extension | undefined;
 }) {
+  const [initialValue] = useState(value);
   const [view, setView] = useState<EditorView | null>(null);
   // Keyed by path, so a grammar that arrives after a file switch is ignored
   // rather than applied to whatever is open now.
@@ -83,6 +102,10 @@ export default function SkillTextEditor({
           : plainText,
     [path, loaded],
   );
+  const allExtensions = useMemo(
+    () => (collaboration ? [extensions, collaboration] : extensions),
+    [extensions, collaboration],
+  );
   useEffect(() => {
     if (!view || !focusRequest) return;
     const line = view.state.doc.line(
@@ -94,20 +117,15 @@ export default function SkillTextEditor({
   return (
     <CodeMirror
       onCreateEditor={setView}
-      value={value}
-      onChange={onChange}
+      value={collaboration ? initialValue : value}
+      {...(onChange ? { onChange } : {})}
       aria-label={label}
       theme={theme}
-      extensions={extensions}
+      extensions={allExtensions}
       autoFocus={autoFocus}
       readOnly={readOnly}
       indentWithTab={false}
-      basicSetup={{
-        lineNumbers: false,
-        foldGutter: false,
-        highlightActiveLine: false,
-        highlightActiveLineGutter: false,
-      }}
+      basicSetup={collaboration ? collaborativeSetup : basicSetup}
     />
   );
 }

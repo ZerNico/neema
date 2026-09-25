@@ -1,0 +1,393 @@
+import { Cancel01Icon, PlusSignIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { shareRecipientsQuery } from "~/modules/sharing/client/queries.ts";
+import { useConfirm } from "~/ui/confirm.tsx";
+import { toastError } from "~/ui/error-toast.ts";
+import { ErrorState } from "~/ui/page-shell.tsx";
+import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
+import { Button } from "~/ui/primitives/button";
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxLabel,
+  ComboboxList,
+  ComboboxTrigger,
+} from "~/ui/primitives/combobox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "~/ui/primitives/dialog";
+import { FieldError } from "~/ui/primitives/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/ui/primitives/select";
+import { Spinner } from "~/ui/primitives/spinner";
+import { projectMembersQuery } from "../client/queries.ts";
+import type { ProjectDetail, ProjectMemberRole } from "../schema.ts";
+import {
+  addProjectGroup,
+  addProjectMember,
+  removeProjectGroup,
+  removeProjectMember,
+  setProjectMemberRole,
+} from "../server/functions.ts";
+
+type AddTarget =
+  | { kind: "person"; id: string; name: string; detail: string; email: string }
+  | { kind: "group"; id: string; name: string; detail: string };
+interface AddSection {
+  value: string;
+  items: AddTarget[];
+}
+const ROLES: ReadonlyArray<{ value: ProjectMemberRole; label: string }> = [
+  { value: "editor", label: "Can edit" },
+  { value: "viewer", label: "Can view" },
+];
+const roleText = (role: ProjectMemberRole) => (role === "editor" ? "Can edit" : "Can view");
+const responseText = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback;
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? "")
+    .join("") || "?";
+
+/**
+ * Who is in a project. The owner adds people and groups with a role; everyone
+ * else sees the list and may leave. Roles from a person's own row and from
+ * their groups add up, so removing one row never claims more than it does.
+ */
+export function ProjectMembersDialog({
+  project,
+  open,
+  onOpenChange,
+}: {
+  project: ProjectDetail;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const manage = project.role === "owner";
+  const { data: me } = useQuery(sessionUserQuery);
+  const members = useQuery({ ...projectMembersQuery(project.id), enabled: open });
+  const [role, setRole] = useState<ProjectMemberRole>("editor");
+  const [picker, setPicker] = useState(false);
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const recipients = useQuery({
+    ...shareRecipientsQuery(search),
+    enabled: open && manage && picker,
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["projects"] });
+  const add = useMutation({
+    mutationFn: (target: AddTarget) =>
+      target.kind === "person"
+        ? addProjectMember({ data: { projectId: project.id, email: target.email, role } })
+        : addProjectGroup({ data: { projectId: project.id, groupId: target.id, role } }),
+    onSuccess: async () => {
+      setAddError(null);
+      await refresh();
+    },
+    onError: (error) => setAddError(responseText(error, "Could not add them.")),
+  });
+  const changeRole = useMutation({
+    mutationFn: (input: { userId: string; role: ProjectMemberRole }) =>
+      setProjectMemberRole({ data: { projectId: project.id, ...input } }),
+    onSuccess: refresh,
+    onError: (error) => toastError("Could not change the role.", error),
+  });
+  const removeUser = useMutation({
+    mutationFn: (userId: string) =>
+      removeProjectMember({ data: { projectId: project.id, userId } }),
+    onSuccess: refresh,
+    onError: (error) => toastError("Could not remove them.", error),
+  });
+  const removeGroup = useMutation({
+    mutationFn: (groupId: string) =>
+      removeProjectGroup({ data: { projectId: project.id, groupId } }),
+    onSuccess: refresh,
+    onError: (error) => toastError("Could not remove the group.", error),
+  });
+  const leave = useMutation({
+    mutationFn: (userId: string) =>
+      removeProjectMember({ data: { projectId: project.id, userId } }),
+    onSuccess: async () => {
+      onOpenChange(false);
+      await refresh();
+      await navigate({ to: "/projects" });
+    },
+    onError: (error) => toastError("Could not leave the project.", error),
+  });
+  const pending =
+    add.isPending ||
+    changeRole.isPending ||
+    removeUser.isPending ||
+    removeGroup.isPending ||
+    leave.isPending;
+  const data = members.data;
+  const needle = query.trim().toLowerCase();
+  const sections: AddSection[] = [
+    {
+      value: "Groups",
+      items: (data?.eligibleGroups ?? [])
+        .filter((group) => !data?.groups.some((granted) => granted.groupId === group.id))
+        .filter((group) => !needle || group.name.toLowerCase().includes(needle))
+        .map((group) => ({
+          kind: "group" as const,
+          id: group.id,
+          name: group.name,
+          detail: "Group",
+        })),
+    },
+    {
+      value: "People",
+      items: (recipients.data ?? [])
+        .filter((person) => person.userId !== project.ownerId)
+        .filter((person) => !data?.users.some((member) => member.userId === person.userId))
+        .map((person) => ({
+          kind: "person" as const,
+          id: person.userId,
+          name: person.name,
+          detail: person.email,
+          email: person.email,
+        })),
+    },
+  ].filter((section) => section.items.length > 0);
+
+  const remove = (label: string, onRemove: () => void) => (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      className="text-muted-foreground hover:text-foreground"
+      aria-label={label}
+      disabled={pending}
+      onClick={onRemove}
+    >
+      <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+    </Button>
+  );
+  const roleControl = (
+    current: ProjectMemberRole,
+    label: string,
+    onChange: (next: ProjectMemberRole) => void,
+  ) =>
+    manage ? (
+      <Select
+        items={ROLES}
+        value={current}
+        onValueChange={(next) => {
+          if (next === "editor" || next === "viewer") onChange(next);
+        }}
+        disabled={pending}
+      >
+        <SelectTrigger size="sm" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {ROLES.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : (
+      <span className="text-muted-foreground shrink-0 text-xs">{roleText(current)}</span>
+    );
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && pending) return;
+        if (!next) {
+          setQuery("");
+          setAddError(null);
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent
+        scrollable={false}
+        className="flex max-h-[min(40rem,calc(var(--dialog-viewport-height,100dvh)-2rem))] min-h-0 flex-col"
+      >
+        <DialogHeader>
+          <DialogTitle>Members</DialogTitle>
+          <DialogDescription className="break-words">
+            Everyone here shares the project’s instructions, documents and memory. Their chats in it
+            stay their own.
+          </DialogDescription>
+        </DialogHeader>
+        {members.isError ? (
+          <ErrorState
+            title="Could not load members"
+            onRetry={() => {
+              void members.refetch();
+            }}
+          />
+        ) : !data ? (
+          <div className="flex justify-center py-10">
+            <Spinner aria-label="Loading members" />
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-col gap-5">
+            {manage ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Combobox
+                    items={sections}
+                    value={null}
+                    open={picker}
+                    onOpenChange={setPicker}
+                    disabled={pending}
+                    onValueChange={(target: AddTarget | null) => {
+                      if (!target) return;
+                      setAddError(null);
+                      setPicker(false);
+                      add.mutate(target);
+                    }}
+                    onInputValueChange={setQuery}
+                    itemToStringLabel={(target: AddTarget) => target.name}
+                    isItemEqualToValue={(a: AddTarget, b: AddTarget) =>
+                      a.kind === b.kind && a.id === b.id
+                    }
+                    filter={() => true}
+                    autoHighlight
+                  >
+                    <ComboboxTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          className="min-w-0 flex-1 justify-start"
+                          disabled={pending}
+                          aria-label="Add people or groups"
+                        />
+                      }
+                    >
+                      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+                      Add people or groups
+                    </ComboboxTrigger>
+                    <ComboboxContent align="start" className="w-[var(--anchor-width)] min-w-72">
+                      <ComboboxInput placeholder="Search by name or email…" showTrigger={false} />
+                      <ComboboxEmpty>
+                        {recipients.isPending ? "Searching…" : "No people or groups match"}
+                      </ComboboxEmpty>
+                      <ComboboxList>
+                        {(section: AddSection) => (
+                          <ComboboxGroup key={section.value} items={section.items}>
+                            <ComboboxLabel>{section.value}</ComboboxLabel>
+                            <ComboboxCollection>
+                              {(target: AddTarget) => (
+                                <ComboboxItem key={`${target.kind}:${target.id}`} value={target}>
+                                  <span className="flex min-w-0 flex-col">
+                                    <span className="truncate">{target.name}</span>
+                                    <span className="text-muted-foreground truncate text-xs">
+                                      {target.detail}
+                                    </span>
+                                  </span>
+                                </ComboboxItem>
+                              )}
+                            </ComboboxCollection>
+                          </ComboboxGroup>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
+                  {roleControl(role, "Role for people you add", setRole)}
+                </div>
+                {addError ? <FieldError>{addError}</FieldError> : null}
+              </div>
+            ) : null}
+            <ul className="divide-border min-h-0 divide-y overflow-y-auto" aria-label="Members">
+              <li className="flex items-center gap-3 py-2.5">
+                <Avatar className="size-9 shrink-0">
+                  <AvatarFallback>{initials(project.ownerName)}</AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 truncate text-sm">{project.ownerName}</span>
+                <span className="text-muted-foreground shrink-0 text-xs">Owner</span>
+              </li>
+              {data.users.map((member) => (
+                <li key={member.userId} className="flex items-center gap-3 py-2.5">
+                  <Avatar className="size-9 shrink-0">
+                    <AvatarFallback>{initials(member.name || member.email)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm">{member.name}</span>
+                    <span className="text-muted-foreground truncate text-xs">{member.email}</span>
+                  </div>
+                  {roleControl(member.role, `Role for ${member.name}`, (next) =>
+                    changeRole.mutate({ userId: member.userId, role: next }),
+                  )}
+                  {manage
+                    ? remove(`Remove ${member.name}`, () => removeUser.mutate(member.userId))
+                    : null}
+                </li>
+              ))}
+              {data.groups.map((group) => (
+                <li key={group.groupId} className="flex items-center gap-3 py-2.5">
+                  <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+                    <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} className="size-4" />
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm">{group.name}</span>
+                    <span className="text-muted-foreground text-xs">Group</span>
+                  </div>
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {roleText(group.role)}
+                  </span>
+                  {manage
+                    ? remove(`Remove ${group.name}`, () => removeGroup.mutate(group.groupId))
+                    : null}
+                </li>
+              ))}
+            </ul>
+            {/* Only a direct membership can be left; one through a group is the group's. */}
+            {manage || !data.users.some((member) => member.userId === me?.id) ? null : (
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  void confirm({
+                    title: `Leave “${project.name}”?`,
+                    description:
+                      "Your chats in it stop working with the project until someone adds you again.",
+                    confirmLabel: "Leave project",
+                  }).then((confirmed) => {
+                    if (confirmed && me) leave.mutate(me.id);
+                  });
+                }}
+              >
+                Leave project
+              </Button>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

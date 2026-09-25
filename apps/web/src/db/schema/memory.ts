@@ -2,6 +2,7 @@ import { desc, sql } from "drizzle-orm";
 import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
+import { projects } from "./projects.ts";
 
 export const memorySettings = pgTable("memory_settings", {
   userId: text("user_id")
@@ -51,5 +52,35 @@ export const memories = pgTable(
     ),
     index("memories_source_conversation_id_idx").on(t.sourceConversationId),
     index("memories_source_message_id_idx").on(t.sourceMessageId),
+  ],
+);
+
+/**
+ * Facts about a project that every member's chats in it may use: decisions,
+ * conventions, status. Never facts about a person; those are `memories`.
+ */
+export const projectMemories = pgTable(
+  "project_memories",
+  {
+    id: text().primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    content: text().notNull(),
+    // Normalized like personal memory, so a repeat save is recognised.
+    contentHash: text("content_hash").notNull(),
+    origin: text({ enum: ["manual", "model"] }).notNull(),
+    createdByUserId: text("created_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    sourceConversationId: text("source_conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_memories_project_content_hash_idx").on(t.projectId, t.contentHash),
+    index("project_memories_source_conversation_id_idx").on(t.sourceConversationId),
   ],
 );

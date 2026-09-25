@@ -15,6 +15,7 @@ type Handler = (params: SaveMemoryParams) => Effect.Effect<SaveMemoryResult>;
 const setup = (outcome: Parameters<typeof Effect.succeed>[0] = { outcome: "created" }) => {
   const saveModel = vi.fn(() => Effect.succeed(outcome as never));
   const group = prepareMemoryTool({
+    personal: true,
     memory: Object.assign({} as MemoryService["Service"], { saveModel }),
     userId: "user-1",
     conversationId: "conversation-1",
@@ -106,6 +107,7 @@ describe("prepareMemoryTool", () => {
   it("names a storage failure without leaking its cause", async () => {
     const saveModel = vi.fn(() => Effect.die(new Error("connection reset: secret host")));
     const group = prepareMemoryTool({
+      personal: true,
       memory: Object.assign({} as MemoryService["Service"], { saveModel }),
       userId: "user-1",
       conversationId: "conversation-1",
@@ -150,6 +152,7 @@ describe("prepareMemoryTool", () => {
   it("keeps a lost fence terminal rather than returning a recoverable memory result", async () => {
     const saveModel = vi.fn(() => Effect.interrupt);
     const prepared = prepareMemoryTool({
+      personal: true,
       memory: Object.assign({} as MemoryService["Service"], { saveModel }),
       userId: "user-1",
       conversationId: "conversation-1",
@@ -168,6 +171,7 @@ describe("prepareMemoryTool", () => {
   it("turns persistence defects into a tool result instead of failing chat", async () => {
     const saveModel = vi.fn(() => Effect.die("database unavailable"));
     const group = prepareMemoryTool({
+      personal: true,
       memory: Object.assign({} as MemoryService["Service"], { saveModel }),
       userId: "user-1",
       conversationId: "conversation-1",

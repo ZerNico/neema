@@ -274,6 +274,7 @@ const sharingKinds: ReadonlyArray<{ key: keyof MemberSharing; label: string }> =
   { key: "agents", label: "Agents" },
   { key: "knowledge", label: "Knowledge" },
   { key: "skills", label: "Skills" },
+  { key: "projects", label: "Projects" },
 ];
 
 function sharingSummary(sharing: MemberSharing) {

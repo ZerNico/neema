@@ -56,6 +56,30 @@ export const lockGeneration = (tx: DbTx, fence: GenerationIdentity) =>
   });
 
 /**
+ * The fence for writes made many times a second (a streamed document edit).
+ * It shares the message row with Stop, retry and the reaper, which update it,
+ * but never takes the conversation lock: at that rate it would queue ahead of
+ * the chat writes it has to stay out of the way of.
+ */
+export const ensureGenerationLive = (tx: DbTx, fence: GenerationIdentity) =>
+  Effect.gen(function* () {
+    const [message] = yield* tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.id, fence.messageId),
+          eq(messages.conversationId, fence.conversationId),
+          eq(messages.generationId, fence.generationId),
+          eq(messages.status, "streaming"),
+        ),
+      )
+      .for("share")
+      .pipe(Effect.orDie);
+    if (!message) return yield* Effect.interrupt;
+  });
+
+/**
  * How often the chat service looks for queues a restart left waiting; `null`
  * turns the sweep off. Tests that assert queue state turn it off rather than
  * racing a background start, or hiding from it in Work chats.

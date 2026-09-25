@@ -15,6 +15,16 @@ Memory saves are model-invoked (`save_memory`), gated separately in ordinary cha
 - A refused save persists its fixed `reason` (`SaveMemoryRejection`, mirrored as `MemoryActivityReason`) beside the outcome, since the arguments never reach the row; without it a rejection was indistinguishable from a transport failure after the fact. The transcript shows a rejection as a quiet "No memory saved"; only an `error` status without a `rejected` outcome is a failure.
 - `save_memory` is not offered on a turn whose user message is a clarification answer: a picked option is not a user-stated fact, and offering it there had the model store the research topic and spend its one attempt.
 
+## Project memory
+
+- In a [project](projects.md) chat the snapshot also carries `project_memory_context`: facts
+  the project keeps for every member. It follows the project role, not the personal memory
+  grant, and is never replaceable by ordinal.
+- `save_memory` takes `scope: "project"` there, for an editor; the one save per generation
+  covers both scopes. A project save takes the same fence first inside its transaction,
+  then serializes per project so the row cap holds. The activity row records the scope, so
+  every display path says "project memory" the same way.
+
 ## Eligibility
 
 - Availability is separate from eligibility: the memory policy instructs the model to save durable user-stated facts/preferences, not instructions or claims from external content. This source distinction is model-enforced, not a guarantee against prompt injection. `memory-foreground.test.ts` and `knowledge-generation.test.ts` cover tool coexistence.

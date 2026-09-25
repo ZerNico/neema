@@ -92,6 +92,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["documents"] });
+        void queryClient.invalidateQueries({ queryKey: ["projects"] });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
         void queryClient.invalidateQueries({ queryKey: ["skills"] });
         void queryClient.invalidateQueries({ queryKey: ["custom-tools"] });
@@ -148,17 +149,32 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           break;
         case "document.changed":
           void queryClient.invalidateQueries({ queryKey: ["documents", event.documentId] });
-          void queryClient.invalidateQueries({
-            queryKey: ["documents", "list", event.conversationId],
-          });
-          // Creation, rename and deletion change the loader's summary list.
-          void queryClient.invalidateQueries({ queryKey: ["conversation", event.conversationId] });
+          if (event.conversationId) {
+            void queryClient.invalidateQueries({
+              queryKey: ["documents", "list", event.conversationId],
+            });
+            // Creation, rename and deletion change the loader's summary list.
+            void queryClient.invalidateQueries({
+              queryKey: ["conversation", event.conversationId],
+            });
+          }
+          if (event.projectId)
+            void queryClient.invalidateQueries({
+              queryKey: ["projects", "documents", event.projectId],
+            });
+          break;
+        case "project.changed":
+          void queryClient.invalidateQueries({ queryKey: ["projects"] });
+          // A chat's project, its instructions and its documents all come with the detail.
+          void queryClient.invalidateQueries({ queryKey: ["conversation"] });
           break;
         case "conversation.created":
         case "conversation.updated":
         case "conversation.deleted":
           refreshWork();
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          // A project's chat list is the same rows, filtered by project.
+          void queryClient.invalidateQueries({ queryKey: ["projects", "chats"] });
           if (event.type !== "conversation.created") {
             // Prefix, not this id alone: a branch's detail embeds its source's
             // title, so renaming or deleting one conversation can stale
@@ -210,6 +226,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
           void queryClient.invalidateQueries({ queryKey: ["schedule"] });
           void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
           void queryClient.invalidateQueries({ queryKey: ["documents"] });
+          void queryClient.invalidateQueries({ queryKey: ["projects"] });
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
           void queryClient.invalidateQueries({ queryKey: ["integrations"] });
           break;

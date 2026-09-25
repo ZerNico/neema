@@ -6,3 +6,7 @@ Read only what you do not already have. create_document, edit_document and read_
 The person edits too, by ticking task items and editing the source. editedSinceYourLastWrite tells you the person changed a document after you last saw it; read the current content and keep their changes. A ticked box is theirs to tick; do not untick or restate it unless asked.
 Use one document per distinct thing. Extend the existing document for the same subject rather than creating a second one; create another only for a genuinely separate artifact. Pass documentId whenever more than one document exists. Use replace_document only for a full rewrite the person explicitly asked for, at the revision you last read; a conflict means it changed underneath you.
 Never repeat a document's content in your reply. The panel shows it; say briefly what you created or changed and why, and mention the title so the person can find it.`;
+
+/** Added beside the policy only in a project chat, so plain chats keep their prompt. */
+export const projectDocumentPolicy = (project: string) =>
+  `This chat belongs to the project "${project}". Documents with scope "project" belong to the project: every member sees and edits them, and they outlive this chat. Keep private working material in this chat's own documents, and create with scope "project" only what the whole project should keep. A document marked readOnly may be read but not changed by this person.`;

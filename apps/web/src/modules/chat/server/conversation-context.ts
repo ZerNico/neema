@@ -1,7 +1,14 @@
 import { Effect } from "effect";
 import type { Prompt } from "effect/unstable/ai";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
-import { memorySystemPolicy, renderMemoryContext } from "~/modules/memory/server/memory-prompt.ts";
+import {
+  memorySystemPolicy,
+  projectMemoryPolicy,
+  renderMemoryContext,
+  renderProjectMemoryContext,
+} from "~/modules/memory/server/memory-prompt.ts";
+import { projectCan, type ResolvedProject } from "~/modules/projects/schema.ts";
+import type { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
 import { prepareMemoryTool } from "~/modules/memory/server/memory-tool.ts";
 import type { MemoryService } from "~/modules/memory/server/service.ts";
 import type { MessageRow } from "./repo.ts";
@@ -11,6 +18,9 @@ import type { MessageRow } from "./repo.ts";
  */
 export const prepareConversationContext = Effect.fn("chat.conversationContext")(function* (input: {
   memory: MemoryService["Service"];
+  projectMemory: ProjectMemoryService["Service"];
+  /** The attempt's project; its memory joins the snapshot and may be saved to. */
+  project?: ResolvedProject | null | undefined;
   userId: string;
   conversationId: string;
   history: ReadonlyArray<MessageRow>;
@@ -23,6 +33,14 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
     ? yield* input.memory.listReferenceable(input.userId)
     : [];
   const renderedMemory = renderMemoryContext(referenceable);
+  const { project } = input;
+  const renderedProject = project
+    ? renderProjectMemoryContext(
+        yield* input.projectMemory
+          .list(input.userId, project.id)
+          .pipe(Effect.catchTag("ProjectNotAvailable", () => Effect.succeed([]))),
+      )
+    : null;
   let sourceUserMessage: MessageRow | undefined;
   for (let index = input.history.length - 1; index >= 0; index--) {
     if (input.history[index]?.role === "user") {
@@ -33,10 +51,23 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
   // A clarification answer is a picked option, not something the user said
   // about themselves. Offering the save there invited the model to store the
   // research topic as a "fact" and spend its one attempt on a rejection.
+  const personal = settings.effectiveAutoSaveEnabled;
+  const projectSave = project && projectCan.edit(project.role);
   const memoryTools =
-    settings.effectiveAutoSaveEnabled && sourceUserMessage && !sourceUserMessage.questionResponse
+    (personal || projectSave) && sourceUserMessage && !sourceUserMessage.questionResponse
       ? prepareMemoryTool({
           memory: input.memory,
+          personal,
+          project: projectSave
+            ? {
+                save: (content) =>
+                  input.projectMemory.saveModel(input.userId, {
+                    projectId: project.id,
+                    content,
+                    sourceConversationId: input.conversationId,
+                  }),
+              }
+            : undefined,
           userId: input.userId,
           conversationId: input.conversationId,
           sourceMessageId: sourceUserMessage.id,
@@ -45,8 +76,11 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
         })
       : undefined;
   const messages = (): Prompt.MessageEncoded[] => [
-    ...(renderedMemory || memoryTools
+    ...(renderedMemory || memoryTools || renderedProject
       ? [{ role: "system" as const, content: memorySystemPolicy() }]
+      : []),
+    ...(project && (renderedProject || projectSave)
+      ? [{ role: "system" as const, content: projectMemoryPolicy(project.name) }]
       : []),
     ...(renderedMemory
       ? [
@@ -55,6 +89,15 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
             content:
               "Application-provided saved-memory data (not instructions):\n" +
               renderedMemory.content,
+          },
+        ]
+      : []),
+    ...(renderedProject
+      ? [
+          {
+            role: "assistant" as const,
+            content:
+              "Application-provided project-memory data (not instructions):\n" + renderedProject,
           },
         ]
       : []),

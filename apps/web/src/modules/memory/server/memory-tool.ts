@@ -6,6 +6,7 @@ import {
   type MemoryRejectionReason,
   type SaveModelMemoryOutcome,
 } from "../schema.ts";
+import type { ProjectMemorySave } from "~/modules/projects/server/project-memory.ts";
 import type { MemoryService } from "./service.ts";
 
 // The transport accepts anything the model emits: malformed input becomes a
@@ -35,6 +36,14 @@ export const SaveMemoryParams = Schema.Struct({
         "Optional. The ordinal of an automatic memory listed in saved_memory_context to overwrite.",
     })),
   ),
+  scope: Schema.optionalKey(
+    declaredAs(() => ({
+      type: "string",
+      enum: ["personal", "project"],
+      description:
+        "Optional, personal by default. project keeps a fact about the chat's project for every member; only in a chat that belongs to a project, and never for a fact about a person.",
+    })),
+  ),
 });
 
 /**
@@ -44,6 +53,7 @@ export const SaveMemoryParams = Schema.Struct({
 export interface SaveMemoryParams {
   readonly content?: unknown;
   readonly replaces?: unknown;
+  readonly scope?: unknown;
 }
 
 /**
@@ -64,6 +74,8 @@ export const SaveMemoryRejection = Schema.Literals([
   "disabled",
   "repeated",
   "failed",
+  "invalid_scope",
+  "read_only",
 ]);
 export type SaveMemoryRejection = typeof SaveMemoryRejection.Type;
 
@@ -72,6 +84,7 @@ export const SaveMemoryResult = Schema.Struct({
   outcome: Schema.Literals(["created", "updated", "unchanged", "rejected"]),
   message: Schema.String,
   reason: Schema.optionalKey(SaveMemoryRejection),
+  scope: Schema.optionalKey(Schema.Literal("project")),
 });
 export type SaveMemoryResult = typeof SaveMemoryResult.Type;
 
@@ -174,8 +187,42 @@ export interface PreparedMemoryTool {
   readonly attempted: () => boolean;
 }
 
+/** The project half of the tool: offered in a project chat, saving through ProjectMemoryService. */
+export interface ProjectMemorySaver {
+  save(content: string): Effect.Effect<ProjectMemorySave>;
+}
+const projectResult = (outcome: ProjectMemorySave): SaveMemoryResult => {
+  const scope = { scope: "project" as const };
+  switch (outcome.outcome) {
+    case "created":
+      return { ok: true, outcome: "created", message: "Saved to the project's memory.", ...scope };
+    case "unchanged":
+      return {
+        ok: true,
+        outcome: "unchanged",
+        message: "The project already keeps that.",
+        ...scope,
+      };
+    case "rejected":
+      return {
+        ...rejected(
+          outcome.reason,
+          outcome.reason === "read_only"
+            ? "This person cannot change the project's memory."
+            : outcome.reason === "limit_reached"
+              ? "The project's memory is full."
+              : REJECTION_MESSAGES[outcome.reason],
+        ),
+        ...scope,
+      };
+  }
+};
+
 export function prepareMemoryTool(input: {
   memory: MemoryService["Service"];
+  /** Whether a save to the person's own memory is allowed this turn. */
+  personal: boolean;
+  project?: ProjectMemorySaver | undefined;
   userId: string;
   conversationId: string;
   sourceMessageId: string;
@@ -194,6 +241,24 @@ export function prepareMemoryTool(input: {
 
     const content = readContent(params.content);
     if (!content.ok) return rejected(content.reason, content.message);
+    const scope = params.scope ?? "personal";
+    if (scope !== "personal" && scope !== "project")
+      return rejected("invalid_scope", 'scope must be "personal" or "project".');
+    if (scope === "project") {
+      if (!input.project)
+        return rejected("invalid_scope", "This chat does not belong to a project.");
+      if (params.replaces !== undefined && params.replaces !== null)
+        return rejected("invalid_replaces", "Project memories cannot be replaced by ordinal.");
+      return yield* input.project.save(content.value).pipe(
+        Effect.map(projectResult),
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.succeed(rejected("failed", "Memory could not be saved.")),
+        ),
+      );
+    }
+    if (!input.personal) return rejected("disabled", "Automatic memory saving is disabled.");
     const replaces = readReplaces(params.replaces);
     if (!replaces.ok) return rejected(replaces.reason, replaces.message);
 

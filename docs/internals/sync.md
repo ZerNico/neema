@@ -4,6 +4,9 @@ Database rows are authoritative. Postgres `chat_sync` notifications carry small
 invalidation hints, never chunks, document bodies or execution authority. User
 and global envelopes feed authenticated browser sync; an internal envelope feeds
 research and indexing only. Internal envelopes never enter browser subscriptions.
+Live document edits have their own per-document stream from the in-process
+document service ([documents](documents.md)); only a throttled `document.changed`
+hint reaches `chat_sync`.
 
 State-dependent wakeups use `notifyOnCommit` on the Drizzle transaction's writer
 connection. The Effect Postgres adapter's `notify` acquires another connection,

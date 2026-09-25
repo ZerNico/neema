@@ -11,9 +11,12 @@ import { activityRowClassName } from "./activity-row.ts";
  */
 export function memoryActivityLabel(activity: MemoryToolActivity): string {
   if (activity.status === "running") return "Saving to memory…";
-  if (activity.outcome === "created") return "Saved to memory";
-  if (activity.outcome === "updated") return "Updated memory";
-  if (activity.outcome === "unchanged") return "Memory already saved";
+  const project = activity.scope === "project";
+  if (activity.outcome === "created")
+    return project ? "Saved to project memory" : "Saved to memory";
+  if (activity.outcome === "updated") return project ? "Updated project memory" : "Updated memory";
+  if (activity.outcome === "unchanged")
+    return project ? "Project already knows this" : "Memory already saved";
   if (activity.outcome === "rejected") return "No memory saved";
   return "Couldn’t save memory";
 }

@@ -208,8 +208,8 @@ const visibleIds = Effect.fn("test.visibleIds")(function* (userId: string) {
 
 describe("group management", () => {
   it("defaults sharing off, scopes updates, preserves duplicate adds and resets re-adds", async () => {
-    const none = { agents: false, knowledge: false, skills: false };
-    const skillsOnly = { agents: false, knowledge: false, skills: true };
+    const none = { agents: false, knowledge: false, skills: false, projects: false };
+    const skillsOnly = { agents: false, knowledge: false, skills: true, projects: false };
     await run(
       Effect.gen(function* () {
         const repo = yield* GroupRepo;

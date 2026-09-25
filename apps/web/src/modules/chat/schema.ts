@@ -90,6 +90,10 @@ export const ConversationReference = Schema.Union([
     id: WorkspaceId,
     mode: ConversationMode,
     temporary: Schema.optionalKey(Schema.Boolean),
+    /** Starts the chat inside a project; authorized in the attempt that creates it. */
+    projectId: Schema.optionalKey(
+      Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+    ),
   }),
   Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
 ]);
@@ -162,6 +166,8 @@ export const ListConversationsInput = Schema.Struct({
   query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   cursor: Schema.optionalKey(ConversationCursor),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+  /** The sidebar lists a project's chats under the project instead. */
+  outsideProjects: Schema.optionalKey(Schema.Boolean),
 });
 
 export const SearchChatsInput = Schema.Struct({

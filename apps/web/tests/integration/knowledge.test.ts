@@ -381,7 +381,12 @@ describe("knowledge access", () => {
     };
     await run(
       GroupRepo.use((repo) =>
-        repo.setMemberSharing(open, member, { agents: true, knowledge: true, skills: true }),
+        repo.setMemberSharing(open, member, {
+          agents: true,
+          knowledge: true,
+          skills: true,
+          projects: false,
+        }),
       ),
     );
     const forMember = await run(
@@ -3969,7 +3974,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     await run(Effect.flatMap(GroupRepo, (repo) => repo.addMember(group.id, member)));
     await run(
       Effect.flatMap(GroupRepo, (repo) =>
-        repo.setMemberSharing(group.id, member, { agents: true, knowledge: true, skills: true }),
+        repo.setMemberSharing(group.id, member, {
+          agents: true,
+          knowledge: true,
+          skills: true,
+          projects: false,
+        }),
       ),
     );
     const denied = await run(
@@ -3993,6 +4003,7 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
           agents: true,
           knowledge: true,
           skills: true,
+          projects: false,
           [ownKind]: false,
         }),
       ),
@@ -4013,7 +4024,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     await run(GroupRepo.use((repo) => repo.addMember(otherGroup.id, owner)));
     await run(
       Effect.flatMap(GroupRepo, (repo) =>
-        repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+        repo.setMemberSharing(group.id, owner, {
+          agents: true,
+          knowledge: true,
+          skills: true,
+          projects: false,
+        }),
       ),
     );
     const isolated = await run(
@@ -4024,7 +4040,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     expect(isolated).toMatchObject({ _tag: "Failure", failure: { _tag: "SharingNotAllowed" } });
     await run(
       GroupRepo.use((repo) =>
-        repo.setMemberSharing(group.id, member, { agents: false, knowledge: false, skills: false }),
+        repo.setMemberSharing(group.id, member, {
+          agents: false,
+          knowledge: false,
+          skills: false,
+          projects: false,
+        }),
       ),
     );
     const memberResource = await resourceFor(member);
@@ -4045,7 +4066,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     expect(await visible(member, resource)).not.toBeNull();
     await run(
       Effect.flatMap(GroupRepo, (repo) =>
-        repo.setMemberSharing(group.id, owner, { agents: false, knowledge: false, skills: false }),
+        repo.setMemberSharing(group.id, owner, {
+          agents: false,
+          knowledge: false,
+          skills: false,
+          projects: false,
+        }),
       ),
     );
     await change(owner, resource, { action: "group", groupId: group.id });
@@ -4103,6 +4129,7 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
                   agents: false,
                   knowledge: false,
                   skills: false,
+                  projects: false,
                 })
               : repo.removeMember(group.id, owner),
           ),
@@ -4115,7 +4142,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       try {
         await run(
           GroupRepo.use((repo) =>
-            repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+            repo.setMemberSharing(group.id, owner, {
+              agents: true,
+              knowledge: true,
+              skills: true,
+              projects: false,
+            }),
           ),
         );
         const first = await resourceFor(owner);
@@ -4143,7 +4175,12 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
         await run(GroupRepo.use((repo) => repo.addMember(group.id, owner)));
         await run(
           GroupRepo.use((repo) =>
-            repo.setMemberSharing(group.id, owner, { agents: true, knowledge: true, skills: true }),
+            repo.setMemberSharing(group.id, owner, {
+              agents: true,
+              knowledge: true,
+              skills: true,
+              projects: false,
+            }),
           ),
         );
         const second = await resourceFor(owner);

@@ -30,9 +30,10 @@ const ActivityId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength
 export const DocumentFailureReason = Schema.String.check(Schema.isMaxLength(600));
 export const DocumentActivityResult = Schema.Struct({
   outcome: DocumentToolOutcome,
-  /** Which document this row refers to, and the conversation that owns it. */
+  /** Which document this row refers to, and the chat or project that owns it. */
   documentId: Schema.optionalKey(ActivityId),
   documentConversationId: Schema.optionalKey(ActivityId),
+  documentProjectId: Schema.optionalKey(ActivityId),
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   message: Schema.optionalKey(DocumentFailureReason),
@@ -46,11 +47,20 @@ export type DocumentActivityResult = typeof DocumentActivityResult.Type;
 export function projectDocumentResult(value: unknown): DocumentActivityResult {
   const decoded = Schema.decodeUnknownOption(DocumentActivityResult)(value);
   if (Option.isNone(decoded)) return { outcome: "invalid" };
-  const { outcome, documentId, documentConversationId, title, revision, message } = decoded.value;
+  const {
+    outcome,
+    documentId,
+    documentConversationId,
+    documentProjectId,
+    title,
+    revision,
+    message,
+  } = decoded.value;
   return {
     outcome,
     ...(documentId ? { documentId } : {}),
     ...(documentConversationId ? { documentConversationId } : {}),
+    ...(documentProjectId ? { documentProjectId } : {}),
     ...(title ? { title } : {}),
     ...(revision ? { revision } : {}),
     ...(message ? { message } : {}),

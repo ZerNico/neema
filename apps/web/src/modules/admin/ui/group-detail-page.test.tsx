@@ -36,7 +36,7 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({}),
 }));
 
-const none = { agents: false, knowledge: false, skills: false };
+const none = { agents: false, knowledge: false, skills: false, projects: false };
 const members = [
   { userId: "u1", name: "Alice", email: "alice@example.test", role: "user", sharing: none },
   {
@@ -44,7 +44,7 @@ const members = [
     name: "Bob",
     email: "bob@example.test",
     role: "user",
-    sharing: { agents: true, knowledge: false, skills: true },
+    sharing: { agents: true, knowledge: false, skills: true, projects: false },
   },
   { userId: "a1", name: "Ada", email: "ada@example.test", role: "admin", sharing: none },
 ];
@@ -129,7 +129,7 @@ describe("GroupDetailPage sharing permissions", () => {
         data: {
           groupId: "g1",
           userId: "u1",
-          sharing: { agents: false, knowledge: true, skills: false },
+          sharing: { agents: false, knowledge: true, skills: false, projects: false },
         },
       }),
     );

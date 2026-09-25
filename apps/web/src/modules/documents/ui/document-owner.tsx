@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
+import { sessionUserQuery } from "~/modules/auth/client.ts";
 import {
   createContext,
   useCallback,
@@ -17,13 +19,12 @@ import { DocumentPanelActions, DocumentPanelBody, documentSubtitle } from "./doc
 import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 
 export interface DocumentOwnerHandle {
-  /** Every mounted document, so one unresolved source conflict blocks generation. */
+  /** Every mounted document, so a send never races typing it has not stored yet. */
   flush: () => Promise<boolean>;
 }
 interface DocumentOwnerProps {
   documentIds: ReadonlyArray<string>;
   goneIds?: ReadonlySet<string>;
-  locked?: boolean;
   onGone: (documentId: string) => void;
   children: ReactNode;
   ref?: Ref<DocumentOwnerHandle> | undefined;
@@ -75,7 +76,6 @@ export const useDocumentPanel = (documentId: string) => {
 export function DocumentOwner({
   documentIds,
   goneIds = EMPTY_DOCUMENT_IDS,
-  locked = false,
   onGone,
   autoOpenIds,
   children,
@@ -137,7 +137,6 @@ export function DocumentOwner({
           publish={publish}
           forget={forget}
           onGone={onGone}
-          locked={locked}
           autoOpen={autoOpenIds?.has(documentId) ?? false}
         />
       ))}
@@ -151,26 +150,26 @@ function DocumentSession({
   publish,
   forget,
   onGone,
-  locked,
   autoOpen,
 }: {
   documentId: string;
   publish: (documentId: string, session: Session) => void;
   forget: (documentId: string) => void;
   onGone: (documentId: string) => void;
-  locked: boolean;
   autoOpen: boolean;
 }) {
-  const controller = useDocument(documentId, true, locked);
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
   const [rendered, setRendered] = useState(true);
   const id = `document:${documentId}`;
+  // Only the document open in the panel holds a live connection.
+  const controller = useDocument(documentId, selected === id);
   useBlocker({
     shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
     enableBeforeUnload: controller.unpersisted,
   });
-  const subtitle = documentSubtitle(controller);
+  const { data: me } = useQuery(sessionUserQuery);
+  const subtitle = documentSubtitle(controller, me?.id);
   const request = useMemo(
     () => ({
       id,
@@ -208,8 +207,8 @@ function DocumentSession({
         ? failed
           ? "Could not load document"
           : "Loading document…"
-        : controller.error || controller.conflict
-          ? "Review changes"
+        : controller.error
+          ? "Changes not saved yet"
           : subtitle,
       tasks: available ? taskProgress(controller.content) : null,
       chars: controller.content.length,
@@ -229,7 +228,8 @@ function DocumentSession({
   }, [documentId, entry, flush, publish]);
   useEffect(() => () => forget(documentId), [documentId, forget]);
   const gone =
-    controller.query.isSuccess && controller.query.data === null && !controller.unpersisted();
+    controller.status === "gone" ||
+    (controller.query.isSuccess && controller.query.data === null && !controller.unpersisted());
   useEffect(() => {
     if (gone) onGone(documentId);
   }, [documentId, gone, onGone]);
