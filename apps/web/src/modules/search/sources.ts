@@ -10,10 +10,10 @@ import {
   Moon02Icon,
   PlusSignIcon,
   Robot01Icon,
+  SecurityIcon,
   Settings02Icon,
   SidebarLeftIcon,
   Sun03Icon,
-  UserCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { ADMIN_SECTIONS } from "~/modules/admin/sections.ts";
@@ -144,13 +144,13 @@ const usePageSearch: SearchSource = (query, active) => {
             can("schedules") && page("/schedules", "Schedules", Calendar03Icon),
             can("skillsUse") && page("/skills", "Skills", Book02Icon),
             page("/help", "Help", HelpCircleIcon),
-            page("/settings", "Settings", UserCircleIcon),
+            page("/settings", "Settings", Settings02Icon),
             ...SETTINGS_SECTIONS.map((section) =>
               page(section.to, section.label, section.icon, "Settings"),
             ),
             ...(user?.role === "admin"
               ? [
-                  page("/admin", "Admin", Settings02Icon),
+                  page("/admin", "Admin", SecurityIcon),
                   ...ADMIN_SECTIONS.map((section) =>
                     page(section.to, section.label, section.icon, "Admin"),
                   ),

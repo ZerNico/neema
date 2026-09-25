@@ -2,8 +2,8 @@ import {
   CloudServerIcon,
   HelpCircleIcon,
   Logout03Icon,
+  SecurityIcon,
   Settings02Icon,
-  UserCircleIcon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -100,7 +100,7 @@ export function AccountMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
         <DropdownMenuItem render={<Link to="/settings" />}>
-          <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />
+          <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
           Settings
         </DropdownMenuItem>
         <DropdownMenuItem render={<Link to="/help" />}>
@@ -109,7 +109,7 @@ export function AccountMenu({
         </DropdownMenuItem>
         {isAdmin ? (
           <DropdownMenuItem render={<Link to="/admin" />}>
-            <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
+            <HugeiconsIcon icon={SecurityIcon} strokeWidth={2} />
             Admin
           </DropdownMenuItem>
         ) : null}
