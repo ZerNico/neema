@@ -274,8 +274,9 @@ function VersionsDialog({
     <Dialog open={!!file} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{file ? `${file.name} history` : "History"}</DialogTitle>
+          <DialogTitle>Version history</DialogTitle>
           <DialogDescription>
+            {file ? <span className="block wrap-anywhere">{file.name}</span> : null}
             Versions stay for 30 days, up to {PROJECT_FILE_LIMITS.historyVersions}. Pin one to keep
             it.
           </DialogDescription>

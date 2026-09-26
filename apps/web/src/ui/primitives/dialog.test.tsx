@@ -1,6 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./dialog.tsx";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "./alert-dialog.tsx";
 
 describe("DialogContent", () => {
   it("scrolls inside the rounded popup and keeps the close button outside the scroller", () => {
@@ -44,5 +50,25 @@ describe("DialogContent", () => {
     expect(popup).toHaveClass("p-6", "gap-6");
     expect(popup.querySelector('[data-slot="dialog-scroll-area"]')).toBeNull();
     expect(screen.getByTestId("access-list").parentElement).toBe(popup);
+  });
+});
+
+describe("AlertDialogContent", () => {
+  it("keeps long confirmation text and actions within the phone viewport", () => {
+    const name = "A".repeat(200);
+    render(
+      <AlertDialog open>
+        <AlertDialogContent>
+          <AlertDialogTitle>Delete “{name}”?</AlertDialogTitle>
+          <AlertDialogDescription>{name} and its files will be deleted.</AlertDialogDescription>
+          <button>Cancel</button>
+        </AlertDialogContent>
+      </AlertDialog>,
+    );
+    const popup = screen.getByRole("alertdialog");
+    expect(popup).toHaveClass("w-[calc(100%-2rem)]", "overflow-y-auto");
+    expect(screen.getByText(`Delete “${name}”?`)).toHaveClass("wrap-anywhere");
+    expect(screen.getByText(`${name} and its files will be deleted.`)).toHaveClass("wrap-anywhere");
+    expect(popup).toContainElement(screen.getByRole("button", { name: "Cancel" }));
   });
 });

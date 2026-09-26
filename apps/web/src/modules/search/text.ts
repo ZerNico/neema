@@ -12,6 +12,7 @@ export interface Snippet {
 
 /** Below this, a prefix matches most of a history and says nothing. */
 export const MIN_SEARCH_LENGTH = 2;
+export const MAX_SEARCH_LENGTH = 200;
 const MAX_SEARCH_TERMS = 8;
 
 /** Letters and digits of any script; everything else only separates terms. */

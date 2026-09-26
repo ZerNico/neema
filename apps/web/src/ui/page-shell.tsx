@@ -163,7 +163,9 @@ export function Page({
               <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
             ) : null}
           </div>
-          {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
+          {description ? (
+            <p className="text-muted-foreground text-sm wrap-anywhere">{description}</p>
+          ) : null}
         </header>
         {children}
       </div>
@@ -191,11 +193,13 @@ export function Section({
   return (
     <section className={cn("flex flex-col gap-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0 flex flex-col gap-1 break-words">
+        <div className="min-w-0 flex flex-col gap-1 wrap-anywhere">
           <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             {title}
           </h2>
-          {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
+          {description ? (
+            <p className="text-muted-foreground text-sm wrap-anywhere">{description}</p>
+          ) : null}
         </div>
         {actions ? (
           <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>

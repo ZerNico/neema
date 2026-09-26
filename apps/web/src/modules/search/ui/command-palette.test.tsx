@@ -229,6 +229,19 @@ describe("command palette", () => {
     }
   });
 
+  it("bounds chat searches and ignores malformed results without crashing the palette", async () => {
+    vi.mocked(searchChats).mockResolvedValue({ error: "failed" } as never);
+    await renderPalette();
+    openWithShortcut();
+    const field = input();
+    expect(field).toHaveAttribute("maxLength", "200");
+    fireEvent.change(field, { target: { value: "X".repeat(201) } });
+    await waitFor(() =>
+      expect(vi.mocked(searchChats)).toHaveBeenCalledWith({ data: { query: "X".repeat(200) } }),
+    );
+    expect(within(palette()).getByText("Nothing found")).toBeVisible();
+  });
+
   it("keeps admin pages from other accounts", async () => {
     const user = userEvent.setup();
     await renderPalette();

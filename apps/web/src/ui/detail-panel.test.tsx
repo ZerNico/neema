@@ -156,6 +156,16 @@ function lastExit() {
 }
 
 describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
+  it("keeps long titles readable beside the mobile close button", () => {
+    environment.mobile = mobile;
+    render(<Harness />);
+    const title = "LongDocumentTitle".repeat(15);
+    act(() => panel.open({ id: "long", title, body: <p>Document</p> }));
+    const heading = screen.getByText(title);
+    if (mobile) expect(heading.parentElement).toHaveClass("pr-10", "wrap-anywhere");
+    else expect(heading).toHaveClass("truncate");
+  });
+
   it("refreshes same-ID props without resetting body state; a different ID resets it", () => {
     environment.mobile = mobile;
     environment.reducedMotion = false;

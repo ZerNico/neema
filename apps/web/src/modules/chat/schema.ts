@@ -1,4 +1,5 @@
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+import { MAX_SEARCH_LENGTH } from "~/modules/search/text.ts";
 import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { Attachment, AttachmentIds } from "~/modules/attachments/schema.ts";
@@ -180,7 +181,7 @@ export const ConversationCursor = Schema.Struct({
 
 export const ListConversationsInput = Schema.Struct({
   /** Case-insensitive substring match on the title; blank lists everything. */
-  query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_SEARCH_LENGTH))),
   cursor: Schema.optionalKey(ConversationCursor),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
   /** The sidebar lists a project's chats under the project instead. */
@@ -188,7 +189,7 @@ export const ListConversationsInput = Schema.Struct({
 });
 
 export const SearchChatsInput = Schema.Struct({
-  query: Schema.String.check(Schema.isMaxLength(200)),
+  query: Schema.String.check(Schema.isMaxLength(MAX_SEARCH_LENGTH)),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 }))),
 });
 
@@ -306,7 +307,7 @@ export const UpdateWorkSettingsInput = Schema.Struct({
 
 export const RenameConversationInput = Schema.Struct({
   conversationId: Schema.String,
-  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SEARCH_LENGTH)),
 });
 
 // Envelope persisted in message_chunks.delta for kind:"compaction" markers.

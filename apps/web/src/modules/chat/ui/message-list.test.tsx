@@ -262,7 +262,26 @@ describe("MessageBubble", () => {
         }}
       />,
     );
-    expect(screen.getByText("Hello!")).toBeInTheDocument();
+    expect(screen.getByText("Hello!")).toHaveClass("whitespace-pre-wrap", "wrap-anywhere");
+  });
+
+  it("wraps unbroken text steered into an assistant answer", () => {
+    const content = "S".repeat(500);
+    render(
+      <MessageBubble
+        message={{
+          id: "steered",
+          role: "assistant",
+          content: "Answer",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+          steers: [{ id: "s1", content, textOffset: 6, turnIndex: 0, attachments: [] }],
+        }}
+      />,
+    );
+    expect(screen.getByText(content)).toHaveClass("whitespace-pre-wrap", "wrap-anywhere");
   });
 
   it("shows thinking indicator for empty streaming messages", () => {

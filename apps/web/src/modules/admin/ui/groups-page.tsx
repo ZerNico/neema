@@ -37,6 +37,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { GROUP_NAME_MAX } from "../schema.ts";
 
 export const groupsQuery = queryOptions({
   queryKey: ["admin", "groups"],
@@ -384,9 +385,14 @@ function AddGroupDialog({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const tooLong = name.trim().length > GROUP_NAME_MAX;
 
   const save = useMutation({
-    mutationFn: () => createGroup({ data: { name: name.trim() } }),
+    mutationFn: async () => {
+      const group = await createGroup({ data: { name: name.trim() } });
+      if (!group?.id) throw new Error("Group creation did not return an ID");
+      return group;
+    },
     onSuccess: async (group) => {
       await queryClient.invalidateQueries({ queryKey: ["admin"] });
       onOpenChange(false);
@@ -401,6 +407,7 @@ function AddGroupDialog({
       onOpenChange={(next) => {
         if (!next) {
           if (save.isPending) return;
+          save.reset();
           setName("");
         }
         onOpenChange(next);
@@ -415,7 +422,7 @@ function AddGroupDialog({
           className="flex flex-col gap-6"
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim()) save.mutate();
+            if (name.trim() && !tooLong) save.mutate();
           }}
         >
           <FieldGroup>
@@ -424,14 +431,19 @@ function AddGroupDialog({
               <Input
                 id={`${id}-name`}
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  if (save.isError) save.reset();
+                }}
                 placeholder="Engineering"
                 disabled={save.isPending}
                 autoFocus
               />
             </Field>
           </FieldGroup>
-          {save.isError ? (
+          {tooLong ? (
+            <FieldError>Group names can’t exceed {GROUP_NAME_MAX} characters.</FieldError>
+          ) : save.isError ? (
             <FieldError>
               {isConflict(save.error)
                 ? "A group with this name already exists."
@@ -442,7 +454,11 @@ function AddGroupDialog({
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
+            <PendingButton
+              type="submit"
+              pending={save.isPending}
+              disabled={!name.trim() || tooLong}
+            >
               Create group
             </PendingButton>
           </DialogFooter>

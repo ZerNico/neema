@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
-import { ErrorState, Page, Section, SectionShell } from "./page-shell.tsx";
+import { EmptyState, ErrorState, Page, Section, SectionShell } from "./page-shell.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
@@ -37,6 +37,19 @@ describe("Page", () => {
       expect(group.parentElement).toHaveClass("flex-wrap");
     }
     expect(scrollerOf(scrollerOf(screen.getByText("Body"))!.parentElement)).toBeNull();
+  });
+
+  it("wraps unbroken page and section descriptions within their containers", () => {
+    const description = "A".repeat(500);
+    render(
+      <Page title="Project" description={description}>
+        <Section title="Notes" description={description}>
+          <p>Body</p>
+        </Section>
+      </Page>,
+    );
+    for (const paragraph of screen.getAllByText(description))
+      expect(paragraph).toHaveClass("wrap-anywhere");
   });
 
   it("is the one scroll container for its content, wherever it is mounted", () => {
@@ -77,6 +90,14 @@ describe("Page", () => {
     expect(scrollerOf(scroller.parentElement)).toBeNull();
     // The shell column must be able to shrink so the Page's h-full is real.
     expect(scroller.parentElement).toHaveClass("min-h-0", "flex-1");
+  });
+});
+
+describe("EmptyState", () => {
+  it("keeps an unbroken search term inside the empty card", () => {
+    const description = `No titles match “${"X".repeat(200)}”.`;
+    render(<EmptyState icon={Analytics01Icon} title="No chats match" description={description} />);
+    expect(screen.getByText(description)).toHaveClass("min-w-0", "wrap-anywhere");
   });
 });
 

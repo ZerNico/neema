@@ -65,6 +65,7 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { GROUP_NAME_MAX } from "../schema.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { toastError } from "~/ui/error-toast.ts";
@@ -437,6 +438,7 @@ function RenameGroupDialog({
   const id = useId();
   const queryClient = useQueryClient();
   const [name, setName] = useState(currentName);
+  const tooLong = name.trim().length > GROUP_NAME_MAX;
 
   const save = useMutation({
     mutationFn: () => renameGroup({ data: { groupId, name: name.trim() } }),
@@ -453,6 +455,7 @@ function RenameGroupDialog({
       onOpenChange={(next) => {
         if (!next) {
           if (save.isPending) return;
+          save.reset();
           setName(currentName);
         }
         onOpenChange(next);
@@ -467,7 +470,7 @@ function RenameGroupDialog({
           className="flex flex-col gap-6"
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim()) save.mutate();
+            if (name.trim() && !tooLong) save.mutate();
           }}
         >
           <FieldGroup>
@@ -476,13 +479,18 @@ function RenameGroupDialog({
               <Input
                 id={`${id}-name`}
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  if (save.isError) save.reset();
+                }}
                 disabled={save.isPending}
                 autoFocus
               />
             </Field>
           </FieldGroup>
-          {save.isError ? (
+          {tooLong ? (
+            <FieldError>Group names can’t exceed {GROUP_NAME_MAX} characters.</FieldError>
+          ) : save.isError ? (
             <FieldError>
               {isConflict(save.error)
                 ? "A group with this name already exists."
@@ -493,7 +501,11 @@ function RenameGroupDialog({
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
+            <PendingButton
+              type="submit"
+              pending={save.isPending}
+              disabled={!name.trim() || tooLong}
+            >
               Rename
             </PendingButton>
           </DialogFooter>

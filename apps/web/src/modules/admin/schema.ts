@@ -107,13 +107,15 @@ export const ModelIdInput = Schema.Struct({
   modelId: Schema.String,
 });
 
+export const GROUP_NAME_MAX = 100;
+
 export const CreateGroupInput = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(GROUP_NAME_MAX)),
 });
 
 export const RenameGroupInput = Schema.Struct({
   groupId: Schema.String,
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(GROUP_NAME_MAX)),
 });
 
 export const CapabilitiesInput = Schema.Struct(

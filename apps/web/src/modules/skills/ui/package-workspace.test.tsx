@@ -95,6 +95,17 @@ describe("package workspace", () => {
     });
     expect(screen.queryByRole("textbox", { name: "New file name" })).toBeNull();
   });
+  it("wraps an invalid unbroken path inside the file rail", async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
+    const field = screen.getByRole("textbox", { name: "New file name" });
+    fireEvent.change(field, { target: { value: "x".repeat(240) + ".txt" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    const error = await screen.findByRole("alert");
+    expect(error).toHaveClass("wrap-anywhere");
+    expect(error.parentElement).toHaveClass("max-w-full");
+  });
+
   it("renames a folder in place, keeping its contents and its folder icon", async () => {
     const { container } = render(<Harness />);
     fireEvent.doubleClick(screen.getByRole("button", { name: "references" }));

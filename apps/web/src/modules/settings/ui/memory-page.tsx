@@ -334,7 +334,9 @@ function MemoryRow({
   return (
     <ListRow className="items-start">
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{memory.content}</p>
+        <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">
+          {memory.content}
+        </p>
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <Badge variant="outline">{badge}</Badge>
           {!Number.isNaN(updated.getTime()) ? (
@@ -348,7 +350,7 @@ function MemoryRow({
             <Link
               to="/chat/$conversationId"
               params={{ conversationId: memory.sourceConversationId }}
-              className="hover:text-foreground underline underline-offset-3"
+              className="min-w-0 wrap-anywhere hover:text-foreground underline underline-offset-3"
             >
               {memory.sourceConversationTitle ?? "Source chat"}
             </Link>

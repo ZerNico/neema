@@ -155,8 +155,11 @@ function DraftRow({
           }}
         />
       </div>
-      {/* oxlint-disable-next-line shadcn/no-restyle -- the row this belongs to is an h-6 text-xs input, so the default would outsize the name */}
-      {error ? <FieldError className="text-2xs px-2 pt-1 pb-0.5">{error}</FieldError> : null}
+      {error ? (
+        <div className="max-w-full px-2 pt-1 pb-0.5">
+          <FieldError className="min-w-0 wrap-anywhere">{error}</FieldError>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -589,7 +592,9 @@ export function PackageWorkspace({
             <li
               key={`${finding.path}:${finding.line ?? 0}:${finding.message}`}
               className={
-                finding.severity === "error" ? "text-destructive" : "text-muted-foreground"
+                finding.severity === "error"
+                  ? "text-destructive wrap-anywhere"
+                  : "text-muted-foreground wrap-anywhere"
               }
             >
               <button

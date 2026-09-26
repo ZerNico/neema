@@ -149,6 +149,9 @@ describe("ProfilePage", () => {
   it("renders the admin badge in sentence case", () => {
     renderPage();
     expect(screen.getByText("Admin")).toBeInTheDocument();
+    const name = screen.getByText(SESSION_USER.name);
+    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).toHaveAttribute("title", SESSION_USER.name);
   });
 
   it("validates the password form and separates success from error", async () => {

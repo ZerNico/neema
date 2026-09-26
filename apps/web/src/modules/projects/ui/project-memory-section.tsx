@@ -186,7 +186,7 @@ function MemoryRow({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm">{memory.content}</span>
+            <span className="text-sm wrap-anywhere">{memory.content}</span>
             <span className="text-muted-foreground truncate text-xs">{by}</span>
           </div>
           {editable ? (

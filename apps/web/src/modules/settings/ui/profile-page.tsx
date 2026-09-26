@@ -101,7 +101,9 @@ function ProfileForms({
               <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium">{user.name}</span>
+              <span className="min-w-0 truncate text-sm font-medium" title={user.name}>
+                {user.name}
+              </span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>
             {user.role === "admin" ? <Badge variant="outline">Admin</Badge> : null}

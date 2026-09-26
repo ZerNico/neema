@@ -203,6 +203,8 @@ describe("MemoryPage", () => {
       "href",
       "/chat/conversation-1",
     );
+    expect(screen.getByRole("link", { name: "Planning notes" })).toHaveClass("wrap-anywhere");
+    expect(screen.getByText(memory().content)).toHaveClass("wrap-anywhere");
     expect(screen.getByText("Source message edited")).toBeInTheDocument();
     expect(screen.getByText("Source chat deleted")).toBeInTheDocument();
     expect(screen.getByText("Edited by you")).toBeInTheDocument();

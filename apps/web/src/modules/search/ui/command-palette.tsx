@@ -11,7 +11,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import type { SearchGroup, SearchItem } from "../registry.ts";
 import { useSearchGroups } from "../sources.ts";
-import type { Snippet } from "../text.ts";
+import { MAX_SEARCH_LENGTH, type Snippet } from "../text.ts";
 
 const PaletteContext = createContext<((open: boolean) => void) | null>(null);
 
@@ -119,6 +119,7 @@ export function CommandPalette({
               />
               <Autocomplete.Input
                 aria-label="Search"
+                maxLength={MAX_SEARCH_LENGTH}
                 placeholder="Search chats, agents, pages… or type > for actions"
                 className="placeholder:text-muted-foreground h-12 min-w-0 flex-1 bg-transparent outline-none"
               />

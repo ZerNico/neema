@@ -22,10 +22,11 @@ import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { useDebounced } from "~/ui/use-debounced.ts";
+import { MAX_SEARCH_LENGTH } from "~/modules/search/text.ts";
 
 export function ChatsPage() {
   const [search, setSearch] = useState("");
-  const query = useDebounced(search.trim(), 250);
+  const query = useDebounced(search.trim().slice(0, MAX_SEARCH_LENGTH), 250);
   // Not the suspense variant: typing must narrow the list in place, never
   // suspend the page out from under the search box.
   const pages = useInfiniteQuery({
@@ -65,6 +66,7 @@ export function ChatsPage() {
       }
     >
       <SearchInput
+        maxLength={MAX_SEARCH_LENGTH}
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Search chats…"

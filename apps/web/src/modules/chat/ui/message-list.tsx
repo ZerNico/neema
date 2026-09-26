@@ -460,7 +460,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           ) : null}
           {/* An attachment-only turn has no text bubble to draw. */}
           {text ? (
-            <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+            <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
               <MessageTagText text={text} />
             </div>
           ) : null}
@@ -606,7 +606,7 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
         </AttachmentChipRow>
       ) : null}
       {steer.content ? (
-        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
           {steer.content}
         </div>
       ) : null}

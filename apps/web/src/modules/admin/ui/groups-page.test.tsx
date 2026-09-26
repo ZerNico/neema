@@ -10,6 +10,8 @@ import {
 } from "../server/functions.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 
+const navigate = vi.hoisted(() => vi.fn());
+
 vi.mock("../server/functions.ts", () => ({
   listGroups: vi.fn(),
   listGroupMemberships: vi.fn(),
@@ -29,7 +31,7 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useMatches: () => [{ pathname: "/admin/groups" }],
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
   useParams: () => ({}),
 }));
 
@@ -135,5 +137,28 @@ describe("GroupsPage", () => {
     fireEvent.submit(screen.getByLabelText("Name").closest("form")!);
 
     await waitFor(() => expect(createMock).toHaveBeenCalledWith({ data: { name: "Ops" } }));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: "/admin/groups/$groupId",
+        params: { groupId: "g9" },
+      }),
+    );
+  });
+
+  it("does not navigate when group creation returns no group", async () => {
+    createMock.mockResolvedValue(undefined as never);
+    renderPage([group("g1", "Existing", 0)]);
+    fireEvent.click(await screen.findByRole("button", { name: "New group" }));
+    const field = await screen.findByLabelText("Name");
+    fireEvent.change(field, { target: { value: "A".repeat(101) } });
+    fireEvent.submit(field.closest("form")!);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Group names can’t exceed 100 characters.")).toBeVisible();
+
+    fireEvent.change(field, { target: { value: "Engineering" } });
+    fireEvent.submit(field.closest("form")!);
+    expect(await screen.findByText("Could not create the group.")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "New group" })).toBeVisible();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

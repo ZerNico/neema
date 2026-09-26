@@ -120,6 +120,20 @@ describe("ChatsPage", () => {
     expect(listMock.mock.calls[1]?.[0]).toMatchObject({ data: { query: "driz" } });
   });
 
+  it("bounds title search to the server’s 200-character limit", async () => {
+    listMock.mockResolvedValue({ conversations: [], nextCursor: null } as never);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BASE);
+    renderPage();
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(1));
+    const field = screen.getByLabelText("Search chats");
+    expect(field).toHaveAttribute("maxLength", "200");
+    fireEvent.change(field, { target: { value: "X".repeat(201) } });
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+    expect(listMock.mock.calls[1]?.[0]).toMatchObject({ data: { query: "X".repeat(200) } });
+  });
+
   it("appends the next page and drops the button at the end", async () => {
     listMock
       .mockResolvedValueOnce({

@@ -188,9 +188,11 @@ function MobilePanel() {
         inert={!open || undefined}
       >
         <SheetHeader className="pb-2">
-          <SheetTitle>{request?.title}</SheetTitle>
+          <div className="min-w-0 pr-10 wrap-anywhere">
+            <SheetTitle>{request?.title}</SheetTitle>
+          </div>
           {request?.subtitle ? (
-            <p className="text-muted-foreground text-xs">{request.subtitle}</p>
+            <p className="text-muted-foreground text-xs wrap-anywhere">{request.subtitle}</p>
           ) : null}
         </SheetHeader>
         {request?.actions ? (
