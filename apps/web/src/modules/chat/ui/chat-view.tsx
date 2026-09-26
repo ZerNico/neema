@@ -1997,6 +1997,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               branchedFrom={data.branchedFrom}
               agent={data.agent}
               temporary={data.conversation.temporary}
+              archived={!!data.conversation.archivedAt}
               project={data.project}
             />
             {foreignMachine ? (

@@ -176,6 +176,7 @@ describe("command palette", () => {
         title: "Packing list",
         messageId: "m1",
         snippet: { text: "Das Handgepäck darf 10 kg wiegen", highlights: [[4, 14]] },
+        archived: false,
       },
     ]);
     const router = await renderPalette();
@@ -187,6 +188,25 @@ describe("command palette", () => {
     expect(within(option).getByText("Handgepäck").tagName).toBe("MARK");
     await user.keyboard("{Enter}");
     await waitFor(() => expect(router.state.location.pathname).toBe("/chat/c9"));
+  });
+
+  it("finds an archived chat and says it is archived", async () => {
+    const user = userEvent.setup();
+    vi.mocked(searchChats).mockResolvedValue([
+      {
+        conversationId: "c7",
+        title: "Old packing list",
+        messageId: "m2",
+        snippet: { text: "Handgepäck bleibt klein", highlights: [[0, 10]] },
+        archived: true,
+      },
+    ]);
+    await renderPalette();
+    openWithShortcut();
+    await user.type(input(), "handgep");
+
+    const option = await within(palette()).findByRole("option", { name: /Old packing list/ });
+    expect(within(option).getByText("Archived")).toBeInTheDocument();
   });
 
   it("does not ask the server about a single character", async () => {

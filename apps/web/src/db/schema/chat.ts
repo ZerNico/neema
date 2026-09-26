@@ -71,11 +71,20 @@ export const conversations = pgTable(
     // with. The chat itself stays its owner's alone; deleting the project
     // turns it back into an ordinary chat.
     projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    // Put away by its owner: out of the sidebar and every list, still found by
+    // search. A message the owner sends clears it; a schedule's does not. See
+    // docs/internals/archived-chats.md.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (t) => [
     check(
       "conversations_project_not_temporary",
       sql`not (${t.temporary} and ${t.projectId} is not null)`,
+    ),
+    // Nothing lists a temporary chat, so there is nothing to archive it from.
+    check(
+      "conversations_archived_not_temporary",
+      sql`not (${t.temporary} and ${t.archivedAt} is not null)`,
     ),
     index("conversations_project_id_idx").on(t.projectId),
     index("conversations_user_id_idx").on(t.userId),

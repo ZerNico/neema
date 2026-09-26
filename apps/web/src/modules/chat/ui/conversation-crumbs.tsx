@@ -1,4 +1,6 @@
 import {
+  Archive02Icon,
+  ArchiveArrowUpIcon,
   Calendar03Icon,
   Folder01Icon,
   GitBranchIcon,
@@ -12,7 +14,7 @@ import { scheduleQuery } from "~/modules/schedules/client/queries.ts";
 import { cadenceLabel, nextFireLabel } from "~/modules/schedules/ui/schedule-labels.ts";
 import { HeaderContent } from "~/ui/header-slot.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import { keepConversation } from "../server/functions.ts";
+import { keepConversation, setConversationArchived } from "../server/functions.ts";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
 import { Badge } from "~/ui/primitives/badge";
 import { agentIcon } from "./context-picker.tsx";
@@ -39,6 +41,7 @@ export function ConversationCrumbs({
   branchedFrom,
   agent,
   temporary = false,
+  archived = false,
   project,
 }: {
   conversationId: string;
@@ -46,6 +49,8 @@ export function ConversationCrumbs({
   project?: { id: string; name: string; role: string | null } | null | undefined;
   /** Hidden from lists and without memory until kept. */
   temporary?: boolean;
+  /** Out of the sidebar and lists until unarchived or written in. */
+  archived?: boolean;
   title: string | null;
   agent: { id: string | null; name: string | null; icon?: string } | null | undefined;
   schedule: ScheduleOrigin | null | undefined;
@@ -79,8 +84,10 @@ export function ConversationCrumbs({
           </Badge>
         ) : null}
         {temporary ? <TemporaryTag /> : null}
+        {archived ? <ArchivedTag /> : null}
       </div>
       {temporary ? <KeepButton conversationId={conversationId} /> : null}
+      {archived ? <UnarchiveButton conversationId={conversationId} /> : null}
     </HeaderContent>
   );
 }
@@ -103,6 +110,47 @@ function TemporaryTag() {
         </p>
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+function ArchivedTag() {
+  return (
+    <HoverCard>
+      <HoverCardTrigger
+        delay={300}
+        closeDelay={100}
+        render={<Badge variant="secondary" className={tagClassName} tabIndex={0} />}
+      >
+        <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} aria-hidden />
+        <span className="truncate">Archived</span>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" sideOffset={8}>
+        <p className="text-muted-foreground text-xs">
+          This chat isn’t in your sidebar, but search still finds it. Sending a message brings it
+          back.
+        </p>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function UnarchiveButton({ conversationId }: { conversationId: string }) {
+  const queryClient = useQueryClient();
+  const unarchive = useMutation({
+    mutationFn: () => setConversationArchived({ data: { conversationId, archived: false } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation"] }),
+  });
+  return (
+    <PendingButton
+      size="sm"
+      variant="outline"
+      className="ml-auto shrink-0"
+      pending={unarchive.isPending}
+      onClick={() => unarchive.mutate()}
+    >
+      <HugeiconsIcon icon={ArchiveArrowUpIcon} strokeWidth={2} />
+      Unarchive
+    </PendingButton>
   );
 }
 

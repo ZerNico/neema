@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -460,7 +460,14 @@ export class ProjectService extends Context.Service<
         const rows = yield* db
           .select({ id: conversations.id, title: conversations.title, lastActivityAt: activity })
           .from(conversations)
-          .where(and(eq(conversations.projectId, projectId), eq(conversations.userId, userId)))
+          .where(
+            and(
+              eq(conversations.projectId, projectId),
+              eq(conversations.userId, userId),
+              // Archived chats leave every list, a project's too.
+              isNull(conversations.archivedAt),
+            ),
+          )
           .orderBy(desc(activity), desc(conversations.id))
           .limit(200)
           .pipe(Effect.orDie);

@@ -1,4 +1,5 @@
 import {
+  Archive02Icon,
   BubbleChatIcon,
   MoreHorizontalIcon,
   PlusSignIcon,
@@ -51,7 +52,18 @@ export function ChatsPage() {
   const empty = conversations.length === 0 && !pages.isPending;
 
   return (
-    <Page title="Chats" rootPath="/" rootLabel="Chat">
+    <Page
+      title="Chats"
+      rootPath="/"
+      rootLabel="Chat"
+      actions={
+        // Out of the way: archived chats are a place you go to, not a list to compare.
+        <Link to="/chats/archived" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+          <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} data-icon="inline-start" />
+          Archived
+        </Link>
+      }
+    >
       <SearchInput
         value={search}
         onChange={(event) => setSearch(event.target.value)}

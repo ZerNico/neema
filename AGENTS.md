@@ -236,6 +236,8 @@ skipped one on purpose.
   markdown plugins.
 - `docs/internals/temporary-chats.md`: the flag, where it is read, the sweep and
   what a branch or schedule does with one.
+- `docs/internals/archived-chats.md`: the list and search predicates, what unarchives a chat
+  and why a schedule's fire does not.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,

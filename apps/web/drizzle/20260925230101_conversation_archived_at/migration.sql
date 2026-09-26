@@ -1,0 +1,2 @@
+ALTER TABLE "conversations" ADD COLUMN "archived_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "conversations" ADD CONSTRAINT "conversations_archived_not_temporary" CHECK (not ("temporary" and "archived_at" is not null));

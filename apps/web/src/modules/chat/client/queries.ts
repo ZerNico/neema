@@ -1,6 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   getConversationWithMessages,
+  listArchivedConversations,
   listChatModels,
   listConversations,
 } from "../server/functions.ts";
@@ -59,4 +60,13 @@ export const webSearchAvailabilityQuery = queryOptions({
   queryKey: ["tools", "web-search", "availability"],
   queryFn: () => getWebSearchAvailability(),
   staleTime: 30_000,
+});
+
+/**
+ * Under the `["conversations"]` prefix, so every archive, unarchive, delete and
+ * `conversation.updated` event that refreshes the lists refreshes this too.
+ */
+export const archivedConversationsQuery = queryOptions({
+  queryKey: ["conversations", "archived"],
+  queryFn: () => listArchivedConversations(),
 });

@@ -35,6 +35,7 @@ interface SeedChat {
   title: string | null;
   at: number;
   temporary?: boolean;
+  archived?: boolean;
   messages: ReadonlyArray<{
     role?: "user" | "assistant" | "system";
     content: string;
@@ -63,6 +64,7 @@ const seed = (chats: ReadonlyArray<SeedChat>) =>
           updatedAt: new Date(BASE + chat.at),
           lastMessageAt: new Date(BASE + chat.at),
           temporary: chat.temporary ?? false,
+          archivedAt: chat.archived ? new Date(BASE + chat.at) : null,
         });
         if (chat.messages.length)
           yield* db.insert(messages).values(
@@ -267,5 +269,69 @@ describe("chat search and temporary chats", () => {
     expect((await search(userId, "itinerary")).map((hit) => hit.conversationId)).toEqual([
       temporaryId,
     ]);
+  });
+});
+
+const repo = <A>(use: (chat: ChatRepo["Service"]) => Effect.Effect<A>) =>
+  runtime.runPromise(Effect.flatMap(ChatRepo, use));
+
+describe("archived chats", () => {
+  it("leave every list but stay in search, marked archived", async () => {
+    const { userId, ids } = await seed([
+      { title: "Ordinary", at: 0, messages: [{ content: "nothing to see" }] },
+      { title: "Lisbon trip", at: 1000, archived: true, messages: [{ content: "a lisbon plan" }] },
+    ]);
+    const listed = await repo((chat) => chat.listConversations({ userId, limit: 10 }));
+    expect(listed.conversations.map((c) => c.id)).toEqual([ids[0]]);
+
+    // Title, recent-window and indexed matches are separate queries.
+    const found = await Promise.all(["lisbon trip", "plan"].map((query) => search(userId, query)));
+    for (const [hit, ...rest] of found) {
+      expect(rest).toEqual([]);
+      expect(hit).toMatchObject({ conversationId: ids[1], archived: true });
+    }
+    expect((await search(userId, "ordinary"))[0]?.archived).toBe(false);
+
+    const archived = await repo((chat) => chat.listArchived(userId));
+    expect(archived.map((row) => row.id)).toEqual([ids[1]]);
+  });
+
+  it("archive and unarchive one at a time, and all at once sparing temporary chats", async () => {
+    const { userId, ids } = await seed([
+      { title: "One", at: 0, messages: [] },
+      { title: "Two", at: 1, messages: [] },
+      { title: "Scratch", at: 2, temporary: true, messages: [] },
+    ]);
+    expect(await repo((chat) => chat.setArchived(userId, ids[0]!, true))).toBe(true);
+    // Already archived: nothing changes.
+    expect(await repo((chat) => chat.setArchived(userId, ids[0]!, true))).toBe(false);
+    // Nothing lists a temporary chat, so it is never archived.
+    expect(await repo((chat) => chat.setArchived(userId, ids[2]!, true))).toBe(false);
+    // Someone else's chat is not archived either.
+    const stranger = (await seed([])).userId;
+    expect(await repo((chat) => chat.setArchived(stranger, ids[1]!, true))).toBe(false);
+
+    expect(await repo((chat) => chat.archiveAll(userId))).toEqual([ids[1]]);
+    expect(
+      (await repo((chat) => chat.listArchived(userId))).map((row) => row.id).toSorted(),
+    ).toEqual([ids[0], ids[1]].toSorted());
+
+    expect(await repo((chat) => chat.setArchived(userId, ids[0]!, false))).toBe(true);
+    const listed = await repo((chat) => chat.listConversations({ userId, limit: 10 }));
+    expect(listed.conversations.map((c) => c.id)).toEqual([ids[0]]);
+  });
+
+  it("refuses a temporary chat that is archived, at the database", async () => {
+    const { ids } = await seed([{ title: "Scratch", at: 0, temporary: true, messages: [] }]);
+    await expect(
+      runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(conversations)
+            .set({ archivedAt: new Date() })
+            .where(eq(conversations.id, ids[0]!)),
+        ),
+      ),
+    ).rejects.toThrow();
   });
 });

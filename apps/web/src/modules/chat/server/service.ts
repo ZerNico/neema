@@ -362,6 +362,17 @@ export class ChatService extends Context.Service<
       userId: string;
       conversationId: string;
     }): Effect.Effect<void, ConversationNotFound>;
+    /** Archives or unarchives one chat. Idempotent. */
+    setArchived(input: {
+      userId: string;
+      conversationId: string;
+      archived: boolean;
+    }): Effect.Effect<void, ConversationNotFound>;
+    /** Archives every chat the sidebar lists. Returns how many. */
+    archiveAll(input: { userId: string }): Effect.Effect<number>;
+    listArchived(input: {
+      userId: string;
+    }): Effect.Effect<ReadonlyArray<{ id: string; title: string | null; archivedAt: Date }>>;
     /** One pass of the temporary-chat sweep; exposed so tests need not wait for it. */
     sweepTemporary(): Effect.Effect<void>;
     /**
@@ -1921,6 +1932,37 @@ function makeChatService() {
         });
     });
 
+    const setArchived = Effect.fn("ChatService.setArchived")(function* (input: {
+      userId: string;
+      conversationId: string;
+      archived: boolean;
+    }) {
+      yield* repo.getConversation(input.userId, input.conversationId);
+      if (yield* repo.setArchived(input.userId, input.conversationId, input.archived))
+        yield* sync.publish(input.userId, {
+          type: "conversation.updated",
+          conversationId: input.conversationId,
+        });
+    });
+
+    const archiveAll = Effect.fn("ChatService.archiveAll")(function* (input: { userId: string }) {
+      const ids = yield* repo.archiveAll(input.userId);
+      // One event is enough: every tab refreshes its chat lists and details by
+      // key prefix, whichever chat an update names.
+      if (ids.length > 0)
+        yield* sync.publish(input.userId, {
+          type: "conversation.updated",
+          conversationId: ids[0]!,
+        });
+      return ids.length;
+    });
+
+    const listArchived = Effect.fn("ChatService.listArchived")(function* (input: {
+      userId: string;
+    }) {
+      return yield* repo.listArchived(input.userId);
+    });
+
     // Deletes expired temporary chats the way a person's own delete does, so
     // research, attachments and every open tab settle the same way.
     const sweepTemporary = Effect.fn("ChatService.sweepTemporary")(function* () {
@@ -1962,6 +2004,9 @@ function makeChatService() {
       updateWorkSettings,
       renameConversation,
       keepConversation,
+      setArchived,
+      archiveAll,
+      listArchived,
       sweepTemporary,
       runScheduledTurn,
     });

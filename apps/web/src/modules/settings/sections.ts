@@ -1,5 +1,6 @@
 import {
   Analytics01Icon,
+  Archive02Icon,
   Brain02Icon,
   ComputerIcon,
   PlugSocketIcon,
@@ -32,6 +33,12 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     label: "Devices",
     icon: ComputerIcon,
     matchPrefix: "/settings/devices",
+  },
+  {
+    to: "/settings/archived",
+    label: "Archived chats",
+    icon: Archive02Icon,
+    matchPrefix: "/settings/archived",
   },
   {
     to: "/settings/usage",

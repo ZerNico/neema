@@ -154,6 +154,11 @@ export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
 });
 
+export const ConversationArchiveInput = Schema.Struct({
+  conversationId: Schema.String,
+  archived: Schema.Boolean,
+});
+
 /** Opaque to the client: it hands back whatever the previous page returned. */
 export const ConversationCursor = Schema.Struct({
   /** ISO timestamp of coalesce(lastMessageAt, createdAt) for the last row served. */

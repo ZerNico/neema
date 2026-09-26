@@ -1,4 +1,4 @@
-import { BubbleChatIcon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, BubbleChatIcon } from "@hugeicons/core-free-icons";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { SearchSource } from "~/modules/search/registry.ts";
 import { MIN_SEARCH_LENGTH } from "~/modules/search/text.ts";
@@ -48,8 +48,10 @@ export const useChatSearch: SearchSource = (query, active) => {
     items: (found.data ?? []).map((hit) => ({
       id: `chat:${hit.conversationId}`,
       label: hit.title ?? "New chat",
+      // Search is how an archived chat is found again, so say that it is one.
+      detail: hit.archived ? "Archived" : undefined,
       snippet: hit.snippet,
-      icon: BubbleChatIcon,
+      icon: hit.archived ? Archive02Icon : BubbleChatIcon,
       href: chatHref(hit.conversationId),
     })),
     pending: query !== settled || found.isFetching,

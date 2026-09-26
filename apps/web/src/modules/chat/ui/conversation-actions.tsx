@@ -1,4 +1,6 @@
 import {
+  ArchiveArrowDownIcon,
+  ArchiveArrowUpIcon,
   Delete02Icon,
   Folder01Icon,
   FolderTransferIcon,
@@ -9,7 +11,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { deleteConversation, renameConversation } from "../server/functions.ts";
+import {
+  deleteConversation,
+  renameConversation,
+  setConversationArchived,
+} from "../server/functions.ts";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -38,6 +44,7 @@ import { Input } from "~/ui/primitives/input";
 import { useConfirm } from "~/ui/confirm.tsx";
 import type { ReactElement, ReactNode } from "react";
 import { toastError } from "~/ui/error-toast.ts";
+import { toast } from "sonner";
 
 export interface ActionableConversation {
   readonly id: string;
@@ -45,10 +52,13 @@ export interface ActionableConversation {
   /** Present on list rows; a temporary chat never joins a project. */
   readonly projectId?: string | null;
   readonly temporary?: boolean;
+  /** Set on the archived list; everything else a menu opens on is unarchived. */
+  readonly archived?: boolean;
 }
 
 export interface ConversationActions {
   startRename: (conversation: ActionableConversation) => void;
+  setArchived: (conversation: ActionableConversation, archived: boolean) => void;
   confirmDelete: (conversation: ActionableConversation) => Promise<void>;
   /** Mount once per surface: the shared rename dialog. */
   renameDialog: ReactNode;
@@ -83,6 +93,31 @@ export function useConversationActions(): ConversationActions {
     onError: (error) => toastError("Could not delete the chat.", error),
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (input: { conversationId: string; archived: boolean }) =>
+      setConversationArchived({ data: input }),
+    onSuccess: async (_, input) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", input.conversationId] }),
+      ]);
+      // The chat leaves every list at once, so offer the way straight back.
+      if (input.archived)
+        toast("Chat archived", {
+          action: {
+            label: "Undo",
+            onClick: () =>
+              archiveMutation.mutate({ conversationId: input.conversationId, archived: false }),
+          },
+        });
+    },
+    onError: (error, input) =>
+      toastError(
+        input.archived ? "Could not archive the chat." : "Could not unarchive the chat.",
+        error,
+      ),
+  });
+
   const renameMutation = useMutation({
     mutationFn: (input: { conversationId: string; title: string }) =>
       renameConversation({ data: input }),
@@ -96,6 +131,8 @@ export function useConversationActions(): ConversationActions {
   const title = renaming?.title.trim() ?? "";
 
   return {
+    setArchived: (conversation, archived) =>
+      archiveMutation.mutate({ conversationId: conversation.id, archived }),
     startRename: (conversation) =>
       setRenaming({ id: conversation.id, title: conversation.title ?? "" }),
     confirmDelete: async (conversation) => {
@@ -152,7 +189,7 @@ export function useConversationActions(): ConversationActions {
   };
 }
 
-/** The Rename / Delete entries; each surface supplies its own menu trigger. */
+/** The Rename / Move / Archive / Delete entries; each surface supplies its own menu trigger. */
 export function ConversationMenuItems({
   conversation,
   actions,
@@ -167,6 +204,16 @@ export function ConversationMenuItems({
         Rename
       </DropdownMenuItem>
       {conversation.temporary ? null : <MoveToProject conversation={conversation} />}
+      {/* Nothing lists a temporary chat, so it has nowhere to be archived from. */}
+      {conversation.temporary ? null : (
+        <DropdownMenuItem onClick={() => actions.setArchived(conversation, !conversation.archived)}>
+          <HugeiconsIcon
+            icon={conversation.archived ? ArchiveArrowUpIcon : ArchiveArrowDownIcon}
+            strokeWidth={2}
+          />
+          {conversation.archived ? "Unarchive" : "Archive"}
+        </DropdownMenuItem>
+      )}
       <DropdownMenuItem variant="destructive" onClick={() => actions.confirmDelete(conversation)}>
         <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         Delete

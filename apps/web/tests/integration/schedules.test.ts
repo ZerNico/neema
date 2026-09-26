@@ -349,6 +349,85 @@ describe("durable scheduled attempts", () => {
       await turnRuntime.dispose();
     }
   });
+
+  it("leaves an archived chat archived when a schedule fires into it, and unarchives it on a send", async () => {
+    const turnRuntime = ManagedRuntime.make(
+      ChatRepo.layer.pipe(
+        Layer.provideMerge(AttachmentRepo.layer),
+        Layer.provideMerge(ScheduleRepo.layer),
+        Layer.provideMerge(Db.layer),
+        Layer.provideMerge(PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 })),
+      ),
+    );
+    try {
+      const result = await turnRuntime.runPromise(
+        Effect.gen(function* () {
+          const owner = yield* makeUser();
+          const schedule = yield* insert(owner);
+          const repo = yield* ScheduleRepo;
+          const chatRepo = yield* ChatRepo;
+          const db = yield* Db;
+          const providerId = uuidv7();
+          const modelId = uuidv7();
+          yield* db.insert(providers).values({
+            id: providerId,
+            name: "Test provider",
+            kind: "openrouter",
+            baseUrl: "http://x",
+            apiKeyCiphertext: "x",
+          });
+          yield* db.insert(models).values({
+            id: modelId,
+            providerId,
+            modelKey: "archive-test",
+            displayName: "Test",
+            type: "chat",
+          });
+          const chatId = uuidv7();
+          yield* db
+            .insert(conversations)
+            .values({ id: chatId, userId: owner, title: "Put away", archivedAt: new Date() });
+          const archivedAt = () =>
+            db
+              .select({ archivedAt: conversations.archivedAt })
+              .from(conversations)
+              .where(eq(conversations.id, chatId))
+              .pipe(Effect.map((rows) => rows[0]?.archivedAt ?? null));
+
+          const fire = yield* repo.beginRun(schedule.id);
+          yield* chatRepo.createTurn({
+            userId: owner,
+            conversation: { kind: "existing", id: chatId },
+            modelId,
+            content: schedule.prompt,
+            attachmentIds: [],
+            scheduleId: schedule.id,
+            scheduleRunId: fire.id,
+            resolve: () => Effect.succeed(PLAIN_GENERATION),
+          });
+          const afterFire = yield* archivedAt();
+          yield* db
+            .update(messages)
+            .set({ status: "complete" })
+            .where(eq(messages.conversationId, chatId));
+          yield* chatRepo.createTurn({
+            userId: owner,
+            conversation: { kind: "existing", id: chatId },
+            modelId,
+            content: "and one more thing",
+            attachmentIds: [],
+            resolve: () => Effect.succeed(PLAIN_GENERATION),
+          });
+          const afterSend = yield* archivedAt();
+          return { afterFire, afterSend };
+        }),
+      );
+      expect(result.afterFire).not.toBeNull();
+      expect(result.afterSend).toBeNull();
+    } finally {
+      await turnRuntime.dispose();
+    }
+  });
 });
 
 describe("schedule capability revocation", () => {

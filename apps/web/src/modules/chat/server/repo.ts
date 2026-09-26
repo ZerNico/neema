@@ -11,6 +11,7 @@ import {
   gt,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   lt,
   ne,
@@ -152,7 +153,16 @@ const draftSummary = (draft: {
 });
 
 /** The user's chats that lists and search may show: never a temporary one. */
+/** Chats a list may show: never temporary, never archived. */
 const listedBy = (userId: string) =>
+  and(
+    eq(conversations.userId, userId),
+    eq(conversations.temporary, false),
+    isNull(conversations.archivedAt),
+  );
+
+/** Chats search may find: archived ones too, marked, never temporary. */
+const searchableBy = (userId: string) =>
   and(eq(conversations.userId, userId), eq(conversations.temporary, false));
 
 /** The fixed association, not an agent configuration snapshot. */
@@ -249,6 +259,7 @@ export interface ChatSearchHit {
   title: string | null;
   messageId: string | null;
   snippet: Snippet | null;
+  archived: boolean;
 }
 
 /**
@@ -886,6 +897,17 @@ export class ChatRepo extends Context.Service<
     /** Clears the temporary flag. False when it was already a kept chat. */
     keepConversation(userId: string, conversationId: string): Effect.Effect<boolean>;
     /**
+     * Archives or unarchives one chat. False when nothing changed: already in
+     * that state, not this person's, or temporary (which is never archived).
+     */
+    setArchived(userId: string, conversationId: string, archived: boolean): Effect.Effect<boolean>;
+    /** Archives every chat a list shows; returns the ids it archived. */
+    archiveAll(userId: string): Effect.Effect<ReadonlyArray<string>>;
+    /** Archived chats, most recently archived first. */
+    listArchived(
+      userId: string,
+    ): Effect.Effect<ReadonlyArray<{ id: string; title: string | null; archivedAt: Date }>>;
+    /**
      * Resolves a pending title. False when the row is gone or already titled,
      * since a manual rename that landed first must not be overwritten.
      */
@@ -1222,7 +1244,7 @@ export class ChatRepo extends Context.Service<
             activity: sql<string>`${activity}`.as("recent_activity"),
           })
           .from(conversations)
-          .where(listedBy(userId))
+          .where(searchableBy(userId))
           .orderBy(desc(activity), desc(conversations.id))
           .limit(SEARCH_WINDOW_CHATS)
           .as("recent");
@@ -1271,7 +1293,7 @@ export class ChatRepo extends Context.Service<
                 .innerJoin(conversations, eq(conversations.id, messages.conversationId))
                 .where(
                   and(
-                    listedBy(userId),
+                    searchableBy(userId),
                     ne(messages.role, "system"),
                     sql`${messageSearchVector(messages.content)} @@ ${query}`,
                   ),
@@ -1364,7 +1386,10 @@ export class ChatRepo extends Context.Service<
             .select({ conversationId: conversations.id, title: conversations.title })
             .from(conversations)
             .where(
-              and(listedBy(input.userId), ilike(conversations.title, `%${escapeLike(needle)}%`)),
+              and(
+                searchableBy(input.userId),
+                ilike(conversations.title, `%${escapeLike(needle)}%`),
+              ),
             )
             .orderBy(desc(activity), desc(conversations.id))
             .limit(input.limit)
@@ -1406,11 +1431,28 @@ export class ChatRepo extends Context.Service<
           const snippets = new Map(
             headlines.map((row) => [row.id, snippetFromHeadline(row.headline)] as const),
           );
+          const archivedRows = hits.length
+            ? yield* db
+                .select({ id: conversations.id })
+                .from(conversations)
+                .where(
+                  and(
+                    inArray(
+                      conversations.id,
+                      hits.map((hit) => hit.conversationId),
+                    ),
+                    isNotNull(conversations.archivedAt),
+                  ),
+                )
+                .pipe(Effect.orDie)
+            : [];
+          const archived = new Set(archivedRows.map((row) => row.id));
           return hits.map((hit) => ({
             conversationId: hit.conversationId,
             title: hit.title,
             messageId: hit.messageId,
             snippet: (hit.messageId && snippets.get(hit.messageId)) || null,
+            archived: archived.has(hit.conversationId),
           }));
         }),
 
@@ -1813,7 +1855,14 @@ export class ChatRepo extends Context.Service<
                     .pipe(Effect.orDie);
                 yield* tx
                   .update(conversations)
-                  .set({ modelId: input.modelId, lastMessageAt: new Date(), updatedAt: new Date() })
+                  .set({
+                    modelId: input.modelId,
+                    lastMessageAt: new Date(),
+                    updatedAt: new Date(),
+                    // Writing in an archived chat brings it back; a schedule's
+                    // fire is nobody writing, so its chat stays put away.
+                    ...(input.scheduleRunId ? {} : { archivedAt: null }),
+                  })
                   .where(eq(conversations.id, conversation.id))
                   .pipe(Effect.orDie);
                 if (reservation)
@@ -1958,6 +2007,7 @@ export class ChatRepo extends Context.Service<
                     modelId: entry.input.modelId,
                     lastMessageAt: new Date(),
                     updatedAt: new Date(),
+                    archivedAt: null,
                   })
                   .where(eq(conversations.id, conversation.id))
                   .pipe(Effect.orDie);
@@ -2280,6 +2330,51 @@ export class ChatRepo extends Context.Service<
             return rows.length > 0;
           },
         ),
+
+        setArchived: Effect.fn("ChatRepo.setArchived")(
+          function* (userId, conversationId, archived) {
+            const rows = yield* db
+              .update(conversations)
+              .set({ archivedAt: archived ? new Date() : null })
+              .where(
+                and(
+                  eq(conversations.id, conversationId),
+                  eq(conversations.userId, userId),
+                  eq(conversations.temporary, false),
+                  archived ? isNull(conversations.archivedAt) : isNotNull(conversations.archivedAt),
+                ),
+              )
+              .returning({ id: conversations.id })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
+
+        archiveAll: Effect.fn("ChatRepo.archiveAll")(function* (userId) {
+          const rows = yield* db
+            .update(conversations)
+            .set({ archivedAt: new Date() })
+            .where(listedBy(userId))
+            .returning({ id: conversations.id })
+            .pipe(Effect.orDie);
+          return rows.map((row) => row.id);
+        }),
+
+        listArchived: Effect.fn("ChatRepo.listArchived")(function* (userId) {
+          const rows = yield* db
+            .select({
+              id: conversations.id,
+              title: conversations.title,
+              archivedAt: conversations.archivedAt,
+            })
+            .from(conversations)
+            .where(and(searchableBy(userId), isNotNull(conversations.archivedAt)))
+            .orderBy(desc(conversations.archivedAt), desc(conversations.id))
+            .pipe(Effect.orDie);
+          return rows.flatMap(({ id, title, archivedAt }) =>
+            archivedAt ? [{ id, title, archivedAt }] : [],
+          );
+        }),
 
         setTitleIfPending: Effect.fn("ChatRepo.setTitleIfPending")(
           function* (conversationId, title) {
@@ -3237,6 +3332,17 @@ export class ChatRepo extends Context.Service<
                     .where(eq(conversations.id, input.edit.conversationId))
                     .pipe(Effect.orDie);
                 }
+                // A retry or an edit is writing in the chat, so it unarchives it.
+                yield* tx
+                  .update(conversations)
+                  .set({ archivedAt: null })
+                  .where(
+                    and(
+                      eq(conversations.id, target.conversationId),
+                      isNotNull(conversations.archivedAt),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
 
                 if (input.invalidateCheckpointThroughMessageIds.length > 0) {
                   yield* tx
@@ -3390,7 +3496,7 @@ export class ChatRepo extends Context.Service<
                 }
                 yield* tx
                   .update(conversations)
-                  .set({ modelId: input.modelId, updatedAt: new Date() })
+                  .set({ modelId: input.modelId, updatedAt: new Date(), archivedAt: null })
                   .where(eq(conversations.id, input.conversationId))
                   .pipe(Effect.orDie);
 

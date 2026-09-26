@@ -20,10 +20,12 @@ the rest of this page depends on.
 
 ## Kept out of every list
 
-- `ChatRepo.listedBy` is the predicate for "chats a list may show". Every place chats are
-  listed has to use it: `listConversations` (the sidebar, `/chats`, the palette's recent
-  chats, the schedule chat picker), plus the title query, `recentMatches` and `indexedMatches`
-  behind `searchConversations`. Adding a new list without it leaks temporary chats.
+- `ChatRepo.listedBy` is the predicate for "chats a list may show" and
+  `ChatRepo.searchableBy` for "chats search may find"; both exclude temporary chats (they differ
+  on [archived](archived-chats.md) ones). Every list uses `listedBy`: `listConversations` (the
+  sidebar, `/chats`, the palette's recent chats, the schedule chat picker). The title query,
+  `recentMatches` and `indexedMatches` behind `searchConversations` use `searchableBy`. A new
+  list or search path without one of them leaks temporary chats.
 - A schedule refuses a temporary chat as its target (`validate.ts`). The chat would be swept
   while the schedule still pointed at it.
 - A branch copies the flag: a copy of a temporary chat must not outlive it in the sidebar.

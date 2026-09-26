@@ -151,7 +151,15 @@ export function CommandPalette({
                             aria-hidden
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium">{item.label}</span>
+                            <span className="block truncate font-medium">
+                              {item.label}
+                              {/* A snippet takes the second line; the detail still shows. */}
+                              {item.snippet && item.detail ? (
+                                <span className="text-muted-foreground ml-2 text-xs font-normal">
+                                  {item.detail}
+                                </span>
+                              ) : null}
+                            </span>
                             {item.snippet ? (
                               <SnippetText snippet={item.snippet} />
                             ) : item.detail ? (

@@ -7,6 +7,7 @@ import { runtime } from "~/server/runtime.ts";
 import {
   AnswerQuestionInput,
   BranchConversationInput,
+  ConversationArchiveInput,
   ConversationIdInput,
   EditMessageInput,
   ListConversationsInput,
@@ -720,6 +721,45 @@ export const keepConversation = createServerFn({ method: "POST" })
       ).pipe(
         Effect.catchTag("ConversationNotFound", () =>
           Effect.die(new Response("Not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
+export const setConversationArchived = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ConversationArchiveInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.setArchived({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          archived: data.archived,
+        }),
+      ).pipe(
+        Effect.catchTag("ConversationNotFound", () =>
+          Effect.die(new Response("Not found", { status: 404 })),
+        ),
+      ),
+    ),
+  );
+
+export const archiveAllConversations = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) => chat.archiveAll({ userId: context.session.user.id })),
+    ),
+  );
+
+export const listArchivedConversations = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) => chat.listArchived({ userId: context.session.user.id })).pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({ ...row, archivedAt: row.archivedAt.toISOString() })),
         ),
       ),
     ),
