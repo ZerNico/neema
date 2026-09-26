@@ -42,7 +42,10 @@ export function VirtualMessageList({ messages }: { messages: DisplayMessage[] })
     anchorTo: "end",
     followOnAppend: true,
     scrollEndThreshold: BOTTOM_THRESHOLD,
-    useAnimationFrameWithResizeObserver: true,
+    // Measure inside the ResizeObserver callback, which runs before paint, so
+    // the scroll correction lands in the frame the row grew. Deferring it to
+    // the next frame painted a streamed code block below the fold first.
+    useAnimationFrameWithResizeObserver: false,
   });
 
   const scrollToBottom = useCallback(

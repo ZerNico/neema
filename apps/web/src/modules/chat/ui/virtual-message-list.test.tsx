@@ -71,7 +71,7 @@ describe("VirtualMessageList", () => {
       typeof options.initialOffset === "function" ? options.initialOffset() : options.initialOffset,
     ).toBe(96);
     expect(options.scrollEndThreshold).toBe(48);
-    expect(options.useAnimationFrameWithResizeObserver).toBe(true);
+    expect(options.useAnimationFrameWithResizeObserver).toBe(false);
     expect(options.getScrollElement()).toHaveClass("overflow-y-auto");
     expect(options.getScrollElement()).toHaveClass("[overflow-anchor:none]");
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);

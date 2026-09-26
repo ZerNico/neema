@@ -283,6 +283,15 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
   color: var(--shiki-dark) !important;
 }
 
+/* Streamdown skips laying out an off-screen code block and reserves 200px for
+   it instead. A block arriving below the fold then measured as that guess and
+   shrank once seen, so the transcript's virtualizer, which already keeps
+   off-screen rows out of the DOM, kept correcting scroll for heights that were
+   never real. Its inline style needs the !important. */
+[data-streamdown="code-block"] {
+  content-visibility: visible !important;
+}
+
 /* Live-progress label (deep research, and anything else that reports what it
    is doing right now). A sweep across the text reads as "still working"
    without the twitch of a pulsing opacity on a line of prose. */
