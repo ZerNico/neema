@@ -37,6 +37,10 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
       plugins={markdownPlugins}
       isAnimating={streaming}
       animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
+      // Streamdown caps tables at 300px and scrolls them inside the transcript's
+      // own scroll, which hid most rows and caught the wheel. A table is read,
+      // so it takes its full height; wide ones still scroll sideways.
+      tableMaxHeight={0}
       {...(components ? { components } : {})}
       className={cn("space-y-3 [&_pre]:overflow-x-auto", className)}
     >

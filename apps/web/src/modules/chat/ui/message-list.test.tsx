@@ -1600,6 +1600,29 @@ const snapshot = (text: string): LiveTextSnapshot => ({
   drained: false,
 });
 
+describe("answer tables", () => {
+  it("take their full height instead of scrolling inside the transcript", async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => `| row ${i} | value ${i} |`).join("\n");
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "table",
+          role: "assistant",
+          content: `| name | value |\n| --- | --- |\n${rows}`,
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+        }}
+      />,
+    );
+    const table = await waitFor(() => container.querySelector('[data-streamdown="table"]')!);
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(30);
+    // Streamdown puts its cap on the table's own scroll container.
+    expect((table.parentElement as HTMLElement).style.maxHeight).toBe("");
+  });
+});
+
 describe("withLiveText", () => {
   const row: DisplayMessage = {
     id: "live",
