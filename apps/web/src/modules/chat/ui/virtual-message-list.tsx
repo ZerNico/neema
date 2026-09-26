@@ -2,13 +2,17 @@ import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { estimateMessageHeight } from "./estimate-message-height.ts";
 import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 
 const BOTTOM_THRESHOLD = 48;
-const ESTIMATED_MESSAGE_HEIGHT = 96;
+/** The column's `max-w-3xl`, the width rows have before the list is laid out. */
+const COLUMN_WIDTH = 768;
+/** Estimates per message object, redone only when the column width changes. */
+const estimates = new WeakMap<DisplayMessage, { width: number; height: number }>();
 /** How close to the first loaded row (overscan included) older turns start loading. */
 const REACH_START_ROWS = 3;
 
@@ -36,19 +40,32 @@ export function VirtualMessageList({
   "use no memo";
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const count = messages.length;
+
+  // Close guesses keep rows from resizing as they mount: every miss above the
+  // viewport is offset by moving the scroll position under the reader.
+  const estimate = (index: number) => {
+    const message = messages[index]!;
+    const width = columnRef.current?.clientWidth || COLUMN_WIDTH;
+    const known = estimates.get(message);
+    if (known?.width === width) return known.height;
+    const height = estimateMessageHeight(message, width);
+    estimates.set(message, { width, height });
+    return height;
+  };
 
   // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual exposes a mutable imperative instance
   const virtualizer = useVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ESTIMATED_MESSAGE_HEIGHT,
+    estimateSize: estimate,
     // Begin with the ending range on the very first render. Without an initial
     // offset, the mount effect first renders and measures the beginning of a
     // long chat, then walks through several expensive markdown slices on its
     // way to the bottom.
-    initialOffset: () => count * ESTIMATED_MESSAGE_HEIGHT,
+    initialOffset: () => messages.reduce((sum, _, index) => sum + estimate(index), 0),
     overscan: 6,
     getItemKey: (index) => messages[index]!.id,
     anchorTo: "end",
@@ -112,6 +129,7 @@ export function VirtualMessageList({
         )}
       >
         <div
+          ref={columnRef}
           className="relative mx-auto w-full max-w-3xl"
           style={{ height: virtualizer.getTotalSize() }}
         >

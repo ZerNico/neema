@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DisplayMessage } from "./message-list.tsx";
+import { estimateMessageHeight } from "./estimate-message-height.ts";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +18,16 @@ vi.mock("./message-list.tsx", () => ({
   MessageBubble: () => <div />,
 }));
 
-const messages = [{ id: "message-1" }] as DisplayMessage[];
+const message = (id: string, content = "An answer.\n\nIn two paragraphs."): DisplayMessage => ({
+  id,
+  role: "assistant",
+  content,
+  reasoning: "",
+  reasoningSeen: false,
+  toolActivities: [],
+  status: "complete",
+});
+const messages = [message("message-1")];
 let visible: Array<{ index: number; key: string; start: number }> = [];
 const virtualizer = {
   getVirtualItems: () => visible,
@@ -75,7 +85,7 @@ describe("VirtualMessageList", () => {
     expect(options.followOnAppend).toBe(true);
     expect(
       typeof options.initialOffset === "function" ? options.initialOffset() : options.initialOffset,
-    ).toBe(96);
+    ).toBe(estimateMessageHeight(messages[0]!, 768));
     expect(options.scrollEndThreshold).toBe(48);
     expect(options.useAnimationFrameWithResizeObserver).toBe(false);
     expect(options.getScrollElement()).toHaveClass("overflow-y-auto");
@@ -93,9 +103,7 @@ describe("VirtualMessageList", () => {
     expect(virtualizer).not.toHaveProperty("shouldAdjustScrollPositionOnItemSizeChange");
 
     // New rows are followed by `followOnAppend`, not by this component.
-    rerender(
-      <VirtualMessageList messages={[...messages, { id: "message-2" } as DisplayMessage]} />,
-    );
+    rerender(<VirtualMessageList messages={[...messages, message("message-2")]} />);
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);
   });
 
@@ -131,7 +139,7 @@ describe("VirtualMessageList", () => {
   });
 
   it("asks for older turns only while the rows near the start are on screen", () => {
-    const many = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}` })) as DisplayMessage[];
+    const many = Array.from({ length: 40 }, (_, i) => message(`m${i}`));
     const onReachStart = vi.fn();
 
     visible = rows(30);
