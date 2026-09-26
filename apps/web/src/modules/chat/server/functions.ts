@@ -8,6 +8,8 @@ import {
   AnswerQuestionInput,
   BranchConversationInput,
   ConversationArchiveInput,
+  ConversationDetailInput,
+  ConversationHistoryInput,
   ConversationIdInput,
   EditMessageInput,
   ListConversationsInput,
@@ -27,7 +29,7 @@ import {
   SendQueuedNowInput,
   SteerQueueEntryInput,
 } from "../schema.ts";
-import { loadConversationDetail } from "./conversation-detail.ts";
+import { loadConversationDetail, loadConversationHistory } from "./conversation-detail.ts";
 import { ChatRepo } from "./repo.ts";
 import { ChatService, type DesktopFolderRef } from "./service.ts";
 
@@ -83,12 +85,23 @@ export const searchChats = createServerFn({ method: "GET" })
 
 export const getConversationWithMessages = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .validator(standard(ConversationIdInput))
+  .validator(standard(ConversationDetailInput))
   .handler(({ data, context }) =>
     runtime.runPromise(
-      loadConversationDetail(context.session.user.id, data.conversationId).pipe(
+      loadConversationDetail(context.session.user.id, data.conversationId, data.anchorId).pipe(
         // Preserve missing-resource semantics across the server-function
         // boundary so route loaders can render their not-found state.
+        Effect.catchTag("ConversationNotFound", () => Effect.die(notFound())),
+      ),
+    ),
+  );
+
+export const getConversationHistory = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(standard(ConversationHistoryInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      loadConversationHistory(context.session.user.id, data.conversationId, data.beforeId).pipe(
         Effect.catchTag("ConversationNotFound", () => Effect.die(notFound())),
       ),
     ),

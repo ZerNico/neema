@@ -30,6 +30,16 @@ describe("inheritSources", () => {
     expect(lookups[2]!(1)).toMatchObject({ read: true, title: "A, read in full" });
   });
 
+  it("offers sources registered before the loaded range to every message", () => {
+    const [first, second] = inheritSources(
+      [[web(2, "https://b.dev")], []],
+      [web(1, "https://a.dev", { title: "found long ago" })],
+    );
+    expect(first!(1)).toMatchObject({ title: "found long ago" });
+    expect(second!(1)).toMatchObject({ title: "found long ago" });
+    expect(first!(2)).toBeUndefined();
+  });
+
   it("keeps one entry per number however long the conversation", () => {
     const messages = Array.from({ length: 2_000 }, (_, i) => [web(i + 1, `https://s${i}.dev`)]);
     const lookups = inheritSources(messages);

@@ -14,9 +14,22 @@ export const NO_INHERITED_SOURCES: InheritedSources = () => undefined;
  */
 export function inheritSources(
   perMessage: ReadonlyArray<ReadonlyArray<ToolSource>>,
+  /** Sources registered before the first loaded message, when older turns are not loaded. */
+  before: ReadonlyArray<ToolSource> = [],
 ): InheritedSources[] {
   // Entries per number, in message order, each merged with those before it.
   const history = new Map<number, Array<{ message: number; source: ToolSource }>>();
+  const record = (message: number, sources: ReadonlyArray<ToolSource>) => {
+    for (const source of sources) {
+      const entries = history.get(source.index) ?? [];
+      const last = entries.at(-1);
+      const merged = mergeSource(last?.source, source);
+      if (last?.message === message) last.source = merged;
+      else entries.push({ message, source: merged });
+      history.set(source.index, entries);
+    }
+  };
+  record(-1, before);
   const lookups: InheritedSources[] = [];
   perMessage.forEach((sources, message) => {
     lookups.push((index) => {
@@ -32,14 +45,7 @@ export function inheritSources(
       }
       return low === 0 ? undefined : entries[low - 1]!.source;
     });
-    for (const source of sources) {
-      const entries = history.get(source.index) ?? [];
-      const last = entries.at(-1);
-      const merged = mergeSource(last?.source, source);
-      if (last?.message === message) last.source = merged;
-      else entries.push({ message, source: merged });
-      history.set(source.index, entries);
-    }
+    record(message, sources);
   });
   return lookups;
 }

@@ -1,5 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
+  getConversationHistory,
   getConversationWithMessages,
   listArchivedConversations,
   listChatModels,
@@ -38,10 +39,42 @@ export const conversationsInfiniteQuery = (query = "", outsideProjects = false) 
     getNextPageParam: (last) => last.nextCursor,
   });
 
+type ConversationDetail = Awaited<ReturnType<typeof getConversationWithMessages>>;
+
+/**
+ * The latest turns of a chat and everything conversation-wide. A refetch sends
+ * back the first message it already has, so every invalidation grows the
+ * loaded range from there instead of sliding it; see `loadConversationDetail`.
+ */
 export const conversationQuery = (conversationId: string) =>
   queryOptions({
     queryKey: ["conversation", conversationId],
-    queryFn: () => getConversationWithMessages({ data: { conversationId } }),
+    queryFn: ({ client, queryKey }) => {
+      const previous = client.getQueryData<ConversationDetail>(queryKey);
+      return getConversationWithMessages({
+        data: { conversationId, anchorId: previous?.window.anchorId ?? null },
+      });
+    },
+  });
+
+/**
+ * Older pages, newest first, above the head. Keyed by the head's anchor under a
+ * root of its own: the sync bus's `["conversation"]` invalidations never refetch
+ * them, and a new anchor (a rewind past the old one) leaves them behind.
+ */
+export const conversationHistoryQuery = (
+  conversationId: string,
+  anchorId: string | null,
+  olderCursor: string | null,
+) =>
+  infiniteQueryOptions({
+    queryKey: ["conversation-history", conversationId, anchorId],
+    queryFn: ({ pageParam }) =>
+      getConversationHistory({ data: { conversationId, beforeId: pageParam! } }),
+    initialPageParam: olderCursor,
+    getNextPageParam: (page) => page.olderCursor,
+    enabled: olderCursor !== null,
+    staleTime: Infinity,
   });
 
 export const chatModelsQuery = queryOptions({

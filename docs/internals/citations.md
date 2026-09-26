@@ -27,6 +27,10 @@ plugin config because highlighting, math, mermaid and CJK handling are opt-in an
 - `tools/sources.ts` merges observations everywhere: successful extraction is monotonic, and a later search
   cannot replace it with snippet-only evidence. Sources panel/counts select own cited or extracted sources
   plus cited inherited sources, never all search hits.
+- The client resolves an inherited number through one merged history per number (`inheritSources`), never
+  a copy of every earlier source per message. A chat opens with only its latest turns, so an answer may cite
+  a number an unloaded turn registered: every detail window and older page carries `priorSources`, the
+  earlier sources its own text cites, and they seed that history.
 
 ## Markdown plugins (`src/ui/markdown-plugins.ts`)
 

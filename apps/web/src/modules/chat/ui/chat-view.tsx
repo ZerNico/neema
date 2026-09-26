@@ -41,12 +41,19 @@ import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/
 import { Option, Schema } from "effect";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { projectQuery } from "~/modules/projects/client/queries.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { conversationQuery } from "../client/queries.ts";
+import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
+import { withHistory } from "./conversation-window.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import {
   applyCompactionChunk,
@@ -549,14 +556,22 @@ interface Stranded {
  * the loader reports before the tool rows arrive. Never under the transcript,
  * where it would read as belonging to the whole chat.
  */
-function placeStranded(messages: DisplayMessage[], stranded: ReadonlyArray<Stranded>) {
+function placeStranded(
+  messages: DisplayMessage[],
+  stranded: ReadonlyArray<Stranded>,
+  /** Older turns are not loaded, so an unknown answer may simply be further up. */
+  partial: boolean,
+) {
   if (stranded.length === 0) return messages;
   const answers = messages.filter((message) => message.role === "assistant");
   const fallback = answers.at(-1)?.id;
   const byMessage = new Map<string, Stranded[]>();
   for (const item of stranded) {
     const anchor = item.messageId;
-    const host = anchor && answers.some((message) => message.id === anchor) ? anchor : fallback;
+    const loaded = !!anchor && answers.some((message) => message.id === anchor);
+    // Its answer is somewhere above: it appears there once that page loads.
+    if (anchor && !loaded && partial) continue;
+    const host = loaded ? anchor : fallback;
     if (!host) continue;
     const list = byMessage.get(host);
     if (list) list.push(item);
@@ -597,7 +612,28 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const { data, dataUpdatedAt } = useSuspenseQuery(conversationQuery(conversationId));
+  const { data: head, dataUpdatedAt } = useSuspenseQuery(conversationQuery(conversationId));
+  // Older turns load only once the reader scrolls up to the first loaded one.
+  // A new anchor (a rewind past the old one) starts that over.
+  const [historyWanted, setHistoryWanted] = useState<string | null>(null);
+  const history = useInfiniteQuery({
+    ...conversationHistoryQuery(conversationId, head.window.anchorId, head.window.olderCursor),
+    enabled: head.window.olderCursor !== null && historyWanted === head.window.anchorId,
+  });
+  const data = useMemo(() => withHistory(head, history.data?.pages), [head, history.data]);
+  const { hasNextPage, isFetching: loadingOlder, fetchNextPage } = history;
+  const loadOlder = useCallback(() => {
+    if (!data.hasOlder || loadingOlder) return;
+    if (historyWanted !== head.window.anchorId) setHistoryWanted(head.window.anchorId);
+    else if (hasNextPage) void fetchNextPage();
+  }, [
+    data.hasOlder,
+    fetchNextPage,
+    hasNextPage,
+    head.window.anchorId,
+    historyWanted,
+    loadingOlder,
+  ]);
   // Stays in step with an asynchronously generated title: `conversation.updated`
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
@@ -631,8 +667,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ? foreignMachineStamp(
           conversationId,
           localMachineId,
-          data.generations ?? [],
-          data.messages.filter((m) => m.role === "assistant").map((m) => m.id),
+          // Found server-side: the newest such attempt may predate the loaded turns.
+          data.latestMachineAttempt ? [data.latestMachineAttempt] : [],
+          data.latestMachineAttempt ? [data.latestMachineAttempt.messageId] : [],
         )
       : null;
 
@@ -1657,6 +1694,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const baseDisplay = useMemo(() => {
     const inherited = inheritSources(
       visibleMessages.map((message) => collectSources(toolCallsByMessage.get(message.id) ?? [])),
+      data.priorSources,
     );
 
     return visibleMessages.map((message, position): DisplayMessage => {
@@ -1772,6 +1810,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     steersByAnswer,
     toolCallsByMessage,
     visibleMessages,
+    data.priorSources,
   ]);
 
   const liveId = streamingMessage?.id ?? (stream.status === "streaming" ? overlayId : null);
@@ -1910,49 +1949,53 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     callIndex: index,
     textOffset: message.content.length,
   });
-  const withPlacedCards = placeStranded(display, [
-    ...draftIds
-      .filter((draftId) => !shownAgentDrafts.has(draftId))
-      .map((draftId) => ({
-        messageId: origin.get(draftId)?.messageId,
-        activity: (message: DisplayMessage, index: number): ToolActivity => ({
-          ...placed(message, index, draftId),
-          family: "agent-draft",
-          name: "draft_agent",
-          result: { outcome: "drafted", draftId, draftConversationId: conversationId },
-        }),
-      })),
-    ...scheduleDraftIds
-      .filter((draftId) => !shownScheduleDrafts.has(draftId))
-      .map((draftId) => ({
-        messageId: origin.get(draftId)?.messageId,
-        activity: (message: DisplayMessage, index: number): ToolActivity => ({
-          ...placed(message, index, draftId),
-          family: "schedule-draft",
-          name: "draft_schedule",
-          result: { outcome: "drafted", draftId, draftConversationId: conversationId },
-        }),
-      })),
-    ...documentIds
-      .filter((documentId) => !shownDocuments.has(documentId))
-      .map((documentId) => {
-        const title = (origin.get(documentId) as { title?: string } | undefined)?.title;
-        return {
-          messageId: origin.get(documentId)?.messageId,
+  const withPlacedCards = placeStranded(
+    display,
+    [
+      ...draftIds
+        .filter((draftId) => !shownAgentDrafts.has(draftId))
+        .map((draftId) => ({
+          messageId: origin.get(draftId)?.messageId,
           activity: (message: DisplayMessage, index: number): ToolActivity => ({
-            ...placed(message, index, documentId),
-            family: "document",
-            name: "create_document",
-            result: {
-              outcome: "created",
-              documentId,
-              documentConversationId: conversationId,
-              ...(title ? { title } : {}),
-            },
+            ...placed(message, index, draftId),
+            family: "agent-draft",
+            name: "draft_agent",
+            result: { outcome: "drafted", draftId, draftConversationId: conversationId },
           }),
-        };
-      }),
-  ]);
+        })),
+      ...scheduleDraftIds
+        .filter((draftId) => !shownScheduleDrafts.has(draftId))
+        .map((draftId) => ({
+          messageId: origin.get(draftId)?.messageId,
+          activity: (message: DisplayMessage, index: number): ToolActivity => ({
+            ...placed(message, index, draftId),
+            family: "schedule-draft",
+            name: "draft_schedule",
+            result: { outcome: "drafted", draftId, draftConversationId: conversationId },
+          }),
+        })),
+      ...documentIds
+        .filter((documentId) => !shownDocuments.has(documentId))
+        .map((documentId) => {
+          const title = (origin.get(documentId) as { title?: string } | undefined)?.title;
+          return {
+            messageId: origin.get(documentId)?.messageId,
+            activity: (message: DisplayMessage, index: number): ToolActivity => ({
+              ...placed(message, index, documentId),
+              family: "document",
+              name: "create_document",
+              result: {
+                outcome: "created",
+                documentId,
+                documentConversationId: conversationId,
+                ...(title ? { title } : {}),
+              },
+            }),
+          };
+        }),
+    ],
+    data.hasOlder,
+  );
 
   return (
     <DocumentOwner
@@ -2003,7 +2046,11 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                       : null
                   }
                 >
-                  <VirtualMessageList messages={withPlacedCards} />
+                  <VirtualMessageList
+                    messages={withPlacedCards}
+                    onReachStart={loadOlder}
+                    loadingOlder={loadingOlder}
+                  />
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>
             </div>

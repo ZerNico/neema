@@ -18,8 +18,9 @@ vi.mock("./message-list.tsx", () => ({
 }));
 
 const messages = [{ id: "message-1" }] as DisplayMessage[];
+let visible: Array<{ index: number; key: string; start: number }> = [];
 const virtualizer = {
-  getVirtualItems: () => [],
+  getVirtualItems: () => visible,
   getTotalSize: () => 96,
   measureElement: mocks.measureElement,
   scrollToEnd: mocks.scrollToEnd,
@@ -45,6 +46,7 @@ beforeEach(() => {
     value: rawScrollTo,
   });
 
+  visible = [];
   mocks.scrollToEnd.mockReset();
   mocks.measureElement.mockReset();
   mocks.useVirtualizer.mockReset();
@@ -60,6 +62,10 @@ afterEach(() => {
     value: originalScrollTo,
   });
 });
+
+/** Eight rendered rows starting at `from`. */
+const rows = (from: number) =>
+  Array.from({ length: 8 }, (_, i) => ({ index: from + i, key: `m${from + i}`, start: 0 }));
 
 describe("VirtualMessageList", () => {
   it("targets the measured end on first mount", () => {
@@ -122,5 +128,23 @@ describe("VirtualMessageList", () => {
     expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "smooth" });
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveClass("opacity-0");
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveAttribute("inert");
+  });
+
+  it("asks for older turns only while the rows near the start are on screen", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}` })) as DisplayMessage[];
+    const onReachStart = vi.fn();
+
+    visible = rows(30);
+    const { rerender } = render(<VirtualMessageList messages={many} onReachStart={onReachStart} />);
+    expect(onReachStart).not.toHaveBeenCalled();
+
+    visible = rows(2);
+    rerender(<VirtualMessageList messages={many} onReachStart={onReachStart} />);
+    expect(onReachStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when earlier messages are loading", () => {
+    render(<VirtualMessageList messages={messages} loadingOlder />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading earlier messages…");
   });
 });

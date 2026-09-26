@@ -15,6 +15,7 @@ import {
   isNull,
   lt,
   ne,
+  not,
   or,
   sql,
   type SQL,
@@ -152,7 +153,14 @@ const draftSummary = (draft: {
   messageId: draft.messageId,
 });
 
-/** The user's chats that lists and search may show: never a temporary one. */
+/**
+ * A message row that sorts before `id` in the conversation's total order
+ * `(created_at, id)`. Compared in SQL: a JS Date drops the microseconds that
+ * tell apart the rows of one turn.
+ */
+const positionBefore = (id: string) =>
+  sql`(${messages.createdAt}, ${messages.id}) < (select position.created_at, position.id from ${messages} as position where position.id = ${id})`;
+
 /** Chats a list may show: never temporary, never archived. */
 const listedBy = (userId: string) =>
   and(
@@ -945,6 +953,33 @@ export class ChatRepo extends Context.Service<
       ConversationNotFound | MessageNotFound | BranchNotAllowed | ConversationBusy
     >;
     listMessages(conversationId: string): Effect.Effect<MessageRow[]>;
+    /**
+     * The message opening the last `turns` turns before `beforeId`, or before
+     * the end. Null when fewer turns exist, so the window reaches the start.
+     */
+    findWindowStart(
+      conversationId: string,
+      turns: number,
+      beforeId?: string,
+    ): Effect.Effect<string | null>;
+    /** Messages from `fromId` (or the start) up to, not including, `beforeId` (or the end). */
+    listMessageWindow(
+      conversationId: string,
+      range: { fromId?: string | null; beforeId?: string },
+    ): Effect.Effect<MessageRow[]>;
+    hasMessagesBefore(conversationId: string, messageId: string): Effect.Effect<boolean>;
+    hasMessage(conversationId: string, messageId: string): Effect.Effect<boolean>;
+    /** The newest answer sent from a desktop machine, however far back it is. */
+    latestMachineAttempt(conversationId: string): Effect.Effect<{
+      messageId: string;
+      desktopMachine: { id: string; name: string | null };
+    } | null>;
+    /** Sources earlier messages' tool calls registered under these citation numbers. */
+    listSourcesBefore(
+      conversationId: string,
+      messageId: string,
+      indexes: ReadonlyArray<number>,
+    ): Effect.Effect<unknown[]>;
     insertMessage(input: {
       conversationId: string;
       role: "user" | "assistant" | "system";
@@ -2781,6 +2816,128 @@ export class ChatRepo extends Context.Service<
             .orderBy(asc(messages.createdAt), asc(messages.id))
             .pipe(Effect.orDie);
         }),
+
+        findWindowStart: Effect.fn("ChatRepo.findWindowStart")(
+          function* (conversationId, turns, beforeId) {
+            const [row] = yield* db
+              .select({ id: messages.id })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.conversationId, conversationId),
+                  // A turn opens on the person's own message. A steer belongs
+                  // to the answer before it and a structured answer to the
+                  // question before it, so neither may start a window.
+                  eq(messages.role, "user"),
+                  isNull(messages.steeredIntoMessageId),
+                  isNull(messages.questionResponse),
+                  beforeId ? positionBefore(beforeId) : undefined,
+                ),
+              )
+              .orderBy(desc(messages.createdAt), desc(messages.id))
+              .offset(turns - 1)
+              .limit(1)
+              .pipe(Effect.orDie);
+            return row?.id ?? null;
+          },
+        ),
+
+        listMessageWindow: Effect.fn("ChatRepo.listMessageWindow")(
+          function* (conversationId, range) {
+            return yield* db
+              .select()
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.conversationId, conversationId),
+                  range.fromId ? not(positionBefore(range.fromId)) : undefined,
+                  range.beforeId ? positionBefore(range.beforeId) : undefined,
+                ),
+              )
+              // The same total order as listMessages.
+              .orderBy(asc(messages.createdAt), asc(messages.id))
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        hasMessagesBefore: Effect.fn("ChatRepo.hasMessagesBefore")(function* (conversationId, id) {
+          const [row] = yield* db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(and(eq(messages.conversationId, conversationId), positionBefore(id)))
+            .limit(1)
+            .pipe(Effect.orDie);
+          return row !== undefined;
+        }),
+
+        hasMessage: Effect.fn("ChatRepo.hasMessage")(function* (conversationId, id) {
+          const [row] = yield* db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(and(eq(messages.conversationId, conversationId), eq(messages.id, id)))
+            .pipe(Effect.orDie);
+          return row !== undefined;
+        }),
+
+        latestMachineAttempt: Effect.fn("ChatRepo.latestMachineAttempt")(
+          function* (conversationId) {
+            const [row] = yield* db
+              .select({
+                messageId: messages.id,
+                id: messageGenerationConfig.desktopMachineId,
+                name: messageGenerationConfig.desktopMachineName,
+              })
+              .from(messageGenerationConfig)
+              .innerJoin(messages, eq(messages.id, messageGenerationConfig.messageId))
+              .where(
+                and(
+                  eq(messages.conversationId, conversationId),
+                  sql`${messageGenerationConfig.desktopMachineId} is not null`,
+                ),
+              )
+              .orderBy(desc(messages.createdAt), desc(messages.id))
+              .limit(1)
+              .pipe(Effect.orDie);
+            return row?.id
+              ? { messageId: row.messageId, desktopMachine: { id: row.id, name: row.name } }
+              : null;
+          },
+        ),
+
+        listSourcesBefore: Effect.fn("ChatRepo.listSourcesBefore")(
+          function* (conversationId, id, indexes) {
+            if (indexes.length === 0) return [];
+            const wanted = new Set(indexes);
+            const sources = sql`case when jsonb_typeof(${messageToolCalls.result}->'sources') = 'array' then ${messageToolCalls.result}->'sources' else '[]'::jsonb end`;
+            const rows = yield* db
+              .select({ result: messageToolCalls.result })
+              .from(messageToolCalls)
+              .innerJoin(messages, eq(messages.id, messageToolCalls.messageId))
+              .where(
+                and(
+                  eq(messages.conversationId, conversationId),
+                  positionBefore(id),
+                  sql`exists (select 1 from jsonb_array_elements(${sources}) source where source->>'index' in (${sql.join(
+                    [...wanted].map((index) => sql`${String(index)}`),
+                    sql`, `,
+                  )}))`,
+                ),
+              )
+              .orderBy(
+                asc(messages.createdAt),
+                asc(messages.id),
+                asc(messageToolCalls.turnIndex),
+                asc(messageToolCalls.callIndex),
+              )
+              .pipe(Effect.orDie);
+            return rows.flatMap((row) => {
+              const found = (row.result as { sources?: unknown } | null)?.sources;
+              return Array.isArray(found)
+                ? found.filter((source: { index?: unknown }) => wanted.has(source?.index as number))
+                : [];
+            });
+          },
+        ),
 
         insertMessage: Effect.fn("ChatRepo.insertMessage")(function* (input) {
           return yield* db

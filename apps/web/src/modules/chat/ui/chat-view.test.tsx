@@ -14,6 +14,7 @@ import {
   abortWorkTurn,
   answerQuestion,
   branchConversation,
+  getConversationHistory,
   getConversationWithMessages,
   editMessage,
   getWorkTurnReservation,
@@ -33,7 +34,11 @@ import {
   saveAgentDraft,
 } from "~/modules/agents/server/draft-functions.ts";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
-import { applyToolChunk, type ToolActivity } from "../client/use-message-stream.ts";
+import {
+  applyToolChunk,
+  type ToolActivity,
+  type ToolSource,
+} from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
@@ -88,6 +93,7 @@ vi.mock("../server/functions.ts", () => ({
   abortWorkTurn: vi.fn(),
   activateWorkTurn: vi.fn(),
   getConversationWithMessages: vi.fn(),
+  getConversationHistory: vi.fn(),
   getWorkTurnReservation: vi.fn(),
   listConversations: vi.fn(),
   reserveWorkTurn: vi.fn(),
@@ -135,8 +141,17 @@ vi.mock("@tanstack/react-router", () => ({
 // The list itself is covered by message-list.test; here it only has to expose
 // what the view wired onto each row.
 vi.mock("./virtual-message-list.tsx", () => ({
-  VirtualMessageList: ({ messages }: { messages: ReadonlyArray<Record<string, unknown>> }) => (
+  VirtualMessageList: ({
+    messages,
+    onReachStart,
+  }: {
+    messages: ReadonlyArray<Record<string, unknown>>;
+    onReachStart?: () => void;
+  }) => (
     <div>
+      <button type="button" onClick={onReachStart}>
+        Reach start
+      </button>
       {messages.map((message) => (
         <div
           key={String(message.id)}
@@ -436,6 +451,10 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
   }>,
   toolCalls: [] as Array<Parameters<typeof toActivity>[0] & { messageId: string }>,
   attachments: [],
+  // The whole conversation is loaded; paging has its own tests.
+  window: { anchorId: "m-user" as string | null, olderCursor: null as string | null },
+  priorSources: [] as ToolSource[],
+  latestMachineAttempt: null,
   queue: [],
   queueState: null,
   branchedFrom,
@@ -1604,6 +1623,42 @@ const draftWriteGate = () => {
   return { promise, release };
 };
 
+const historyMock = vi.mocked(getConversationHistory);
+// One older turn above a head that does not reach the start.
+const olderPage = {
+  messages: [message("m-old-user", "user", "old question"), message("m-old", "assistant", "old")],
+  toolCalls: [],
+  compactionEvents: [],
+  attachments: [],
+  generations: [],
+  priorSources: [],
+  olderCursor: null,
+};
+const partial = { window: { anchorId: "m-user", olderCursor: "m-user" } };
+
+describe("ChatView older turns", () => {
+  it("loads the turns above once the list reaches its start, and draws them first", async () => {
+    historyMock.mockResolvedValueOnce(olderPage as never);
+    const { container } = renderView(null, partial);
+    expect(historyMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reach start" }));
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-message-id="m-old"]')).not.toBeNull(),
+    );
+    expect(historyMock).toHaveBeenCalledWith({
+      data: { conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7", beforeId: "m-user" },
+    });
+    expect(
+      [...container.querySelectorAll("[data-message-id]")].map((row) =>
+        row.getAttribute("data-message-id"),
+      ),
+    ).toEqual(["m-old-user", "m-old", "m-user", "m-answer"]);
+    historyMock.mockReset();
+  });
+});
+
 describe("ChatView agent drafts", () => {
   let current: AgentDraft;
   beforeEach(() => {
@@ -1791,6 +1846,26 @@ describe("ChatView agent drafts", () => {
       expect(saveAgentDraft).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps an unloaded answer's card off the newest answer", async () => {
+    historyMock.mockResolvedValueOnce(olderPage as never);
+    const { container } = renderView(null, {
+      ...partial,
+      agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-old" }],
+    });
+    // The card can only appear once its draft has loaded, so wait for that.
+    await waitFor(() => expect(getAgentDraft).toHaveBeenCalled());
+    await act(async () => {
+      await vi.mocked(getAgentDraft).mock.results.at(-1)!.value;
+    });
+    expect(screen.queryByRole("button", { name: "Open agent draft: Writer" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reach start" }));
+
+    const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
+    expect(container.querySelector('[data-message-id="m-old"]')).toContainElement(widget);
+    historyMock.mockReset();
+  });
 
   it("blocks send when persistence fails, without discarding local settings", async () => {
     renderView(null, { agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }] });

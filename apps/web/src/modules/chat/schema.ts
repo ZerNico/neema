@@ -159,6 +159,18 @@ export const ConversationArchiveInput = Schema.Struct({
   archived: Schema.Boolean,
 });
 
+export const ConversationDetailInput = Schema.Struct({
+  conversationId: Schema.String,
+  /** The first message the view already shows; see `loadConversationDetail`. */
+  anchorId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+
+export const ConversationHistoryInput = Schema.Struct({
+  conversationId: Schema.String,
+  /** The first message loaded so far; the page ends just before it. */
+  beforeId: Schema.String,
+});
+
 /** Opaque to the client: it hands back whatever the previous page returned. */
 export const ConversationCursor = Schema.Struct({
   /** ISO timestamp of coalesce(lastMessageAt, createdAt) for the last row served. */

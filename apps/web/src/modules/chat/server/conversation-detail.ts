@@ -2,7 +2,9 @@ import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ChatRepo, type QueueGate } from "./repo.ts";
+import { ChatRepo, type MessageRow, type QueueGate } from "./repo.ts";
+import { mergeSources } from "~/modules/tools/sources.ts";
+import type { Source } from "~/modules/tools/source-schema.ts";
 import { StreamEngine } from "./streaming.ts";
 import { eq } from "drizzle-orm";
 import { projects } from "~/db/schema/index.ts";
@@ -43,6 +45,82 @@ const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: 
   return queue[0]?.lastError ? ("failed" as const) : ("ready" as const);
 };
 
+/** Turns the first read of a chat returns, and each older page after it. */
+export const HEAD_TURNS = 30;
+export const OLDER_TURNS = 30;
+
+/**
+ * The rows that hang off one run of messages: tool calls, compactions,
+ * attachments and generation display, and the earlier sources its answers
+ * cite. Citation numbers are conversation-scoped, so an answer may cite a
+ * number an unloaded turn registered; those sources ride along.
+ */
+const loadMessageRows = Effect.fn("chat.loadMessageRows")(function* (
+  conversationId: string,
+  messages: ReadonlyArray<MessageRow>,
+) {
+  const repo = yield* ChatRepo;
+  const attachmentRepo = yield* AttachmentRepo;
+  const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
+  const userIds = messages.filter((m) => m.role === "user").map((m) => m.id);
+  const cited = new Set(
+    messages.flatMap((m) =>
+      [...m.content.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1])),
+    ),
+  );
+  const first = messages[0];
+  // These hang off the same message-id snapshot and nothing else, so they go
+  // out together rather than one after the other.
+  const rows = yield* Effect.all(
+    {
+      // Durable generation activity for all assistant messages. Research
+      // compaction bodies stay private; ordinary chat summaries are displayable.
+      toolCalls: repo.listToolCalls(assistantIds),
+      compactionEvents: repo.listCompactionEvents(assistantIds),
+      // Flat, like tool calls. The view groups by messageId.
+      attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
+      // What each answer ran with: the collections (shown on the *question*
+      // that added them, like attached files). Snapshot text and document
+      // manifests stay server-side; only
+      // names travel, resolved client-side against what the viewer may read.
+      generations: repo.listGenerationDisplay(assistantIds),
+      priorSources: first
+        ? repo
+            .listSourcesBefore(conversationId, first.id, [...cited])
+            .pipe(Effect.map((found) => mergeSources(found as Source[])))
+        : Effect.succeed([]),
+    },
+    { concurrency: "unbounded" },
+  );
+  return {
+    messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
+    ...rows,
+    compactionEvents: rows.compactionEvents.map((event) =>
+      event.researchRunId ? { ...event, summary: null } : event,
+    ),
+  };
+});
+
+/**
+ * An older page of a conversation: the `OLDER_TURNS` turns before `beforeId`,
+ * and the cursor for the page before it. Pages never overlap the loaded head,
+ * which always starts at a turn and only grows forward.
+ */
+export const loadConversationHistory = Effect.fn("chat.loadConversationHistory")(function* (
+  userId: string,
+  conversationId: string,
+  beforeId: string,
+) {
+  const repo = yield* ChatRepo;
+  // Ownership first and alone, as for the detail.
+  const conversation = yield* repo.getConversation(userId, conversationId);
+  const start = yield* repo.findWindowStart(conversation.id, OLDER_TURNS, beforeId);
+  const messages = yield* repo.listMessageWindow(conversation.id, { fromId: start, beforeId });
+  const olderCursor =
+    start && (yield* repo.hasMessagesBefore(conversation.id, start)) ? start : null;
+  return { ...(yield* loadMessageRows(conversation.id, messages)), olderCursor };
+});
+
 /**
  * Everything the chat view needs for one conversation, in three dependency
  * stages rather than one serial chain of round trips.
@@ -54,9 +132,15 @@ const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: 
 export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(function* (
   userId: string,
   conversationId: string,
+  /**
+   * The first message the caller already shows. A refetch keeps it, so the
+   * loaded range grows with new turns instead of sliding and leaving a gap
+   * before the pages loaded above it. When it is gone (a retry or edit
+   * further back rewound past it), a fresh window replaces everything.
+   */
+  anchorId?: string | null,
 ) {
   const repo = yield* ChatRepo;
-  const attachmentRepo = yield* AttachmentRepo;
   const schedules = yield* ScheduleRepo;
   // Ownership first and alone: an unauthorized id must fail before any of its
   // children are read.
@@ -70,9 +154,22 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   // The source of a branch, for the "branched from" link. Read through the
   // same ownership check, and null when it has been deleted since. It depends
   // on the conversation only, so it rides with the messages.
-  const { messages, branchedFrom, schedule } = yield* Effect.all(
+  const anchored = anchorId ? yield* repo.hasMessage(conversation.id, anchorId) : false;
+  const start = anchored ? anchorId! : yield* repo.findWindowStart(conversation.id, HEAD_TURNS);
+  const { messages, olderCursor, branchedFrom, schedule, latestMachineAttempt } = yield* Effect.all(
     {
-      messages: repo.listMessages(conversation.id),
+      messages: repo.listMessageWindow(conversation.id, { fromId: start }),
+      olderCursor: start
+        ? repo
+            .hasMessagesBefore(conversation.id, start)
+            .pipe(Effect.map((older) => (older ? start : null)))
+        : Effect.succeed(null),
+      // The window may not reach the newest attempt sent from a machine,
+      // which the foreign-machine banner compares against this one.
+      latestMachineAttempt:
+        conversation.mode === "work"
+          ? repo.latestMachineAttempt(conversation.id)
+          : Effect.succeed(null),
       branchedFrom: conversation.branchedFrom
         ? repo.getConversation(userId, conversation.branchedFrom).pipe(
             Effect.map((source) => ({ conversationId: source.id, title: source.title })),
@@ -93,39 +190,17 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     },
     { concurrency: "unbounded" },
   );
+  // The streaming answer is the newest row, so it is always in the window.
   const streaming = messages.find((m) => m.status === "streaming");
-  const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
-  const userIds = messages.filter((m) => m.role === "user").map((m) => m.id);
-  // These hang off the same message-id snapshot and nothing else, so they go
-  // out together rather than one after the other.
-  const {
-    pendingChunks,
-    toolCalls,
-    compactionEvents,
-    attachments,
-    defaults,
-    generations,
-    queue,
-    queueGate,
-  } = yield* Effect.all(
+  const { rows, pendingChunks, defaults, queue, queueGate } = yield* Effect.all(
     {
+      rows: loadMessageRows(conversation.id, messages),
       // For streaming messages the client resumes via SSE using the chunks
       // persisted so far; ship them inline so the first paint is complete.
       pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
-      // Durable generation activity for all assistant messages. Research
-      // compaction bodies stay private; ordinary chat summaries are displayable.
-      toolCalls: repo.listToolCalls(assistantIds),
-      compactionEvents: repo.listCompactionEvents(assistantIds),
-      // Flat, like tool calls. The view groups by messageId.
-      attachments: attachmentRepo.listForMessages([...userIds, ...assistantIds]),
       // Only the installed agent persists between turns. Standalone knowledge
       // is message input, not a conversation default.
       defaults: repo.getConversationDefaults(conversation.id),
-      // What each answer ran with: the collections (shown on the *question*
-      // that added them, like attached files). Snapshot text and document
-      // manifests stay server-side; only
-      // names travel, resolved client-side against what the viewer may read.
-      generations: repo.listGenerationDisplay(assistantIds),
       // Messages waiting behind the live answer. They are conversation state,
       // not transcript rows, so every tab and device sees the same queue.
       queue: repo.listQueue(conversation.id),
@@ -154,13 +229,10 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     agentDrafts: defaults.agentDrafts ?? [],
     scheduleDrafts: defaults.scheduleDrafts ?? [],
     documents: defaults.documents ?? [],
-    messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
+    ...rows,
+    window: { anchorId: messages[0]?.id ?? null, olderCursor },
+    latestMachineAttempt,
     pendingChunks,
-    toolCalls,
-    compactionEvents: compactionEvents.map((event) =>
-      event.researchRunId ? { ...event, summary: null } : event,
-    ),
-    attachments,
     branchedFrom,
     schedule,
     agent: defaults.agent
@@ -175,7 +247,6 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
           available: liveAgent !== null,
         }
       : null,
-    generations,
     queue,
     queueState: queueStateOf(queue, queueGate),
     project: project ? { id: project.id, name: project.name, role: project.role } : null,

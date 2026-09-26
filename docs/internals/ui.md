@@ -193,6 +193,14 @@ false`), so a page body is written against data already there. This includes loc
   Copying the text back into the display rows re-renders the whole conversation about 33 times a
   second, which is what made a long chat slow while it answered. Keeping to the end is the
   virtualiser's (`anchorTo: "end"`, `followOnAppend`), so nothing else watches the text either.
+- A chat opens with its latest turns only (`loadConversationDetail`); older ones load a page at a time
+  as the reader nears the top. Every refetch sends back the first message already shown, so the loaded
+  range grows from it rather than sliding and leaving a gap under the pages above. A retry or edit further
+  back deletes that message, and a fresh window then replaces everything. Pages live under their own
+  `["conversation-history", id, anchor]` key, out of reach of the sync bus's `["conversation"]`
+  invalidations. Windows open on a turn: never on a steer or a question's reply, which belong to the
+  answer before them. Anything that reads the whole conversation on the client sees only the loaded
+  suffix, so conversation-wide facts come from the server (drafts, documents, the latest machine attempt).
 - A message about an agent or schedule carries a Markdown link to its page (`[this schedule](/schedules/<id>)`):
   that is how the model finds the ID. `modules/chat/references.ts` is the one parser: the composer, the edit
   box and the sent bubble show a chip plus the link's own words, and the composer puts the link back on send,

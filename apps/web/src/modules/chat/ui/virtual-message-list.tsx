@@ -4,10 +4,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
 import { Button } from "~/ui/primitives/button";
+import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 
 const BOTTOM_THRESHOLD = 48;
 const ESTIMATED_MESSAGE_HEIGHT = 96;
+/** How close to the first loaded row (overscan included) older turns start loading. */
+const REACH_START_ROWS = 3;
 
 /**
  * Virtualized, bottom-anchored message list. Only visible messages render
@@ -20,7 +23,16 @@ const ESTIMATED_MESSAGE_HEIGHT = 96;
  * same for new rows. Nothing here reacts to streamed text, so the live row can
  * re-render without this list doing so.
  */
-export function VirtualMessageList({ messages }: { messages: DisplayMessage[] }) {
+export function VirtualMessageList({
+  messages,
+  onReachStart,
+  loadingOlder = false,
+}: {
+  messages: DisplayMessage[];
+  /** Called while the rows near the top are on screen, to load older turns. */
+  onReachStart?: () => void;
+  loadingOlder?: boolean;
+}) {
   "use no memo";
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,6 +89,13 @@ export function VirtualMessageList({ messages }: { messages: DisplayMessage[] })
 
   const items = virtualizer.getVirtualItems();
 
+  // Rows added above keep the reader's place: with stable keys, `anchorTo:
+  // "end"` holds the row on screen still when the ones before it change.
+  const firstIndex = items[0]?.index;
+  useEffect(() => {
+    if (firstIndex !== undefined && firstIndex <= REACH_START_ROWS) onReachStart?.();
+  }, [firstIndex, onReachStart]);
+
   return (
     <div className="relative h-full min-h-0">
       {/* stable both-edges keeps centered content aligned with the composer,
@@ -116,6 +135,15 @@ export function VirtualMessageList({ messages }: { messages: DisplayMessage[] })
           ))}
         </div>
       </div>
+      {loadingOlder ? (
+        <div
+          role="status"
+          className="bg-popover text-muted-foreground absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-1.5 text-xs shadow-sm"
+        >
+          <Spinner aria-hidden className="size-3.5" />
+          Loading earlier messages…
+        </div>
+      ) : null}
       <Button
         size="icon-sm"
         variant="floating"

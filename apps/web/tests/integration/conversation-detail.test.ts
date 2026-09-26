@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, documents, models } from "~/db/schema/index.ts";
+import { conversations, documents, messageToolCalls, messages, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
+import {
+  HEAD_TURNS,
+  OLDER_TURNS,
+  loadConversationDetail,
+  loadConversationHistory,
+} from "~/modules/chat/server/conversation-detail.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
@@ -357,5 +362,156 @@ describe("loadConversationDetail", () => {
 
     expect(error._tag).toBe("ConversationNotFound");
     expect(error.conversationId).toBe(thread.conversationId);
+  });
+});
+
+/** `turns` finished turns in one new conversation, oldest first. */
+const seedTurns = Effect.fn("test.seedTurns")(function* (userId: string, turns: number) {
+  const repo = yield* ChatRepo;
+  const conversation = yield* repo.createConversation({ userId, modelId });
+  const rows: Array<{ userId: string; assistantId: string }> = [];
+  for (let turn = 1; turn <= turns; turn += 1) rows.push(yield* addTurn(conversation.id, turn));
+  return { conversationId: conversation.id, turns: rows };
+});
+
+const addTurn = Effect.fn("test.addTurn")(function* (
+  conversationId: string,
+  turn: number,
+  answer = `answer ${turn}`,
+) {
+  const repo = yield* ChatRepo;
+  const user = yield* repo.insertMessage({
+    conversationId,
+    role: "user",
+    content: `question ${turn}`,
+  });
+  const assistant = yield* repo.insertMessage({
+    conversationId,
+    role: "assistant",
+    status: "streaming",
+    modelId,
+  });
+  yield* repo.finalizeMessage({ messageId: assistant.id, status: "complete", content: answer });
+  return { userId: user.id, assistantId: assistant.id };
+});
+
+const source = (index: number) => ({
+  kind: "web",
+  index,
+  url: `https://s${index}.dev`,
+  title: `S${index}`,
+  snippet: "",
+  read: false,
+});
+
+describe("loadConversationDetail windows", () => {
+  it("loads the latest turns, then pages back to the start without gaps or overlap", async () => {
+    const userId = await run(makeUser());
+    const turns = HEAD_TURNS + OLDER_TURNS + 10;
+    const thread = await run(seedTurns(userId, turns));
+    const all = (
+      await run(Effect.flatMap(ChatRepo, (repo) => repo.listMessages(thread.conversationId)))
+    ).map((m) => m.id);
+
+    const head = await run(loadConversationDetail(userId, thread.conversationId));
+    expect(head.messages).toHaveLength(HEAD_TURNS * 2);
+    expect(head.window.anchorId).toBe(head.messages[0]!.id);
+    expect(head.window.olderCursor).toBe(head.window.anchorId);
+
+    const middle = await run(
+      loadConversationHistory(userId, thread.conversationId, head.window.olderCursor!),
+    );
+    expect(middle.messages).toHaveLength(OLDER_TURNS * 2);
+    const first = await run(
+      loadConversationHistory(userId, thread.conversationId, middle.olderCursor!),
+    );
+    expect(first.olderCursor).toBeNull();
+
+    expect([...first.messages, ...middle.messages, ...head.messages].map((m) => m.id)).toEqual(all);
+  });
+
+  it("grows from its anchor on refetch instead of sliding", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedTurns(userId, HEAD_TURNS + 5));
+    const head = await run(loadConversationDetail(userId, thread.conversationId));
+
+    await run(addTurn(thread.conversationId, HEAD_TURNS + 6));
+    const again = await run(
+      loadConversationDetail(userId, thread.conversationId, head.window.anchorId),
+    );
+
+    expect(again.window.anchorId).toBe(head.window.anchorId);
+    expect(again.messages).toHaveLength(HEAD_TURNS * 2 + 2);
+    expect(again.messages.at(-1)!.content).toBe(`answer ${HEAD_TURNS + 6}`);
+  });
+
+  it("never opens a window on a steer or on a question's reply", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedTurns(userId, HEAD_TURNS + 2));
+    // Without these, turn 3 would open the latest HEAD_TURNS turns.
+    const [, second, third, fourth] = thread.turns;
+    await run(
+      Effect.flatMap(Db, (db) =>
+        Effect.all([
+          db
+            .update(messages)
+            .set({ steeredIntoMessageId: second!.assistantId })
+            .where(eq(messages.id, third!.userId)),
+          db
+            .update(messages)
+            .set({ questionResponse: { callId: "ask", response: { kind: "skip" } } as never })
+            .where(eq(messages.id, fourth!.userId)),
+        ]),
+      ),
+    );
+
+    const head = await run(loadConversationDetail(userId, thread.conversationId));
+
+    // Turns 3 and 4 no longer count, so the window reaches back to turn 1.
+    expect(head.window.anchorId).toBe(thread.turns[0]!.userId);
+    expect(head.window.olderCursor).toBeNull();
+  });
+
+  it("starts a fresh window when a rewind removed its anchor", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedTurns(userId, HEAD_TURNS + 10));
+    const head = await run(loadConversationDetail(userId, thread.conversationId));
+    // A retry of turn 3 deletes everything after it, the anchor included.
+    const rewound = thread.turns.slice(3).flatMap((turn) => [turn.userId, turn.assistantId]);
+    await run(Effect.flatMap(Db, (db) => db.delete(messages).where(inArray(messages.id, rewound))));
+
+    const again = await run(
+      loadConversationDetail(userId, thread.conversationId, head.window.anchorId),
+    );
+
+    expect(again.window.anchorId).toBe(thread.turns[0]!.userId);
+    expect(again.messages).toHaveLength(6);
+    expect(again.window.olderCursor).toBeNull();
+  });
+
+  it("returns only the window's own rows and the earlier sources it cites", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedTurns(userId, HEAD_TURNS + 2));
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.insert(messageToolCalls).values({
+          id: uuidv7(),
+          messageId: thread.turns[0]!.assistantId,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "call",
+          toolName: "web_search",
+          arguments: {},
+          status: "complete",
+          result: { v: 1, family: "web", sources: [source(1), source(2)] },
+        }),
+      ),
+    );
+    await run(addTurn(thread.conversationId, HEAD_TURNS + 3, "As found earlier[^2]."));
+
+    const head = await run(loadConversationDetail(userId, thread.conversationId));
+
+    expect(head.toolCalls).toEqual([]);
+    expect(head.priorSources).toEqual([source(2)]);
   });
 });

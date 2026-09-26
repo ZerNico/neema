@@ -75,7 +75,10 @@ describe.each([
     expect(modelsMock).toHaveBeenCalledTimes(1);
     expect(availabilityMock).toHaveBeenCalledTimes(1);
     if (route === Route) {
-      expect(conversationMock).toHaveBeenCalledWith({ data: { conversationId: "c1" } });
+      // A first load has no anchor yet, so it asks for the latest turns.
+      expect(conversationMock).toHaveBeenCalledWith({
+        data: { conversationId: "c1", anchorId: null },
+      });
     } else {
       expect(conversationMock).not.toHaveBeenCalled();
     }
