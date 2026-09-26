@@ -47,30 +47,30 @@ export const SCHEDULE_AUTHORING_SKILL: BuiltinSkill = {
   id: "builtin:schedule-authoring",
   name: "schedule-authoring",
   description:
-    "How to create or edit a scheduled task from chat: the draft workflow, natural cadence to cron translation, and how each fire runs as a fresh conversation.",
+    "How to create or edit a scheduled task from chat: the draft workflow, natural cadence to cron translation, and choosing a new or continuing chat.",
   root: `---
 name: schedule-authoring
-description: How to create or edit a scheduled task from chat: the draft workflow, natural cadence to cron translation, and how each fire runs as a fresh conversation.
+description: How to create or edit a scheduled task from chat: the draft workflow, natural cadence to cron translation, and choosing a new or continuing chat.
 ---
 
 # Schedule authoring
 
-A schedule asks a prompt on a cadence: every fire starts a fresh conversation that answers the prompt on its own, with the schedule's own model, collections, skills, and search toggles. It never reuses or extends an existing chat. If the app is down at fire time, one catch-up fire runs on recovery and the cadence resumes from now; a backlog is never replayed.
+A schedule asks a prompt on a cadence. chatMode "new" (the default) starts a fresh chat each fire. chatMode "same" keeps answering in chatId, or adopts the chat the first fire creates when chatId is null. To run the task here, use chatMode "same" and the draftConversationId returned by the draft tools as chatId. If the app is down at fire time, one catch-up fire runs on recovery and the cadence resumes from now; a backlog is never replayed.
 
 ## Workflow
 
 1. When the user wants a recurring or one-time task, reminder, or automation, call draft_schedule. Omit scheduleId for a new schedule, or pass an owned schedule's ID to edit it. Optional changes populate the draft as it is created.
 2. A successful call presents an editable draft widget in this chat. The user reviews and edits it in the panel.
 3. Refine with update_schedule_draft: patch only the requested fields. Pass expectedRevision from the last read or update.
-4. Discover actual models, agents, skills, and collections with list_agent_options; never invent IDs. For modelId, use only an id from availableModels in the trailing data; leave it null unless the user asks for a specific model. An agentId runs each fire with that agent's configuration; omit it for a plain chat turn with the draft's own collections, skills, and toggles.
+4. Discover actual models, agents, skills, and collections with list_agent_options; never invent IDs. For modelId, use only an id from availableModels in the trailing data; leave it null unless the user asks for a specific model. An agentId applies only to chats a fire creates; an existing chat keeps its own agent. Omit agentId to create plain chats with the draft's own collections, skills, and toggles.
 
 ## Cadence fields
 
-Translate the user's natural cadence into three fields: scheduleText keeps their words ("every weekday at 7am"), cron holds the 5-field expression ("0 7 * * 1-5"), and timezone is the IANA name (default to the user's timezone from the runtime context). A one-time task is a single-fire cron plus endAt set to the fire instant.
+Translate the user's natural cadence into three fields: scheduleText keeps their words ("every weekday at 7am"), cron holds the 5-field expression ("0 7 * * 1-5"), and timezone is the IANA name (default to the user's timezone from the runtime context). A schedule may fire at most once an hour. A one-time task is a single-fire cron plus endAt set to the fire instant.
 
 Common recipes, minute hour day-of-month month day-of-week:
 - Every weekday at 7am: 0 7 * * 1-5
-- Every 20 minutes: */20 * * * *
+- Every hour: 0 * * * *
 - Every day at 9:30am: 30 9 * * *
 - Mondays at 6pm: 0 18 * * 1
 - First of the month at midnight: 0 0 1 * *

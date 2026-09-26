@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { validateCron } from "~/modules/schedules/server/cron.ts";
 import {
   AGENT_AUTHORING_SKILL,
   BUILTIN_SKILLS,
@@ -30,6 +31,16 @@ describe("bundled skills", () => {
     // The cron recipes the schedule flow leans on.
     expect(SCHEDULE_AUTHORING_SKILL.root).toContain("0 7 * * 1-5");
     expect(SCHEDULE_AUTHORING_SKILL.root).toContain("endAt");
+  });
+
+  it("advertises cron recipes accepted by the schedule validator", () => {
+    const section = SCHEDULE_AUTHORING_SKILL.root.split("Common recipes,")[1]?.split("\n\n")[0];
+    expect(section).toBeDefined();
+    const recipes = [...section!.matchAll(/^- [^\n]+: ([^\n]+)$/gm)];
+    expect(recipes).toHaveLength(5);
+    for (const [, cron] of recipes) {
+      expect(validateCron(cron!, "UTC")).toBeNull();
+    }
   });
 
   it("resolves by exact id only", () => {

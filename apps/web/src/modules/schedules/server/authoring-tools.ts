@@ -97,7 +97,7 @@ const transport = (schema: Schema.Top) =>
   );
 // Models write "no value" as null and small integers as strings. Both mean the
 // key is absent or the number itself; refusing them only burns a round trip.
-// modelId/agentId keep null: there it is a real value (no preference).
+// modelId/agentId/endAt/chatId keep null: it explicitly clears the setting.
 const lenient = (raw: unknown, changes = false): unknown => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
@@ -105,7 +105,8 @@ const lenient = (raw: unknown, changes = false): unknown => {
   for (const [rawKey, value] of Object.entries(input)) {
     const key = changes ? (DRAFT_FIELD_ALIASES[rawKey] ?? rawKey) : rawKey;
     if (value === null || value === undefined) {
-      if (key === "modelId" || key === "agentId" || key === "endAt") out[key] = null;
+      if (key === "modelId" || key === "agentId" || key === "endAt" || key === "chatId")
+        out[key] = null;
       continue;
     }
     if (key === "changes") out[key] = lenient(value, true);
