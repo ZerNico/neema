@@ -6,6 +6,11 @@ tenant, one Node process, Postgres. Stack: TanStack Start, React 19, Effect 4 (r
 Drizzle 1 (rc), Better Auth, Base UI/shadcn, Vitest. `README.md` has the layout and
 the commands; this file has what you need before you touch anything.
 
+The web package is `apps/web/`, the desktop shell is `apps/desktop/`, and shared
+packages live in `packages/`. In this file, paths beginning `src/`, `tests/`, or
+`drizzle/`, and `vite.config.ts`, are relative to `apps/web/`. Root scripts and
+`docs/` paths are repository-relative.
+
 ## Glossary
 
 Several ordinary words mean something specific here. Get these wrong and you will
@@ -152,12 +157,11 @@ skipped one on purpose.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,
   not the ones you expected.
-- `eslint-plugin-slop` runs through oxlint's JS plugin loader on changed lines,
-  never on untouched code. It rejects em dashes, comments over 50 words, inflated
+- `eslint-plugin-slop` runs through oxlint's JS plugin loader with full inspection.
+  It rejects em dashes, comments over 50 words, inflated
   vocabulary in comments, chained type assertions, trivial wrappers and static-only
-  classes. Fix the line; do not widen the window or disable the rule for the file.
-  It uses `recent-changes` (baseline `HEAD~5`). The temporary monorepo-rename
-  exception has ended now that the move is outside that window.
+  classes. Fix the line; do not narrow lint coverage or disable the rule for the
+  file.
 - `@shadcn/lint` is the other JS plugin: it rejects a call site that changes a
   component's own spacing, shape or type scale, which means the wrong component
   was chosen or a variant is missing. `src/ui/**` is exempt, being the design
@@ -185,8 +189,8 @@ skipped one on purpose.
 - Schema change: `pnpm db:generate`, commit `drizzle/`, `pnpm db:migrate`.
 - Commits: imperative title under ~70 characters, body says problem then fix. One
   concern per commit; "and also" means split. Do not commit unless asked.
-- `pnpm-workspace.yaml` holds `patchedDependencies`, `allowBuilds` (only `esbuild`
-  true; an unlisted package that wants a script is a hard error) and
+- `pnpm-workspace.yaml` holds `patchedDependencies`, `allowBuilds` (`electron` and
+  `esbuild` are enabled; an unlisted package that wants a script is a hard error) and
   `minimumReleaseAge` (24h cooldown). `minimumReleaseAgeExclude` lists the pins
   deliberately tracked same-day; extend it rather than lowering the cooldown.
 - UI primitives in `src/ui/primitives` are shadcn-generated. Regenerate with
