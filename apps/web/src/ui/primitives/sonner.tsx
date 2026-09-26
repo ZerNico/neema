@@ -29,6 +29,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
         ),
         loading: <Spinner aria-hidden />,
       }}
+      toastOptions={{
+        classNames: {
+          // Sonner's own button is a small square chip; ours is the secondary pill. Its
+          // stylesheet selects by three attributes, so each override needs `!` to win.
+          actionButton:
+            "h-7! rounded-4xl! px-3! text-xs! bg-secondary! text-secondary-foreground! hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]! focus-visible:ring-3! focus-visible:ring-ring/30! transition-colors",
+        },
+      }}
       style={
         {
           "--normal-bg": "var(--popover)",
