@@ -187,6 +187,12 @@ false`), so a page body is written against data already there. This includes loc
 
 ## Chat-specific pieces
 
+- Streamed answer and reasoning text never enters `ChatView` state. `useMessageStream` hands it to a
+  `LiveText` store (`client/live-text.ts`) that paces it word by word, and only the live row
+  subscribes; the message list is rebuilt for tool, file and status changes, not per chunk or tick.
+  Copying the text back into the display rows re-renders the whole conversation about 33 times a
+  second, which is what made a long chat slow while it answered. Keeping to the end is the
+  virtualiser's (`anchorTo: "end"`, `followOnAppend`), so nothing else watches the text either.
 - A message about an agent or schedule carries a Markdown link to its page (`[this schedule](/schedules/<id>)`):
   that is how the model finds the ID. `modules/chat/references.ts` is the one parser: the composer, the edit
   box and the sent bubble show a chip plus the link's own words, and the composer puts the link back on send,

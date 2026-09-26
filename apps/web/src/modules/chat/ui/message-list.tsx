@@ -15,10 +15,13 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import type { LiveText, LiveTextSnapshot } from "../client/live-text.ts";
 import {
   type CompactionActivity,
   type ResearchToolActivity,
+  type StreamState,
   type ToolActivity,
   type ToolSource,
 } from "../client/use-message-stream.ts";
@@ -230,6 +233,46 @@ export interface DisplayMessage {
   retryModelId?: string | null;
   /** Disables the retry button (e.g. while another generation runs). */
   retryDisabled?: boolean;
+  /**
+   * The stream behind the one live answer. Its text is read by the row, never
+   * copied into this object, so a pacing tick re-renders that row alone.
+   */
+  liveStream?: LiveStream;
+}
+
+export interface LiveStream {
+  text: LiveText;
+  status: StreamState["status"];
+}
+
+/** Marks a card placed at the end of its answer rather than by a tool row of its own. */
+export const PLACED_CALL_PREFIX = "placed:";
+
+/** The live answer as drawn at one pacing tick. */
+export function withLiveText(
+  message: DisplayMessage,
+  status: LiveStream["status"],
+  snapshot: LiveTextSnapshot,
+): DisplayMessage {
+  // Status comes from the stream, not the row: the refetched row says
+  // complete while the last words are still landing.
+  const following = status === "streaming";
+  const ahead = snapshot.text.length > message.content.length;
+  const content = following || ahead ? snapshot.text : message.content;
+  return {
+    ...message,
+    content,
+    status: following ? "streaming" : ahead ? status : message.status,
+    reasoning: snapshot.reasoning,
+    reasoningSeen: snapshot.reasoningSeen || message.reasoningSeen,
+    rawTextLength: snapshot.rawTextLength,
+    // A placed card belongs at the end of the answer, which moves while it streams.
+    toolActivities: message.toolActivities.some((a) => a.callId.startsWith(PLACED_CALL_PREFIX))
+      ? message.toolActivities.map((a) =>
+          a.callId.startsWith(PLACED_CALL_PREFIX) ? { ...a, textOffset: content.length } : a,
+        )
+      : message.toolActivities,
+  };
 }
 
 // Separates two calendar days inside the conversation. Drawn as part of the
@@ -247,7 +290,23 @@ function DayDivider({ label }: { label: string }) {
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message }: { message: DisplayMessage }) {
+const staticSubscribe = () => () => {};
+const noSnapshot = () => null;
+
+export const MessageBubble = memo(function MessageBubble({
+  message: row,
+}: {
+  message: DisplayMessage;
+}) {
+  // One component whether live or not: swapping the tree when the stream ends
+  // would remount the bubble and drop whatever the reader was typing in it.
+  const live = row.liveStream;
+  const snapshot = useSyncExternalStore(
+    live?.text.subscribe ?? staticSubscribe,
+    live?.text.getSnapshot ?? noSnapshot,
+    live?.text.getSnapshot ?? noSnapshot,
+  );
+  const message = live && snapshot ? withLiveText(row, live.status, snapshot) : row;
   return (
     <>
       {message.dayLabel ? <DayDivider label={message.dayLabel} /> : null}

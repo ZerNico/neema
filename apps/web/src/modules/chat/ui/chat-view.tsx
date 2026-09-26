@@ -108,7 +108,7 @@ import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
-import type { DisplayMessage } from "./message-list.tsx";
+import { type DisplayMessage, PLACED_CALL_PREFIX } from "./message-list.tsx";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
@@ -1830,13 +1830,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
         if (base.id !== liveId) return projected;
 
-        // Overlay live stream state onto only the active assistant row.
-        const live = {
+        // Overlay live stream state onto only the active assistant row. Its
+        // text is read by the row itself (`liveStream`), so pacing ticks never
+        // rebuild this list.
+        return {
           ...projected,
           files: stream.files,
-          rawTextLength: stream.rawTextLength,
-          reasoning: stream.reasoning,
-          reasoningSeen: stream.reasoningSeen || base.reasoningSeen,
           toolActivities: stream.tools.length > 0 ? stream.tools : base.toolActivities,
           compactionActivities: stream.compactions,
           // The stream has them the moment they are taken in; the rows arrive
@@ -1847,16 +1846,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               (steer) => !projected.steers?.some((known) => known.id === steer.id),
             ),
           ],
+          liveStream: { text: stream.live, status: stream.status },
         };
-        // Status comes from the stream, not the row: the refetched row says
-        // complete while the last words are still landing.
-        if (stream.status === "streaming") {
-          return { ...live, content: stream.text, status: "streaming" };
-        }
-        if (stream.text.length > base.content.length) {
-          return { ...live, content: stream.text, status: stream.status };
-        }
-        return live;
       }),
     [
       activeEditingMessage,
@@ -1880,12 +1871,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       setReasoningEffort,
       editResearchEnabled,
       stream.compactions,
-      stream.rawTextLength,
-      stream.reasoning,
-      stream.reasoningSeen,
+      stream.live,
       stream.status,
       stream.steers,
-      stream.text,
       stream.tools,
     ],
   );
@@ -1920,7 +1908,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   );
   const placed = (message: DisplayMessage, index: number, id: string) => ({
     status: "complete" as const,
-    callId: `placed:${id}`,
+    callId: `${PLACED_CALL_PREFIX}${id}`,
     turnIndex: Number.MAX_SAFE_INTEGER,
     callIndex: index,
     textOffset: message.content.length,
@@ -2004,7 +1992,6 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
             ) : null}
             <div className="min-h-0 flex-1">
-              {/* lastSeq covers tool-activity-only updates too */}
               <ResearchPanelOwner messages={display} />
               {/* A Work row names a path; only this view knows whose folders it
               resolves against. */}
@@ -2019,7 +2006,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                       : null
                   }
                 >
-                  <VirtualMessageList messages={withPlacedCards} followKey={stream.lastSeq} />
+                  <VirtualMessageList messages={withPlacedCards} />
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>
             </div>

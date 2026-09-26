@@ -27,6 +27,7 @@ const virtualizer = {
 
 type CapturedOptions = {
   anchorTo?: string;
+  followOnAppend?: boolean;
   initialOffset?: number | (() => number);
   scrollEndThreshold?: number;
   useAnimationFrameWithResizeObserver?: boolean;
@@ -62,9 +63,10 @@ afterEach(() => {
 
 describe("VirtualMessageList", () => {
   it("targets the measured end on first mount", () => {
-    render(<VirtualMessageList messages={messages} followKey={0} />);
+    render(<VirtualMessageList messages={messages} />);
 
     expect(options.anchorTo).toBe("end");
+    expect(options.followOnAppend).toBe(true);
     expect(
       typeof options.initialOffset === "function" ? options.initialOffset() : options.initialOffset,
     ).toBe(96);
@@ -77,34 +79,22 @@ describe("VirtualMessageList", () => {
     expect(rawScrollTo).not.toHaveBeenCalled();
   });
 
-  it("adjusts only for rows fully above the viewport", () => {
-    render(<VirtualMessageList messages={messages} followKey={0} />);
+  it("leaves following and size anchoring to the virtualizer", () => {
+    const { rerender } = render(<VirtualMessageList messages={messages} />);
 
-    const shouldAdjust = (
-      virtualizer as typeof virtualizer & {
-        shouldAdjustScrollPositionOnItemSizeChange: (
-          item: { start: number; end: number },
-          delta: number,
-          instance: { scrollOffset: number | null },
-        ) => boolean;
-      }
-    ).shouldAdjustScrollPositionOnItemSizeChange;
+    // Its default anchoring corrects first measurements above the fold and
+    // holds still while the reader scrolls up.
+    expect(virtualizer).not.toHaveProperty("shouldAdjustScrollPositionOnItemSizeChange");
 
-    expect(shouldAdjust({ start: 10, end: 80 }, 20, { scrollOffset: 100 })).toBe(true);
-    expect(shouldAdjust({ start: 80, end: 120 }, 20, { scrollOffset: 100 })).toBe(false);
-  });
-
-  it("follows streamed growth while pinned", () => {
-    const { rerender } = render(<VirtualMessageList messages={messages} followKey={0} />);
-
-    rerender(<VirtualMessageList messages={messages} followKey={1} />);
-
-    expect(mocks.scrollToEnd).toHaveBeenCalledTimes(2);
-    expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "auto" });
+    // New rows are followed by `followOnAppend`, not by this component.
+    rerender(
+      <VirtualMessageList messages={[...messages, { id: "message-2" } as DisplayMessage]} />,
+    );
+    expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the floating jump button opaque on hover in both themes", () => {
-    render(<VirtualMessageList messages={messages} followKey={0} />);
+    render(<VirtualMessageList messages={messages} />);
 
     const button = screen.getByRole("button", { name: "Jump to bottom" });
     expect(button).toHaveClass("bg-popover", "text-popover-foreground", "hover:bg-muted");
@@ -112,8 +102,8 @@ describe("VirtualMessageList", () => {
     expect(button).not.toHaveClass("dark:hover:bg-input/30");
   });
 
-  it("detaches on user scroll and reattaches from the jump button", () => {
-    const { rerender } = render(<VirtualMessageList messages={messages} followKey={0} />);
+  it("shows the jump button once scrolled up and reattaches from it", () => {
+    render(<VirtualMessageList messages={messages} />);
     const scroller = options.getScrollElement()!;
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 1_000 },
@@ -125,7 +115,6 @@ describe("VirtualMessageList", () => {
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveClass("opacity-100");
     expect(screen.getByRole("button", { name: "Jump to bottom" })).not.toHaveAttribute("inert");
 
-    rerender(<VirtualMessageList messages={messages} followKey={1} />);
     expect(mocks.scrollToEnd).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Jump to bottom" }));
@@ -133,9 +122,5 @@ describe("VirtualMessageList", () => {
     expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "smooth" });
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveClass("opacity-0");
     expect(screen.getByRole("button", { name: "Jump to bottom" })).toHaveAttribute("inert");
-
-    rerender(<VirtualMessageList messages={messages} followKey={2} />);
-    expect(mocks.scrollToEnd).toHaveBeenCalledTimes(3);
-    expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "auto" });
   });
 });

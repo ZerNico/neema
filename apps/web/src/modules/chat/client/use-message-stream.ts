@@ -37,8 +37,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { ResearchProgress } from "../research-schema.ts";
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
-import { useEffect, useReducer, useRef, useState } from "react";
-import { useSmoothText } from "./use-smooth-text.ts";
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { createLiveText, type LiveText } from "./live-text.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
@@ -215,20 +215,17 @@ export interface CompactionActivity {
   summary?: string;
 }
 
+/**
+ * Everything but the answer and reasoning text, which stream through a
+ * `LiveText` instead so their pacing does not re-render the whole chat.
+ */
 export interface StreamState {
   files: AssistantFile[];
-  /** Visible answer text accumulated from chunks. */
-  text: string;
-  /** Reasoning/thinking text; stays empty for hidden-reasoning providers. */
-  reasoning: string;
-  /** True once any reasoning chunk arrived (even empty hidden markers). */
-  reasoningSeen: boolean;
   tools: ToolActivity[];
   /** Usually empty; one response may compact at several turn boundaries. */
   compactions: CompactionActivity[];
   /** Queued messages this answer took in, in the order it took them. */
   steers: AssistantSteer[];
-  lastSeq: number;
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
 }
 
@@ -236,18 +233,13 @@ type Action =
   | {
       kind: "reset";
       files?: AssistantFile[];
-      text: string;
-      reasoning: string;
-      reasoningSeen: boolean;
       tools: ToolActivity[];
       compactions: CompactionActivity[];
       steers?: AssistantSteer[];
-      lastSeq: number;
     }
   | {
       kind: "chunk";
-      seq: number;
-      chunkKind: ChunkKind;
+      chunkKind: Exclude<ChunkKind, "text" | "reasoning">;
       delta: string;
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
@@ -891,63 +883,33 @@ export const applyFileChunk = (
   }
 };
 
+type StateChunkKind = Extract<Action, { kind: "chunk" }>["chunkKind"];
+
+function applyChunk(state: StreamState, kind: StateChunkKind, delta: string): StreamState {
+  switch (kind) {
+    case "file":
+      return { ...state, files: applyFileChunk(state.files, delta) };
+    case "compaction":
+      return { ...state, compactions: applyCompactionChunk(state.compactions, delta) };
+    case "steer":
+      return { ...state, steers: applySteerChunk(state.steers, delta) };
+    case "tool":
+      return { ...state, tools: applyToolChunk(state.tools, delta) };
+  }
+}
+
 function reducer(state: StreamState, action: Action): StreamState {
   switch (action.kind) {
     case "reset":
       return {
         files: action.files ?? [],
-        text: action.text,
-        reasoning: action.reasoning,
-        reasoningSeen: action.reasoningSeen,
         tools: action.tools,
         compactions: action.compactions,
         steers: action.steers ?? [],
-        lastSeq: action.lastSeq,
         status: "streaming",
       };
-    case "chunk": {
-      if (action.seq <= state.lastSeq) return state;
-      if (action.chunkKind === "file")
-        return {
-          ...state,
-          files: applyFileChunk(state.files, action.delta),
-          lastSeq: action.seq,
-        };
-      if (action.chunkKind === "reasoning") {
-        return {
-          ...state,
-          reasoning: state.reasoning + action.delta,
-          reasoningSeen: true,
-          lastSeq: action.seq,
-        };
-      }
-      if (action.chunkKind === "compaction") {
-        return {
-          ...state,
-          compactions: applyCompactionChunk(state.compactions, action.delta),
-          lastSeq: action.seq,
-        };
-      }
-      if (action.chunkKind === "steer") {
-        return {
-          ...state,
-          steers: applySteerChunk(state.steers, action.delta),
-          lastSeq: action.seq,
-        };
-      }
-      if (action.chunkKind === "tool") {
-        return {
-          ...state,
-          tools: applyToolChunk(state.tools, action.delta),
-          lastSeq: action.seq,
-        };
-      }
-      return {
-        ...state,
-        text: state.text + (action.chunkKind === "text" ? action.delta : ""),
-        lastSeq: action.seq,
-      };
-    }
+    case "chunk":
+      return applyChunk(state, action.chunkKind, action.delta);
     case "done":
       return { ...state, status: action.status };
   }
@@ -963,6 +925,14 @@ export interface InitialStream {
   steers?: AssistantSteer[];
   lastSeq: number;
 }
+
+const liveTextFrom = (initial: InitialStream | null): LiveText =>
+  createLiveText({
+    text: initial?.text ?? "",
+    reasoning: initial?.reasoning ?? "",
+    reasoningSeen: initial?.reasoningSeen ?? false,
+    lastSeq: initial?.lastSeq ?? 0,
+  });
 
 /**
  * Subscribes to a streaming assistant message with resume support.
@@ -984,15 +954,12 @@ export function useMessageStream(
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, {
     files: initial?.files ?? [],
-    text: initial?.text ?? "",
-    reasoning: initial?.reasoning ?? "",
-    reasoningSeen: initial?.reasoningSeen ?? false,
     tools: initial?.tools ?? [],
     compactions: initial?.compactions ?? [],
     steers: initial?.steers ?? [],
-    lastSeq: initial?.lastSeq ?? 0,
     status: messageId ? "streaming" : "idle",
   });
+  const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
   // retry of the same message).
   const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
@@ -1000,16 +967,13 @@ export function useMessageStream(
   // Reset before commit: a same-message retry must never paint the prior files.
   if (messageId && stateGeneration !== generationKey) {
     setStateGeneration(generationKey);
+    setLive(liveTextFrom(initial));
     dispatch({
       kind: "reset",
       files: initial?.files ?? [],
-      text: initial?.text ?? "",
-      reasoning: initial?.reasoning ?? "",
-      reasoningSeen: initial?.reasoningSeen ?? false,
       tools: initial?.tools ?? [],
       compactions: initial?.compactions ?? [],
       steers: initial?.steers ?? [],
-      lastSeq: initial?.lastSeq ?? 0,
     });
   }
   const activeRef = useRef<string | null>(null);
@@ -1052,8 +1016,10 @@ export function useMessageStream(
         delta: string;
         runId?: string;
       };
-      if (!acceptsRun(data.runId)) return;
-      dispatch({ kind: "chunk", seq: data.seq, chunkKind: data.kind ?? "text", delta: data.delta });
+      if (!acceptsRun(data.runId) || !live.claim(data.seq)) return;
+      const chunkKind = data.kind ?? "text";
+      if (chunkKind === "text" || chunkKind === "reasoning") live.append(chunkKind, data.delta);
+      else dispatch({ kind: "chunk", chunkKind, delta: data.delta });
       if (data.kind === "tool") {
         const activity = applyToolChunk([], data.delta, "document").at(0);
         if (activity?.family === "document" && activity.result?.documentId)
@@ -1092,32 +1058,33 @@ export function useMessageStream(
       source.close();
     };
     // initial is intentionally captured only when the generation changes
-  }, [messageId, epoch, runId, terminalFailure, conversationId, queryClient, generationKey]);
+  }, [messageId, epoch, runId, terminalFailure, conversationId, queryClient, generationKey, live]);
 
-  // The reducer accumulates raw deltas (lastSeq must track receipt exactly,
-  // since resume depends on it); only the strings the UI renders are word-paced.
-  const text = useSmoothText(state.text);
-  const reasoning = useSmoothText(state.reasoning);
-  const drained = text === state.text && reasoning === state.reasoning;
+  // Completion is only reported once the words are all on screen; the pacer
+  // keeps advancing regardless of status, so this converges within ticks of
+  // the real finish. Errors and stops pass through undelayed. Read only once
+  // complete, so a display catching up mid-stream re-renders nothing here.
+  const complete = state.status === "complete";
+  const drained = useSyncExternalStore(
+    live.subscribe,
+    () => !complete || live.getSnapshot().drained,
+    () => true,
+  );
 
   // Deferred half of the done handler: once the display has caught up,
   // refresh the canonical message row (final content, usage, status). The
   // messageId guard keeps the refetch from re-firing after it lands (the
   // streaming row disappears, so messageId goes null) or on navigation.
   useEffect(() => {
-    if (state.status !== "complete" || !drained || !messageId || !conversationId) return;
+    if (!complete || !drained || !messageId || !conversationId) return;
     void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-  }, [state.status, drained, messageId, conversationId, queryClient]);
+  }, [complete, drained, messageId, conversationId, queryClient]);
 
   return {
     ...state,
-    rawTextLength: state.text.length,
-    text,
-    reasoning,
-    // Completion is only reported once the words are all on screen; the
-    // pacer keeps advancing regardless of status, so this converges within
-    // ticks of the real finish. Errors and stops pass through undelayed.
-    status: state.status === "complete" && !drained ? ("streaming" as const) : state.status,
+    /** The answer and reasoning text; only the row drawing them subscribes. */
+    live,
+    status: complete && !drained ? ("streaming" as const) : state.status,
   };
 }
 

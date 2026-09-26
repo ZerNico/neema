@@ -1,8 +1,14 @@
 import { RESPONSE_FAILURES } from "../generation-failure.ts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
+import {
+  MessageBubble,
+  PLACED_CALL_PREFIX,
+  withLiveText,
+  type DisplayMessage,
+} from "./message-list.tsx";
+import { createLiveText, type LiveTextSnapshot } from "../client/live-text.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
@@ -1581,3 +1587,78 @@ for (const [code, copy] of Object.entries(RESPONSE_FAILURES)) {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 }
+
+const snapshot = (text: string): LiveTextSnapshot => ({
+  text,
+  reasoning: "weighing it",
+  rawTextLength: text.length + 5,
+  reasoningSeen: true,
+  drained: false,
+});
+
+describe("withLiveText", () => {
+  const row: DisplayMessage = {
+    id: "live",
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    reasoningSeen: false,
+    toolActivities: [],
+    status: "streaming",
+  };
+  it("draws the paced text while the stream is live", () => {
+    expect(withLiveText(row, "streaming", snapshot("Half an"))).toMatchObject({
+      content: "Half an",
+      status: "streaming",
+      reasoning: "weighing it",
+      reasoningSeen: true,
+      rawTextLength: 12,
+    });
+  });
+
+  it("keeps the longer text once finished, and the row's own once it caught up", () => {
+    // The refetched row may still hold the partial text the stream outgrew.
+    expect(withLiveText(row, "complete", snapshot("The whole answer"))).toMatchObject({
+      content: "The whole answer",
+      status: "complete",
+    });
+    const refetched = { ...row, content: "The whole answer", status: "complete" };
+    expect(withLiveText(refetched, "error", snapshot("The whole"))).toMatchObject({
+      content: "The whole answer",
+      status: "complete",
+    });
+  });
+
+  it("moves a placed card to the end of the text as it grows", () => {
+    const placed = {
+      family: "document",
+      name: "create_document",
+      status: "complete",
+      callId: `${PLACED_CALL_PREFIX}doc-1`,
+      textOffset: 0,
+    } as ToolActivity;
+    const drawn = withLiveText(
+      { ...row, toolActivities: [placed] },
+      "streaming",
+      snapshot("Grown"),
+    );
+    expect(drawn.toolActivities[0]?.textOffset).toBe(5);
+  });
+
+  it("re-renders the live row on a pacing tick without a new message object", () => {
+    vi.useFakeTimers();
+    try {
+      const text = createLiveText({ text: "", reasoning: "", reasoningSeen: false, lastSeq: 0 });
+      const { container } = render(
+        <MessageBubble message={{ ...row, liveStream: { text, status: "streaming" } }} />,
+      );
+      text.append("text", "Streamed straight into the row");
+      expect(container).not.toHaveTextContent("Streamed");
+      // Streaming words render as separate animated spans.
+      act(() => vi.advanceTimersByTime(30 * 10));
+      expect(container).toHaveTextContent("Streamed straight into the row");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

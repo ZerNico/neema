@@ -70,7 +70,7 @@ describe("useMessageStream ask replay", () => {
     act(() => source.emit("chunk", { seq: 2, kind: "tool", delta: "null" }));
     expect(result.current.tools).toHaveLength(1);
     expect(result.current.tools[0]).toMatchObject({ family: "ask", status: "complete", questions });
-    expect(result.current.lastSeq).toBe(2);
+    expect(result.current.live.lastSeq).toBe(2);
     expect(result.current.status).toBe("streaming");
     act(() => source.emit("done", { status: "complete" }));
     expect(result.current.status).toBe("complete");
@@ -113,7 +113,7 @@ describe("research attempt identity", () => {
     act(() => current.emit("chunk", { runId: "run-2", seq: 1, kind: "tool", delta }));
     expect(result.current.tools).toHaveLength(1);
     act(() => current.emit("chunk", { runId: "run-1", seq: 2, kind: "tool", delta }));
-    expect(result.current.lastSeq).toBe(1);
+    expect(result.current.live.lastSeq).toBe(1);
     expect(current.close).toHaveBeenCalled();
   });
 
@@ -132,20 +132,22 @@ describe("research attempt identity", () => {
     const old = FakeEventSource.instances.at(-1)!;
     expect(old.url).toContain("runId=run-1");
     act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Old text" }));
-    expect(result.current.lastSeq).toBe(1);
+    expect(result.current.live.lastSeq).toBe(1);
     rerender({ runId: "run-2" });
     const current = FakeEventSource.instances.at(-1)!;
     expect(current.url).toContain("after=0&runId=run-2");
-    expect(result.current.lastSeq).toBe(0);
+    expect(result.current.live.lastSeq).toBe(0);
+    // A retry must never flash the previous generation's words.
+    expect(result.current.live.getSnapshot().text).toBe("");
     act(() => {
       old.emit("chunk", { runId: "run-1", seq: 2, delta: "Late text" });
       old.emit("done", { runId: "run-1", status: "error" });
       current.emit("chunk", { runId: "run-2", seq: 1, delta: "New text" });
     });
-    expect(result.current.lastSeq).toBe(1);
+    expect(result.current.live.lastSeq).toBe(1);
     expect(result.current.status).toBe("streaming");
     act(() => vi.advanceTimersByTime(500));
-    expect(result.current.text).toBe("New text");
+    expect(result.current.live.getSnapshot().text).toBe("New text");
   });
 
   it("reconciles a terminal detail refresh when the SSE terminal event is missing", () => {
@@ -168,7 +170,7 @@ describe("research attempt identity", () => {
     expect(old.close).toHaveBeenCalled();
     expect(result.current.status).toBe("error");
     act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
-    expect(result.current.lastSeq).toBe(0);
+    expect(result.current.live.lastSeq).toBe(0);
   });
 
   it("refetches a changed server attempt without applying its done or subsequent chunks", () => {
@@ -186,7 +188,7 @@ describe("research attempt identity", () => {
     expect(source.close).toHaveBeenCalled();
     expect(result.current.status).toBe("streaming");
     act(() => source.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
-    expect(result.current.lastSeq).toBe(0);
+    expect(result.current.live.lastSeq).toBe(0);
   });
 });
 
@@ -201,12 +203,12 @@ describe("useMessageStream smoothing", () => {
     // Raw state is complete, but the display hasn't caught up, so consumers
     // still see a streaming message and the canonical refetch waits.
     expect(result.current.status).toBe("streaming");
-    expect(result.current.text).not.toBe("A final chunk of several words");
+    expect(result.current.live.getSnapshot().text).not.toBe("A final chunk of several words");
     expect(invalidate).not.toHaveBeenCalled();
 
     act(() => vi.advanceTimersByTime(30 * 12));
 
-    expect(result.current.text).toBe("A final chunk of several words");
+    expect(result.current.live.getSnapshot().text).toBe("A final chunk of several words");
     expect(result.current.status).toBe("complete");
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
     expect(invalidate).toHaveBeenCalledTimes(1);
@@ -229,8 +231,38 @@ describe("useMessageStream smoothing", () => {
     act(() => source.emit("chunk", { seq: 2, delta: " and then some more" }));
 
     // Resume bookkeeping tracks receipt, not the paced display.
-    expect(result.current.lastSeq).toBe(2);
-    expect(result.current.text.length).toBeLessThan("Many words arriving all at once here".length);
+    expect(result.current.live.lastSeq).toBe(2);
+    expect(result.current.live.getSnapshot().text.length).toBeLessThan(
+      "Many words arriving all at once here".length,
+    );
+  });
+
+  it("streams text without re-rendering its consumer", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    let renders = 0;
+    const { result } = renderHook(
+      () => {
+        renders += 1;
+        return useMessageStream("m1", null, "c1");
+      },
+      { wrapper },
+    );
+    const source = FakeEventSource.instances.at(-1)!;
+    const settled = renders;
+
+    // The chat view owns this hook, so every render here is a render of the
+    // whole conversation. Chunks and pacing ticks must reach the row only.
+    for (let seq = 1; seq <= 20; seq += 1)
+      act(() => source.emit("chunk", { seq, delta: `word${seq} ` }));
+    act(() => source.emit("chunk", { seq: 21, kind: "reasoning", delta: "thinking" }));
+    act(() => vi.advanceTimersByTime(30 * 40));
+
+    expect(result.current.live.getSnapshot()).toMatchObject({ drained: true, reasoningSeen: true });
+    expect(result.current.live.getSnapshot().text).toContain("word20");
+    expect(renders).toBe(settled);
   });
 });
 
@@ -274,7 +306,7 @@ describe("ordinary image attempt identity", () => {
       });
     });
     expect(result.current.files).toEqual([image]);
-    expect(result.current.text).toBe("");
+    expect(result.current.live.getSnapshot().text).toBe("");
     act(() => old.emit("done", { runId: "generation-1", status: "complete" }));
     expect(result.current.status).toBe("complete");
     rerender({ runId: "generation-2" });
@@ -288,6 +320,6 @@ describe("ordinary image attempt identity", () => {
       }),
     );
     expect(result.current.files).toEqual([]);
-    expect(result.current.lastSeq).toBe(0);
+    expect(result.current.live.lastSeq).toBe(0);
   });
 });

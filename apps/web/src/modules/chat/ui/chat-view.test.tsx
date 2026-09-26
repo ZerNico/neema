@@ -40,6 +40,7 @@ import { getDocument, pushDocument } from "~/modules/documents/server/document-f
 import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import { createLiveText } from "../client/live-text.ts";
 
 const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -327,18 +328,18 @@ vi.mock("./composer.tsx", () => ({
   ),
 }));
 
+const idleLiveText = createLiveText({ text: "", reasoning: "", reasoningSeen: false, lastSeq: 0 });
+
 vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../client/use-message-stream.ts")>()),
   useMessageStream: (...args: unknown[]) => {
     streamProbe(...args);
     return {
-      text: "",
-      reasoning: "",
-      reasoningSeen: false,
+      files: [],
       tools: liveDraft.tools,
       compactions: [],
       steers: [],
-      lastSeq: 0,
+      live: idleLiveText,
       status: liveDraft.status,
     };
   },

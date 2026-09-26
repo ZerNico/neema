@@ -14,21 +14,17 @@ const ESTIMATED_MESSAGE_HEIGHT = 96;
  * (long chats stay cheap), heights are measured dynamically (markdown blocks
  * vary wildly), and the list follows streaming output while the user is at
  * the bottom. Scrolling up detaches; a jump-to-bottom button reattaches.
+ *
+ * Following is the virtualizer's own: with `anchorTo: "end"` a row growing
+ * while the view sits at the end keeps it there, and `followOnAppend` does the
+ * same for new rows. Nothing here reacts to streamed text, so the live row can
+ * re-render without this list doing so.
  */
-export function VirtualMessageList({
-  messages,
-  /** Monotonically growing signal (e.g. streamed text length) to follow. */
-  followKey,
-}: {
-  messages: DisplayMessage[];
-  followKey: number;
-}) {
+export function VirtualMessageList({ messages }: { messages: DisplayMessage[] }) {
   "use no memo";
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
-  // Whether auto-follow is engaged; detaches when the user scrolls up.
-  const pinnedRef = useRef(true);
   const count = messages.length;
 
   // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual exposes a mutable imperative instance
@@ -44,45 +40,37 @@ export function VirtualMessageList({
     overscan: 6,
     getItemKey: (index) => messages[index]!.id,
     anchorTo: "end",
+    followOnAppend: true,
     scrollEndThreshold: BOTTOM_THRESHOLD,
     useAnimationFrameWithResizeObserver: true,
   });
 
-  // When an item above the viewport resizes (e.g. images/code settle),
-  // keep the visual position stable instead of jumping. Instance-level
-  // property in virtual-core, not a constructor option.
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-    item.end <= (instance.scrollOffset ?? 0);
-
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
       if (!scrollRef.current) return;
-      pinnedRef.current = true;
       setAtBottom(true);
       virtualizer.scrollToEnd({ behavior });
     },
     [virtualizer],
   );
 
-  // Track whether the user is at (or near) the bottom.
+  // Track whether the user is at (or near) the bottom, for the jump button.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const nearBottom = distance <= BOTTOM_THRESHOLD;
-      setAtBottom(nearBottom);
-      pinnedRef.current = nearBottom;
+      setAtBottom(distance <= BOTTOM_THRESHOLD);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Follow new content while pinned: new messages or streamed text growth.
-  // biome/oxlint: followKey is the intentional trigger.
+  // Settle on the end once the first rows are measured; from here on the
+  // virtualizer keeps it there.
   useEffect(() => {
-    if (pinnedRef.current) scrollToBottom();
-  }, [count, followKey, scrollToBottom]);
+    scrollToBottom();
+  }, [scrollToBottom]);
 
   const items = virtualizer.getVirtualItems();
 
