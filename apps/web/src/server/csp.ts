@@ -13,7 +13,8 @@ export const documentCsp = (production: boolean, nonce?: string) =>
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    production ? "connect-src 'self'" : "connect-src 'self' ws: wss:",
+    // Desktop text previews fetch object URLs made from locally read bytes.
+    production ? "connect-src 'self' blob:" : "connect-src 'self' blob: ws: wss:",
     "worker-src 'self' blob:",
     // A PDF preview is an iframe over our own bytes route, which carries no
     // CSP of its own. Documents do, and theirs refuses every ancestor, so this

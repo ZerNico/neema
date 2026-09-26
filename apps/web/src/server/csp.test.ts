@@ -11,6 +11,15 @@ describe("document CSP", () => {
     expect(csp).not.toContain("ws:");
   });
 
+  it.each([true, false])("allows local preview fetches (production: %s)", (production) => {
+    const connect = documentCsp(production)
+      .split("; ")
+      .find((directive) => directive.startsWith("connect-src "));
+    expect(connect?.split(" ").slice(1)).toEqual(
+      production ? ["'self'", "blob:"] : ["'self'", "blob:", "ws:", "wss:"],
+    );
+  });
+
   it("runs no inline script in production when no nonce was minted", () => {
     expect(documentCsp(true)).toContain("script-src 'self';");
   });
@@ -32,6 +41,6 @@ describe("document CSP", () => {
     const csp = documentCsp(false, "abc123");
     expect(csp).toMatch(/script-src [^;]*'unsafe-inline'/);
     expect(csp).not.toContain("nonce-");
-    expect(csp).toContain("connect-src 'self' ws: wss:");
+    expect(csp).toContain("connect-src 'self' blob: ws: wss:");
   });
 });
