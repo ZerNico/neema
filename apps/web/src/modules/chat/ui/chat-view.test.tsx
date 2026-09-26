@@ -141,7 +141,9 @@ vi.mock("./virtual-message-list.tsx", () => ({
         <div
           key={String(message.id)}
           data-message-id={String(message.id)}
-          data-inherited-sources={JSON.stringify(message.inheritedSources)}
+          data-inherited-source-1={JSON.stringify(
+            (message.inheritedSources as DisplayMessage["inheritedSources"])?.(1) ?? null,
+          )}
           data-collection-ids={
             Array.isArray(message.collectionIds) ? message.collectionIds.join(",") : undefined
           }
@@ -2252,6 +2254,12 @@ it("hydrates document source activities only from an explicit knowledge envelope
   );
 });
 
+// What the view wired onto a row as inherited citation number 1.
+const inheritedOne = (id: string) =>
+  JSON.parse(
+    document.querySelector(`[data-message-id="${id}"]`)!.getAttribute("data-inherited-source-1")!,
+  );
+
 describe("ChatView knowledge placement", () => {
   it("passes document sources forward for inherited citations", () => {
     const source = {
@@ -2301,13 +2309,9 @@ describe("ChatView knowledge placement", () => {
         } as never,
       ],
     });
-    expect(
-      JSON.parse(
-        document
-          .querySelector('[data-message-id="m-later"]')!
-          .getAttribute("data-inherited-sources")!,
-      ),
-    ).toEqual([source]);
+    expect(inheritedOne("m-later")).toEqual(source);
+    // The answer that found it cites it as its own, never as inherited.
+    expect(inheritedOne("m-answer")).toBeNull();
   });
 
   it("hands a turn's collections to the question that added them, not the answer", () => {

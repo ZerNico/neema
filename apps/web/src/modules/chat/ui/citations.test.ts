@@ -5,6 +5,7 @@ import {
   prepareCitedMarkdown,
   selectAnswerSources,
 } from "./citations.ts";
+import { inheritSources } from "./inherited-sources.ts";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 
 const source = (index: number, url: string): ToolSource => ({
@@ -80,7 +81,10 @@ describe("answer evidence selection", () => {
       { ...source(2, "https://b.dev"), read: false },
       { ...source(3, "https://c.dev"), read: false },
     ];
-    const inherited = [source(4, "https://d.dev"), source(5, "https://e.dev")];
+    const inherited = inheritSources([
+      [source(4, "https://d.dev"), source(5, "https://e.dev")],
+      [],
+    ])[1]!;
     expect(
       selectAnswerSources("Claim[^2] and prior finding[^4].", own, inherited).map((s) => s.index),
     ).toEqual([1, 2, 4]);

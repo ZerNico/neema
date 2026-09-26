@@ -3,6 +3,7 @@ import { gfmFootnoteFromMarkdown } from "mdast-util-gfm-footnote";
 import { gfmFootnote } from "micromark-extension-gfm-footnote";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { mergeSources, sourceTarget } from "~/modules/tools/sources.ts";
+import type { InheritedSources } from "./inherited-sources.ts";
 
 /**
  * Matches the href streamdown gives a GFM footnote reference. A run of
@@ -89,12 +90,12 @@ export function citedSourceIndexes(content: string): Set<number> {
 export function selectAnswerSources(
   content: string,
   own: ReadonlyArray<ToolSource>,
-  inherited: ReadonlyArray<ToolSource>,
+  inherited: InheritedSources,
 ): ToolSource[] {
   const cited = citedSourceIndexes(content);
   return mergeSources([
     ...own.filter((source) => source.read || cited.has(source.index)),
-    ...inherited.filter((source) => cited.has(source.index)),
+    ...[...cited].flatMap((index) => inherited(index) ?? []),
   ]);
 }
 

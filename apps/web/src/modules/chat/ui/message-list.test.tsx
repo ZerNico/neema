@@ -9,13 +9,17 @@ import {
   type DisplayMessage,
 } from "./message-list.tsx";
 import { createLiveText, type LiveTextSnapshot } from "../client/live-text.ts";
+import { inheritSources } from "./inherited-sources.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
-import type { ToolActivity } from "../client/use-message-stream.ts";
+import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { composerText, setComposerText } from "./composer-test-utils.ts";
+
+// Sources an earlier message registered, as the view hands them to a row.
+const inheritedFrom = (sources: ToolSource[]) => inheritSources([sources, []])[1]!;
 
 // The panel closes on navigation; the citation tests render outside a router.
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
@@ -729,7 +733,7 @@ describe("MessageBubble actions", () => {
             reasoningSeen: false,
             toolActivities: [],
             status: "complete",
-            inheritedSources: [
+            inheritedSources: inheritedFrom([
               {
                 kind: "web" as const,
                 index: 2,
@@ -747,7 +751,7 @@ describe("MessageBubble actions", () => {
                 snippet: "",
                 read: false,
               },
-            ],
+            ]),
           }}
         />
       </DetailPanelProvider>,
@@ -1353,7 +1357,7 @@ describe("MessageBubble actions", () => {
                 sources: [hit(5, true)],
               },
             ],
-            inheritedSources: [hit(6), hit(7)],
+            inheritedSources: inheritedFrom([hit(6), hit(7)]),
           }}
         />
         <DetailPanelRail />

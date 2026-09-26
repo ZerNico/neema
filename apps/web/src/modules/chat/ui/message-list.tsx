@@ -18,6 +18,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { LiveText, LiveTextSnapshot } from "../client/live-text.ts";
+import { NO_INHERITED_SOURCES, type InheritedSources } from "./inherited-sources.ts";
 import {
   type CompactionActivity,
   type ResearchToolActivity,
@@ -186,7 +187,7 @@ export interface DisplayMessage {
    * conversation-scoped, so a message may cite a source it didn't search for
    * itself; markers resolve against these plus the message's own sources.
    */
-  inheritedSources?: ToolSource[];
+  inheritedSources?: InheritedSources;
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
   /**
@@ -941,7 +942,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
       selectAnswerSources(
         message.content,
         collectSources(message.toolActivities),
-        message.inheritedSources ?? [],
+        message.inheritedSources ?? NO_INHERITED_SOURCES,
       ),
     [message.content, message.inheritedSources, message.toolActivities],
   );

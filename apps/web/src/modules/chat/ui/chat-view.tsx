@@ -36,6 +36,7 @@ import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
 import { applyFileChunk, integrationActivityFromRow } from "../client/use-message-stream.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
+import { inheritSources } from "./inherited-sources.ts";
 import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
 import { Option, Schema } from "effect";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
@@ -119,7 +120,6 @@ import { uuidv7 } from "uuidv7";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
-import { mergeSource } from "~/modules/tools/sources.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -1655,20 +1655,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   );
 
   const baseDisplay = useMemo(() => {
-    // Citation numbering is conversation-scoped: each message inherits every
-    // source discovered before it, deduplicated by index and message order.
-    const inheritedByIndex = new Map<number, ToolSource>();
+    const inherited = inheritSources(
+      visibleMessages.map((message) => collectSources(toolCallsByMessage.get(message.id) ?? [])),
+    );
 
-    return visibleMessages.map((message): DisplayMessage => {
+    return visibleMessages.map((message, position): DisplayMessage => {
       const reasoning = message.reasoning ?? "";
       const toolActivities = toolCallsByMessage.get(message.id) ?? [];
       const compactionActivities = compactionsByMessage.get(message.id) ?? [];
       const retryTarget =
         message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
-      const inheritedSources = [...inheritedByIndex.values()];
-      for (const source of collectSources(toolActivities)) {
-        inheritedByIndex.set(source.index, mergeSource(inheritedByIndex.get(source.index), source));
-      }
+      const inheritedSources = inherited[position]!;
       const stamp = stamps.get(message.id);
       const resolution = questionResponses.byAssistant.get(message.id);
       const answerTime = resolution ? answerStamps.get(resolution.messageId) : undefined;
