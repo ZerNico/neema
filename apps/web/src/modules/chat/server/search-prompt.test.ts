@@ -28,6 +28,13 @@ const textOf = (message: Prompt.Message): string =>
         .join("");
 
 describe("webToolsSystemHint", () => {
+  it("does not direct search-only requests to an unavailable reader", () => {
+    const hint = webToolsSystemHint({ search: true, reader: false });
+    expect(hint).toContain("Use web_search");
+    expect(hint).toContain("returns snippets only, not page content");
+    expect(hint).not.toContain("read_url");
+  });
+
   it("limits read_url to user and search-result URLs", () => {
     const hint = webToolsSystemHint({ search: false, reader: true });
     expect(hint).toContain("URLs from user messages and web_search results");

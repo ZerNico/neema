@@ -31,7 +31,7 @@ export { WebToolResult } from "../schema.ts";
 export const webSearchTool = Tool.make("web_search", {
   description:
     "Search the web with one or more queries. Returns titles, URLs, and snippets, not page content. " +
-    "Use read_url with the most relevant result URLs when the answer needs full-page evidence.",
+    "When read_url is available, use it with the most relevant result URLs when the answer needs full-page evidence.",
   parameters: WebSearchParams,
   success: WebToolResultSchema,
   // Handler failures become tool results the model can react to.
