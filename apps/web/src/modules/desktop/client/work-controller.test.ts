@@ -81,13 +81,18 @@ describe("app-owned Work execution", () => {
   );
 
   it.each(["manual", "auto", "skip"] as const)(
-    "honours %s approval policy and always asks about deletes",
+    "honours %s approval policy and always asks about deletes and network access",
     (approval) => {
       const { controller } = setup();
       const current = snapshot(
         call("edit"),
         { ...call("read"), name: "read_local_file" },
         { ...call("command"), name: "run_command" },
+        {
+          ...call("network"),
+          name: "request_network_access",
+          args: { host: "example.com" },
+        },
         { ...call("delete"), name: "delete_local_file" },
       );
       current.settings[0]!.approval = approval;
@@ -97,6 +102,7 @@ describe("app-owned Work execution", () => {
       expect(pending.has("edit")).toBe(approval !== "skip");
       expect(pending.has("command")).toBe(approval !== "skip");
       expect(pending.get("delete")).toBe("delete");
+      expect(pending.get("network")).toBe("network");
     },
   );
 
@@ -114,6 +120,66 @@ describe("app-owned Work execution", () => {
     await completed;
     expect([...controller.pending("a").keys()]).toEqual(["read", "command", "delete"]);
   });
+
+  it.each(["manual", "auto", "skip"] as const)(
+    "requires individual network consent under %s even after a blanket decision",
+    async (approval) => {
+      const { controller, deps, completed } = setup();
+      const first = {
+        ...call("network"),
+        name: "request_network_access",
+        args: { host: "one.example" },
+      };
+      const next = {
+        ...call("next-network"),
+        name: "request_network_access",
+        args: { host: "two.example" },
+      };
+      const current = snapshot(first, next);
+      current.settings[0]!.approval = approval;
+      controller.reconcile(current);
+      expect(controller.pending("a").size).toBe(2);
+      expect(deps.execute).not.toHaveBeenCalled();
+      controller.decide("network", "allow-rest");
+      await completed;
+      expect(deps.execute).toHaveBeenCalledExactlyOnceWith(first, expect.any(Number));
+      expect(controller.pending("a").get("next-network")).toBe("network");
+      const subsequent = snapshot({ ...next, callId: "future-network" });
+      subsequent.settings[0]!.approval = approval;
+      controller.reconcile(subsequent);
+      expect(controller.pending("a").get("future-network")).toBe("network");
+      expect(deps.execute).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("declines network access without invoking the desktop grant", async () => {
+    const { controller, deps, completed } = setup();
+    controller.reconcile(snapshot({ ...call("network"), name: "request_network_access" }));
+    controller.decide("network", "deny");
+    await completed;
+    expect(deps.execute).not.toHaveBeenCalled();
+    expect(deps.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "network" }),
+      "token",
+      expect.objectContaining({ ok: false, summary: "You declined that" }),
+    );
+  });
+
+  it.each(["expiry", "removal", "identity"] as const)(
+    "cannot approve a pending network request after %s",
+    (reason) => {
+      vi.useFakeTimers();
+      const { controller, deps } = setup();
+      controller.reconcile(snapshot({ ...call("network"), name: "request_network_access" }));
+      if (reason === "expiry") vi.setSystemTime(Date.now() + 2000);
+      if (reason === "removal") controller.reconcile(snapshot());
+      if (reason === "identity") controller.dispose();
+      controller.decide("network", "allow");
+      expect(deps.claim).not.toHaveBeenCalled();
+      expect(deps.execute).not.toHaveBeenCalled();
+      expect(deps.cancel).toHaveBeenCalledWith("network");
+    },
+  );
 
   it("reports a refusal without executing and reads changed policy on the next call", async () => {
     const { controller, deps, completed } = setup();

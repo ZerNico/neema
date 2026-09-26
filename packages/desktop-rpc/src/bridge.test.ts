@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   makeDesktopClient,
   makeDesktopResponder,
@@ -31,6 +31,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   readFile: unimplemented("readFile"),
   writeFile: unimplemented("writeFile"),
   saveToWorkspace: unimplemented("saveToWorkspace"),
+  requestNetworkAccess: unimplemented("requestNetworkAccess"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),
@@ -65,6 +66,39 @@ const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
 };
 
 describe("the desktop channel", () => {
+  it("round-trips only a host for network approval", async () => {
+    const client = makeDesktopClient(
+      connect({ requestNetworkAccess: ({ host }) => Effect.succeed({ host }) }),
+    );
+    const result = await Effect.runPromise(
+      client.requestNetworkAccess({
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        callId: "call-1",
+        host: "example.com",
+      }),
+    );
+    expect(result).toEqual({ host: "example.com" });
+  });
+
+  it("rejects an invalid conversation before sending network approval to the desktop", async () => {
+    const request = vi.fn().mockRejectedValue(new Error("should not send"));
+    const client = makeDesktopClient({
+      protocolVersion: PROTOCOL_VERSION,
+      stageDroppedFile: async () => null,
+      request,
+    });
+    await expect(
+      Effect.runPromise(
+        client.requestNetworkAccess({
+          conversationId: "not-a-conversation-id",
+          callId: "call-1",
+          host: "example.com",
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("round-trips a decoded result through the declared schemas", async () => {
     const client = makeDesktopClient(
       connect({

@@ -25,6 +25,25 @@ describe("main-process executions", () => {
     await executions.dispose();
   });
 
+  it("joins an in-flight network grant and retains its result on replay", async () => {
+    const finish = Promise.withResolvers<typeof reply>();
+    const started = Promise.withResolvers<void>();
+    const run = vi.fn(() => {
+      started.resolve();
+      return finish.promise;
+    });
+    const executions = makeExecutions(run);
+    const request = { callId: "network", conversationId: "chat", host: "example.org" };
+    const first = executions.request("requestNetworkAccess", request);
+    await started.promise;
+    expect(executions.request("requestNetworkAccess", { ...request })).toBe(first);
+    finish.resolve(reply);
+    expect(await first).toEqual(reply);
+    expect(await executions.request("requestNetworkAccess", request)).toEqual(reply);
+    expect(run).toHaveBeenCalledTimes(1);
+    await executions.dispose();
+  });
+
   it("answers a replayed side effect from its retained result, and a read by reading again", async () => {
     const run = vi.fn(async () => reply);
     const executions = makeExecutions(run);

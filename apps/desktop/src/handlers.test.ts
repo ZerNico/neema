@@ -54,6 +54,7 @@ let ran: { command: string; cwd: string; allowWrite: string[] }[];
 let revealed: { absolute: string; mode: string }[];
 /** What the operating system complained about, when the test wants it to. */
 let revealComplaint: string | null;
+let approvedNetwork: string[] = [];
 
 const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
 const FRESH_CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
@@ -69,6 +70,12 @@ const stubSandbox = Layer.succeed(
   Sandbox.of({
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
+    grants: () => Effect.succeed([]),
+    approveNetwork: ({ host }) =>
+      Effect.sync(() => {
+        approvedNetwork.push(host);
+      }),
+    revokeNetwork: () => Effect.void,
     run: ({ command, cwd, allowWrite }) =>
       Effect.sync(() => {
         ran.push({ command, cwd, allowWrite: [...allowWrite] });
@@ -105,6 +112,7 @@ beforeAll(async () => {
     }),
     cancelCall: () => false,
     setWorkState: () => {},
+    networkGrantsDirectory: join(root, "network-grants"),
   };
 
   handlers = await Effect.runPromise(
@@ -1131,5 +1139,71 @@ describe("once a folder is attached", () => {
         }),
       ),
     ).toBe("not-found");
+  });
+});
+
+describe("network permission boundary", () => {
+  it("grants an exact destination without requiring a failed command first", async () => {
+    const input = {
+      conversationId: CONVERSATION,
+      callId: "network-ask",
+      host: "EXAMPLE.ORG",
+    };
+    const commandsBefore = ran.length;
+    const grantsBefore = approvedNetwork.length;
+    expect(await Effect.runPromise(handlers.requestNetworkAccess(input))).toEqual({
+      host: "example.org",
+    });
+    expect(approvedNetwork.slice(grantsBefore)).toEqual(["example.org"]);
+    expect(ran).toHaveLength(commandsBefore);
+  });
+
+  it("refuses invalid destinations without granting access", async () => {
+    const before = approvedNetwork.length;
+    for (const host of ["*.example.org", "https://example.org", "127.0.0.1"]) {
+      expect(
+        await failureOf(
+          handlers.requestNetworkAccess({
+            conversationId: CONVERSATION,
+            callId: "invalid-network",
+            host,
+          }),
+        ),
+      ).toBe("failed");
+    }
+    expect(approvedNetwork).toHaveLength(before);
+  });
+
+  it("refuses direct file-tool writes and moves of the permission directory", async () => {
+    await attach();
+    const protectedFile = join(root, "network-grants", "approved.json");
+    expect(
+      await failureOf(
+        handlers.writeFile({
+          conversationId: CONVERSATION,
+          callId: "f",
+          path: protectedFile,
+          text: "[]",
+        }),
+      ),
+    ).toBe("outside-folder");
+    expect(
+      await failureOf(
+        handlers.movePath({
+          conversationId: CONVERSATION,
+          callId: "m",
+          from: join(root, "src"),
+          to: join(root, "network-grants"),
+        }),
+      ),
+    ).toBe("outside-folder");
+    const deletion = await Effect.runPromise(
+      handlers.deletePath({
+        conversationId: CONVERSATION,
+        callId: "d",
+        paths: [join(root, "network-grants")],
+      }),
+    );
+    expect(deletion.failed[0]?.reason).toBe("outside-folder");
   });
 });

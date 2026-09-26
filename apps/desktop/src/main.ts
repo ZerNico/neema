@@ -36,7 +36,13 @@ import {
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { DROPPED_FILE_CHANNEL, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import {
+  DROPPED_FILE_CHANNEL,
+  NETWORK_LIST,
+  NETWORK_REVOKE,
+  makeDesktopResponder,
+  refusalReply,
+} from "@chat/desktop-rpc";
 import { makeDroppedFileHandler } from "./dropped-file.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
@@ -45,6 +51,7 @@ import { disposeOwnedProcesses } from "./process.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
+import { networkGrantsDirectory, normalizeNetworkGrant } from "./network-grants.ts";
 import { Sandbox } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import {
@@ -147,7 +154,7 @@ const runtime = ManagedRuntime.make(
       if (serverOrigin === null) throw new Error("No server is configured.");
       return serverOrigin;
     }, app.getPath("userData")),
-    Sandbox.layer,
+    Sandbox.layerAt(networkGrantsDirectory(app.getPath("userData"))),
   ),
 );
 
@@ -156,6 +163,7 @@ const runtime = ManagedRuntime.make(
 let machine: MachineIdentity = { id: "unknown", name: "Unknown machine" };
 
 const desktopShell: Shell = {
+  networkGrantsDirectory: networkGrantsDirectory(app.getPath("userData")),
   // Requests only arrive from the configured origin's page (`isPageSender`),
   // so by the time a handler runs there is one.
   serverOrigin: () => {
@@ -494,6 +502,17 @@ void app.whenReady().then(async () => {
   ipcMain.handle(CHROME_SET_THEME, (event, theme: unknown) => {
     if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
     windowChrome.get(mainWindow)?.setTheme(theme);
+  });
+  ipcMain.handle(NETWORK_LIST, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    return runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.grants()));
+  });
+  ipcMain.handle(NETWORK_REVOKE, async (event, payload: unknown) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    const input = payload && typeof payload === "object" ? (payload as { host?: unknown }) : null;
+    const grant = typeof input?.host === "string" ? normalizeNetworkGrant(input.host) : null;
+    if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
+    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
   });
   ipcMain.handle(RECOVERY_RETRY, async (event) => {
     if (!isPageSender(event, mainWindow?.webContents, (url) => url === recoveryUrl) || !mainWindow)

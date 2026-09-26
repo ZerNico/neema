@@ -234,6 +234,17 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
+  /** Requests approved website access; the desktop fixes the port to 443. */
+  Rpc.make("requestNetworkAccess", {
+    payload: {
+      conversationId: WorkspaceId,
+      callId: Schema.String,
+      host: Schema.String,
+    },
+    success: Schema.Struct({ host: Schema.String }),
+    error: DesktopError,
+  }),
+
   Rpc.make("runCommand", {
     payload: {
       conversationId: WorkspaceId,

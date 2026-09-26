@@ -19,6 +19,23 @@ const asResult = (
     ? outcome.success
     : desktopFailure(refusalSummary(outcome.failure.reason), outcome.failure.message);
 
+const blockedNetworkDestinations = (violations: readonly string[]) => [
+  ...new Set(
+    violations.flatMap((violation) => {
+      const match = /^deny network-outbound (\S+):(\d{1,5})(?: \(([^)]*)\))?$/.exec(
+        violation.trim(),
+      );
+      const port = Number(match?.[2]);
+      return match &&
+        port >= 1 &&
+        port <= 65_535 &&
+        (port !== 443 || match[3] === "host is not on the allow list")
+        ? [`${match[1]}:${port}`]
+        : [];
+    }),
+  ),
+];
+
 /** Reader-facing line for the transcript row. The detail carries the rest. */
 const refusalSummary = (reason: string) => {
   switch (reason) {
@@ -305,6 +322,21 @@ export const executeDesktopTool = (
           ),
         );
       }
+      case "request_network_access": {
+        const host = str(args.host);
+        if (!host)
+          return Effect.succeed(desktopFailure("No website named", "Name a website host."));
+        return Effect.map(
+          client.requestNetworkAccess({ callId: activity.callId, conversationId, host }),
+          (receipt) => ({
+            v: 1 as const,
+            ok: true,
+            summary: `Allowed network access to ${receipt.host}`,
+            detail: `The user allowed ${receipt.host}. You may now run or retry the command.`,
+            truncated: false,
+          }),
+        );
+      }
       case "run_command": {
         // A slow approval has already eaten into the server's wait; what is
         // left, minus the trip back, is all the command may take.
@@ -327,17 +359,38 @@ export const executeDesktopTool = (
             command,
             timeoutMs,
           }),
-          (output) => ({
-            v: 1 as const,
-            ok: output.exitCode === 0,
-            summary:
-              output.exitCode === 0
-                ? `Ran ${command}`
-                : `${command} exited with ${output.exitCode}`,
-            detail: output.output === "" ? "(no output)" : output.output,
-            truncated: output.truncated,
-            ...(output.violations.length > 0 ? { violations: output.violations } : {}),
-          }),
+          (output) => {
+            const blocked = blockedNetworkDestinations(output.violations);
+            const websites = blocked
+              .filter((destination) => destination.endsWith(":443"))
+              .map((destination) => destination.slice(0, -4));
+            const unsupported = blocked.filter((destination) => !destination.endsWith(":443"));
+            return {
+              v: 1 as const,
+              ok: output.exitCode === 0 && blocked.length === 0,
+              summary:
+                blocked.length > 0
+                  ? `Network access blocked: ${[...websites, ...unsupported].join(", ")}`
+                  : output.exitCode === 0
+                    ? `Ran ${command}`
+                    : `${command} exited with ${output.exitCode}`,
+              detail: [
+                ...(websites.length > 0
+                  ? [
+                      `Network access to ${websites.join(", ")} was blocked. Call request_network_access separately with only the host for ${websites.join(", ")}, wait for approval, then retry the command. Do not assume the command succeeded.`,
+                    ]
+                  : []),
+                ...(unsupported.length > 0
+                  ? [
+                      `Network access to ${unsupported.join(", ")} was blocked. These destinations use unsupported ports; website approval cannot authorize them. Do not assume the command succeeded.`,
+                    ]
+                  : []),
+                output.output === "" ? "(no output)" : output.output,
+              ].join("\n\n"),
+              truncated: output.truncated,
+              ...(output.violations.length > 0 ? { violations: output.violations } : {}),
+            };
+          },
         );
       }
     }

@@ -128,10 +128,27 @@ export const runCommandTool = Tool.make("run_command", {
     "Run a shell command on the user's computer. The command starts in this chat's workspace, " +
     "and paths inside it are absolute: it may `cd` and `cp` anywhere inside the workspace and " +
     "the attached folders. It runs sandboxed: writes land only inside those roots and only " +
-    "package registries are reachable. The user is asked before it happens and may refuse. " +
+    "package registries are reachable by default. A blocked HTTPS website needs a separate " +
+    "request_network_access call naming only its host and user approval before retrying. " +
+    "Other network destinations are unsupported. The user is asked before " +
+    "the command happens and may refuse. " +
     "Prefer the file tools over commands to inspect or change files.",
   parameters: Schema.Struct({
     command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),
+  }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
+export const requestNetworkAccessTool = Tool.make("request_network_access", {
+  description:
+    "Ask the user to allow a command on their computer to access one HTTPS website. " +
+    "Name only its exact host before running a command that needs it, or use the host " +
+    "reported by a blocked run_command result that supports requesting access. Wait for " +
+    "approval before running or retrying the command. Approval is saved for every Work chat " +
+    "on this desktop. Other network destinations are unsupported.",
+  parameters: Schema.Struct({
+    host: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253)),
   }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -196,7 +213,9 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     deleteLocalFileTool,
   ] as const;
   return {
-    toolkit: deps.commands ? Toolkit.make(...files, runCommandTool) : Toolkit.make(...files),
+    toolkit: deps.commands
+      ? Toolkit.make(...files, runCommandTool, requestNetworkAccessTool)
+      : Toolkit.make(...files),
     handlers: {
       list_folder: handle("list_folder", DESKTOP_TIMEOUTS.quick),
       find_files: handle("find_files", DESKTOP_TIMEOUTS.quick),
@@ -209,7 +228,12 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       edit_local_file: handle("edit_local_file", DESKTOP_TIMEOUTS.command),
       move_local_file: handle("move_local_file", DESKTOP_TIMEOUTS.command),
       delete_local_file: handle("delete_local_file", DESKTOP_TIMEOUTS.command),
-      ...(deps.commands ? { run_command: handle("run_command", DESKTOP_TIMEOUTS.command) } : {}),
+      ...(deps.commands
+        ? {
+            run_command: handle("run_command", DESKTOP_TIMEOUTS.command),
+            request_network_access: handle("request_network_access", DESKTOP_TIMEOUTS.command),
+          }
+        : {}),
     },
   };
 };

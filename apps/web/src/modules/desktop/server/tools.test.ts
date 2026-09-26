@@ -3,7 +3,8 @@ import { Deferred, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
-import { prepareDesktopTools } from "./tools.ts";
+import { Tool } from "effect/unstable/ai";
+import { prepareDesktopTools, requestNetworkAccessTool } from "./tools.ts";
 
 const owner = {
   userId: "user",
@@ -41,6 +42,25 @@ const waitingHandler = Effect.gen(function* () {
 });
 
 describe("desktop handler registration", () => {
+  it("offers website approval with only a required host", () => {
+    const schema = Tool.getJsonSchema(requestNetworkAccessTool);
+    expect(schema).toMatchObject({
+      properties: { host: { type: "string", minLength: 1, maxLength: 253 } },
+      required: ["host"],
+    });
+    expect(schema.properties).not.toHaveProperty("port");
+  });
+
+  it("offers network requests only when commands are ready", () => {
+    const deps = { rowIdFor: () => Effect.succeed(undefined) };
+    expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(
+      "request_network_access",
+    );
+    expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(
+      "request_network_access",
+    );
+  });
+
   it.effect("waits for registration and keeps an answer that arrived before readiness", () =>
     Effect.gen(function* () {
       const external = yield* ExternalCompletion;

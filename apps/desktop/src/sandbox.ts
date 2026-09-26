@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { Context, Effect, Layer, Semaphore } from "effect";
 import { runOwnedProcess } from "./process.ts";
-import { DesktopError, LIMITS, type SandboxAvailability } from "@chat/desktop-rpc";
+import { loadNetworkGrants, type NetworkGrants } from "./network-grants.ts";
+import {
+  DesktopError,
+  LIMITS,
+  type NetworkGrant,
+  type SandboxAvailability,
+} from "@chat/desktop-rpc";
 
 const home = homedir();
 const inHome = (...segments: string[]) => join(home, ...segments);
@@ -80,12 +86,9 @@ const SECRETS_INSIDE_TOOLCHAINS = [
  * allow-only and this config lists none, so the *only* writable place is the
  * set of folders passed per call.
  *
- * Network is one policy for the machine, set once here. srt keeps a single
- * proxy per process and reads this list live, which is why the level is not
- * a per-chat choice: two chats with different levels would need two proxies.
- *
- * Not user-editable in v1. A settings screen for this would be a way to talk
- * someone into disabling their own sandbox.
+ * Network is one policy for this desktop profile. srt keeps a single proxy
+ * per process; a human-approved exact destination is shared by all its chats.
+ * The connected app asks for consent before requesting a grant.
  */
 const GLOBAL_POLICY: SandboxRuntimeConfig = {
   filesystem: {
@@ -110,8 +113,32 @@ const GLOBAL_POLICY: SandboxRuntimeConfig = {
       "objects.githubusercontent.com",
     ],
     deniedDomains: [],
+    deniedResolvedAddresses: [
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "100.64.0.0/10",
+      "fc00::/7",
+    ],
+    strictAllowlist: true,
   },
 };
+
+const policyWithGrants = (grants: NetworkGrants | null): SandboxRuntimeConfig => ({
+  ...GLOBAL_POLICY,
+  filesystem: {
+    ...GLOBAL_POLICY.filesystem,
+    denyWrite: grants ? [grants.directory] : [],
+  },
+  network: {
+    ...GLOBAL_POLICY.network,
+    allowedDomains: [
+      ...GLOBAL_POLICY.network.allowedDomains,
+      // Bare hosts in SRT allow every port; website grants only allow 443.
+      ...(grants?.list().map(({ host }) => `${host}:443`) ?? []),
+    ],
+  },
+});
 
 /**
  * Two things srt gets wrong for real tools on macOS, fixed on the argv it
@@ -183,12 +210,24 @@ export class Sandbox extends Context.Service<
     /** Windows only; elsewhere it just re-reports availability. */
     setUp(): Effect.Effect<SandboxAvailability>;
     run(input: SandboxRun): Effect.Effect<SandboxResult, DesktopError>;
+    grants(): Effect.Effect<readonly NetworkGrant[]>;
+    approveNetwork(grant: NetworkGrant): Effect.Effect<void, DesktopError>;
+    revokeNetwork(grant: NetworkGrant): Effect.Effect<void, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layer = Layer.effect(
     Sandbox,
     Effect.suspend(() => makeSandbox()),
   );
+
+  static readonly layerAt = (directory: string) =>
+    Layer.effect(
+      Sandbox,
+      Effect.flatMap(
+        Effect.promise(() => loadNetworkGrants(directory)),
+        (grants) => makeSandbox(SandboxManager, runOwnedProcess, grants),
+      ),
+    );
 }
 
 /**
@@ -204,23 +243,27 @@ interface ManagerState {
 const managerStates = new WeakMap<typeof SandboxManager, ManagerState>();
 /** Guards start, reset and the Windows install against each other and against running commands. */
 const lifecyclePermit = Semaphore.makeUnsafe(1);
+const networkPermit = Semaphore.makeUnsafe(1);
 
-export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess) =>
+export const makeSandbox = (
+  manager = SandboxManager,
+  execute = runOwnedProcess,
+  grants: NetworkGrants | null = null,
+) =>
   Effect.gen(function* () {
     const state = managerStates.get(manager) ?? { started: false, owners: 0, running: 0 };
     managerStates.set(manager, state);
     state.owners += 1;
 
     // `initialize` returns early whenever a previous call is in flight or
-    // done, *before* it stores the new config, so it is called exactly once
-    // per process with the whole policy. The folders are the only per-call
-    // part and travel through `wrapWithSandboxArgv`.
+    // done. Approved destinations are loaded before this first start; later
+    // changes update the full policy rather than re-initializing the proxy.
     const ensureStarted = lifecyclePermit.withPermit(
       Effect.suspend(() => {
         if (state.started) return Effect.void;
         return Effect.tryPromise({
           try: async () => {
-            await manager.initialize(GLOBAL_POLICY);
+            await manager.initialize(policyWithGrants(grants));
             state.started = true;
           },
           catch: (cause) =>
@@ -319,7 +362,7 @@ export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess)
                   denyRead: GLOBAL_POLICY.filesystem.denyRead,
                   allowRead: [...TOOLCHAIN_READ, ...input.allowWrite],
                   allowWrite: [...input.allowWrite],
-                  denyWrite: [],
+                  denyWrite: grants ? [grants.directory] : [],
                 },
               },
               undefined,
@@ -360,11 +403,13 @@ export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess)
           );
         }
 
-        // Turns bare EPERMs into sentences naming what was blocked. Empty on
-        // Linux, which reports no violations at all, so silence here never
-        // means nothing was denied.
-        const annotated = manager.annotateStderrWithSandboxFailures(input.callId, finished.stderr);
-        const violations = annotated === finished.stderr ? [] : [annotated.slice(0, 2_000)];
+        // The appended annotation follows stderr, which can be arbitrarily
+        // long. Take short individual events instead so network denials survive.
+        const violations = manager
+          .getSandboxViolationStore()
+          .getViolationsForCommand(input.callId)
+          .slice(0, 20)
+          .map((event) => event.line.slice(0, 500));
 
         const combined = [finished.stdout, finished.stderr].filter(Boolean).join("\n");
         const truncated = combined.length > LIMITS.outputChars;
@@ -406,5 +451,45 @@ export const makeSandbox = (manager = SandboxManager, execute = runOwnedProcess)
         );
       });
 
-    return Sandbox.of({ availability, setUp, run });
+    const changeNetwork = (grant: NetworkGrant, add: boolean): Effect.Effect<void, DesktopError> =>
+      networkPermit.withPermit(
+        lifecyclePermit.withPermit(
+          // Once consent is given, a Stop or server switch must wait for the
+          // file and proxy to agree rather than abandoning an in-flight write.
+          Effect.uninterruptible(
+            Effect.tryPromise({
+              try: async () => {
+                if (!grants) throw new Error("No network grant store is available.");
+                const existed = grants.has(grant);
+                if (add === existed) return;
+                if (add) await grants.add(grant);
+                else await grants.remove(grant);
+                if (!state.started) return;
+                try {
+                  manager.updateConfig(policyWithGrants(grants));
+                } catch (cause) {
+                  if (existed) await grants.add(grant);
+                  else await grants.remove(grant);
+                  manager.updateConfig(policyWithGrants(grants));
+                  throw cause;
+                }
+              },
+              catch: (cause) =>
+                new DesktopError({
+                  reason: "sandbox-unavailable",
+                  message: `Could not change network access: ${String(cause)}`,
+                }),
+            }),
+          ),
+        ),
+      );
+
+    return Sandbox.of({
+      availability,
+      setUp,
+      run,
+      grants: () => Effect.sync(() => grants?.list() ?? []),
+      approveNetwork: (grant) => changeNetwork(grant, true),
+      revokeNetwork: (grant) => changeNetwork(grant, false),
+    });
   });

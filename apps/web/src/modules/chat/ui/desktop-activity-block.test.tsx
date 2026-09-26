@@ -58,6 +58,41 @@ describe("DesktopActivityBlock", () => {
     ).toBeInTheDocument();
   });
 
+  it("asks inline for profile-wide network access without a blanket grant", async () => {
+    const decide = vi.fn();
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          name: "request_network_access",
+          args: { host: "example.com" },
+        })}
+        approval={{ kind: "network", decide }}
+      />,
+    );
+    expect(screen.getByText("example.com")).toBeInTheDocument();
+    expect(screen.getByText(/Applies to all Work chats on this desktop/)).toHaveTextContent(
+      "You can remove access in Settings › Devices.",
+    );
+    expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow for this desktop" }));
+    expect(decide).toHaveBeenLastCalledWith("allow");
+    await userEvent.click(screen.getByRole("button", { name: "Deny" }));
+    expect(decide).toHaveBeenLastCalledWith("deny");
+  });
+
+  it("names the website host in network approval and progress", () => {
+    const activity = running({
+      name: "request_network_access",
+      args: { host: "picsum.photos" },
+    });
+    show(
+      <DesktopActivityBlock activity={activity} approval={{ kind: "network", decide: vi.fn() }} />,
+    );
+    expect(screen.getByText("picsum.photos")).toBeInTheDocument();
+    show(<DesktopActivityBlock activity={activity} />);
+    expect(screen.getByText("Requesting network access to picsum.photos")).toBeInTheDocument();
+  });
+
   it("offers no blanket grant for a delete and lists every path", () => {
     const decide = vi.fn();
     show(

@@ -72,7 +72,7 @@ export class WorkController {
         const kind = approvalKind(call.name as DesktopToolName);
         const granted = this.grants.get(call.conversationId)?.has(kind ?? "read");
         const permitted =
-          kind === "delete"
+          kind === "network" || kind === "delete"
             ? false
             : kind === null
               ? settings.approval !== "manual"
@@ -116,7 +116,8 @@ export class WorkController {
     const entry = this.entries.get(callId);
     if (!entry || entry.pending === null) return;
     const kind = entry.pending;
-    const blanket = choice === "allow-rest" && kind !== "delete" && kind !== "read";
+    const blanket =
+      choice === "allow-rest" && kind !== "delete" && kind !== "network" && kind !== "read";
     if (blanket) {
       const grants = this.grants.get(entry.call.conversationId) ?? new Set<PendingKind>();
       grants.add(kind);

@@ -33,6 +33,7 @@ describe("desktop tools system hint", () => {
     const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], false);
     expect(hint).toContain("Running commands is unavailable on this computer");
     expect(hint).not.toContain("sandboxed");
+    expect(hint).not.toContain("request_network_access");
   });
 
   it("credits the workspace to the chat, never to the user", () => {
@@ -64,6 +65,10 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Files the user drops into the chat land in the workspace");
     expect(hint).toContain("Commands run sandboxed and start in the workspace");
     expect(hint).toContain("`cd` and `cp` between them work");
+    expect(hint).toContain("request_network_access with only the exact host");
+    expect(hint).toContain("Other network destinations are unsupported");
+    expect(hint).not.toContain("host and port");
+    expect(hint).toContain("Work permissions never grant network access");
   });
 
   it("leaves the workspace unmentioned when the shell predates it", () => {
@@ -78,6 +83,7 @@ describe("approvalKind", () => {
     // never overwrites, so there is nothing for a person to weigh.
     expect(approvalKind("save_to_workspace")).toBeNull();
     expect(approvalKind("write_local_file")).toBe("edit");
+    expect(approvalKind("request_network_access")).toBe("network");
   });
 });
 

@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { loadNetworkGrants, networkGrantsDirectory } from "./network-grants.ts";
 import { Effect, Exit, Scope } from "effect";
-import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { SandboxManager, SandboxViolationStore } from "@anthropic-ai/sandbox-runtime";
 import { makeSandbox, type SandboxRun } from "./sandbox.ts";
 import type { runOwnedProcess } from "./process.ts";
 
@@ -20,6 +24,7 @@ const managerFor = () => ({
   updateConfig: vi.fn(),
   wrapWithSandboxArgv: vi.fn(async (command: string) => ({ argv: ["fake", command], env: {} })),
   annotateStderrWithSandboxFailures: (_command: string, stderr: string) => stderr,
+  getSandboxViolationStore: () => new SandboxViolationStore(),
   cleanupAfterCommand: vi.fn(),
   reset: vi.fn(async () => {}),
 });
@@ -27,9 +32,12 @@ const managerFor = () => ({
 const scopedSandbox = async (
   manager: ReturnType<typeof managerFor>,
   execute: typeof runOwnedProcess,
+  grants?: Awaited<ReturnType<typeof loadNetworkGrants>>,
 ) => {
   const scope = await Effect.runPromise(Scope.make());
-  const sandbox = await Effect.runPromise(makeSandbox(manager, execute).pipe(Scope.provide(scope)));
+  const sandbox = await Effect.runPromise(
+    makeSandbox(manager, execute, grants).pipe(Scope.provide(scope)),
+  );
   return { sandbox, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
 };
 
@@ -144,6 +152,120 @@ describe("sandbox lifetime", () => {
     expect(execute).not.toHaveBeenCalled();
     await closing;
     expect(manager.reset).toHaveBeenCalledOnce();
+  });
+
+  it("updates complete policy for approved destinations and protects the grant directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-grants-"));
+    const directory = networkGrantsDirectory(root);
+    const grants = await loadNetworkGrants(directory);
+    const manager = managerFor();
+    const service = await scopedSandbox(manager, () => Effect.succeed(result), grants);
+    const grant = { host: "example.com" };
+    try {
+      await Effect.runPromise(service.sandbox.run(input));
+      expect(manager.initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filesystem: expect.objectContaining({ denyWrite: [directory] }),
+        }),
+      );
+      expect(manager.wrapWithSandboxArgv).toHaveBeenCalledWith(
+        "first",
+        undefined,
+        expect.objectContaining({
+          filesystem: expect.objectContaining({ denyWrite: [directory] }),
+        }),
+        undefined,
+        "/tmp",
+        expect.anything(),
+      );
+      await Effect.runPromise(service.sandbox.approveNetwork(grant));
+      expect(manager.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filesystem: expect.objectContaining({
+            denyRead: expect.any(Array),
+            denyWrite: [directory],
+          }),
+          network: expect.objectContaining({
+            allowedDomains: expect.arrayContaining(["example.com:443"]),
+          }),
+        }),
+      );
+      const domains = manager.updateConfig.mock.lastCall?.[0].network.allowedDomains;
+      expect(domains).not.toContain("example.com");
+      expect(domains).not.toContain("example.com:80");
+      expect(domains).not.toContain("example.com:8443");
+      await Effect.runPromise(service.sandbox.revokeNetwork(grant));
+      expect(manager.updateConfig.mock.lastCall?.[0].network.allowedDomains).not.toContain(
+        "example.com:443",
+      );
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back a grant when the proxy rejects a policy update", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-grants-"));
+    const directory = networkGrantsDirectory(root);
+    const grants = await loadNetworkGrants(directory);
+    const manager = managerFor();
+    const service = await scopedSandbox(manager, () => Effect.succeed(result), grants);
+    const grant = { host: "example.org" };
+    try {
+      await Effect.runPromise(service.sandbox.run(input));
+      manager.updateConfig.mockImplementationOnce(() => {
+        throw new Error("proxy failed");
+      });
+      expect(
+        Exit.isFailure(await Effect.runPromiseExit(service.sandbox.approveNetwork(grant))),
+      ).toBe(true);
+      expect(grants.list()).toEqual([]);
+      expect((await loadNetworkGrants(directory)).list()).toEqual([]);
+      expect(manager.updateConfig.mock.lastCall?.[0].network.allowedDomains).not.toContain(
+        "example.org:443",
+      );
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for an approved write to settle before completing cancellation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-grants-"));
+    const directory = networkGrantsDirectory(root);
+    const grants = await loadNetworkGrants(directory);
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const manager = managerFor();
+    const service = await scopedSandbox(manager, () => Effect.succeed(result), {
+      ...grants,
+      add: async (grant) => {
+        writing.resolve();
+        await release.promise;
+        await grants.add(grant);
+      },
+    });
+    const controller = new AbortController();
+    try {
+      await Effect.runPromise(service.sandbox.run(input));
+      const change = Effect.runPromiseExit(
+        service.sandbox.approveNetwork({ host: "example.org" }),
+        { signal: controller.signal },
+      );
+      await writing.promise;
+      controller.abort();
+      expect(manager.updateConfig).not.toHaveBeenCalled();
+      release.resolve();
+      expect(Exit.isFailure(await change)).toBe(true);
+      expect((await loadNetworkGrants(directory)).list()).toEqual([{ host: "example.org" }]);
+      expect(manager.updateConfig.mock.lastCall?.[0].network.allowedDomains).toContain(
+        "example.org:443",
+      );
+    } finally {
+      release.resolve();
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("only records successful initialization, allowing a failed start to retry", async () => {

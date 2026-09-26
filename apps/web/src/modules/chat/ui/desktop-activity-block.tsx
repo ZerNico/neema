@@ -7,6 +7,7 @@ import {
   Folder01Icon,
   FolderSearchIcon,
   FolderTransferIcon,
+  NoInternetIcon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
@@ -43,6 +44,7 @@ const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   move_local_file: FolderTransferIcon,
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
+  request_network_access: NoInternetIcon,
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
@@ -53,6 +55,8 @@ const argText = (activity: DesktopToolActivity) => {
   switch (activity.name) {
     case "run_command":
       return text(args.command);
+    case "request_network_access":
+      return text(args.host);
     case "find_files":
     case "search_files":
       return text(args.pattern);
@@ -112,6 +116,8 @@ const runningLabel = (activity: DesktopToolActivity) => {
     }
     case "run_command":
       return what ? `Running ${what}` : "Running a program";
+    case "request_network_access":
+      return what ? `Requesting network access to ${what}` : "Requesting network access";
   }
 };
 
@@ -178,6 +184,8 @@ const approvalTitle = (
           : "Read this file";
     case "command":
       return "Run a program on this computer";
+    case "network":
+      return "Allow network access on this computer";
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
@@ -277,16 +285,20 @@ function ApprovalCard({
             {what}
           </pre>
         ) : null}
+        {approval.kind === "network" ? (
+          <p className="text-muted-foreground text-xs">
+            Applies to all Work chats on this desktop. You can remove access in Settings › Devices.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => approval.decide("allow")}>
-            Allow
+            {approval.kind === "network" ? "Allow for this desktop" : "Allow"}
           </Button>
           <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
             Deny
           </Button>
-          {/* A delete is asked about every time; there is no blanket for it.
-              A read is only asked under "ask each time", which is the blanket. */}
-          {approval.kind !== "delete" && approval.kind !== "read" ? (
+          {/* Deletes and network destinations are always asked about individually. */}
+          {approval.kind !== "delete" && approval.kind !== "network" && approval.kind !== "read" ? (
             <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
               {blanketLabel(approval.kind)}
             </Button>

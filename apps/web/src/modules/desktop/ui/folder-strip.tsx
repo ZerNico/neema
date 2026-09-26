@@ -222,7 +222,7 @@ function PermissionPicker({
         </DropdownMenuRadioGroup>
         <p className="text-muted-foreground px-3 py-2 text-xs">
           The delete tool always asks, once for the whole list. An allowed command can still delete
-          files.
+          files. Network access always asks separately on your computer.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

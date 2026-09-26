@@ -1,6 +1,8 @@
 import { ComputerIcon, GlobeIcon } from "@hugeicons/core-free-icons";
+import { readDesktopNetwork, type DesktopNetwork } from "@chat/desktop-rpc";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
 import {
   authClient,
   createDesktopTicket,
@@ -49,7 +51,82 @@ export function describeSession(userAgent: string | null | undefined): string {
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const when = (value: Date | string) => dateFormat.format(new Date(value));
 
+const networkGrantsKey = ["desktop-network-grants"] as const;
+const subscribeToNothing = () => () => {};
+
+function NetworkAccess({ network }: { network: DesktopNetwork }) {
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const grants = useQuery({
+    queryKey: networkGrantsKey,
+    queryFn: () => network.list(),
+    retry: false,
+    refetchOnMount: "always",
+  });
+  const revoke = useMutation({
+    mutationFn: (host: string) => network.revoke(host),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: networkGrantsKey }),
+    onError: (error) => toastError("Could not remove access.", error),
+  });
+
+  return (
+    <Section
+      title="Network access"
+      description="Websites you’ve allowed Work to access from this desktop."
+    >
+      {grants.isPending ? (
+        <p className="text-muted-foreground text-sm">Loading network access…</p>
+      ) : grants.isError ? (
+        <div role="alert" className="flex items-center gap-3">
+          <span className="text-muted-foreground text-sm">Could not load network access.</span>
+          <PendingButton
+            variant="outline"
+            size="sm"
+            pending={grants.isFetching}
+            onClick={() => void grants.refetch()}
+          >
+            Try again
+          </PendingButton>
+        </div>
+      ) : grants.data.length === 0 ? (
+        <p className="text-muted-foreground text-sm">No websites allowed yet.</p>
+      ) : (
+        <ListCard>
+          {grants.data.map((grant) => (
+            <ListRow key={grant.host}>
+              <HugeiconsIcon
+                icon={GlobeIcon}
+                strokeWidth={2}
+                className="text-muted-foreground size-5 shrink-0"
+              />
+              <span className="min-w-0 flex-1 wrap-anywhere text-sm font-medium">{grant.host}</span>
+              <PendingButton
+                variant="ghost"
+                size="sm"
+                pending={revoke.isPending && revoke.variables === grant.host}
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: `Remove access to ${grant.host}?`,
+                      description: "Work will need your approval to access this website again.",
+                      confirmLabel: "Remove access",
+                    })
+                  )
+                    revoke.mutate(grant.host);
+                }}
+              >
+                Remove access
+              </PendingButton>
+            </ListRow>
+          ))}
+        </ListCard>
+      )}
+    </Section>
+  );
+}
+
 export function DevicesPage() {
+  const network = useSyncExternalStore(subscribeToNothing, readDesktopNetwork, () => null);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { data: sessions } = useSuspenseQuery(desktopSessionsQuery);
@@ -176,6 +253,7 @@ export function DevicesPage() {
           </FormActions>
         )}
       </Section>
+      {network ? <NetworkAccess network={network} /> : null}
     </Page>
   );
 }

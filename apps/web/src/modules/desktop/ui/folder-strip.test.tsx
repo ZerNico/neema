@@ -54,11 +54,11 @@ it("explains approval modes and preserves their stored values when selected", as
   expect(
     screen.getByRole("menuitemradio", { name: "Auto-approve reads and changes" }),
   ).toHaveAccessibleDescription(
-    "Allow reading, editing, moving files, and running commands without asking.",
+    "Allow reading, editing, moving files, and running commands without asking. Network access still needs separate approval.",
   );
   expect(
     screen.getByText(
-      "The delete tool always asks, once for the whole list. An allowed command can still delete files.",
+      "The delete tool always asks, once for the whole list. An allowed command can still delete files. Network access always asks separately on your computer.",
     ),
   ).toBeInTheDocument();
   await userEvent.click(

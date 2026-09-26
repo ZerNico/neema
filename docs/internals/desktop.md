@@ -398,12 +398,28 @@ claim protection against every concurrent filesystem replacement or
 hard-link alias.
 
 Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
-Its manager is one per process with one proxy and one live policy, which is
-why network policy is a fact about the machine, set once at initialization,
-and not a per-chat choice: two chats wanting different levels would need two
-proxies. Commands from different chats run concurrently; only start, reset,
-the Windows install and the Linux mount cleanup wait for running commands to
-drain. Initialization is marked successful only after it succeeds.
+Its manager is one per process with one proxy and one live policy, so network
+permissions belong to the desktop profile, not a chat or server origin. The
+built-in registry/GitHub rules are available without asking. An off-list
+connection is denied and reported to the model; it may separately call
+`request_network_access` with only the exact website hostname, or request a known
+website before attempting a command. User grants are fixed to port 443; the desktop
+expands each stored hostname to an explicit `host:443` SRT rule because a bare host
+would allow every port. This restricts the destination port, not the protocol
+inside the tunnel. Other blocked ports cannot be approved through this tool.
+The existing inline Work approval card asks the person under every permission
+level, without a blanket option. The connected web app is trusted to relay that
+decision to the desktop, which validates the exact hostname. Canonical hostnames
+are persisted as a JSON array in the local profile. Each grant affects new proxy
+connections across all its chats and connected servers,
+and can be removed in Settings › Devices. Command auto-approval never grants
+network access. The model must explicitly run or retry its command. Existing tunnels
+are not torn down by revocation. Commands from different chats run concurrently;
+start, reset and the Windows install wait for running commands to drain, while
+network policy changes serialize with initialization and each other. Once
+an approved request begins a policy change, Stop waits for persistence and the proxy
+to agree. Linux mount cleanup waits for the last command. Initialization is
+marked successful only after it succeeds.
 
 Reads are deny-then-allow in srt, so the home directory is denied as a whole
 and a list of toolchain locations (version managers, package stores, caches,
@@ -411,9 +427,11 @@ git's identity) is re-allowed inside it, with the few credential files that
 sit in those regions denied again. The rest of the disk stays readable. Each
 call adds its attached folders to both the read and the write allow lists;
 they and the chat's workspace (picked up per call through `rootsFor`) are
-the only writable places. A tool installed somewhere unusual fails
-with a denial that names the path, which is preferred over a readable
-`~/.git-credentials`.
+the only writable places. The profile's network-grant directory stays
+write-denied, even when someone attaches its parent; local file mutations
+also refuse it and attempts to replace its ancestors. A tool installed
+somewhere unusual fails with a denial that names the path, which is
+preferred over a readable `~/.git-credentials`.
 
 On macOS, the wrapper replaces `localhost` in leading sandbox-generated proxy
 environment assignments with `127.0.0.1`, avoiding resolver access denied by the
@@ -434,7 +452,9 @@ the server. The folder strip is where it is changed: “Approve each action”,
 in the picker. The stored values remain `manual`, `auto`, and `skip`.
 
 Manual asks for reads too; automatic asks before changes and commands; skip
-allows those without another question. The dedicated delete tool always asks,
+allows those without another question. None of them grants network access:
+that requires a separate model call and explicit consent in its inline approval card.
+The dedicated delete tool always asks,
 once per call, and a call may name several paths so a cleanup is one
 confirmation rather than one per file. An allowed command can also delete
 files; this is not a deletion safeguard. Conversation-scoped

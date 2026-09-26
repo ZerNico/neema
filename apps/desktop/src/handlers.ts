@@ -1,5 +1,6 @@
 import { open, readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
+import { conflictsWithNetworkGrants, normalizeNetworkGrant } from "./network-grants.ts";
 import { Effect } from "effect";
 import {
   DesktopError,
@@ -78,6 +79,7 @@ export interface Shell {
   executionSession(): { id: string; machineId: string; machineName: string };
   cancelCall(callId: string): boolean;
   setWorkState(state: { active: number; needsApproval: number }): void;
+  networkGrantsDirectory?: string;
 }
 
 const alreadyAttached = (name: string) =>
@@ -140,6 +142,23 @@ export const makeHandlers = (shell: Shell) =>
         return yield* resolveAmongRoots(roots, path);
       });
 
+    const locateForWrite = (conversationId: string, path: string) =>
+      Effect.gen(function* () {
+        const target = yield* locate(conversationId, path);
+        if (
+          shell.networkGrantsDirectory &&
+          conflictsWithNetworkGrants(shell.networkGrantsDirectory, target.absolute)
+        ) {
+          return yield* Effect.fail(
+            new DesktopError({
+              reason: "outside-folder",
+              message: "That path contains desktop network permissions.",
+            }),
+          );
+        }
+        return target;
+      });
+
     /** One path from a batch. A folder root is the owner's to detach, never to delete. */
     const removeAt = (conversationId: string, path: string) =>
       Effect.gen(function* () {
@@ -155,6 +174,7 @@ export const makeHandlers = (shell: Shell) =>
             }),
           );
         }
+        yield* locateForWrite(conversationId, path);
         const info = yield* Effect.tryPromise({
           try: () => stat(target.absolute),
           catch: () =>
@@ -479,7 +499,7 @@ export const makeHandlers = (shell: Shell) =>
 
       editFile: ({ conversationId, path, old: before, new: after, all }) =>
         Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
+          const target = yield* locateForWrite(conversationId, path);
           const info = yield* Effect.tryPromise({
             try: () => stat(target.absolute),
             catch: () =>
@@ -570,8 +590,8 @@ export const makeHandlers = (shell: Shell) =>
         Effect.gen(function* () {
           // Both ends are contained: a move is a read of one path and a write
           // of another, and either could be the one that escapes.
-          const source = yield* locate(conversationId, from);
-          const destination = yield* locate(conversationId, to);
+          const source = yield* locateForWrite(conversationId, from);
+          const destination = yield* locateForWrite(conversationId, to);
           yield* Effect.tryPromise({
             try: () => stat(source.absolute),
             catch: () =>
@@ -758,7 +778,7 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const target = yield* locate(conversationId, path);
+          const target = yield* locateForWrite(conversationId, path);
           const existed = yield* exists(target.absolute);
           yield* Effect.tryPromise({
             try: async () => {
@@ -813,6 +833,21 @@ export const makeHandlers = (shell: Shell) =>
             allowWrite: allowed.filter((root): root is string => root !== null),
             timeoutMs,
           });
+        }),
+
+      requestNetworkAccess: ({ host }) =>
+        Effect.gen(function* () {
+          const grant = normalizeNetworkGrant(host);
+          if (!grant) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "failed",
+                message: "Enter one exact public hostname without a URL or port.",
+              }),
+            );
+          }
+          yield* sandbox.approveNetwork(grant);
+          return grant;
         }),
 
       revealPath: ({ conversationId, path, mode }) =>

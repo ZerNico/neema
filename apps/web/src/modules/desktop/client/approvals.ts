@@ -24,6 +24,7 @@ export const PERMISSION_LEVELS: ReadonlyArray<{
   {
     value: "skip",
     label: "Auto-approve reads and changes",
-    description: "Allow reading, editing, moving files, and running commands without asking.",
+    description:
+      "Allow reading, editing, moving files, and running commands without asking. Network access still needs separate approval.",
   },
 ];
