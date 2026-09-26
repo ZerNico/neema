@@ -1,6 +1,6 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { estimateMessageHeight } from "./estimate-message-height.ts";
 import { type DisplayMessage, MessageBubble } from "./message-list.tsx";
@@ -15,6 +15,29 @@ const COLUMN_WIDTH = 768;
 const estimates = new WeakMap<DisplayMessage, { width: number; height: number }>();
 /** How close to the first loaded row (overscan included) older turns start loading. */
 const REACH_START_ROWS = 3;
+/** Where an anchored question sits below the top of the view. */
+const ANCHOR_OFFSET = 16;
+/** The scroller's `pb-8`, part of what the view scrolls through below the last row. */
+const BOTTOM_PADDING = 32;
+
+/**
+ * The empty space an anchored question needs below the last row to scroll to
+ * the top of the view, from the last measured rows. Zero once its answer
+ * fills the view, or when the question is not among the rendered rows, which
+ * it always is while the space matters.
+ */
+function anchoredEndSpace(
+  virtualizer: Virtualizer<HTMLDivElement, Element> | null,
+  anchorIndex: number,
+  count: number,
+  viewport: number,
+) {
+  const items = virtualizer?.getVirtualItems() ?? [];
+  const anchor = items.find((item) => item.index === anchorIndex);
+  const last = items.at(-1);
+  if (!anchor || last?.index !== count - 1) return 0;
+  return Math.max(0, viewport - BOTTOM_PADDING - ANCHOR_OFFSET - (last.end - anchor.start));
+}
 
 /**
  * Virtualized, bottom-anchored message list. Only visible messages render
@@ -26,16 +49,25 @@ const REACH_START_ROWS = 3;
  * while the view sits at the end keeps it there, and `followOnAppend` does the
  * same for new rows. Nothing here reacts to streamed text, so the live row can
  * re-render without this list doing so.
+ *
+ * An anchored question (the one the reader just asked) instead sits at the top
+ * of the view with empty space below it for the answer, and nothing follows
+ * the stream until the reader jumps to the bottom.
  */
 export function VirtualMessageList({
   messages,
   onReachStart,
   loadingOlder = false,
+  anchorId = null,
+  onReleaseAnchor,
 }: {
   messages: DisplayMessage[];
   /** Called while the rows near the top are on screen, to load older turns. */
   onReachStart?: () => void;
   loadingOlder?: boolean;
+  /** The question to hold at the top of the view while its answer arrives. */
+  anchorId?: string | null;
+  onReleaseAnchor?: () => void;
 }) {
   "use no memo";
 
@@ -43,6 +75,14 @@ export function VirtualMessageList({
   const columnRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const count = messages.length;
+  const instance = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+  const anchorIndex = anchorId ? messages.findIndex((message) => message.id === anchorId) : -1;
+  const anchored = anchorIndex >= 0;
+  // From the previous render's measurements: every measurement re-renders the
+  // list, so the space shrinks as the answer grows and nothing on screen moves.
+  const endSpace = anchored
+    ? anchoredEndSpace(instance.current, anchorIndex, count, scrollRef.current?.clientHeight ?? 0)
+    : 0;
 
   // Close guesses keep rows from resizing as they mount: every miss above the
   // viewport is offset by moving the scroll position under the reader.
@@ -69,13 +109,18 @@ export function VirtualMessageList({
     overscan: 6,
     getItemKey: (index) => messages[index]!.id,
     anchorTo: "end",
-    followOnAppend: true,
-    scrollEndThreshold: BOTTOM_THRESHOLD,
+    paddingEnd: endSpace,
+    // An anchored turn is read from the top: no following new rows, and a
+    // negative threshold keeps growth from ever counting as "at the end".
+    followOnAppend: !anchored,
+    scrollEndThreshold: anchored ? -1 : BOTTOM_THRESHOLD,
     // Measure inside the ResizeObserver callback, which runs before paint, so
     // the scroll correction lands in the frame the row grew. Deferring it to
     // the next frame painted a streamed code block below the fold first.
     useAnimationFrameWithResizeObserver: false,
   });
+
+  instance.current = virtualizer;
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
@@ -86,22 +131,67 @@ export function VirtualMessageList({
     [virtualizer],
   );
 
-  // Track whether the user is at (or near) the bottom, for the jump button.
+  // Bring a newly anchored question to the top once the space below it is in
+  // place; before that, the scroll would stop short at the end.
+  const positioned = useRef<string | null>(null);
+  const anchorStart = virtualizer
+    .getVirtualItems()
+    .find((item) => item.index === anchorIndex)?.start;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!anchorId || anchorStart === undefined || positioned.current === anchorId || !el) return;
+    const target = Math.max(0, anchorStart - ANCHOR_OFFSET);
+    if (target > virtualizer.getTotalSize() + BOTTOM_PADDING - el.clientHeight + 1) return;
+    positioned.current = anchorId;
+    // A chat too short to scroll leaves virtual-core holding "keep the end in
+    // view" corrections it could not apply; no scroll event clears them, and
+    // it replays one once the answer grows, pulling the question away. There
+    // is no public way to drop it.
+    Reflect.set(virtualizer, "_clampedAdjustment", null);
+    virtualizer.scrollToOffset(target, { behavior: "smooth" });
+  }, [anchorId, anchorStart, endSpace, virtualizer]);
+
+  // Whether anything is hidden below, for the jump button. Also checked when
+  // the list grows, since an anchored answer passes the bottom edge without a
+  // scroll. While that answer still fits its space nothing is hidden, even
+  // mid-glide to the question, when the space itself is below the view.
+  const endSpaceRef = useRef(endSpace);
+  endSpaceRef.current = endSpace;
+  const updateAtBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD;
+    setAtBottom(atEnd || endSpaceRef.current > 0);
+    return atEnd;
+  }, []);
+  // Scrolling down to the end of an answer that has outgrown its space is
+  // asking to follow it, like the jump button. Only a scroll counts: the
+  // answer growing past the bottom must leave the question where it is.
+  const anchoredRef = useRef(anchored);
+  anchoredRef.current = anchored;
+  const releaseRef = useRef(onReleaseAnchor);
+  releaseRef.current = onReleaseAnchor;
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setAtBottom(distance <= BOTTOM_THRESHOLD);
+      if (updateAtBottom() && anchoredRef.current && endSpaceRef.current === 0)
+        releaseRef.current?.();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [updateAtBottom]);
+  const totalSize = virtualizer.getTotalSize();
+  useEffect(() => {
+    updateAtBottom();
+  }, [updateAtBottom, totalSize, endSpace]);
 
   // Settle on the end once the first rows are measured; from here on the
-  // virtualizer keeps it there.
+  // virtualizer keeps it there. A chat that opens on an anchored question
+  // (just started from the new-chat page) positions that instead.
+  const opensAnchored = useRef(anchored);
   useEffect(() => {
-    scrollToBottom();
+    if (!opensAnchored.current) scrollToBottom();
   }, [scrollToBottom]);
 
   const items = virtualizer.getVirtualItems();
@@ -167,7 +257,10 @@ export function VirtualMessageList({
         variant="floating"
         aria-label="Jump to bottom"
         inert={atBottom || undefined}
-        onClick={() => scrollToBottom("smooth")}
+        onClick={() => {
+          onReleaseAnchor?.();
+          scrollToBottom("smooth");
+        }}
         className={cn(
           "absolute bottom-3 left-1/2 -translate-x-1/2 transition-opacity",
           atBottom ? "pointer-events-none opacity-0" : "opacity-100",

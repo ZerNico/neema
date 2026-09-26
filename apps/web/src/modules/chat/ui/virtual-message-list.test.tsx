@@ -7,6 +7,7 @@ import { VirtualMessageList } from "./virtual-message-list.tsx";
 const mocks = vi.hoisted(() => ({
   useVirtualizer: vi.fn(),
   scrollToEnd: vi.fn(),
+  scrollToOffset: vi.fn(),
   measureElement: vi.fn(),
 }));
 
@@ -28,17 +29,21 @@ const message = (id: string, content = "An answer.\n\nIn two paragraphs."): Disp
   status: "complete",
 });
 const messages = [message("message-1")];
-let visible: Array<{ index: number; key: string; start: number }> = [];
+let visible: Array<{ index: number; key: string; start: number; end?: number }> = [];
+/** Rows' extent; like the real virtualizer, the total adds the end padding it was given. */
+let contentSize = 96;
 const virtualizer = {
   getVirtualItems: () => visible,
-  getTotalSize: () => 96,
+  getTotalSize: () => contentSize + (options?.paddingEnd ?? 0),
   measureElement: mocks.measureElement,
   scrollToEnd: mocks.scrollToEnd,
+  scrollToOffset: mocks.scrollToOffset,
 };
 
 type CapturedOptions = {
   anchorTo?: string;
   followOnAppend?: boolean;
+  paddingEnd?: number;
   initialOffset?: number | (() => number);
   scrollEndThreshold?: number;
   useAnimationFrameWithResizeObserver?: boolean;
@@ -57,7 +62,9 @@ beforeEach(() => {
   });
 
   visible = [];
+  contentSize = 96;
   mocks.scrollToEnd.mockReset();
+  mocks.scrollToOffset.mockReset();
   mocks.measureElement.mockReset();
   mocks.useVirtualizer.mockReset();
   mocks.useVirtualizer.mockImplementation((nextOptions: CapturedOptions) => {
@@ -72,6 +79,16 @@ afterEach(() => {
     value: originalScrollTo,
   });
 });
+
+/** Scrolls the transcript so `distance` px remain below the view. */
+const scrollTo = (distance: number) => {
+  const scroller = options.getScrollElement()!;
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: 3000 },
+    scrollTop: { configurable: true, value: 3000 - 800 - distance, writable: true },
+  });
+  fireEvent.scroll(scroller);
+};
 
 /** Eight rendered rows starting at `from`. */
 const rows = (from: number) =>
@@ -154,5 +171,109 @@ describe("VirtualMessageList", () => {
   it("says when earlier messages are loading", () => {
     render(<VirtualMessageList messages={messages} loadingOlder />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading earlier messages…");
+  });
+
+  describe("an anchored question", () => {
+    // A question at 100–200 and its short answer at 200–300, in an 800px view.
+    const turn = [message("earlier"), message("question"), message("answer")];
+    const renderAnchored = (onReleaseAnchor = vi.fn()) => {
+      visible = [
+        { index: 0, key: "earlier", start: 0, end: 100 },
+        { index: 1, key: "question", start: 100, end: 200 },
+        { index: 2, key: "answer", start: 200, end: 300 },
+      ];
+      contentSize = 300;
+      const view = render(<VirtualMessageList messages={turn} />);
+      Object.defineProperty(options.getScrollElement()!, "clientHeight", {
+        configurable: true,
+        value: 800,
+      });
+      view.rerender(
+        <VirtualMessageList
+          messages={turn}
+          anchorId="question"
+          onReleaseAnchor={onReleaseAnchor}
+        />,
+      );
+      return view;
+    };
+
+    it("leaves room below its answer to sit at the top of the view", () => {
+      renderAnchored();
+      // 800 − the scroller's 32px bottom padding − the 16px offset − 200px of turn.
+      expect(options.paddingEnd).toBe(552);
+    });
+
+    it("scrolls to the top once that room is in place, and only once", () => {
+      const view = renderAnchored();
+      view.rerender(<VirtualMessageList messages={turn} anchorId="question" />);
+      expect(mocks.scrollToOffset).toHaveBeenCalledTimes(1);
+      expect(mocks.scrollToOffset).toHaveBeenCalledWith(84, { behavior: "smooth" });
+    });
+
+    it("does not follow the stream until the reader jumps to the bottom", () => {
+      const onReleaseAnchor = vi.fn();
+      renderAnchored(onReleaseAnchor);
+      expect(options.followOnAppend).toBe(false);
+      expect(options.scrollEndThreshold).toBeLessThan(0);
+
+      fireEvent.click(screen.getByRole("button", { name: "Jump to bottom" }));
+      expect(onReleaseAnchor).toHaveBeenCalledTimes(1);
+      expect(mocks.scrollToEnd).toHaveBeenLastCalledWith({ behavior: "smooth" });
+    });
+
+    it("opens on the anchored question instead of the end", () => {
+      render(<VirtualMessageList messages={turn} anchorId="question" />);
+      expect(mocks.scrollToEnd).not.toHaveBeenCalled();
+    });
+
+    it("follows again once the reader scrolls to the end of a long answer", () => {
+      const onReleaseAnchor = vi.fn();
+      visible = [
+        { index: 0, key: "question", start: 0, end: 100 },
+        { index: 1, key: "answer", start: 100, end: 2000 },
+      ];
+      const long = [message("question"), message("answer")];
+      const view = render(<VirtualMessageList messages={long} />);
+      Object.defineProperty(options.getScrollElement()!, "clientHeight", {
+        configurable: true,
+        value: 800,
+      });
+      view.rerender(
+        <VirtualMessageList
+          messages={long}
+          anchorId="question"
+          onReleaseAnchor={onReleaseAnchor}
+        />,
+      );
+
+      scrollTo(600);
+      expect(onReleaseAnchor).not.toHaveBeenCalled();
+      scrollTo(20);
+      expect(onReleaseAnchor).toHaveBeenCalledTimes(1);
+    });
+
+    it("stays anchored while the answer still fits below its question", () => {
+      const onReleaseAnchor = vi.fn();
+      renderAnchored(onReleaseAnchor);
+      // The space below the answer is what the view reaches at its end.
+      scrollTo(0);
+      expect(onReleaseAnchor).not.toHaveBeenCalled();
+    });
+
+    it("gives up its room once the answer fills the view", () => {
+      visible = [
+        { index: 0, key: "question", start: 0, end: 100 },
+        { index: 1, key: "answer", start: 100, end: 2000 },
+      ];
+      const long = [message("question"), message("answer")];
+      const view = render(<VirtualMessageList messages={long} />);
+      Object.defineProperty(options.getScrollElement()!, "clientHeight", {
+        configurable: true,
+        value: 800,
+      });
+      view.rerender(<VirtualMessageList messages={long} anchorId="question" />);
+      expect(options.paddingEnd).toBe(0);
+    });
   });
 });

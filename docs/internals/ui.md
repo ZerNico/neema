@@ -193,6 +193,15 @@ false`), so a page body is written against data already there. This includes loc
   Copying the text back into the display rows re-renders the whole conversation about 33 times a
   second, which is what made a long chat slow while it answered. Keeping to the end is the
   virtualiser's (`anchorTo: "end"`, `followOnAppend`), so nothing else watches the text either.
+- A turn started from this tab (send, edit, structured answer, retry) is read from its question:
+  once its answer streams, `ChatView` anchors that question and the list holds it at the top with
+  end padding sized from the measured rows, shrinking as the answer grows. While anchored nothing
+  follows the stream (`followOnAppend` off, a negative end threshold); `anchorTo: "end"` stays,
+  since loading older pages relies on it. Jump-to-bottom releases the anchor, and so does the reader
+  scrolling to the end of an answer that has outgrown its space; the answer growing never does. A
+  new chat's first turn is anchored too: the new-chat page navigates with a one-shot `anchorNewTurn`
+  history state, which the chat route strips at once so a reload opens the chat as usual. A queued
+  message the server promotes on its own is not anchored and follows as before.
 - A chat opens with its latest turns only (`loadConversationDetail`); older ones load a page at a time
   as the reader nears the top. Every refetch sends back the first message already shown, so the loaded
   range grows from it rather than sliding and leaving a gap under the pages above. A retry or edit further

@@ -1,5 +1,6 @@
 import { BubbleChatCancelIcon } from "@hugeicons/core-free-icons";
-import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { Link, createFileRoute, notFound, useLocation, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import {
   chatModelsQuery,
@@ -60,7 +61,28 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
 
 function ChatPage() {
   const { conversationId } = Route.useParams();
-  return <ChatView key={conversationId} conversationId={conversationId} />;
+  const router = useRouter();
+  const location = useLocation();
+  // Held per conversation, since the flag leaves the history entry right away
+  // and the view may only render once its data is in.
+  const opened = { conversationId, anchorFirstTurn: location.state.anchorNewTurn === true };
+  const [entry, setEntry] = useState(opened);
+  if (entry.conversationId !== conversationId) setEntry(opened);
+  const anchorFirstTurn = entry.conversationId === conversationId && entry.anchorFirstTurn;
+  // One-shot: a reload or a return to this entry opens the chat as usual.
+  useEffect(() => {
+    const current = router.history.location;
+    if (!current.state.anchorNewTurn) return;
+    const { anchorNewTurn: _consumed, ...state } = current.state;
+    router.history.replace(current.href, state);
+  }, [router]);
+  return (
+    <ChatView
+      key={conversationId}
+      conversationId={conversationId}
+      anchorFirstTurn={anchorFirstTurn}
+    />
+  );
 }
 
 function ChatPending() {

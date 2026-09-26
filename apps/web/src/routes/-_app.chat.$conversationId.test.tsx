@@ -1,5 +1,13 @@
 import { QueryClient } from "@tanstack/react-query";
-import { isNotFound, notFound } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  isNotFound,
+  notFound,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "./_app.chat.$conversationId.tsx";
@@ -17,7 +25,9 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
 }));
 // The views are covered by chat-view.test; the routes only have to hand them data.
 vi.mock("~/modules/chat/ui/chat-view.tsx", () => ({
-  ChatView: () => <div />,
+  ChatView: ({ anchorFirstTurn }: { anchorFirstTurn?: boolean }) => (
+    <div data-testid="chat-view" data-anchor-first-turn={String(anchorFirstTurn ?? false)} />
+  ),
   NewChatView: () => <div />,
 }));
 
@@ -190,5 +200,31 @@ describe("chat route pending state", () => {
     render(<Pending />);
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByLabelText("Loading conversation")).toBeInTheDocument();
+  });
+});
+
+describe("chat route after a new chat's send", () => {
+  it("anchors the first turn once, then forgets it for reloads and returns", async () => {
+    const history = createMemoryHistory({ initialEntries: ["/chat/c1"] });
+    history.replace("/chat/c1", { anchorNewTurn: true });
+    const root = createRootRoute();
+    const app = createRoute({ getParentRoute: () => root, id: "_app" });
+    const chat = createRoute({
+      getParentRoute: () => app,
+      path: "/chat/$conversationId",
+      component: Route.options.component!,
+    });
+    const router = createRouter({
+      routeTree: root.addChildren([app.addChildren([chat])]),
+      history,
+    });
+    await router.load();
+    render(<RouterProvider router={router} />);
+
+    expect(await screen.findByTestId("chat-view")).toHaveAttribute(
+      "data-anchor-first-turn",
+      "true",
+    );
+    await waitFor(() => expect(history.location.state).not.toHaveProperty("anchorNewTurn"));
   });
 });

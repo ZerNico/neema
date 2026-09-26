@@ -40,6 +40,8 @@ export function getRouter() {
 declare module "@tanstack/react-router" {
   interface HistoryState {
     chatPrefill?: string;
+    /** Set by the new-chat page on the chat it just started, so its first turn is anchored. */
+    anchorNewTurn?: true;
   }
   interface Register {
     router: ReturnType<typeof getRouter>;

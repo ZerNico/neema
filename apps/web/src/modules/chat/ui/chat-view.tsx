@@ -591,13 +591,33 @@ function placeStranded(
   });
 }
 
+/** The person's own message an answer replies to: the nearest one before it that is not a steer. */
+const questionBefore = (
+  messages: ReadonlyArray<{ id: string; role: string; steeredIntoMessageId?: string | null }>,
+  answerId: string,
+) => {
+  const answer = messages.findIndex((message) => message.id === answerId);
+  for (let index = answer - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "user" && !message.steeredIntoMessageId) return message.id;
+  }
+  return null;
+};
+
 /** The ids a family's rows already show, so only the rest need placing. */
 const shownIds = (
   messages: DisplayMessage[],
   pick: (activity: ToolActivity) => string | undefined,
 ) => new Set(messages.flatMap((message) => message.toolActivities.flatMap((a) => pick(a) ?? [])));
 
-export function ChatView({ conversationId }: { conversationId: string }) {
+export function ChatView({
+  conversationId,
+  anchorFirstTurn = false,
+}: {
+  conversationId: string;
+  /** Opened by the new-chat page right after sending, so the answer arriving is ours. */
+  anchorFirstTurn?: boolean;
+}) {
   const agentDraft = useRef<AgentDraftHandle>(null);
   const scheduleDraft = useRef<ScheduleDraftHandle>(null);
   const documents = useRef<DocumentOwnerHandle>(null);
@@ -674,6 +694,20 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       : null;
 
   const streamingMessage = data.messages.find((m) => m.status === "streaming");
+  // A turn this tab started is read from its question: once its answer starts
+  // streaming, that question is held at the top of the view. Decided while
+  // rendering, so the new rows never commit with the list still following.
+  // (Guarded render-time adjust.)
+  const [anchorRequested, setAnchorRequested] = useState(
+    // A first answer that already finished has nothing left to arrive.
+    () => anchorFirstTurn && streamingMessage !== undefined,
+  );
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  if (anchorRequested && streamingMessage) {
+    setAnchorRequested(false);
+    setAnchorId(questionBefore(data.messages, streamingMessage.id));
+  }
+  const releaseAnchor = useCallback(() => setAnchorId(null), []);
   // The row the stream overlay applies to. Sticky beyond streamingMessage:
   // when the generation finishes, the sync bus refetches and the row flips to
   // complete before the smoothed text drains. Dropping the overlay at that
@@ -990,9 +1024,12 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     await flushScheduleDraft();
     await flushDocuments();
     closeEdit();
+    setAnchorRequested(true);
   };
+  const cancelAnchor = () => setAnchorRequested(false);
   const sendMutation = useMutation({
     onMutate: beforeGeneration,
+    onError: cancelAnchor,
     mutationFn: async (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
@@ -1086,7 +1123,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           ...documentFocus(),
         },
       }),
-    onError: (error) => toastError("Could not send your answers.", error),
+    onError: (error) => {
+      cancelAnchor();
+      toastError("Could not send your answers.", error);
+    },
     onSettled: refreshQuestionState,
   });
   const mutateAnswer = answerMutation.mutateAsync;
@@ -1094,6 +1134,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   const retryMutation = useMutation({
     onMutate: beforeGeneration,
+    onError: cancelAnchor,
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -1158,6 +1199,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       checkWorkReady();
       await flushAgentDraft();
       await flushDocuments();
+      setAnchorRequested(true);
     },
     mutationFn: async (
       input: {
@@ -1199,6 +1241,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       setRetryEpoch((epoch) => epoch + 1);
     },
     onError: async (_error, input) => {
+      cancelAnchor();
       if (!input.questionResponse) return;
       toast.error("Could not save your answers.");
       await refreshQuestionState();
@@ -2048,6 +2091,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
                 >
                   <VirtualMessageList
                     messages={withPlacedCards}
+                    anchorId={anchorId}
+                    onReleaseAnchor={releaseAnchor}
                     onReachStart={loadOlder}
                     loadingOlder={loadingOlder}
                   />
@@ -2310,6 +2355,7 @@ export function NewChatView({
       await navigate({
         to: "/chat/$conversationId",
         params: { conversationId: result.conversationId },
+        state: { anchorNewTurn: true },
       });
     },
   });

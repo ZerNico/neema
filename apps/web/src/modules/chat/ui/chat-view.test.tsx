@@ -144,11 +144,13 @@ vi.mock("./virtual-message-list.tsx", () => ({
   VirtualMessageList: ({
     messages,
     onReachStart,
+    anchorId,
   }: {
     messages: ReadonlyArray<Record<string, unknown>>;
     onReachStart?: () => void;
+    anchorId?: string | null;
   }) => (
-    <div>
+    <div data-testid="transcript" data-anchor-id={anchorId ?? ""}>
       <button type="button" onClick={onReachStart}>
         Reach start
       </button>
@@ -487,6 +489,7 @@ function SyncProbe() {
 const renderView = (
   branchedFrom: Parameters<typeof basePayload>[0] = null,
   overrides: Partial<Payload> = {},
+  props: { anchorFirstTurn?: boolean } = {},
 ) => {
   const client = new QueryClient({
     // The payload is seeded, not fetched. The server functions are mocks.
@@ -557,7 +560,7 @@ const renderView = (
               <HeaderSlotProvider>
                 <HeaderSlot />
                 <Suspense fallback={null}>
-                  <ChatView conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7" />
+                  <ChatView conversationId="01990f4e-6650-7a33-a768-611e2e4bf4c7" {...props} />
                 </Suspense>
                 <DetailPanelRail />
               </HeaderSlotProvider>
@@ -1635,6 +1638,115 @@ const olderPage = {
   olderCursor: null,
 };
 const partial = { window: { anchorId: "m-user", olderCursor: "m-user" } };
+
+const streaming = (id: string, role: "user" | "assistant", content: string) => ({
+  ...message(id, role, content),
+  status: "streaming" as const,
+});
+/** The question the transcript was told to hold at the top, or "" for none. */
+const anchor = () => screen.getByTestId("transcript").getAttribute("data-anchor-id");
+
+describe("ChatView anchored turns", () => {
+  beforeEach(() => {
+    for (const rpc of [sendMock, retryMock, conversationMock]) rpc.mockReset();
+  });
+
+  it("holds the question just sent at the top while its answer streams", async () => {
+    sendMock.mockResolvedValueOnce({} as never);
+    conversationMock.mockResolvedValue(
+      payload(null, {
+        messages: [
+          message("m-user", "user", "u1"),
+          message("m-answer", "assistant", "a1"),
+          message("m-next", "user", "hello"),
+          streaming("m-next-answer", "assistant", ""),
+        ],
+      }) as never,
+    );
+    renderView();
+    expect(anchor()).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
+
+    await waitFor(() => expect(anchor()).toBe("m-next"));
+  });
+
+  it("holds a retried answer's question", async () => {
+    retryMock.mockResolvedValueOnce({} as never);
+    conversationMock.mockResolvedValue(
+      payload(null, {
+        messages: [message("m-user", "user", "u1"), streaming("m-answer", "assistant", "")],
+      }) as never,
+    );
+    renderView();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry m-answer" }));
+
+    await waitFor(() => expect(anchor()).toBe("m-user"));
+  });
+
+  it("holds a new chat's first question when it opens right after the send", () => {
+    renderView(
+      null,
+      { messages: [message("m-user", "user", "u1"), streaming("m-answer", "assistant", "")] },
+      { anchorFirstTurn: true },
+    );
+    expect(anchor()).toBe("m-user");
+  });
+
+  it("opens as usual when that first answer already finished", async () => {
+    conversationMock.mockResolvedValue(
+      payload(null, {
+        messages: [
+          message("m-user", "user", "u1"),
+          message("m-answer", "assistant", "a1"),
+          message("m-queued", "user", "from the queue"),
+          streaming("m-queued-answer", "assistant", ""),
+        ],
+      }) as never,
+    );
+    const { container } = renderView(null, {}, { anchorFirstTurn: true });
+    expect(anchor()).toBe("");
+    // Nor does the unused request wait for some later answer.
+    act(() =>
+      FakeEventSource.instances.at(-1)!.emit("sync", {
+        type: "message.created",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        messageId: "m-queued-answer",
+      }),
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-message-id="m-queued-answer"]')).not.toBeNull(),
+    );
+    expect(anchor()).toBe("");
+  });
+
+  it("leaves an answer this tab did not start to the ordinary follow", async () => {
+    conversationMock.mockResolvedValue(
+      payload(null, {
+        messages: [
+          message("m-user", "user", "u1"),
+          message("m-answer", "assistant", "a1"),
+          message("m-queued", "user", "from the queue"),
+          streaming("m-queued-answer", "assistant", ""),
+        ],
+      }) as never,
+    );
+    const { container } = renderView();
+    act(() =>
+      FakeEventSource.instances.at(-1)!.emit("sync", {
+        type: "message.created",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        messageId: "m-queued-answer",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-message-id="m-queued-answer"]')).not.toBeNull(),
+    );
+    expect(anchor()).toBe("");
+  });
+});
 
 describe("ChatView older turns", () => {
   it("loads the turns above once the list reaches its start, and draws them first", async () => {
