@@ -34,6 +34,9 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Running commands is unavailable on this computer");
     expect(hint).not.toContain("sandboxed");
     expect(hint).not.toContain("request_network_access");
+    expect(hint).not.toContain("Python");
+    expect(hint).not.toContain("Node");
+    expect(hint).not.toContain("authenticated proxies");
   });
 
   it("credits the workspace to the chat, never to the user", () => {
@@ -69,6 +72,30 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Other network destinations are unsupported");
     expect(hint).not.toContain("host and port");
     expect(hint).toContain("Work permissions never grant network access");
+  });
+
+  it("explains portable runtime discovery and the sandbox environment upfront", () => {
+    const hint = desktopToolsSystemHint([{ name: "workspace", path: "/work" }], true);
+    expect(hint).toContain("local file tools act inside");
+    expect(hint).toContain("read permitted toolchain locations and system libraries");
+    expect(hint).not.toContain("reads and writes may land only inside");
+    expect(hint).toContain("Python or Node through run_command");
+    expect(hint).toContain("no dedicated language tool is needed");
+    expect(hint).toContain("discover the executable and version");
+    expect(hint).toContain("rather than assuming a command name, version or installed package");
+    expect(hint).toContain("Install dependencies locally (a virtualenv, node_modules)");
+    expect(hint).toContain("chosen Python interpreter’s `-m pip`");
+    expect(hint).toContain("Each command is a fresh process");
+    expect(hint).toContain(
+      "activation, environment variables and directory changes do not persist",
+    );
+    expect(hint).toContain("Temporary files and Python caches default to the workspace");
+    expect(hint).toContain("files instead of opening GUI windows");
+    expect(hint).toContain("supplied authenticated proxies");
+    expect(hint).toContain("explicit proxy support, including authentication");
+    expect(hint).toContain("Do not bypass the proxy or sandbox restrictions");
+    expect(hint).toContain("a failed command is not required");
+    expect(hint).toContain("A refusal is an answer, not an error to work around");
   });
 
   it("leaves the workspace unmentioned when the shell predates it", () => {

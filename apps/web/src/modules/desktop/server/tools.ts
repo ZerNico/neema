@@ -131,7 +131,8 @@ export const runCommandTool = Tool.make("run_command", {
     "package registries are reachable by default. A blocked HTTPS website needs a separate " +
     "request_network_access call naming only its host and user approval before retrying. " +
     "Other network destinations are unsupported. The user is asked before " +
-    "the command happens and may refuse. " +
+    "the command happens and may refuse. Installed Python and Node can run here; discover " +
+    "the executable when needed. Each call is a fresh process, so shell state does not persist. " +
     "Prefer the file tools over commands to inspect or change files.",
   parameters: Schema.Struct({
     command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),

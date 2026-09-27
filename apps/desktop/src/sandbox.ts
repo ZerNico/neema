@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { Context, Effect, Layer, Semaphore } from "effect";
 import { runOwnedProcess } from "./process.ts";
+import { commandWithEnvironment, forSandboxedChild } from "./sandbox-environment.ts";
 import { loadNetworkGrants, type NetworkGrants } from "./network-grants.ts";
 import {
   DesktopError,
@@ -139,52 +140,6 @@ const policyWithGrants = (grants: NetworkGrants | null): SandboxRuntimeConfig =>
     ],
   },
 });
-
-/**
- * Two things srt gets wrong for real tools on macOS, fixed on the argv it
- * hands back. That argv is `bash -c "env VAR=... sandbox-exec ... <cmd>"`,
- * one shell string, so the rewrite is over the assignments in that string.
- *
- * srt hands the child `HTTPS_PROXY=http://localhost:PORT`, but its Seatbelt
- * profile denies the resolver lookup that `getaddrinfo("localhost")` needs,
- * so anything resolving the name properly (Python's urllib3, so pip) fails
- * with "nodename nor servname provided" before it ever reaches the proxy.
- * curl and npm happen to special-case the name. The numeric loopback address
- * needs no lookup and is what the profile actually allows.
- *
- * And pip's cache lives under `~/Library/Caches`, outside the only writable
- * path, so every install warns and then retries the network for nothing.
- * Pointing the cache inside the folder keeps installs quiet and fast.
- */
-const PROXY_URL_VAR =
-  /\b((?:[A-Z_]*_PROXY|[a-z_]*_proxy)=[a-z0-9+]+:\/\/(?:[^@\s]*@)?)localhost(?=:\d)/g;
-const PROXY_HOST_VAR = /\b(CLOUDSDK_PROXY_ADDRESS=|RSYNC_PROXY=)localhost\b/g;
-
-export const forSandboxedChild = (argv: readonly string[], cwd: string): string[] =>
-  argv.map((arg, index) => {
-    if (index === 0 || !arg.startsWith("env ")) return arg;
-    // Match shell words only in env's leading assignment list. The executable,
-    // profile and user script are an opaque suffix, including proxy-looking text.
-    const assignments =
-      /^env\s+((?:[A-Za-z_][A-Za-z_0-9]*=(?:[^\s'"\\;|&<>`()]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.)*(?:\s+|$))*)/.exec(
-        arg,
-      );
-    if (!assignments) return arg;
-    const prefix = assignments[0];
-    const rewritten = prefix
-      .replaceAll(PROXY_URL_VAR, (_match, name: string) => `${name}127.0.0.1`)
-      .replaceAll(PROXY_HOST_VAR, (_match, name: string) => `${name}127.0.0.1`);
-    const withCache = /(?:^|\s)PIP_CACHE_DIR=/.test(assignments[1] ?? "")
-      ? rewritten
-      : rewritten.replace(
-          /^env /,
-          () => `env PIP_CACHE_DIR=${shellQuote(join(cwd, ".cache", "pip"))} `,
-        );
-    return withCache + arg.slice(prefix.length);
-  });
-
-/** Single-quoted for the `bash -c` string; a folder name may hold anything. */
-const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export interface SandboxRun {
   readonly callId: string;
@@ -350,9 +305,9 @@ export const makeSandbox = (
     const runCounted = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
       Effect.gen(function* () {
         const { argv, env } = yield* Effect.tryPromise({
-          try: () =>
-            manager.wrapWithSandboxArgv(
-              input.command,
+          try: async () => {
+            const { argv, env } = await manager.wrapWithSandboxArgv(
+              commandWithEnvironment(input.command, input.cwd),
               undefined,
               // The grant, per call. The denies are repeated rather than
               // inherited so the one config a reader sees at the call site
@@ -371,7 +326,9 @@ export const makeSandbox = (
               // default, so two long commands sharing a prefix would report
               // each other's denials. The call id is unique by construction.
               { commandId: input.callId, commandText: input.command },
-            ),
+            );
+            return { argv: forSandboxedChild(argv, input.cwd), env };
+          },
           catch: (cause) =>
             new DesktopError({
               reason: "sandbox-unavailable",
@@ -379,7 +336,7 @@ export const makeSandbox = (
             }),
         }).pipe(Effect.uninterruptible);
 
-        const [program, ...args] = forSandboxedChild(argv, input.cwd);
+        const [program, ...args] = argv;
         if (!program) {
           return yield* Effect.fail(
             new DesktopError({ reason: "failed", message: "The command was empty." }),

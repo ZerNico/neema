@@ -364,7 +364,14 @@ folder and the files inside it, not only files whose own names match.
 `run_command` takes no folder: the command starts in the chat's workspace,
 and the sandbox's write allowance covers the workspace plus every attached
 folder, so `cd` and `cp` across roots work inside one address space. Each
-command is one fresh sandboxed process; there is no persistent shell.
+command is one fresh sandboxed process; activation, environment changes and
+`cd` do not carry into the next call. The shell inherits the desktop process's
+PATH without loading interactive shell startup files. Runtime names, versions
+and packages therefore depend on that desktop, not the server or another chat's
+machine. The model hint tells it to discover an interpreter when needed, use
+local dependencies, honor authenticated proxies and save headless output to files.
+It distinguishes the file tools' root containment from the command sandbox's
+permitted toolchain reads.
 
 A file a custom tool returned stays a server attachment of the answer in a
 Work chat too, never pushed to the machine on its own: the shell may be
@@ -433,10 +440,27 @@ also refuse it and attempts to replace its ancestors. A tool installed
 somewhere unusual fails with a denial that names the path, which is
 preferred over a readable `~/.git-credentials`.
 
-On macOS, the wrapper replaces `localhost` in leading sandbox-generated proxy
-environment assignments with `127.0.0.1`, avoiding resolver access denied by the
-sandbox. It also places the pip cache inside the granted folder. It never rewrites
-proxy-looking text inside the user's command.
+On macOS, the adapter reads only the literal words in SRT's leading `env`
+assignments, including whole-quoted assignments and unset options. Encoded proxy
+credentials cause SRT to quote entire words; matching only bare `KEY=value`
+prefixes silently missed them. The adapter replaces the proxy hostname
+`localhost` with `127.0.0.1` to avoid Seatbelt-denied resolution, preserving
+credentials, protocols and ports. The executable, profile and user command stay
+byte-for-byte unchanged. Linux and Windows keep their own proxy routing.
+
+Temporary files default to the existing workspace, and Python and XDG caches to
+its `.cache` tree. On POSIX, quoted exports run inside confinement after SRT's
+own environment setup, whose TMPDIR may not exist. On Windows, the adapter uses
+SRT's child `--env` argv overlay before `--`, not the broker's environment, and
+keeps SRT's omission of POSIX TMPDIR and proxy bypass variables. The original
+command still supplies violation attribution on every platform.
+
+These defaults change neither HOME nor the process-wide environment and add no
+write allowances. Cache directories are created by libraries inside the sandbox:
+host-side mkdir beneath a model-writable workspace could follow a symlink outside
+it. Explicit command assignments can override defaults within the same policy.
+Temporary-file APIs own their cleanup; abandoned files remain in the workspace,
+with no additional sweeper.
 
 Owned POSIX process groups are terminated during cancellation and cleanup;
 Windows uses `taskkill /T`. Descendants that deliberately escape the process

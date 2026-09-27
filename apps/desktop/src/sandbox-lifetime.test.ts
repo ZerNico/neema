@@ -1,11 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { loadNetworkGrants, networkGrantsDirectory } from "./network-grants.ts";
 import { Effect, Exit, Scope } from "effect";
 import { SandboxManager, SandboxViolationStore } from "@anthropic-ai/sandbox-runtime";
 import { makeSandbox, type SandboxRun } from "./sandbox.ts";
+import { commandWithEnvironment } from "./sandbox-environment.ts";
 import type { runOwnedProcess } from "./process.ts";
 
 const input: SandboxRun = {
@@ -22,7 +23,10 @@ const managerFor = () => ({
   isSupportedPlatform: () => true,
   checkDependenciesAsync: async () => ({ errors: [], warnings: [] }),
   updateConfig: vi.fn(),
-  wrapWithSandboxArgv: vi.fn(async (command: string) => ({ argv: ["fake", command], env: {} })),
+  wrapWithSandboxArgv: vi.fn(async (command: string) => ({
+    argv: platform() === "win32" ? ["fake", "--", command] : ["fake", command],
+    env: {},
+  })),
   annotateStderrWithSandboxFailures: (_command: string, stderr: string) => stderr,
   getSandboxViolationStore: () => new SandboxViolationStore(),
   cleanupAfterCommand: vi.fn(),
@@ -46,9 +50,9 @@ describe("sandbox lifetime", () => {
     const manager = managerFor();
     const running = { first: Promise.withResolvers<void>(), second: Promise.withResolvers<void>() };
     const finish = Promise.withResolvers<void>();
-    const execute: typeof runOwnedProcess = ({ args }) =>
+    const execute: typeof runOwnedProcess = ({ cwd }) =>
       Effect.gen(function* () {
-        running[args[0] as "first" | "second"].resolve();
+        (cwd === input.cwd ? running.first : running.second).resolve();
         yield* Effect.promise(() => finish.promise);
         return result;
       });
@@ -57,11 +61,30 @@ describe("sandbox lifetime", () => {
     try {
       const first = Effect.runPromise(firstService.sandbox.run(input));
       const second = Effect.runPromise(
-        secondService.sandbox.run({ ...input, command: "second", callId: "second" }),
+        secondService.sandbox.run({
+          ...input,
+          command: "second",
+          callId: "second",
+          cwd: "/tmp/second",
+          allowWrite: ["/tmp/second"],
+        }),
       );
       // Both children are alive at once: neither waited for the other.
       await Promise.all([running.first.promise, running.second.promise]);
       expect(manager.wrapWithSandboxArgv).toHaveBeenCalledTimes(2);
+      for (const [command, cwd] of [
+        ["first", "/tmp"],
+        ["second", "/tmp/second"],
+      ] as const) {
+        expect(manager.wrapWithSandboxArgv).toHaveBeenCalledWith(
+          commandWithEnvironment(command, cwd),
+          undefined,
+          expect.objectContaining({ filesystem: expect.objectContaining({ allowWrite: [cwd] }) }),
+          undefined,
+          cwd,
+          { commandId: command, commandText: command },
+        );
+      }
       expect(manager.initialize).toHaveBeenCalledTimes(1);
       // The policy is fixed at initialize; nothing rewrites it per command.
       expect(manager.updateConfig).not.toHaveBeenCalled();
@@ -169,7 +192,7 @@ describe("sandbox lifetime", () => {
         }),
       );
       expect(manager.wrapWithSandboxArgv).toHaveBeenCalledWith(
-        "first",
+        commandWithEnvironment("first", input.cwd),
         undefined,
         expect.objectContaining({
           filesystem: expect.objectContaining({ denyWrite: [directory] }),
