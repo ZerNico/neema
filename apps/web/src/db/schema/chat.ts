@@ -1,5 +1,6 @@
 import { uuidv7 } from "uuidv7";
 import type { AssistantOutput } from "~/modules/chat/assistant-output.ts";
+import type { FileReferenceAliases } from "~/modules/chat/file-reference-aliases.ts";
 import type { ProviderReplay } from "~/modules/chat/server/provider-replay.ts";
 import type { QueuedTurnInput } from "~/modules/chat/queued-turn.ts";
 import { desc, sql } from "drizzle-orm";
@@ -40,6 +41,7 @@ export const conversations = pgTable(
     branchedFrom: text("branched_from").references((): AnyPgColumn => conversations.id, {
       onDelete: "set null",
     }),
+    fileReferenceAliases: jsonb("file_reference_aliases").$type<FileReferenceAliases>(),
     // Fixed at creation, like the agent association. A work chat can reach
     // folders on the user's machine; a browser tab can only read it. A folder
     // is invited, not required: tools stay withheld until one is attached.

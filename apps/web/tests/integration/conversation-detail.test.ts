@@ -3,7 +3,18 @@ import { PgClient } from "@effect/sql-pg";
 import { eq, inArray } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, documents, messageToolCalls, messages, models } from "~/db/schema/index.ts";
+import {
+  attachmentBlobs,
+  attachments,
+  conversationQueueEntries,
+  conversationQueueEntryAttachments,
+  conversations,
+  documents,
+  messageAttachments,
+  messageToolCalls,
+  messages,
+  models,
+} from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import {
   HEAD_TURNS,
@@ -153,6 +164,29 @@ describe("loadConversationDetail", () => {
     const detail = await run(loadConversationDetail(userId, thread.conversationId));
 
     expect(detail.branchedFrom).toBeNull();
+    expect(detail.conversation.fileReferenceAliases).toBeNull();
+  });
+
+  it("retains branch file provenance in detail after deleting the source", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, "Source");
+        const repo = yield* ChatRepo;
+        const branch = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: source.conversationId,
+          throughMessageId: source.assistantId,
+        });
+        yield* repo.deleteConversation(userId, source.conversationId);
+        const detail = yield* loadConversationDetail(userId, branch.id);
+        expect(detail.branchedFrom).toBeNull();
+        expect(detail.conversation.fileReferenceAliases).toEqual({
+          attachments: {},
+          workspaceAncestors: [source.conversationId],
+        });
+      }),
+    );
   });
 
   it("projects conversation document summaries without their source", async () => {
@@ -405,6 +439,103 @@ const source = (index: number) => ({
 });
 
 describe("loadConversationDetail windows", () => {
+  it("ships reference metadata for unloaded files, but not pending or unrelated files", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const stranger = yield* makeUser();
+        const thread = yield* seedTurns(userId, HEAD_TURNS + 3);
+        const other = yield* seedThread(userId, "Other conversation");
+        const db = yield* Db;
+        const attachmentRepo = yield* AttachmentRepo;
+        const blobId = uuidv7();
+        yield* db.insert(attachmentBlobs).values({
+          id: blobId,
+          userId,
+          sha256: blobId,
+          storageKey: `private/${blobId}`,
+          size: 4,
+          mediaType: "text/plain",
+          parsedText: "PRIVATE PARSED TEXT",
+        });
+        const files = Array.from({ length: 6 }, (_, i) => ({
+          id: uuidv7(),
+          userId,
+          blobId,
+          fileName: `file-${i}.txt`,
+        }));
+        yield* db.insert(attachments).values(files);
+        const linkedMessages = [
+          thread.turns[0]!.userId,
+          thread.turns[0]!.assistantId,
+          thread.turns.at(-1)!.userId,
+          other.userMessageId,
+        ];
+        yield* db.insert(messageAttachments).values(
+          linkedMessages.map((messageId, i) => ({
+            messageId,
+            attachmentId: files[i]!.id,
+            position: 0,
+          })),
+        );
+        yield* db
+          .update(messages)
+          .set({ steeredIntoMessageId: thread.turns.at(-1)!.assistantId })
+          .where(eq(messages.id, thread.turns.at(-1)!.userId));
+        const queueId = uuidv7();
+        yield* db.insert(conversationQueueEntries).values({
+          id: queueId,
+          conversationId: thread.conversationId,
+          userId,
+          content: "pending",
+          input: { modelId, searchEnabled: false, researchEnabled: false },
+        });
+        yield* db.insert(conversationQueueEntryAttachments).values({
+          queueEntryId: queueId,
+          attachmentId: files[4]!.id,
+          position: 0,
+        });
+        const detail = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(detail.messages.some((message) => message.id === thread.turns[0]!.userId)).toBe(
+          false,
+        );
+        expect(detail.attachments.map((file) => file.id)).toEqual([files[2]!.id]);
+        const expected = files.slice(0, 3).map((file) => ({
+          id: file.id,
+          fileName: file.fileName,
+          size: 4,
+          mediaType: "text/plain",
+          kind: "text",
+        }));
+        expect(detail.referenceAttachments).toEqual(expected);
+        expect(yield* attachmentRepo.listForConversation(stranger, thread.conversationId)).toEqual(
+          [],
+        );
+        const older = yield* loadConversationHistory(
+          userId,
+          thread.conversationId,
+          detail.window.olderCursor!,
+        );
+        expect(older).not.toHaveProperty("referenceAttachments");
+        const repo = yield* ChatRepo;
+        const branch = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: thread.conversationId,
+          throughMessageId: thread.turns[0]!.assistantId,
+        });
+        const branchDetail = yield* loadConversationDetail(userId, branch.id);
+        expect(branchDetail.referenceAttachments.map((file) => file.id)).toEqual(
+          files.slice(0, 2).map((file) => branch.fileReferenceAliases!.attachments[file.id]),
+        );
+        yield* db
+          .delete(messageAttachments)
+          .where(eq(messageAttachments.attachmentId, files[0]!.id));
+        const refreshed = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(refreshed.referenceAttachments).toEqual(expected.slice(1));
+      }),
+    );
+  });
+
   it("loads the latest turns, then pages back to the start without gaps or overlap", async () => {
     const userId = await run(makeUser());
     const turns = HEAD_TURNS + OLDER_TURNS + 10;

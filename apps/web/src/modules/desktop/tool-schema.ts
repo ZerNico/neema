@@ -191,6 +191,10 @@ export const desktopToolsSystemHint = (
       : `The local file tools act inside this chat's own workspace at ${JSON.stringify(workspace.path)} and inside ${attached.length === 1 ? `a folder the user attached at ${list}` : `folders the user attached: ${list}`}. Paths are absolute, like ${JSON.stringify(`${workspace.path}/README.md`)}; anything outside those roots is refused. list_folder with "." lists them.`;
   return [
     addressSpace,
+    "Refer to a local file in your answer with a Markdown link such as [plot.png](/local-file?path=/Users/alex/work/plot.png) or [plot.png](/local-file?path=C:/Users/alex/work/plot.png). Use its actual absolute path, including for files a command created; no upload or extra tool call is needed. Encode spaces as %20, a literal percent as %25, # as %23, & as %26, + as %2B, parentheses as %28/%29, and backslashes as %5C. Do not invent a path. These links open the current file, not a saved snapshot.",
+    workspace
+      ? "If this chat was branched, older answers may name the source chat’s workspace. Use the current workspace above with the same relative file path, not an old workspace path. Attached-folder paths stay unchanged."
+      : null,
     workspace
       ? `Files the user drops into the chat land in the workspace, and the message that names them says so; keep anything you create for this chat there too.`
       : null,

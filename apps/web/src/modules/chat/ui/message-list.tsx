@@ -26,7 +26,12 @@ import {
   type ToolActivity,
   type ToolSource,
 } from "../client/use-message-stream.ts";
-import { AssistantMarkdown, type MarkdownComponents } from "./assistant-markdown.tsx";
+import {
+  AssistantMarkdown,
+  MarkdownReferenceSpan,
+  type MarkdownComponents,
+} from "./assistant-markdown.tsx";
+import { FileReferenceMachine } from "./file-reference.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
 import { projectAssistantBody, type AssistantSteer } from "./assistant-body.ts";
 import { CitationChip } from "./citation-chip.tsx";
@@ -99,17 +104,20 @@ const CitationSources = createContext<ReadonlyMap<number, ToolSource>>(new Map()
 // `data-footnotes` section, are verified against 2.5.0 by render tests;
 // re-check on upgrade.
 const citationComponents: MarkdownComponents = {
-  a: function CitationLink({ node: _node, href, children, ...props }) {
+  span: function CitationLink({ node, children, ...props }) {
     const citationSources = use(CitationSources);
-    const [source, ...more] = footnoteIndexes(href).flatMap((index) => {
-      const found = citationSources.get(index);
-      return found ? [found] : [];
-    });
+    const href = node?.data && "referenceHref" in node.data ? node.data.referenceHref : undefined;
+    const [source, ...more] = footnoteIndexes(typeof href === "string" ? href : undefined).flatMap(
+      (index) => {
+        const found = citationSources.get(index);
+        return found ? [found] : [];
+      },
+    );
     if (!source) {
       return (
-        <a href={href} {...props}>
+        <MarkdownReferenceSpan {...(node ? { node } : {})} {...props}>
           {children}
-        </a>
+        </MarkdownReferenceSpan>
       );
     }
     return <CitationChip source={source} more={more} />;
@@ -140,12 +148,18 @@ const CitedAnswer = memo(function CitedAnswer({
   const content = useMemo(() => prepareCitedMarkdown(rawContent, sources), [rawContent, sources]);
   return (
     <CitationSources value={byIndex}>
-      <AssistantMarkdown content={content} components={citationComponents} streaming={streaming} />
+      <AssistantMarkdown
+        content={content}
+        components={citationComponents}
+        hasCitations
+        streaming={streaming}
+      />
     </CitationSources>
   );
 });
 
 export interface DisplayMessage {
+  desktopMachineId?: string | null;
   files?: ReadonlyArray<AssistantFile>;
   id: string;
   role: "user" | "assistant" | "system";
@@ -640,11 +654,13 @@ const AssistantBody = memo(function AssistantBody({
     if (part.kind === "text") {
       return (
         <div key={part.key} className="mb-3 last:mb-0">
-          {sources.length > 0 ? (
-            <CitedAnswer content={part.content} sources={sources} streaming={part.streaming} />
-          ) : (
-            <AssistantMarkdown content={part.content} streaming={part.streaming} />
-          )}
+          <FileReferenceMachine value={message.desktopMachineId ?? null}>
+            {sources.length > 0 ? (
+              <CitedAnswer content={part.content} sources={sources} streaming={part.streaming} />
+            ) : (
+              <AssistantMarkdown content={part.content} streaming={part.streaming} />
+            )}
+          </FileReferenceMachine>
         </div>
       );
     }

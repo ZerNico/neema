@@ -502,6 +502,143 @@ describe("branching a conversation", () => {
     expect(result.cloned.filter((a) => result.original.some((o) => o.id === a.id))).toEqual([]);
   });
 
+  it("flattens file aliases for a shorter branch after its source was deleted", async () => {
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [
+          { user: "earlier upload", assistant: "first answer" },
+          { user: "later upload", assistant: "later answer" },
+        ]);
+        expect(source.conversation.fileReferenceAliases).toBeNull();
+        yield* attach(userId, source.messages[0]!.id, [{ fileName: "early.png", position: 0 }]);
+        yield* attach(userId, source.messages[2]!.id, [{ fileName: "late.png", position: 0 }]);
+        const [early, late] = yield* attachmentRepo.listForMessages(
+          source.messages.map((m) => m.id),
+        );
+        const content = `[earlier upload](/api/files/${early!.id})`;
+        const replay = {
+          v: 1 as const,
+          providerId,
+          modelKey: "m",
+          turns: [
+            {
+              turnIndex: 0,
+              startOffset: 0,
+              endOffset: content.length,
+              reasoningDetails: [
+                { type: "reasoning.encrypted" as const, data: "signed-private-data" },
+              ],
+            },
+          ],
+        };
+        yield* db
+          .update(messages)
+          .set({ content, providerReplay: replay })
+          .where(eq(messages.id, source.messages[1]!.id));
+        const callId = uuidv7();
+        yield* repo.insertToolCall({
+          id: callId,
+          messageId: source.messages[1]!.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "reference-call",
+          toolName: "custom_files__read",
+          arguments: { attachmentId: early!.id },
+        });
+        yield* repo.completeToolCall({
+          id: callId,
+          status: "complete",
+          result: { attachmentId: early!.id, text: content },
+        });
+        const originalCalls = yield* repo.listToolCalls([source.messages[1]!.id]);
+        const first = yield* branch(userId, source.conversation.id, source.messages[3]!.id);
+        const firstAliases = first.conversation.fileReferenceAliases!;
+        expect(Object.keys(firstAliases.attachments).toSorted()).toEqual(
+          [early!.id, late!.id].toSorted(),
+        );
+        expect(firstAliases.workspaceAncestors).toEqual([source.conversation.id]);
+        yield* repo.deleteConversation(userId, source.conversation.id);
+        expect(
+          (yield* repo.getConversation(userId, first.conversation.id)).branchedFrom,
+        ).toBeNull();
+        const second = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: first.conversation.id,
+          throughMessageId: first.messages[1]!.id,
+        });
+        const secondMessages = yield* repo.listMessages(second.id);
+        const secondFiles = yield* attachmentRepo.listForMessages(secondMessages.map((m) => m.id));
+        expect(secondFiles).toHaveLength(1);
+        const expected = {
+          attachments: {
+            [early!.id]: secondFiles[0]!.id,
+            [firstAliases.attachments[early!.id]!]: secondFiles[0]!.id,
+          },
+          workspaceAncestors: [first.conversation.id, source.conversation.id],
+        };
+        expect(second.fileReferenceAliases).toEqual(expected);
+        expect(secondMessages[1]).toMatchObject({ content, providerReplay: replay });
+        const secondCalls = yield* repo.listToolCalls([secondMessages[1]!.id]);
+        expect(secondCalls[0]).toMatchObject({
+          arguments: originalCalls[0]!.arguments,
+          result: originalCalls[0]!.result,
+          turnIndex: originalCalls[0]!.turnIndex,
+          callIndex: originalCalls[0]!.callIndex,
+          textOffset: originalCalls[0]!.textOffset,
+        });
+        yield* repo.deleteConversation(userId, first.conversation.id);
+        const surviving = yield* repo.getConversation(userId, second.id);
+        expect(surviving.branchedFrom).toBeNull();
+        expect(surviving.fileReferenceAliases).toEqual(expected);
+        expect(yield* attachmentRepo.listForConversation(userId, second.id)).toEqual(
+          secondFiles.map(({ messageId: _messageId, position: _position, ...file }) => file),
+        );
+      }),
+    );
+  });
+
+  it("rolls the entire branch back when inherited aliases collide", async () => {
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const attachmentRepo = yield* AttachmentRepo;
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "upload", assistant: "answer" }]);
+        yield* attach(userId, source.messages[0]!.id, [
+          { fileName: "one.png", position: 0 },
+          { fileName: "two.png", position: 1 },
+        ]);
+        const files = yield* attachmentRepo.listForMessages([source.messages[0]!.id]);
+        yield* db
+          .update(conversationsTable)
+          .set({
+            fileReferenceAliases: {
+              attachments: { [files[0]!.id]: files[1]!.id },
+              workspaceAncestors: [],
+            },
+          })
+          .where(eq(conversationsTable.id, source.conversation.id));
+        const outcome = yield* Effect.exit(
+          repo.cloneConversationPrefix({
+            userId,
+            sourceConversationId: source.conversation.id,
+            throughMessageId: source.messages[1]!.id,
+          }),
+        );
+        expect(outcome).toMatchObject({ _tag: "Failure" });
+        expect(yield* conversationIds(userId)).toEqual([source.conversation.id]);
+        expect(
+          yield* db.select().from(attachments).where(eq(attachments.userId, userId)),
+        ).toHaveLength(2);
+      }),
+    );
+  });
+
   it("keeps the shared blob until the last conversation referencing it is gone", async () => {
     const result = await run(
       Effect.gen(function* () {

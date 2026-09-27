@@ -30,8 +30,32 @@ declared type, and only the kinds we understand are shown or handed to a model.
   read here and that the model should say so if no tool can take it. Every attached file is
   therefore visible, so the model never guesses at one it cannot open. Bytes are only
   loaded when there is a reader.
-- History replay and a tool's shared file follow the same function, so a turn rebuilt later
-  sees exactly what it saw first.
+- History replay and a tool's shared file follow the same representation. Attachment
+  metadata carries the current registered ID and `/api/files/<id>` reference beside the
+  bytes or extracted text. Historical assistant metadata stays outside signed replay
+  turns and tool pairs, but in the same compaction group. Branches supply cloned IDs
+  in that metadata without rewriting signed provider replay.
+
+## References in answers
+
+Explicit Markdown links to `/api/files/<id>` render as inline file tags. Resolution
+uses exact IDs from the current conversation's message-linked attachment metadata,
+including unloaded history and live generated files. Pending queue files are not
+eligible. Labels come from stored metadata, not model prose; missing targets are
+inert. The authenticated file endpoint remains the authority for bytes. Bare names,
+code and image embeds are not references, and ordinary web links retain Streamdown's
+link confirmation.
+
+A branch records attachment aliases from historical IDs to its cloned IDs inside the
+clone transaction. Inherited aliases flatten through that clone map and drop targets
+outside the copied prefix. This provenance survives source deletion, without changing
+message text, offsets, tool payloads or provider replay. Aliases confer no access: a
+target must still exist in the branch's attachment projection. Retrying an answer may
+remove its target, making old links unavailable rather than opening the source file.
+
+Local Work references have a separate absolute-path address space and read current
+bytes on click; see [desktop paths](desktop.md#several-folders-one-absolute-address-space).
+The reference renderer shares existing previews, never a new active-content viewer.
 
 ## Files into tools
 

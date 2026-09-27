@@ -32,6 +32,7 @@ import {
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
+import { composeFileReferenceAliases } from "../file-reference-aliases.ts";
 import { TEMPORARY_CHAT_HOURS } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { projectResearchProgress } from "../research-schema.ts";
@@ -2717,6 +2718,16 @@ export class ChatRepo extends Context.Service<
                     targetMessageId,
                   })),
                 });
+                const fileReferenceAliases = composeFileReferenceAliases({
+                  sourceConversationId: source.id,
+                  inherited: source.fileReferenceAliases,
+                  attachmentIds,
+                });
+                yield* tx
+                  .update(conversations)
+                  .set({ fileReferenceAliases })
+                  .where(eq(conversations.id, branch.id))
+                  .pipe(Effect.orDie);
                 for (const message of prefix) {
                   if (!message.assistantOutput) continue;
                   yield* tx
@@ -2799,7 +2810,7 @@ export class ChatRepo extends Context.Service<
                 // message_chunks are deliberately not copied. They exist so a
                 // reconnecting client can replay a live stream, and nothing in
                 // the branch is live.
-                return branch;
+                return { ...branch, fileReferenceAliases };
               }),
             )
             .pipe(Effect.catchTag("SqlError", Effect.die));

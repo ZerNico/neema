@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "file_reference_aliases" jsonb;

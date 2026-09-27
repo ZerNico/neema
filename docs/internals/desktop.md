@@ -348,7 +348,7 @@ in the web backend.
 
 ## Several folders, one absolute address space
 
-Every tool the model sees takes and returns real absolute POSIX paths, the
+Every file tool the model sees takes and returns real absolute paths for the desktop's operating system, the
 way Cursor and Claude Code work. The system hint names each root with its
 path — the workspace first, then the attached folders — and
 `list_folder "."` lists the roots by those paths. Find and search return
@@ -360,6 +360,24 @@ label the picker refuses for a user folder. Duplicate basenames are refused
 at choose and at rebind so a receipt's owner is unambiguous; a lost folder
 can be replaced by name from Choose it again. `find_files` names a matching
 folder and the files inside it, not only files whose own names match.
+
+Answers can link to `/local-file?path=<absolute-path>` to preview a file, including
+one created by a command with no server attachment. This is a renderer marker, not
+a route or a tool. The per-answer machine stamp must match the current desktop;
+browser-only clients and unknown or foreign machines cannot open it. The preview
+reads current bytes only when clicked, through the ordinary root and symlink checks.
+It never uploads the file, grants access or navigates to a local URL. HTML stays text;
+SVG uses the existing script-free image preview.
+
+A branch retains exact workspace ancestor conversation IDs separately from
+`branchedFrom`, which may disappear when the source is deleted. Workspaces are
+siblings keyed by conversation ID. Only a path under one of those exact ancestors
+relocates to the current workspace with the same suffix. Attached-folder paths stay
+absolute, and unrelated siblings are never rewritten. Until the current workspace is
+known, references are unavailable. A missing branch copy fails on the destination,
+never retries against the source. Paths from a different profile/base directory are
+not guessed; unrelocated paths still require current root grants. The model receives
+the current workspace and is told to use it for inherited workspace files.
 
 `run_command` takes no folder: the command starts in the chat's workspace,
 and the sandbox's write allowance covers the workspace plus every attached

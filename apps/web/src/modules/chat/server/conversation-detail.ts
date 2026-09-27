@@ -192,22 +192,25 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
   );
   // The streaming answer is the newest row, so it is always in the window.
   const streaming = messages.find((m) => m.status === "streaming");
-  const { rows, pendingChunks, defaults, queue, queueGate } = yield* Effect.all(
-    {
-      rows: loadMessageRows(conversation.id, messages),
-      // For streaming messages the client resumes via SSE using the chunks
-      // persisted so far; ship them inline so the first paint is complete.
-      pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
-      // Only the installed agent persists between turns. Standalone knowledge
-      // is message input, not a conversation default.
-      defaults: repo.getConversationDefaults(conversation.id),
-      // Messages waiting behind the live answer. They are conversation state,
-      // not transcript rows, so every tab and device sees the same queue.
-      queue: repo.listQueue(conversation.id),
-      queueGate: repo.queueGate(conversation.id),
-    },
-    { concurrency: "unbounded" },
-  );
+  const attachmentRepo = yield* AttachmentRepo;
+  const { rows, referenceAttachments, pendingChunks, defaults, queue, queueGate } =
+    yield* Effect.all(
+      {
+        rows: loadMessageRows(conversation.id, messages),
+        referenceAttachments: attachmentRepo.listForConversation(userId, conversation.id),
+        // For streaming messages the client resumes via SSE using the chunks
+        // persisted so far; ship them inline so the first paint is complete.
+        pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
+        // Only the installed agent persists between turns. Standalone knowledge
+        // is message input, not a conversation default.
+        defaults: repo.getConversationDefaults(conversation.id),
+        // Messages waiting behind the live answer. They are conversation state,
+        // not transcript rows, so every tab and device sees the same queue.
+        queue: repo.listQueue(conversation.id),
+        queueGate: repo.queueGate(conversation.id),
+      },
+      { concurrency: "unbounded" },
+    );
   const agentRepo = yield* AgentRepo;
   const liveAgent = defaults.agent?.agentId
     ? yield* agentRepo.get(userId, defaults.agent.agentId)
@@ -230,6 +233,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     scheduleDrafts: defaults.scheduleDrafts ?? [],
     documents: defaults.documents ?? [],
     ...rows,
+    referenceAttachments,
     window: { anchorId: messages[0]?.id ?? null, olderCursor },
     latestMachineAttempt,
     pendingChunks,

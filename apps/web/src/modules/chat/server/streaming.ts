@@ -55,6 +55,7 @@ import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-sch
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
 import { fileForModel } from "./file-for-model.ts";
+import { attachmentReferenceHint, fileReferencesSystemHint } from "../file-references.ts";
 import {
   ensureGenerationLive,
   GenerationFence,
@@ -1077,14 +1078,24 @@ export class StreamEngine extends Context.Service<
                   ),
               ),
             );
-          const historyMessages = yield* buildHistoryMessages(promptDeps, {
+          // Only one-to-one rows can be indexed by position. File metadata and
+          // replay turns expand one stored answer into several prompt messages.
+          const plainHistory = historySuffix.filter(
+            (message) =>
+              !message.assistantOutput?.files.length &&
+              !message.providerReplay?.turns.length &&
+              !steersByAnswer.has(message.id),
+          );
+          const plainMessages = yield* buildHistoryMessages(promptDeps, {
             deferAssistantBytes: true,
-            messages: historySuffix,
+            messages: plainHistory,
             modelSupportsFiles: model?.capabilities.files ?? false,
           });
+          const plainById = new Map(
+            plainHistory.map((message, index) => [message.id, plainMessages[index]!]),
+          );
           const historyGroups: Array<ReadonlyArray<Prompt.MessageEncoded>> = [];
-          for (let index = 0; index < historySuffix.length; index++) {
-            const message = historySuffix[index]!;
+          for (const message of historySuffix) {
             historyGroups.push([
               ...skillReplay(message),
               ...(message.assistantOutput?.files.length ||
@@ -1108,9 +1119,12 @@ export class StreamEngine extends Context.Service<
                         : {}),
                     },
                   )
-                : [historyMessages[index]!]),
+                : [plainById.get(message.id)!]),
             ]);
           }
+          // Compaction indexes stored rows; each representative's full group is
+          // supplied alongside it for token estimates and summary input.
+          const historyMessages = historyGroups.map((group) => group[0]!);
           const sourcesByIndex = new Map(priorSources.map((source) => [source.index, source]));
           const recapSources = () => {
             const sources = [...sourcesByIndex.values()];
@@ -1180,6 +1194,7 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = [
+            { role: "system" as const, content: fileReferencesSystemHint },
             ...(permissions.agentsCreate
               ? [{ role: "system" as const, content: AGENT_APP_POLICY }]
               : []),
@@ -1433,7 +1448,7 @@ export class StreamEngine extends Context.Service<
                       expandAssistantTurns: true,
                     },
                   )
-                : [historyMessages[index]!]),
+                : [plainById.get(message.id)!]),
             ]);
           }
           // Two anchors mark where the stable part ends: after the last system
@@ -1715,7 +1730,10 @@ export class StreamEngine extends Context.Service<
                               Effect.uninterruptible,
                             ),
                           );
-                          void image;
+                          turnFiles.push({
+                            type: "text",
+                            text: attachmentReferenceHint(image.attachment),
+                          });
                           acceptedImages += 1;
                           return;
                         }

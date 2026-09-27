@@ -4854,6 +4854,20 @@ describe("generated image streaming", () => {
             "Replace the original image with a blue image",
           );
           expect(JSON.stringify(prompts[2])).toContain("Make the latest blue image larger");
+          expect(JSON.stringify(prompts[1])).toContain(`/api/files/${initialId}`);
+          expect(JSON.stringify(prompts[2])).toContain(`/api/files/${initialId}`);
+          expect(JSON.stringify(prompts[2])).toContain(`/api/files/${editedId}`);
+          const texts = prompts[2]!.content.flatMap((message) =>
+            message.role === "user"
+              ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+              : [],
+          );
+          expect(
+            texts.filter((text) => text.includes("Replace the original image with a blue image")),
+          ).toHaveLength(1);
+          expect(
+            texts.filter((text) => text.includes("Make the latest blue image larger")),
+          ).toHaveLength(1);
         }),
       );
     } finally {

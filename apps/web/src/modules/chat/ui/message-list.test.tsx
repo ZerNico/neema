@@ -17,6 +17,7 @@ import type { AttachmentUploads } from "~/modules/attachments/client/use-attachm
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 import { composerText, setComposerText } from "./composer-test-utils.ts";
+import { FileReferenceContext } from "./file-reference.tsx";
 
 // Sources an earlier message registered, as the view hands them to a row.
 const inheritedFrom = (sources: ToolSource[]) => inheritSources([sources, []])[1]!;
@@ -553,6 +554,57 @@ describe("MessageBubble citations", () => {
     rerender(bubble("Effect 4.0 is out[^1]. It ships"));
     rerender(bubble("Effect 4.0 is out[^1]. It ships with a new runtime"));
     expect(screen.getByRole("link", { name: "Source: Effect 4.0 released" })).toBe(chip);
+  });
+
+  it("composes citations, live file references and normal-link confirmation without remounting", () => {
+    const file = {
+      id: "live-file",
+      fileName: "generated.png",
+      kind: "image" as const,
+      mediaType: "image/png",
+      size: 4,
+    };
+    const client = new QueryClient();
+    const bubble = (available: boolean) => (
+      <QueryClientProvider client={client}>
+        <FileReferenceContext
+          value={{
+            attachments: new Map(available ? [[file.id, file]] : []),
+            aliases: null,
+            machineId: null,
+          }}
+        >
+          <DetailPanelProvider>
+            <MessageBubble
+              message={{
+                id: "mixed",
+                role: "assistant",
+                content: "Result[^1] [file](/api/files/live-file) [Website](https://example.com)",
+                reasoning: "",
+                reasoningSeen: false,
+                toolActivities: [searchActivity],
+                status: "streaming",
+              }}
+            />
+          </DetailPanelProvider>
+        </FileReferenceContext>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(bubble(false));
+    const citation = screen.getByRole("link", { name: "Source: Effect 4.0 released" });
+    expect(screen.queryByRole("button", { name: "Preview generated.png" })).not.toBeInTheDocument();
+    rerender(bubble(true));
+    expect(screen.getByRole("link", { name: "Source: Effect 4.0 released" })).toBe(citation);
+    fireEvent.click(screen.getByRole("button", { name: "Preview generated.png" }));
+    expect(within(screen.getByRole("dialog")).getByRole("img")).toHaveAttribute(
+      "src",
+      "/api/files/live-file",
+    );
+    rerender(bubble(false));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview generated.png" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Website" }));
+    expect(screen.getByText("Open external link?")).toBeInTheDocument();
   });
 
   it("shows adjacent markers as one chip naming the first source and the rest", () => {

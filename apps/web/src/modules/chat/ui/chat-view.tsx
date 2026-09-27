@@ -104,6 +104,8 @@ import { useConversationQueue } from "./use-conversation-queue.ts";
 import type { AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
+import { FileReferenceContext } from "./file-reference.tsx";
+import type { Attachment } from "~/modules/attachments/schema.ts";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
 import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
@@ -1425,6 +1427,13 @@ export function ChatView({
     },
   });
 
+  const machinesByMessage = useMemo(
+    () =>
+      new Map(
+        (data.generations ?? []).map((row) => [row.messageId, row.desktopMachine?.id ?? null]),
+      ),
+    [data.generations],
+  );
   const attachmentsByMessage = useMemo(() => {
     const grouped = new Map<string, MessageAttachment[]>();
     for (const attachment of data.attachments) {
@@ -1766,6 +1775,7 @@ export function ChatView({
           : {}),
         reasoning,
         files: message.assistantOutput?.files ?? [],
+        desktopMachineId: machinesByMessage.get(message.id) ?? null,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
@@ -1835,6 +1845,7 @@ export function ChatView({
     skillsByUserMessage,
     workspaceFilesByUserMessage,
     desktopRootsByMessage,
+    machinesByMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,
@@ -2040,6 +2051,28 @@ export function ChatView({
     data.hasOlder,
   );
 
+  const fileReferences = useMemo(() => {
+    const attachments = new Map<string, Attachment>(
+      (data.referenceAttachments ?? data.attachments).map((file) => [file.id, file]),
+    );
+    for (const message of display) {
+      for (const file of message.files ?? []) attachments.set(file.attachment.id, file.attachment);
+      for (const steer of message.steers ?? [])
+        for (const file of steer.attachments) attachments.set(file.id, file);
+    }
+    return {
+      attachments,
+      aliases: data.conversation.fileReferenceAliases ?? null,
+      machineId: localMachineId,
+    };
+  }, [
+    data.referenceAttachments,
+    data.attachments,
+    data.conversation.fileReferenceAliases,
+    display,
+    localMachineId,
+  ]);
+
   return (
     <DocumentOwner
       documentIds={documentIds}
@@ -2089,13 +2122,15 @@ export function ChatView({
                       : null
                   }
                 >
-                  <VirtualMessageList
-                    messages={withPlacedCards}
-                    anchorId={anchorId}
-                    onReleaseAnchor={releaseAnchor}
-                    onReachStart={loadOlder}
-                    loadingOlder={loadingOlder}
-                  />
+                  <FileReferenceContext value={fileReferences}>
+                    <VirtualMessageList
+                      messages={withPlacedCards}
+                      anchorId={anchorId}
+                      onReleaseAnchor={releaseAnchor}
+                      onReachStart={loadOlder}
+                      loadingOlder={loadingOlder}
+                    />
+                  </FileReferenceContext>
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>
             </div>

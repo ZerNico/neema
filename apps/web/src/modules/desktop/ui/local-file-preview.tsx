@@ -67,13 +67,21 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
+// A POSIX filename may contain backslashes; only Windows paths treat them as separators.
+const lastSeparator = (path: string) =>
+  Math.max(
+    path.lastIndexOf("/"),
+    /^(?:[a-z]:[\\/]|\\\\)/i.test(path) ? path.lastIndexOf("\\") : -1,
+  );
+
 /** The last segment, which is what the dialog titles itself with. */
-const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const baseName = (path: string) => path.slice(lastSeparator(path) + 1);
 
 /** The folder holding it, or null when the path names an attached folder. */
 const parentOf = (path: string) => {
-  const cut = path.lastIndexOf("/");
-  return cut === -1 ? null : path.slice(0, cut);
+  const cut = lastSeparator(path);
+  if (cut === -1) return null;
+  return path.slice(0, cut === 0 || (cut === 2 && path[1] === ":") ? cut + 1 : cut);
 };
 
 const blobUrl = (parts: BlobPart[], type: string) => URL.createObjectURL(new Blob(parts, { type }));

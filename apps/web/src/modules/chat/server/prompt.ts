@@ -1,4 +1,5 @@
 import type { AssistantOutput } from "../assistant-output.ts";
+import { attachmentReferenceHint } from "../file-references.ts";
 import type { ProviderReplay } from "./provider-replay.ts";
 import type { ChatRepo } from "./repo.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
@@ -184,7 +185,9 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   const userMessage = Effect.fn("chat.historyUserMessage")(function* (message: HistoryMessage) {
     const attached = byMessage.get(message.id);
     if (!attached || attached.length === 0) return withWorkspaceFiles(message);
-    const parts: Array<Prompt.UserMessagePartEncoded> = [];
+    const parts: Array<Prompt.UserMessagePartEncoded> = [
+      { type: "text", text: attached.map(attachmentReferenceHint).join("\n") },
+    ];
     const line = workspaceLine(message);
     if (line !== null) parts.push({ type: "text", text: line });
     for (const row of attached) {
@@ -230,6 +233,14 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       (message.assistantOutput?.files.length || message.providerReplay?.turns.length)
     ) {
       const files = message.assistantOutput?.files ?? [];
+      // Keep host metadata outside signed assistant turns and tool pairs.
+      if (files.length > 0)
+        messages.push({
+          role: "user",
+          content:
+            "Historical assistant file metadata:\n" +
+            files.map((file) => attachmentReferenceHint(file.attachment)).join("\n"),
+        });
       // Metadata-only estimates may compact this entire turn away. Refuse an
       // incompatible retained image only when constructing the actual request.
       const retainedImage = files.find((file) => file.attachment.kind === "image");

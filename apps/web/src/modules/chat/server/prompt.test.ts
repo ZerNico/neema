@@ -5,6 +5,7 @@ import type { Prompt } from "effect/unstable/ai";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { buildHistoryMessages, type HistoryMessage, type PromptDeps } from "./prompt.ts";
 import type { ToolCallRow } from "./repo.ts";
+import { attachmentReferenceHint } from "../file-references.ts";
 
 type Row = AttachmentWithBlob & { messageId: string; position: number };
 
@@ -168,6 +169,7 @@ describe("buildHistoryMessages timestamps", () => {
     });
     const [rendered] = await build(deps, [{ ...user("m1", ""), createdAt }]);
     expect(rendered?.content).toEqual([
+      { type: "text", text: expect.stringContaining('File reference: "a.png"') },
       expect.objectContaining({ type: "file", fileName: "a.png" }),
       { type: "text", text: `[Sent: ${createdAt.toISOString()}]\n` },
     ]);
@@ -210,6 +212,7 @@ describe("buildHistoryMessages with attachments", () => {
     expect(message).toEqual({
       role: "user",
       content: [
+        { type: "text", text: expect.stringContaining('File reference: "shot.png"') },
         {
           type: "file",
           mediaType: "image/png",
@@ -225,7 +228,7 @@ describe("buildHistoryMessages with attachments", () => {
     });
     // The bytes reach the provider as a Uint8Array, not a base64 string.
     expect(
-      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.FilePartEncoded>)[0]
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.FilePartEncoded>)[1]
         ?.data,
     ).toBeInstanceOf(Uint8Array);
   });
@@ -265,6 +268,13 @@ describe("buildHistoryMessages with attachments", () => {
       content: [
         {
           type: "text",
+          text: [
+            attachmentReferenceHint({ id: "att-key", fileName: "pitch.key" }),
+            attachmentReferenceHint({ id: "att-doc", fileName: "brief.docx" }),
+          ].join("\n"),
+        },
+        {
+          type: "text",
           text: "Attached file: pitch.key (2 KB, id att-key). Its contents are not readable here; a tool that takes files can use it. If none can, say so rather than guessing at what it contains.",
         },
         {
@@ -283,7 +293,7 @@ describe("buildHistoryMessages with attachments", () => {
       rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "a.png" })],
     });
     const [message] = await build(deps, [user("m1", "   ")]);
-    expect((message as Prompt.UserMessageEncoded).content).toHaveLength(1);
+    expect((message as Prompt.UserMessageEncoded).content).toHaveLength(2);
   });
 
   it("leaves messages without attachments as plain strings", async () => {
@@ -324,7 +334,7 @@ describe("buildHistoryMessages PDF delivery", () => {
       blobs: { "blobs/user-1/aa/bb/pdf": "%PDF-1.4" },
     });
     const [message] = await build(deps, [user("m1", "summarize")], { modelSupportsFiles: true });
-    expect((message as Prompt.UserMessageEncoded).content[0]).toEqual({
+    expect((message as Prompt.UserMessageEncoded).content[1]).toEqual({
       type: "file",
       mediaType: "application/pdf",
       fileName: "paper.pdf",
@@ -339,7 +349,7 @@ describe("buildHistoryMessages PDF delivery", () => {
       parsed: "page one",
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
-    expect((message as Prompt.UserMessageEncoded).content[0]).toEqual({
+    expect((message as Prompt.UserMessageEncoded).content[1]).toEqual({
       type: "text",
       text: "Text extracted from attached PDF: paper.pdf\n```\npage one\n```",
     });
@@ -357,7 +367,7 @@ describe("buildHistoryMessages PDF delivery", () => {
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
     expect(
-      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[0]
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[1]
         ?.text,
     ).toContain("cached body");
     expect(parsePdf).not.toHaveBeenCalled();
@@ -373,7 +383,7 @@ describe("buildHistoryMessages PDF delivery", () => {
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
     expect(
-      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[0]
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[1]
         ?.text,
     ).toContain("fresh body");
     expect(parsePdf).toHaveBeenCalledTimes(1);
@@ -429,7 +439,12 @@ describe("assistant image replay", () => {
     () =>
       Effect.gen(function* () {
         const { deps } = harness({ rows: [imageRow] });
-        const replay = yield* buildHistoryMessages(deps, input);
+        const [metadata, ...replay] = yield* buildHistoryMessages(deps, input);
+        expect(metadata).toEqual({
+          role: "user",
+          content:
+            "Historical assistant file metadata:\n" + attachmentReferenceHint(image.attachment),
+        });
         expect(replay).toHaveLength(2);
         expect(replay[0]).toMatchObject({
           role: "assistant",
@@ -505,7 +520,7 @@ describe("assistant image replay", () => {
             ],
           },
         };
-        const rendered = yield* buildHistoryMessages(deps, {
+        const [metadata, ...rendered] = yield* buildHistoryMessages(deps, {
           ...input,
           messages: [history],
           ...(mode === "incompatible model"
@@ -514,6 +529,11 @@ describe("assistant image replay", () => {
           ...(mode === "collapsed estimate"
             ? { expandAssistantTurns: false, deferAssistantBytes: true }
             : {}),
+        });
+        expect(metadata).toEqual({
+          role: "user",
+          content:
+            "Historical assistant file metadata:\n" + attachmentReferenceHint(image.attachment),
         });
         expect(rendered).toHaveLength(1);
         expect(rendered[0]?.content).toEqual([
@@ -578,10 +598,15 @@ describe("assistant image replay", () => {
           },
         };
         const original = structuredClone(history);
-        const rendered = yield* buildHistoryMessages(
+        const [metadata, ...rendered] = yield* buildHistoryMessages(
           { ...deps, chat },
           { ...input, messages: [history] },
         );
+        expect(metadata).toEqual({
+          role: "user",
+          content:
+            "Historical assistant file metadata:\n" + attachmentReferenceHint(image.attachment),
+        });
         expect(rendered).toHaveLength(4);
         expect(rendered[0]).toEqual({
           role: "user",
@@ -637,9 +662,14 @@ describe("assistant image replay", () => {
   it.effect("strips incompatible private metadata without dropping the authorized image", () =>
     Effect.gen(function* () {
       const { deps } = harness({ rows: [imageRow] });
-      const replay = yield* buildHistoryMessages(deps, {
+      const [metadata, ...replay] = yield* buildHistoryMessages(deps, {
         ...input,
         modelIdentity: { providerId: "other", modelKey: "model" },
+      });
+      expect(metadata).toEqual({
+        role: "user",
+        content:
+          "Historical assistant file metadata:\n" + attachmentReferenceHint(image.attachment),
       });
       expect(replay.every((part) => part.options === undefined)).toBe(true);
       expect(replay[1]).toMatchObject({ content: [{ type: "file" }, { type: "text" }] });

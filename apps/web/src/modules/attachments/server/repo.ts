@@ -240,6 +240,11 @@ export class AttachmentRepo extends Context.Service<
     listForMessages(
       messageIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<MessageAttachment>>;
+    /** Public file-reference metadata, including messages outside the loaded window. */
+    listForConversation(
+      userId: string,
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<Attachment>>;
     /** Ordered attachments of these messages, with blob details, for prompting. */
     listWithBlobsForMessages(
       messageIds: ReadonlyArray<string>,
@@ -692,6 +697,34 @@ export class AttachmentRepo extends Context.Service<
         }));
       });
 
+      const listForConversation = Effect.fn("AttachmentRepo.listForConversation")(function* (
+        userId: string,
+        conversationId: string,
+      ) {
+        const rows = yield* db
+          .select({
+            id: attachments.id,
+            fileName: attachments.fileName,
+            size: attachmentBlobs.size,
+            mediaType: attachmentBlobs.mediaType,
+          })
+          .from(messageAttachments)
+          .innerJoin(messages, eq(messages.id, messageAttachments.messageId))
+          .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+          .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(
+            and(
+              eq(conversations.id, conversationId),
+              eq(conversations.userId, userId),
+              eq(attachments.userId, userId),
+            ),
+          )
+          .orderBy(asc(messageAttachments.messageId), asc(messageAttachments.position))
+          .pipe(Effect.orDie);
+        return rows.map(toAttachmentDto);
+      });
+
       const listWithBlobsForMessages = Effect.fn("AttachmentRepo.listWithBlobsForMessages")(
         function* (messageIds: ReadonlyArray<string>) {
           if (messageIds.length === 0) {
@@ -863,6 +896,7 @@ export class AttachmentRepo extends Context.Service<
         cloneForMessages,
         releaseForMessages,
         listForMessages,
+        listForConversation,
         listWithBlobsForMessages,
         listWithBlobsByIds,
         cacheParsedText,

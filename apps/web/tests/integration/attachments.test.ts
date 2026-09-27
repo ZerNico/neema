@@ -969,9 +969,13 @@ describe("generated assistant image transactions", () => {
         const clonedImage = cloned.assistantOutput!.files[0]!;
         expect(cloned.generationId).toBeNull();
         expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
-        expect(clonedImage).toMatchObject({
-          textOffset: image.textOffset,
-          turnIndex: image.turnIndex,
+        expect(branch.fileReferenceAliases).toEqual({
+          attachments: { [image.attachment.id]: clonedImage.attachment.id },
+          workspaceAncestors: [turn.conversation.id],
+        });
+        expect(clonedImage).toEqual({
+          ...image,
+          attachment: { ...image.attachment, id: clonedImage.attachment.id },
         });
         const retry = yield* repo.resetMessageForRetry({
           expectedMessages: yield* repo.listMessages(turn.conversation.id),
@@ -1013,6 +1017,11 @@ describe("generated assistant image transactions", () => {
             .where(eq(messageChunks.messageId, turn.assistant.id)),
         ).toHaveLength(0);
         yield* service.deleteBlobs(retry.orphanedKeys);
+        yield* service.deleteBlobs(yield* repo.deleteConversation(userId, turn.conversation.id));
+        expect(yield* repo.getConversation(userId, branch.id)).toMatchObject({
+          branchedFrom: null,
+          fileReferenceAliases: branch.fileReferenceAliases,
+        });
         expect(
           Buffer.from(
             (yield* service.read({ userId, attachmentId: clonedImage.attachment.id })).bytes,

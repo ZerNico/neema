@@ -13,6 +13,8 @@ import {
 } from "@chat/desktop-rpc";
 import type { DesktopToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { DesktopActivityBlock } from "~/modules/chat/ui/desktop-activity-block.tsx";
+import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
+import { FileReferenceContext, FileReferenceMachine } from "~/modules/chat/ui/file-reference.tsx";
 import { LocalFileConversationProvider } from "./local-file-preview.tsx";
 
 const bridge = vi.hoisted(() => ({ client: null as DesktopClient | null }));
@@ -156,16 +158,18 @@ beforeEach(() => {
     "site/report.bin": { mediaType: "application/octet-stream", base64: "AAAA" },
   };
   let next = 0;
-  vi.stubGlobal("URL", {
-    ...URL,
-    createObjectURL: vi.fn((blob: Blob) => {
-      const url = `blob:test/${(next += 1)}`;
-      handed.push(url);
-      behind.set(url, blob);
-      return url;
+  vi.stubGlobal(
+    "URL",
+    Object.assign(class extends URL {}, {
+      createObjectURL: vi.fn((blob: Blob) => {
+        const url = `blob:test/${(next += 1)}`;
+        handed.push(url);
+        behind.set(url, blob);
+        return url;
+      }),
+      revokeObjectURL: vi.fn((url: string) => revoked.push(url)),
     }),
-    revokeObjectURL: vi.fn((url: string) => revoked.push(url)),
-  });
+  );
   // The dialog reads a text file back out of the URL it was handed.
   vi.stubGlobal("fetch", (url: string) =>
     Promise.resolve({ ok: true, text: () => behind.get(url)!.text() }),
@@ -295,6 +299,119 @@ describe("a work file row on the desktop", () => {
 
     show({ ...wrote("site/notes.md", "run_command"), args: { command: "ls" } });
     expect(screen.queryByRole("button", { name: /Wrote site\/notes\.md/ })).toBeNull();
+  });
+});
+
+const branchId = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
+const sourceId = "01a0df3a-9159-75d9-9270-2348eeeca617";
+const inlineView = (content: string, origin: string | null = "machine", streaming = false) => (
+  <QueryClientProvider client={new QueryClient()}>
+    <LocalFileConversationProvider
+      conversationId={branchId}
+      workspaceRoot={`/workspaces/${branchId}`}
+    >
+      <FileReferenceContext
+        value={{
+          attachments: new Map(),
+          aliases: { attachments: {}, workspaceAncestors: [sourceId] },
+          machineId: "machine",
+        }}
+      >
+        <FileReferenceMachine value={origin}>
+          <AssistantMarkdown content={content} streaming={streaming} />
+        </FileReferenceMachine>
+      </FileReferenceContext>
+    </LocalFileConversationProvider>
+  </QueryClientProvider>
+);
+const inlineLink = (path: string) => `[file](/local-file?path=${encodeURIComponent(path)})`;
+
+describe("inline Work file references over the desktop bridge", () => {
+  it("previews all five command-created images after streaming, reload and branching without attachment rows", async () => {
+    const paths = Array.from({ length: 5 }, (_, index) => `downloaded_images/image_${index}.jpg`);
+    for (const path of paths)
+      files[`/workspaces/${branchId}/${path}`] = { mediaType: "image/jpeg", base64: "AAAA" };
+    const content = paths.map((path) => inlineLink(`/workspaces/${sourceId}/${path}`)).join("\n\n");
+    const first = render(inlineView(content, "machine", true));
+    expect(asked).toEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "Preview image_0.jpg" }));
+    const dialog = await screen.findByRole("dialog");
+    first.rerender(inlineView(content + "\n\nFinished.", "machine", true));
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    first.unmount();
+    expect(revoked).toEqual(handed);
+    render(inlineView(content));
+    for (let index = 0; index < paths.length; index += 1) {
+      await userEvent.click(screen.getByRole("button", { name: `Preview image_${index}.jpg` }));
+      expect(await screen.findByRole("img", { name: `image_${index}.jpg` })).toHaveAttribute(
+        "src",
+        handed.at(-1),
+      );
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+    expect(asked).toEqual(
+      [paths[0]!, ...paths].map((path) => ({
+        tag: "readBinary",
+        path: `/workspaces/${branchId}/${path}`,
+      })),
+    );
+    expect(revoked).toEqual(handed);
+  });
+
+  it("does not fall back to a surviving source file when the branch copy is missing", async () => {
+    const path = `/workspaces/${sourceId}/missing.png`;
+    files[path] = { mediaType: "image/png", base64: "AAAA" };
+    render(inlineView(inlineLink(path)));
+    await userEvent.click(screen.getByRole("button", { name: "Preview missing.png" }));
+    await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
+    expect(asked).toEqual([{ tag: "readBinary", path: `/workspaces/${branchId}/missing.png` }]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each([null, "other-machine"])(
+    "refuses unknown or foreign machine provenance: %s",
+    async (origin) => {
+      render(inlineView(inlineLink(`/workspaces/${sourceId}/image.png`), origin));
+      const chip = screen.getByRole("button", { name: "Unavailable file: image.png" });
+      expect(chip).toBeDisabled();
+      await userEvent.click(chip);
+      expect(asked).toEqual([]);
+    },
+  );
+
+  it.each(["svg", "html"])(
+    "keeps inline %s files in the existing safe preview",
+    async (extension) => {
+      const path = `/attached/file.${extension}`;
+      files[path] = {
+        text:
+          extension === "svg"
+            ? '<svg xmlns="http://www.w3.org/2000/svg" onload="steal()"></svg>'
+            : "<script>steal()</script><h1>Hello</h1>",
+      };
+      render(inlineView(inlineLink(path)));
+      await userEvent.click(screen.getByRole("button", { name: `Preview file.${extension}` }));
+      await screen.findByRole("dialog");
+      expect(asked).toEqual([{ tag: "readFile", path }]);
+      expect(document.querySelector("svg[onload], script, iframe")).toBeNull();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+      expect(behind.get(handed[0]!)?.type).toBe(
+        extension === "svg" ? "image/svg+xml" : "text/plain",
+      );
+    },
+  );
+
+  it("uses Windows filenames in the preview and preserves absolute paths for reveal", async () => {
+    const path = "C:\\attached\\image.png";
+    files[path] = { mediaType: "image/png", base64: "AAAA" };
+    const row = wrote(path);
+    show(row);
+    await userEvent.click(screen.getByRole("button", { name: row.result!.summary! }));
+    await screen.findByRole("img", { name: "image.png" });
+    await userEvent.click(screen.getByRole("button", { name: "Show in folder" }));
+    await waitFor(() => expect(asked.at(-1)).toEqual({ tag: "revealPath:reveal", path }));
   });
 });
 
