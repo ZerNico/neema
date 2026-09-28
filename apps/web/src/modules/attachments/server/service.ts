@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { AttachmentNotAvailable, AttachmentRejected, BlobStoreError } from "../errors.ts";
 import type { AttachmentKind } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
 import { canAccessAttachment } from "./policy.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { AttachmentRepo, type AttachmentAssociation } from "./repo.ts";
 import { validateAttachment } from "./validation.ts";
+import { sha256Hex } from "./sha256.ts";
 
 // Uploads that were never sent (tab closed, draft abandoned) are swept once a
 // day's grace has passed. The sweep also runs at startup so a restart does not
@@ -51,6 +50,17 @@ export class AttachmentService extends Context.Service<
       attachmentId: string;
     }): Effect.Effect<AttachmentBytes, AttachmentNotAvailable>;
     /**
+     * The access check and metadata alone; bytes load only when asked, so a
+     * cached derivative of the content can be served without reading them.
+     */
+    open(input: {
+      userId: string;
+      attachmentId: string;
+    }): Effect.Effect<
+      Omit<AttachmentBytes, "bytes"> & { sha256: string; bytes: Effect.Effect<Uint8Array> },
+      AttachmentNotAvailable
+    >;
+    /**
      * Removes bytes whose last row a committed transaction just deleted.
      * Callers pass the keys those repo methods returned.
      */
@@ -62,7 +72,6 @@ export class AttachmentService extends Context.Service<
   static readonly layer = Layer.effect(
     AttachmentService,
     Effect.gen(function* () {
-      const policy = yield* FeaturePolicy;
       const repo = yield* AttachmentRepo;
       const store = yield* BlobStore;
 
@@ -92,11 +101,6 @@ export class AttachmentService extends Context.Service<
         allowedKinds?: ReadonlyArray<AttachmentKind>;
         association?: AttachmentAssociation;
       }) {
-        if (!input.allowedKinds && !(yield* policy.can(input.userId, "attachments")))
-          return yield* new AttachmentRejected({
-            cause: "type",
-            reason: "attachments are unavailable",
-          });
         const validated = yield* validateAttachment({
           fileName: input.fileName,
           declaredMediaType: input.declaredMediaType,
@@ -111,7 +115,7 @@ export class AttachmentService extends Context.Service<
 
         // Hashed here, over the bytes we actually received: a client-supplied
         // hash would be both untrustworthy and a free existence oracle.
-        const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+        const sha256 = sha256Hex(input.bytes);
         const storageKey = blobStorageKey(input.userId, sha256);
 
         // Before the bytes exist: an interrupted upload leaves an object whose
@@ -144,7 +148,7 @@ export class AttachmentService extends Context.Service<
         yield* deleteBlobs(keys);
       });
 
-      const read = Effect.fn("AttachmentService.read")(function* (input: {
+      const open = Effect.fn("AttachmentService.open")(function* (input: {
         userId: string;
         attachmentId: string;
       }) {
@@ -153,17 +157,30 @@ export class AttachmentService extends Context.Service<
         if (!record || !canAccessAttachment(input.userId, record)) {
           return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentId });
         }
-        const bytes = yield* store.get(record.attachment.storageKey).pipe(
-          // Rows without bytes mean the store and the database drifted; that is
-          // a server fault, not a "not found" for the caller to interpret.
-          Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
-          Effect.orDie,
-        );
         return {
           fileName: record.attachment.fileName,
           mediaType: record.attachment.mediaType,
           size: record.attachment.size,
-          bytes,
+          sha256: record.attachment.sha256,
+          bytes: store.get(record.attachment.storageKey).pipe(
+            // Rows without bytes mean the store and the database drifted; that is
+            // a server fault, not a "not found" for the caller to interpret.
+            Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
+            Effect.orDie,
+          ),
+        };
+      });
+
+      const read = Effect.fn("AttachmentService.read")(function* (input: {
+        userId: string;
+        attachmentId: string;
+      }) {
+        const file = yield* open(input);
+        return {
+          fileName: file.fileName,
+          mediaType: file.mediaType,
+          size: file.size,
+          bytes: yield* file.bytes,
         } satisfies AttachmentBytes;
       });
 
@@ -209,7 +226,7 @@ export class AttachmentService extends Context.Service<
         Effect.forkScoped,
       );
 
-      return AttachmentService.of({ upload, remove, read, deleteBlobs, purgeUserFiles });
+      return AttachmentService.of({ upload, remove, read, open, deleteBlobs, purgeUserFiles });
     }),
   );
 }

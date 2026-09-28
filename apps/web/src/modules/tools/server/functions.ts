@@ -135,6 +135,19 @@ export const updateUrlReaderTool = createServerFn({ method: "POST" })
     );
   });
 
+export const getOfficeFilesTool = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("office_files"))));
+
+export const updateOfficeFilesTool = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(Schema.Struct({ enabled: Schema.Boolean })))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      ToolsRepo.use((repo) => repo.updateTool("office_files", { enabled: data.enabled })),
+    ),
+  );
+
 export const getDocumentParserTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("document_parser"))));

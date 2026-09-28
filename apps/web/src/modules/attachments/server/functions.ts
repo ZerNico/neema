@@ -6,6 +6,8 @@ import { MAX_ATTACHMENT_BYTES } from "../constants.ts";
 import { AttachmentIdInput } from "../schema.ts";
 import { AttachmentService } from "./service.ts";
 import { DocumentParser } from "./document-parser.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { AttachmentRejected } from "../errors.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -31,14 +33,27 @@ export const uploadAttachment = createServerFn({ method: "POST" })
     const file = readUpload(data);
     const bytes = new Uint8Array(await file.arrayBuffer());
     return runtime.runPromise(
-      AttachmentService.use((service) =>
-        service.upload({
-          userId: context.session.user.id,
-          fileName: file.name,
-          declaredMediaType: file.type,
-          bytes,
-        }),
-      ).pipe(
+      Effect.gen(function* () {
+        // The feature governs what a person uploads; files a tool or the model
+        // produces, and kept drafts, are stored without it.
+        if (
+          !(yield* FeaturePolicy.use((policy) =>
+            policy.can(context.session.user.id, "attachments"),
+          ))
+        )
+          return yield* new AttachmentRejected({
+            cause: "type",
+            reason: "attachments are unavailable",
+          });
+        return yield* AttachmentService.use((service) =>
+          service.upload({
+            userId: context.session.user.id,
+            fileName: file.name,
+            declaredMediaType: file.type,
+            bytes,
+          }),
+        );
+      }).pipe(
         Effect.catchTag("AttachmentRejected", (error) =>
           Effect.die(new Response(error.reason, { status: error.cause === "size" ? 413 : 415 })),
         ),

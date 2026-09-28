@@ -268,6 +268,9 @@ export const RetryMessageInput = Schema.Struct({
   openDocumentId: OpenDocumentId,
 });
 
+/** Continues the last answer; the same fields as a retry. */
+export const ResumeMessageInput = RetryMessageInput;
+
 /** Forks the conversation at this assistant message into a new one. */
 export const BranchConversationInput = Schema.Struct({
   conversationId: Schema.String,

@@ -25,6 +25,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
+import { useFileDrop } from "~/ui/use-file-drop.ts";
 import { toast } from "sonner";
 import { knowledgeCollectionQuery } from "../client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -271,10 +272,6 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const syncable = useSyncableIntegrations();
   const fileInput = useRef<HTMLInputElement>(null);
   const replacing = useRef<string | null>(null);
-  // Same depth-counted drag tracking as the composer: dragenter/dragleave fire
-  // for every child, so a counter keeps the highlight from flickering.
-  const dragDepth = useRef(0);
-  const [dragging, setDragging] = useState(false);
   const reduced = useAppReducedMotion();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["knowledge"] });
 
@@ -299,6 +296,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const uploadMany = (files: Iterable<File>) => {
     for (const file of files) upload.mutate({ file, documentId: null });
   };
+  const canEdit = !!detail.data?.collection.canEdit && !!capabilities?.knowledgeCreate;
+  const full = (detail.data?.documents.length ?? 0) >= KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
+  const { dragging, handlers: dropHandlers } = useFileDrop({
+    enabled: canEdit && !full,
+    onDrop: uploadMany,
+  });
   const remove = useMutation({
     mutationFn: (documentId: string) => deleteKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
@@ -350,8 +353,6 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       </Page>
     );
   const { collection, documents } = detail.data;
-  const canEdit = collection.canEdit && !!capabilities?.knowledgeCreate;
-  const full = documents.length >= KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
   // Synced pages are listed under their source, not one row each here; they
   // still count toward the collection's limit.
   const ownDocuments = documents.filter((document) => !document.source);
@@ -360,35 +361,6 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const pickFile = (documentId: string | null) => {
     replacing.current = documentId;
     fileInput.current?.click();
-  };
-  const acceptDrop = (event: React.DragEvent) =>
-    canEdit && !full && event.dataTransfer.types.includes("Files");
-  const dropHandlers = {
-    onDragEnter: (event: React.DragEvent) => {
-      if (!acceptDrop(event)) return;
-      event.preventDefault();
-      dragDepth.current += 1;
-      setDragging(true);
-    },
-    onDragOver: (event: React.DragEvent) => {
-      if (!acceptDrop(event)) return;
-      event.preventDefault();
-    },
-    onDragLeave: (event: React.DragEvent) => {
-      if (!acceptDrop(event)) return;
-      dragDepth.current -= 1;
-      if (dragDepth.current <= 0) {
-        dragDepth.current = 0;
-        setDragging(false);
-      }
-    },
-    onDrop: (event: React.DragEvent) => {
-      if (!acceptDrop(event)) return;
-      event.preventDefault();
-      dragDepth.current = 0;
-      setDragging(false);
-      uploadMany(event.dataTransfer.files);
-    },
   };
 
   return (

@@ -75,7 +75,13 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   is a reader for it, for the rest of that answer; the tool row keeps only which file and
   version. A save takes either text content or a chat file by id or name, and runs under
   the answer's generation fence, taken before the project row.
-- A custom tool reads a project file through a file parameter, and its result names the
-  version it read, so the model can save the tool's output as the next version under the
-  same check a person's save gets. Nothing saves a tool's output on its own: the version
-  check depends on the model saying what it started from.
+- A custom or presentation tool reads a project file through an authorized, pinned
+  reference. Its result names the version it read; it can edit a private working copy,
+  but only a published attachment can be passed to `save_project_file` as the next
+  version under the same conflict check a person's save gets. Nothing saves a tool's
+  output to the project on its own: the version check depends on naming the version
+  it started from. Opening and publishing a draft ask only whether the sender may still
+  read the version it came from (a role in the project, and that version still kept), so
+  a newer version does not block publication while losing membership does. The read-only
+  slide preview reauthorizes immutable project versions on each request; it does not
+  change version retention.

@@ -277,7 +277,12 @@ export const executeDesktopTool = (
             (error) => error.reason === "not-text",
             () =>
               Effect.map(
-                client.readBinary({ callId: activity.callId, conversationId, path }),
+                client.readBinary({
+                  callId: activity.callId,
+                  conversationId,
+                  path,
+                  purpose: "view",
+                }),
                 (file) => ({
                   v: 1 as const,
                   ok: true,
@@ -288,6 +293,20 @@ export const executeDesktopTool = (
                 }),
               ),
           ),
+        );
+      case "import_local_file":
+        // Bytes for the server's tools, not for the model to look at; the loop
+        // turns them into a working file and answers with its reference.
+        return Effect.map(
+          client.readBinary({ callId: activity.callId, conversationId, path, purpose: "import" }),
+          (file) => ({
+            v: 1 as const,
+            ok: true,
+            summary: `Imported ${file.path}`,
+            detail: `${file.mediaType}, ${formatFileSize(file.bytes)}`,
+            truncated: false,
+            file: { mediaType: file.mediaType, base64: file.base64, name: file.path },
+          }),
         );
       case "write_local_file":
         return Effect.map(

@@ -65,4 +65,18 @@ describe("acceptDesktopToolResult", () => {
       ).ok,
     ).toBe(false);
   });
+
+  it("lets an imported PowerPoint through only when it is a ZIP package", () => {
+    const pptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+    const accepted = acceptDesktopToolResult(
+      ok({ file: { mediaType: pptx, base64: zip.toString("base64"), name: "deck.pptx" } }),
+    );
+    expect(accepted.file?.mediaType).toBe(pptx);
+    const disguised = acceptDesktopToolResult(
+      ok({ file: { mediaType: pptx, base64: png(20).toString("base64"), name: "deck.pptx" } }),
+    );
+    expect(disguised).toMatchObject({ ok: false });
+    expect(disguised.file).toBeUndefined();
+  });
 });

@@ -41,10 +41,11 @@ className={buttonVariants({...})}>`.
   cannot carry, so between them the two wanted sixty exemptions to catch two real magic numbers.
   `require-static-classes` cannot see through a variable, so it rejects the shared row constants every
   activity block composes.
-- Two surfaces exist only because several screens had each rebuilt them inline, which is the drift this
+- Three pieces exist only because several screens had each rebuilt them inline, which is the drift this
   file warns about: `segmented-control.tsx` (the pill form of a toggle group — the primitive's own shape
-  is a joined bar) and `focus-ring.ts` (the ring a focusable surface takes when it is not a Button, which
-  carries its own). A preview on hover is the `hover-card` primitive (Base UI `PreviewCard`), not a
+  is a joined bar), `focus-ring.ts` (the ring a focusable surface takes when it is not a Button, which
+  carries its own) and `use-file-drop.ts` (a file drop target's depth-counted highlight, which the
+  composer, a collection and the font list had each written). A preview on hover is the `hover-card` primitive (Base UI `PreviewCard`), not a
   restyled tooltip: a tooltip's content cannot hold links, and a citation preview lists sources to open. `--radius-composer` is the composer's corner, off Tailwind's scale, with
   `--radius-composer-inner` the concentric radius for anything sitting `inset-1` within it.
 - `Button` already has an `xs` size (24px tall). Reach for it before writing `h-6` and a padding
@@ -173,7 +174,10 @@ false`), so a page body is written against data already there. This includes loc
   Filter both tours and the page by the effective [feature policy](feature-policy.md): a Use-only
   reader sees use-oriented copy, and a hidden feature remains unseen for a later grant.
 - One state, one word. A document being prepared says "preparing" in the knowledge pages, the
-  collection page and the composer's picker; it used to say "indexing" in one of the three.
+  collection page and the composer's picker; it used to say "indexing" in one of the three. A
+  working file is "Working", "Published" or, once the answer ends unpublished, a "Draft" in every
+  transcript row (`workingFileState`), never "Not saved": a kept draft is saved. A failed step
+  says what it could not do; the error text written for the model stays out of the transcript.
 
 ## Icons and text
 

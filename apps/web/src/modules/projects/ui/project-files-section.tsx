@@ -14,6 +14,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
+import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
+import { presentationSource } from "~/modules/attachments/ui/presentation-preview.tsx";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { toastError } from "~/ui/error-toast.ts";
@@ -183,6 +185,7 @@ function ProjectFileRow({
   onHistory: () => void;
 }) {
   const confirm = useConfirm();
+  const [previewOpen, setPreviewOpen] = useState(false);
   const queryClient = useQueryClient();
   const upload = useUpload(projectId);
   const picker = useFilePicker((picked) => upload.mutate({ file: picked, target: file }));
@@ -192,6 +195,10 @@ function ProjectFileRow({
     onError: (error) => toastError("Could not delete the file.", error),
   });
   const by = file.origin === "model" ? "the assistant" : file.updatedBy;
+  const presentation = presentationSource(
+    { fileName: file.name, mediaType: file.mediaType },
+    { kind: "project-version", id: file.versionId },
+  );
   const detail = [
     `Version ${file.version}`,
     formatFileSize(file.size),
@@ -209,6 +216,24 @@ function ProjectFileRow({
           {upload.isPending ? "Uploading a new version…" : detail}
         </span>
       </div>
+      {presentation ? (
+        <>
+          <Button size="sm" variant="outline" onClick={() => setPreviewOpen(true)}>
+            Preview
+          </Button>
+          <AttachmentPreviewDialog
+            target={{
+              fileName: file.name,
+              size: file.size,
+              kind: "file",
+              url: downloadHref(file.versionId),
+              presentation,
+            }}
+            open={previewOpen}
+            onOpenChange={setPreviewOpen}
+          />
+        </>
+      ) : null}
       <a
         href={downloadHref(file.versionId)}
         download={file.name}

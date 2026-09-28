@@ -79,6 +79,418 @@ describe("MessageBubble chronological body", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
+  const edit: ToolActivity = {
+    family: "presentation",
+    name: "edit_presentation",
+    callId: "edit-one",
+    status: "complete",
+    textOffset: 0,
+    turnIndex: 0,
+    callIndex: 0,
+    workingFileId: "draft-one",
+    revision: 1,
+    outcome: "working",
+    message: "Private draft updated.",
+    origin: "created",
+    changes: "Added a slide and wrote the text",
+    slideCount: 2,
+  };
+  const check: ToolActivity = {
+    family: "presentation",
+    name: "render_presentation",
+    callId: "render-one",
+    status: "complete",
+    textOffset: 0,
+    turnIndex: 1,
+    callIndex: 0,
+    workingFileId: "draft-one",
+    revision: 1,
+    outcome: "complete",
+    message: "Approximate slide images follow.",
+    renderedSlideIds: [256, 257],
+  };
+
+  it("keeps a run of reads live while the model thinks, and names what each read covered", () => {
+    const read = (callIndex: number, extra: Partial<ToolActivity>): ToolActivity =>
+      ({
+        family: "presentation",
+        name: "inspect_presentation",
+        callId: `read-${callIndex}`,
+        status: "complete",
+        textOffset: 0,
+        turnIndex: 0,
+        callIndex,
+        outcome: "complete",
+        message: "Inspection covers the listed page only.",
+        slideCount: 24,
+        ...extra,
+      }) as ToolActivity;
+    const reads = [
+      read(0, { read: { from: 1, to: 10 } }),
+      read(1, { read: { from: 11, to: 20 } }),
+      read(2, { read: { from: 1, to: 10, slides: [5] } }),
+      read(3, { read: { from: 1, to: 10, slides: [5] } }),
+      read(4, { read: { from: 1, to: 10, slides: [18, 6, 7] } }),
+      read(5, { read: { from: 1, to: 10, slides: [3, 4] } }),
+      read(6, { read: { from: 1, to: 10, template: "layout" } }),
+      read(7, { read: { from: 1, to: 10, template: "master" } }),
+    ];
+    const { rerender } = render(
+      <MessageBubble
+        message={{ ...base, status: "streaming", content: "", toolActivities: reads }}
+      />,
+    );
+    // Between calls the model is still working: live, not "Read presentation",
+    // and without a second label repeating the first.
+    const header = screen.getByRole("button", { name: "Reading presentation" });
+    expect(screen.queryByText("Reading slides")).toBeNull();
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    fireEvent.click(header);
+    expect(screen.getByText("Read slides 1–10")).toBeInTheDocument();
+    expect(screen.getByText("Read slides 11–20")).toBeInTheDocument();
+    expect(screen.getByText("Read slide 5 · 2 times")).toBeInTheDocument();
+    expect(screen.getByText("Read slides 6, 7 and 18")).toBeInTheDocument();
+    expect(screen.getByText("Read slides 3–4")).toBeInTheDocument();
+    expect(screen.getByText("Read slide layout")).toBeInTheDocument();
+    expect(screen.getByText("Read slide master")).toBeInTheDocument();
+    expect(screen.queryByText(/Checked appearance/)).toBeNull();
+    // Editing a deck it has read is editing, not creating one.
+    rerender(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: "",
+          toolActivities: [
+            ...reads,
+            { ...edit, callId: "open", status: "running", callIndex: 7, workingFileId: undefined },
+          ] as ToolActivity[],
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^Working on presentation\s?Editing slides/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Creating the deck")).toBeNull();
+    // While the model is still writing the call, the row says so.
+    rerender(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: "",
+          toolActivities: [
+            ...reads,
+            {
+              family: "presentation",
+              name: "edit_presentation",
+              callId: "writing:call",
+              status: "running",
+              textOffset: 0,
+              turnIndex: 1,
+              callIndex: Number.MAX_SAFE_INTEGER,
+              writing: true,
+            },
+          ],
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^Working on presentation\s?Writing changes/ }),
+    ).toBeInTheDocument();
+    rerender(<MessageBubble message={{ ...base, content: "", toolActivities: reads }} />);
+    expect(screen.getByRole("button", { name: "Read presentation" })).toBeInTheDocument();
+  });
+
+  it("shows a published draft as one line with its file beneath and steps on demand", () => {
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          content: "",
+          toolActivities: [
+            edit,
+            check,
+            {
+              family: "tool-file",
+              name: "publish_file",
+              callId: "publish-one",
+              status: "complete",
+              textOffset: 0,
+              turnIndex: 2,
+              callIndex: 0,
+              workingFileId: "draft-one",
+              attachmentId: "deck-file",
+            },
+          ],
+          files: [
+            {
+              v: 1,
+              attachment: {
+                id: "deck-file",
+                fileName: "Q3.pptx",
+                size: 10240,
+                mediaType:
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                kind: "file",
+              },
+              textOffset: 0,
+              turnIndex: 2,
+              eventIndex: 1,
+              callIndex: 0,
+            },
+          ],
+        }}
+      />,
+    );
+    const header = screen.getByRole("button", { name: "Created presentation · 2 slides" });
+    expect(screen.getAllByText("Q3.pptx")).toHaveLength(1);
+    expect(screen.queryByText(/File ready/)).toBeNull();
+    fireEvent.click(header);
+    expect(screen.getByText("Started a new deck")).toBeInTheDocument();
+    expect(screen.getByText("Built the slides")).toBeInTheDocument();
+    expect(screen.queryByText(/added a slide and wrote/)).toBeNull();
+    expect(screen.getByText("Checked appearance of 2 slides")).toBeInTheDocument();
+    expect(screen.getByText("Published Q3.pptx")).toBeInTheDocument();
+  });
+
+  it("does not badge a recovered step failure on a delivered presentation, nor show its model text", () => {
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          content: "",
+          toolActivities: [
+            edit,
+            {
+              ...edit,
+              callId: "bad-edit",
+              status: "error",
+              outcome: "error",
+              error: "invalid_operation: Provide exactly one of create, sourceRef or workingRef.",
+            },
+            {
+              ...edit,
+              callId: "fixed-edit",
+              revision: 2,
+            },
+            {
+              family: "tool-file",
+              name: "publish_file",
+              callId: "publish",
+              status: "complete",
+              textOffset: 0,
+              turnIndex: 3,
+              callIndex: 0,
+              workingFileId: "draft-one",
+              attachmentId: "deck-file",
+            },
+          ],
+        }}
+      />,
+    );
+    const header = screen.getByRole("button", { name: "Created presentation · 2 slides" });
+    expect(header).not.toHaveTextContent("step failed");
+    fireEvent.click(header);
+    expect(screen.getByText("Couldn’t apply an edit")).toBeInTheDocument();
+    expect(screen.queryByText(/Provide exactly one of create/)).toBeNull();
+  });
+
+  it("names each kind of failed step in reader words", () => {
+    const failure = (callId: string, name: string, callIndex: number): ToolActivity => ({
+      family: "presentation",
+      name,
+      callId,
+      status: "error",
+      textOffset: 0,
+      turnIndex: 1,
+      callIndex,
+      workingFileId: "draft-one",
+      outcome: "error",
+      message: "invalid_operation: operations[8] setText.placeholder: unknown",
+      error: "invalid_operation: operations[8] setText.placeholder: unknown",
+    });
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          content: "",
+          toolActivities: [
+            edit,
+            failure("bad-read", "inspect_presentation", 0),
+            failure("bad-check", "render_presentation", 1),
+            failure("bad-edit", "edit_presentation", 2),
+            {
+              family: "tool-file",
+              name: "publish_file",
+              callId: "bad-publish",
+              status: "error",
+              textOffset: 0,
+              turnIndex: 2,
+              callIndex: 0,
+              workingFileId: "draft-one",
+              error: "attachment_limit: 5 files per message",
+            },
+          ],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Presentation draft/ }));
+    for (const label of [
+      "Couldn’t read the presentation",
+      "Couldn’t check the slides",
+      "Couldn’t apply an edit",
+      "Couldn’t publish the file",
+    ])
+      expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid_operation|attachment_limit/)).toBeNull();
+  });
+
+  it("says a first edit creates the deck in the header and the steps alike", () => {
+    const first: ToolActivity = {
+      family: "presentation",
+      name: "edit_presentation",
+      callId: "first-edit",
+      status: "running",
+      textOffset: 0,
+      turnIndex: 0,
+      callIndex: 0,
+    };
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: "",
+          toolActivities: [first],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Working on presentation/ }));
+    expect(screen.getAllByText("Creating the deck")).toHaveLength(2);
+    expect(screen.queryByText("Editing slides")).toBeNull();
+  });
+
+  it("keeps an unfinished draft as the live line instead of Thinking, then labels the unpublished draft", () => {
+    const failed: ToolActivity = {
+      family: "presentation",
+      name: "edit_presentation",
+      callId: "edit-two",
+      status: "error",
+      textOffset: 0,
+      turnIndex: 2,
+      callIndex: 0,
+      outcome: "error",
+      message: "invalid_operation: operations[0] addText: missing x",
+      error: "invalid_operation: operations[0] addText: missing x",
+    };
+    const { rerender } = render(
+      <MessageBubble
+        message={{ ...base, status: "streaming", content: "", toolActivities: [edit, check] }}
+      />,
+    );
+    expect(screen.getByText("Working on presentation")).toBeInTheDocument();
+    // Keep the live label short; the individual steps are in the disclosure.
+    expect(screen.getByText("Checking appearance")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    rerender(
+      <MessageBubble
+        message={{
+          ...base,
+          status: "streaming",
+          content: "",
+          toolActivities: [edit, check, { ...failed, status: "running", callId: "edit-running" }],
+        }}
+      />,
+    );
+    // A running call has no file ID yet; it must not open a second row.
+    expect(screen.getAllByRole("button", { name: /presentation|slides/i })).toHaveLength(1);
+    expect(screen.getByText("Editing slides")).toBeInTheDocument();
+    rerender(
+      <MessageBubble message={{ ...base, content: "", toolActivities: [edit, check, failed] }} />,
+    );
+    expect(screen.getByText("1 step failed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Presentation draft/ }));
+    expect(screen.getByText("Couldn’t apply an edit")).toBeInTheDocument();
+    expect(screen.getByLabelText("Failed")).toBeInTheDocument();
+  });
+
+  it("labels a draft split by narration by what each part did, and never calls it unsaved once published", () => {
+    const content = "Looks good. Publishing now.";
+    const later = (
+      activity: ToolActivity,
+      textOffset: number,
+      turnIndex: number,
+    ): ToolActivity => ({
+      ...activity,
+      callId: `${activity.callId}-${turnIndex}`,
+      textOffset,
+      turnIndex,
+    });
+    const tools: ToolActivity[] = [
+      edit,
+      check,
+      later(
+        {
+          family: "presentation",
+          name: "edit_presentation",
+          callId: "edit-revision",
+          status: "complete",
+          workingFileId: "draft-one",
+          revision: 2,
+          outcome: "working",
+          message: "Private draft updated.",
+          changes: "Added text",
+          slideCount: 2,
+          renderedSlideIds: [257],
+        },
+        27,
+        2,
+      ),
+      later(check, 27, 3),
+    ];
+    const { rerender } = render(
+      <MessageBubble message={{ ...base, status: "streaming", content, toolActivities: tools }} />,
+    );
+    // Only the newest part is live; the earlier one says what it did.
+    expect(
+      screen.getByRole("button", { name: "Created presentation · 2 slides" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Working on presentation")).toBeInTheDocument();
+    rerender(
+      <MessageBubble
+        message={{
+          ...base,
+          content,
+          toolActivities: [
+            ...tools,
+            {
+              family: "tool-file",
+              name: "publish_file",
+              callId: "publish-late",
+              status: "complete",
+              textOffset: 27,
+              turnIndex: 4,
+              callIndex: 0,
+              workingFileId: "draft-one",
+              attachmentId: "deck-late",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Created presentation · 2 slides" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edited presentation · 2 slides" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edited presentation · 2 slides" }));
+    expect(screen.getByText("Edited the slides")).toBeInTheDocument();
+    expect(screen.getByText("Checked slide appearance")).toBeInTheDocument();
+  });
+
   it("does not reveal an activity until displayed text reaches its fixed anchor", () => {
     const { rerender } = render(
       <MessageBubble
@@ -971,6 +1383,62 @@ describe("MessageBubble actions", () => {
     expect(onRetryWith).toHaveBeenCalledWith("model-2");
     // Switching models is its own path; the same-model retry must not fire.
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("offers resume beside try again on a failed answer and resumes with the same model", async () => {
+    const onResume = vi.fn();
+    const onResumeWith = vi.fn();
+    const onRetry = vi.fn();
+    renderPlain({
+      status: "error",
+      content: "Half a deck",
+      onRetry,
+      onResume,
+      onResumeWith,
+      retryModelId: "model-1",
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    within(alert).getByRole("combobox", { name: "Resume" }).click();
+    (await screen.findByRole("button", { name: /Resume same/ })).click();
+
+    expect(onResume).toHaveBeenCalledOnce();
+    expect(onResumeWith).not.toHaveBeenCalled();
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("resumes a stopped answer with no text, on another model", async () => {
+    const onResume = vi.fn();
+    const onResumeWith = vi.fn();
+    renderPlain({
+      status: "aborted",
+      content: "",
+      onResume,
+      onResumeWith,
+      retryModelId: "model-1",
+    });
+
+    expect(screen.getByText("Stopped.")).toBeInTheDocument();
+    screen.getByRole("combobox", { name: "Resume" }).click();
+    (await screen.findByRole("option", { name: /Other Model/ })).click();
+
+    expect(onResumeWith).toHaveBeenCalledWith("model-2");
+    expect(onResume).not.toHaveBeenCalled();
+  });
+
+  it("offers no resume where the chat view wired none, and disables it while busy", () => {
+    const { unmount } = renderPlain({ status: "aborted", content: "" });
+    expect(screen.queryByRole("combobox", { name: "Resume" })).toBeNull();
+    unmount();
+    renderPlain({
+      status: "aborted",
+      content: "",
+      onResume: vi.fn(),
+      onResumeWith: vi.fn(),
+      retryDisabled: true,
+    });
+    expect(screen.getByRole("combobox", { name: "Resume" })).toBeDisabled();
   });
 
   it("offers edit only when a user message wires it", () => {

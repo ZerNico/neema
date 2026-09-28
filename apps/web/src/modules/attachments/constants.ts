@@ -2,7 +2,11 @@
 // (chip UI, paste handling, file picker) and the server (validation), so this
 // module must stay free of node/browser-only imports.
 
-export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+import { LIMITS } from "@chat/desktop-rpc/schema";
+
+// One bound for a whole file anywhere: an attachment, a working draft, a file
+// the desktop reads or saves. The subpath brings in the limits, not the RPC group.
+export const MAX_ATTACHMENT_BYTES = LIMITS.binaryBytes;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 
 /** Pasting more than this becomes a text attachment instead of draft text. */
@@ -20,6 +24,8 @@ export const TEXT_MEDIA_TYPE = "text/plain";
 
 /** Anything that is none of the others: kept and downloadable, never shown inline. */
 export const GENERIC_MEDIA_TYPE = "application/octet-stream";
+export const PPTX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 export type AttachmentKind = "image" | "pdf" | "text" | "file";
 
@@ -128,7 +134,7 @@ const FILE_MEDIA_TYPES: Record<string, string> = {
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odt: "application/vnd.oasis.opendocument.text",
   ogg: "audio/ogg",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pptx: PPTX_MEDIA_TYPE,
   rtf: "application/rtf",
   svg: "image/svg+xml",
   tar: "application/x-tar",

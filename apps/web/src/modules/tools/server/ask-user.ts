@@ -1,44 +1,38 @@
 import { Effect, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { AskUserParams, AskUserResult } from "../ask-user-schema.ts";
-import type { ToolGroup } from "./toolset.ts";
+import { advertisedParameter, type ToolGroup } from "./toolset.ts";
 import { extractUserUrls } from "./user-urls.ts";
 
 // As with save_memory, validate in the handler so bad model arguments produce
 // a recoverable tool result rather than failing parameter decoding mid-stream.
 const TransportParams = Schema.Struct({
-  questions: Schema.optionalKey(
-    Schema.Any.check(
-      Schema.makeFilter(() => true, {
-        toJsonSchema: () => ({
+  questions: advertisedParameter({
+    type: "array",
+    minItems: 1,
+    maxItems: 4,
+    items: {
+      type: "object",
+      required: ["question", "options", "multiSelect"],
+      properties: {
+        question: { type: "string", minLength: 1, maxLength: 1000 },
+        header: { type: "string", minLength: 1, maxLength: 40 },
+        multiSelect: { type: "boolean" },
+        options: {
           type: "array",
-          minItems: 1,
           maxItems: 4,
           items: {
             type: "object",
-            required: ["question", "options", "multiSelect"],
+            required: ["label"],
             properties: {
-              question: { type: "string", minLength: 1, maxLength: 1000 },
-              header: { type: "string", minLength: 1, maxLength: 40 },
-              multiSelect: { type: "boolean" },
-              options: {
-                type: "array",
-                maxItems: 4,
-                items: {
-                  type: "object",
-                  required: ["label"],
-                  properties: {
-                    label: { type: "string", minLength: 1, maxLength: 160 },
-                    description: { type: "string", minLength: 1, maxLength: 500 },
-                  },
-                },
-              },
+              label: { type: "string", minLength: 1, maxLength: 160 },
+              description: { type: "string", minLength: 1, maxLength: 500 },
             },
           },
-        }),
-      }),
-    ),
-  ),
+        },
+      },
+    },
+  }),
 });
 
 export const askUserTool = Tool.make("ask_user", {

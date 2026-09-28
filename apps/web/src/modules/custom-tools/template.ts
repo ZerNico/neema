@@ -12,7 +12,7 @@ export default defineModule({
   }),
 
   // A file parameter: the assistant passes a file from the chat or its
-  // project, and run receives its bytes. Files returned become attachments.
+  // project, and run receives its bytes. Choose working or published delivery.
   shout_file: defineTool({
     name: "Shout a text file",
     description: "Return an upper-cased copy of a text file.",
@@ -21,7 +21,7 @@ export default defineModule({
     }),
     run: async ({ source }) => ({
       text: \`Upper-cased \${source.name} (\${source.size} bytes).\`,
-      files: [file(source.text().toUpperCase(), { name: \`loud-\${source.name}\` })],
+      files: [file(source.text().toUpperCase(), { name: \`loud-\${source.name}\`, delivery: "publish" })],
     }),
   }),
 });

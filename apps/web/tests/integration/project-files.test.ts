@@ -369,7 +369,7 @@ describe("project files", () => {
   });
 
   it("hands a tool only files from this chat or its project, by id or name", async () => {
-    const { owner, viewer, projectId } = await setup();
+    const { owner, editor, viewer, projectId } = await setup();
     const chat = uuidv7();
     const otherChat = uuidv7();
     await db((d) =>
@@ -397,10 +397,10 @@ describe("project files", () => {
     };
     const brief = await attach(chat, "brief.md", "# Brief");
     await attach(otherChat, "secret.md", "elsewhere");
-    await files((s) =>
+    const deck = await files((s) =>
       s.write(person(owner), { projectId, name: "deck.bin", bytes: new Uint8Array([1, 2, 3]) }),
     );
-    const resolverFor = (userId: string) =>
+    const toolFilesFor = (userId: string) =>
       run(
         Effect.gen(function* () {
           return makeToolFileResolver({
@@ -413,6 +413,7 @@ describe("project files", () => {
           });
         }),
       );
+    const resolverFor = async (userId: string) => (await toolFilesFor(userId)).resolve;
     const resolve = await resolverFor(owner);
     const byName = await run(resolve("brief.md"));
     expect(byName).toMatchObject({
@@ -434,5 +435,34 @@ describe("project files", () => {
     const asViewer = await resolverFor(viewer);
     await expect(run(asViewer("brief.md"))).rejects.toThrow("No file");
     expect(await run(asViewer("deck.bin"))).toMatchObject({ source: { kind: "project" } });
+
+    // A draft opened from version 1 stays publishable after version 2 lands:
+    // publication asks only whether that version is still readable.
+    const pinned = `project:${deck.id}@1`;
+    // Another member's save, so it is not folded into the owner's own version.
+    const second = await files((s) =>
+      s.write(person(editor), {
+        projectId,
+        fileId: deck.id,
+        name: "deck.bin",
+        bytes: new Uint8Array([4, 5, 6]),
+        basedOnVersion: 1,
+      }),
+    );
+    expect(second.version).toBe(2);
+    const ownerFiles = await toolFilesFor(owner);
+    await expect(run(ownerFiles.resolve(pinned))).rejects.toThrow("changed since");
+    expect(await run(ownerFiles.authorize(pinned))).toBe(true);
+    expect(await run(ownerFiles.authorize(`attachment:${brief.id}`))).toBe(true);
+    expect(await run(ownerFiles.authorize(`project:${deck.id}@3`))).toBe(false);
+    const viewerFiles = await toolFilesFor(viewer);
+    expect(await run(viewerFiles.authorize(pinned))).toBe(true);
+    expect(await run(viewerFiles.authorize(`attachment:${brief.id}`))).toBe(false);
+    await run(
+      Effect.flatMap(ProjectService, (s) =>
+        s.changeMembers(owner, projectId, { action: "removeUser", userId: viewer }),
+      ),
+    );
+    expect(await run(viewerFiles.authorize(pinned))).toBe(false);
   });
 });

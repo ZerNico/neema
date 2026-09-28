@@ -1,6 +1,8 @@
 import { Effect } from "effect";
-import { Unzip, UnzipInflate } from "fflate";
+import { crc32 } from "node:zlib";
 import { fileExtension, formatFileSize } from "../constants.ts";
+import { decodeXmlText } from "../xml-text.ts";
+import { readZip } from "../zip.ts";
 import { buildTextFence } from "./validation.ts";
 
 /** Bounds on what a small archive may expand into while it is read. */
@@ -17,65 +19,33 @@ export const describeFile = (file: { id?: string; fileName: string; size: number
   `Attached file: ${file.fileName} (${formatFileSize(file.size)}${file.id ? `, id ${file.id}` : ""}). Its contents are not readable here; a tool that takes files can use it. If none can, say so rather than guessing at what it contains.`;
 
 /**
- * The entries of a ZIP that `wanted` selects, expanded with the same guards
- * the skill importer uses: total output and expansion ratio are bounded, so a
- * small hostile file cannot inflate into memory.
+ * The entries of a ZIP that `wanted` selects, or null when the archive is not
+ * one this reader accepts. Output and expansion ratio are bounded, so a small
+ * hostile file cannot inflate into memory.
  */
 function readEntries(bytes: Uint8Array, wanted: (name: string) => boolean) {
-  const entries = new Map<string, Uint8Array>();
-  let total = 0;
-  let failed = false;
-  const unzip = new Unzip((file) => {
-    if (!wanted(file.name)) return;
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    file.ondata = (error, chunk, final) => {
-      if (error || failed) return;
-      size += chunk.length;
-      total += chunk.length;
-      if (total > EXPANDED_BYTES || total > bytes.length * EXPANSION_RATIO) {
-        failed = true;
-        file.terminate();
-        return;
-      }
-      chunks.push(chunk);
-      if (final) {
-        const output = new Uint8Array(size);
-        let offset = 0;
-        for (const part of chunks) {
-          output.set(part, offset);
-          offset += part.length;
-        }
-        entries.set(file.name, output);
-      }
-    };
-    file.start();
-  });
-  unzip.register(UnzipInflate);
   try {
-    for (let offset = 0; offset < bytes.length && !failed; offset += 4096)
-      unzip.push(bytes.subarray(offset, offset + 4096), offset + 4096 >= bytes.length);
+    const entries = readZip(bytes, {
+      limits: {
+        archiveBytes: Number.MAX_SAFE_INTEGER,
+        entries: 10_000,
+        entryBytes: EXPANDED_BYTES,
+        expandedBytes: EXPANDED_BYTES,
+        expansionRatio: EXPANSION_RATIO,
+      },
+      fail: (message) => {
+        throw new Error(message);
+      },
+      wanted,
+      crc32,
+    });
+    // No wanted entry at all means this is not the package its name claims.
+    return entries.size === 0 ? null : entries;
   } catch {
     return null;
   }
-  // No wanted entry at all means this is not the package its name claims.
-  return failed || entries.size === 0 ? null : entries;
 }
 
-const ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-};
-const decodeXml = (text: string) =>
-  text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (match, entity: string) => {
-    if (entity.startsWith("#x") || entity.startsWith("#X"))
-      return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
-    if (entity.startsWith("#")) return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
-    return ENTITIES[entity] ?? match;
-  });
 const utf8 = (bytes: Uint8Array | undefined) => (bytes ? new TextDecoder().decode(bytes) : "");
 /** The text runs of one XML element kind, paragraph by paragraph. */
 const paragraphs = (xml: string, paragraph: string, run: string) =>
@@ -83,7 +53,7 @@ const paragraphs = (xml: string, paragraph: string, run: string) =>
     .split(`</${paragraph}>`)
     .map((part) =>
       [...part.matchAll(new RegExp(`<${run}(?:\\s[^>]*)?>([^<]*)</${run}>`, "g"))]
-        .map((match) => decodeXml(match[1]!))
+        .map((match) => decodeXmlText(match[1]!))
         .join(""),
     )
     .filter((line) => line.trim() !== "");
@@ -119,11 +89,11 @@ function workbookText(bytes: Uint8Array) {
     .split("</si>")
     .slice(0, -1)
     .map((item) =>
-      [...item.matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)].map((m) => decodeXml(m[1]!)).join(""),
+      [...item.matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)].map((m) => decodeXmlText(m[1]!)).join(""),
     );
   const names = [
     ...utf8(entries.get("xl/workbook.xml")).matchAll(/<sheet\s[^>]*name="([^"]*)"/g),
-  ].map((match) => decodeXml(match[1]!));
+  ].map((match) => decodeXmlText(match[1]!));
   return [...entries.keys()]
     .filter((name) => sheet.test(name))
     .sort((a, b) => numbered(a, sheet) - numbered(b, sheet))
@@ -137,7 +107,7 @@ function workbookText(bytes: Uint8Array) {
               const inline = /<t(?:\s[^>]*)?>([^<]*)<\/t>/.exec(cell[2] ?? "")?.[1];
               if (/\bt="s"/.test(cell[1]!) && value !== undefined)
                 return shared[Number(value)] ?? "";
-              return decodeXml(value ?? inline ?? "");
+              return decodeXmlText(value ?? inline ?? "");
             })
             .join("\t"),
       );

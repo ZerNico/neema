@@ -13,6 +13,7 @@ import {
   MessageNotFound,
   ModelNotFound,
   RetryNotAllowed,
+  ResumeNotAllowed,
   QuestionUnavailable,
   QueueEntryNotFound,
   QueueFull,
@@ -56,6 +57,8 @@ import {
   type ResolveError,
 } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
+import { resumeFirstTurn } from "./prompt.ts";
+import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { QueueSweepInterval, TemporarySweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 
@@ -271,6 +274,38 @@ export class ChatService extends Context.Service<
       | MessageNotFound
       | ModelNotFound
       | RetryNotAllowed
+      | ConversationBusy
+      | AgentNotAvailable
+      | WorkDesktopRequired
+      | KnowledgeRejected
+      | InvalidMessage
+      | AttachmentNotAvailable
+      | AttachmentUnsupported
+      | SkillNotAvailable
+      | SkillRejected
+      | KnowledgeNotAvailable
+    >;
+    /**
+     * Continues the last answer after it failed or was stopped: same message,
+     * a new generation that starts from what the answer already produced.
+     */
+    resumeMessage(
+      input: DesktopSubmission & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        /** Continue with this model instead of the one that answered before. */
+        modelId?: string | undefined;
+        deviceSessionId?: string | undefined;
+        timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
+      },
+    ): Effect.Effect<
+      { assistantMessageId: string },
+      | ConversationNotFound
+      | MessageNotFound
+      | ModelNotFound
+      | ResumeNotAllowed
       | ConversationBusy
       | AgentNotAvailable
       | WorkDesktopRequired
@@ -1588,6 +1623,132 @@ function makeChatService() {
       return restarted;
     });
 
+    // Resume is retry without the rewind: the same checks and attempt-time
+    // resolution, but the answer keeps everything it produced and the new
+    // generation continues from it.
+    const resumeMessage = Effect.fn("ChatService.resumeMessage")(function* (
+      input: DesktopSubmission & {
+        userId: string;
+        conversationId: string;
+        messageId: string;
+        modelId?: string | undefined;
+        deviceSessionId?: string | undefined;
+        timeZone?: string | undefined;
+        openDocumentId?: string | undefined;
+      },
+    ) {
+      yield* repo.research?.reap() ?? Effect.void;
+      // ownership check
+      yield* repo.getConversation(input.userId, input.conversationId);
+
+      const message = yield* repo.getMessage(input.messageId);
+      if (!message || message.conversationId !== input.conversationId) {
+        return yield* new MessageNotFound({ messageId: input.messageId });
+      }
+      if (
+        message.role !== "assistant" ||
+        (message.status !== "error" && message.status !== "aborted")
+      ) {
+        return yield* new ResumeNotAllowed({
+          messageId: input.messageId,
+          reason: "only a failed or stopped answer can be resumed",
+        });
+      }
+      const switching = input.modelId !== undefined && input.modelId !== message.modelId;
+      const modelId = input.modelId ?? message.modelId;
+      if (!modelId) {
+        return yield* new ResumeNotAllowed({
+          messageId: input.messageId,
+          reason: "original model is no longer known",
+        });
+      }
+      const model = yield* providers.getModel(modelId);
+      if (!model || !model.enabled || model.type !== "chat") {
+        return yield* new ModelNotFound({ modelId });
+      }
+      if (!(yield* providers.isModelAccessible(input.userId, modelId))) {
+        return yield* new ModelNotFound({ modelId });
+      }
+      // Refused here, before the claim, so a resume that cannot succeed never
+      // replaces the answer's error.
+      const all = yield* repo.listMessages(input.conversationId);
+      const nextTurn = resumeFirstTurn({
+        calls: yield* repo.listToolCalls([message.id]),
+        compactions: yield* repo.listCompactionEvents([message.id]),
+        steerTurns: all
+          .filter((m) => m.steeredIntoMessageId === message.id && m.status === "complete")
+          .map((m) => m.steerTurnIndex ?? -1),
+        files: message.assistantOutput?.files ?? [],
+        replay: message.providerReplay,
+      });
+      if (nextTurn >= RESEARCH_TURN_BASE) {
+        return yield* new ResumeNotAllowed({
+          messageId: input.messageId,
+          reason: "this answer has reached its continuation limit; start a new message instead",
+        });
+      }
+      // The answer is the last turn, so every user message is history the
+      // new model has to read, its steers included.
+      if (switching) {
+        const priorAttachments = yield* attachmentRepo.listForMessages(
+          all.filter((m) => m.role === "user").map((m) => m.id),
+        );
+        yield* validateAttachments(
+          input.userId,
+          model.capabilities,
+          priorAttachments.map((a) => a.id),
+        );
+      }
+
+      const claim = yield* repo.resumeMessage({
+        userId: input.userId,
+        messageId: message.id,
+        modelId,
+        resolve: resolver({
+          userId: input.userId,
+          model,
+          searchAvailable: yield* searchToolEnabled,
+          attempt: "retry",
+          fromDesktop: input.fromDesktop,
+          desktopExecutorId: input.desktopExecutorId,
+          desktopFolders: input.desktopFolders,
+          desktopCommands: input.desktopCommands,
+          desktopMachineId: input.desktopMachineId,
+          desktopMachineName: input.desktopMachineName,
+        }),
+      });
+      if (!claim.claimed) {
+        return yield* new ResumeNotAllowed({
+          messageId: input.messageId,
+          reason: "only the last answer can be resumed, and not while another is generating",
+        });
+      }
+
+      yield* sync.publish(input.userId, {
+        type: "message.status",
+        conversationId: input.conversationId,
+        messageId: message.id,
+        status: "streaming",
+      });
+      yield* engine.startGeneration({
+        desktopExecutorId: input.desktopExecutorId,
+        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+        deviceSessionId: input.deviceSessionId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        messageId: message.id,
+        generationId: claim.generationId,
+        modelId,
+        searchEnabled: claim.searchEnabled,
+        timeZone: input.timeZone,
+        openDocumentId: input.openDocumentId,
+        resume: true,
+        onSettled: ({ status }) =>
+          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
+      });
+      return { assistantMessageId: message.id };
+    });
+
     const branchConversation = Effect.fn("ChatService.branchConversation")(function* (input: {
       userId: string;
       conversationId: string;
@@ -1997,6 +2158,7 @@ function makeChatService() {
       dispatchQueuedMessage,
       sendQueuedNow,
       retryMessage,
+      resumeMessage,
       branchConversation,
       editMessage,
       stopGeneration,

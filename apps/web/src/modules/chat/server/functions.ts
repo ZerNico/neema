@@ -20,6 +20,7 @@ import {
   ActivateWorkTurnInput,
   UpdateWorkSettingsInput,
   RetryMessageInput,
+  ResumeMessageInput,
   SearchChatsInput,
   SendMessageInput,
   QueueMessageInput,
@@ -555,6 +556,58 @@ export const retryMessage = createServerFn({ method: "POST" })
           MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
           ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
           RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          ConversationBusy: () =>
+            Effect.die(new Response("This conversation is busy", { status: 409 })),
+          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AttachmentNotAvailable: () =>
+            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+          AttachmentUnsupported: (e) =>
+            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
+          AgentNotAvailable: () =>
+            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
+          WorkDesktopRequired: () =>
+            Effect.die(
+              new Response("This is a work chat; continue it from the desktop app", {
+                status: 409,
+              }),
+            ),
+          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          KnowledgeNotAvailable: () =>
+            Effect.die(
+              new Response("Knowledge this answer used is no longer available", { status: 409 }),
+            ),
+        }),
+      ),
+    ),
+  );
+
+export const resumeMessage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ResumeMessageInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.resumeMessage({
+          fromDesktop: data.fromDesktop,
+          desktopExecutorId: data.desktopExecutorId,
+          desktopMachineId: data.desktopMachineId,
+          desktopMachineName: data.desktopMachineName,
+          deviceSessionId: context.session.session.id,
+          desktopFolders: data.desktopFolders,
+          desktopCommands: data.desktopCommands,
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+          modelId: data.modelId,
+          timeZone: data.timeZone,
+          openDocumentId: data.openDocumentId,
+        }),
+      ).pipe(
+        Effect.catchTags({
+          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
+          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
+          ResumeNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
           ConversationBusy: () =>
             Effect.die(new Response("This conversation is busy", { status: 409 })),
           InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),

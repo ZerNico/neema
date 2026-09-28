@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applySteerChunk,
   applyCompactionChunk,
+  applyToolActivityChunk,
   applyToolChunk,
   type CompactionActivity,
   type ToolActivity,
@@ -169,6 +170,107 @@ describe("ask_user replay", () => {
 });
 
 describe("applyToolChunk", () => {
+  it("projects publication start, success and failure without exposing file bytes", () => {
+    const start = env({
+      family: "tool-file",
+      phase: "start",
+      name: "publish_file",
+      callId: "publish-1",
+      turnIndex: 2,
+      callIndex: 1,
+      textOffset: 12,
+    });
+    const pending = applyToolChunk([], start);
+    expect(pending[0]).toMatchObject({ family: "tool-file", status: "running", textOffset: 12 });
+    const ready = applyToolChunk(
+      pending,
+      env({
+        family: "tool-file",
+        phase: "result",
+        name: "publish_file",
+        callId: "publish-1",
+        ok: true,
+        attachmentId: "attachment-1",
+      }),
+    );
+    expect(ready[0]).toMatchObject({ status: "complete", attachmentId: "attachment-1" });
+    expect(applyToolChunk(ready, start)).toBe(ready);
+    const failed = applyToolChunk(
+      [],
+      env({
+        family: "tool-file",
+        phase: "result",
+        name: "publish_file",
+        callId: "publish-2",
+        ok: false,
+        error: "File limit reached.",
+      }),
+    );
+    expect(failed[0]).toMatchObject({
+      family: "tool-file",
+      status: "error",
+      error: "File limit reached.",
+    });
+  });
+
+  it("projects a presentation step's summary and keeps its call identity", () => {
+    const running = applyToolChunk(
+      [],
+      env({
+        family: "presentation",
+        phase: "start",
+        name: "edit_presentation",
+        callId: "deck-1",
+        turnIndex: 0,
+        callIndex: 0,
+        textOffset: 0,
+      }),
+    );
+    const done = applyToolChunk(
+      running,
+      env({
+        family: "presentation",
+        phase: "result",
+        name: "edit_presentation",
+        callId: "deck-1",
+        outcome: "working",
+        message: "Private draft updated.",
+        workingFileId: "draft",
+        revision: 1,
+        origin: "created",
+        changes: "Added a slide",
+        slideCount: 2,
+        renderedSlideIds: [256],
+      }),
+    );
+    expect(done[0]).toMatchObject({
+      family: "presentation",
+      callId: "deck-1",
+      name: "edit_presentation",
+      status: "complete",
+      origin: "created",
+      changes: "Added a slide",
+      slideCount: 2,
+      renderedSlideIds: [256],
+    });
+    expect(done[0]).not.toHaveProperty("v");
+    const failed = applyToolChunk(
+      [],
+      env({
+        family: "presentation",
+        phase: "result",
+        name: "edit_presentation",
+        callId: "deck-2",
+        outcome: "error",
+        message: "invalid_operation: operations[0] addText: missing x",
+      }),
+    );
+    expect(failed[0]).toMatchObject({
+      status: "error",
+      error: "invalid_operation: operations[0] addText: missing x",
+    });
+  });
+
   it("creates a running activity from a start envelope", () => {
     expect(applyToolChunk([], start)).toEqual([
       {
@@ -495,5 +597,35 @@ describe("applySteerChunk", () => {
   it("ignores an envelope it cannot read", () => {
     expect(applySteerChunk([], "{not json")).toEqual([]);
     expect(applySteerChunk([], JSON.stringify({ v: 2, id: "x" }))).toEqual([]);
+  });
+});
+
+// Creation, replacement by the started call and clearing on done are covered
+// through the hook in use-message-stream.test.tsx; these are the edge cases.
+describe("a deck edit still being written", () => {
+  const writing = (id: string) =>
+    JSON.stringify({ v: 1, id, name: "edit_presentation", textOffset: 4, turnIndex: 2 });
+
+  it("keeps one placeholder, and only a call starting removes it", () => {
+    let tools = applyToolActivityChunk([], "writing", writing("a"));
+    tools = applyToolActivityChunk(tools, "writing", writing("b"));
+    expect(tools.map((tool) => tool.callId)).toEqual(["writing:b"]);
+    tools = applyToolActivityChunk(
+      tools,
+      "tool",
+      env({ family: "presentation", phase: "result", callId: "old", name: "inspect_presentation" }),
+    );
+    expect(tools.some((tool) => tool.callId === "writing:b")).toBe(true);
+  });
+
+  it("ignores markers for other tools and malformed ones", () => {
+    expect(
+      applyToolActivityChunk(
+        [],
+        "writing",
+        JSON.stringify({ v: 1, id: "x", name: "edit_document", textOffset: 0, turnIndex: 0 }),
+      ),
+    ).toEqual([]);
+    expect(applyToolActivityChunk([], "writing", "{")).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { Effect, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
+import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ProjectFileActivityResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
@@ -41,15 +41,7 @@ const SaveParams = Schema.Struct({
 // Every key optional on the wire: a model that omits one gets an explanation
 // from the handler instead of failing the whole stream at decode.
 const optional = <S extends Schema.Top>(schema: S) =>
-  Schema.optionalKey(
-    // Any, not Unknown: the JSON Schema generator drops this annotation on
-    // Unknown, which sent every parameter to the model with no type at all.
-    Schema.Any.check(
-      Schema.makeFilter(() => true, {
-        toJsonSchema: () => Schema.toJsonSchemaDocument(schema).schema,
-      }),
-    ),
-  );
+  advertisedParameter(Schema.toJsonSchemaDocument(schema).schema);
 
 const listTool = Tool.make("list_project_files", {
   description:

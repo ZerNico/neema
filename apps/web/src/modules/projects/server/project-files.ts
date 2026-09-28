@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -33,6 +32,8 @@ import { projectCan } from "../schema.ts";
 import { projectAudience, projectRole } from "./access.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { fileText } from "~/modules/attachments/server/file-text.ts";
+import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
+import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
 
 type ProjectFileError = ProjectNotAvailable | ProjectRejected;
 /** Who is writing: a person, or the model inside one answer. */
@@ -126,11 +127,27 @@ export class ProjectFileService extends Context.Service<
       userId: string,
       versionId: string,
     ): Effect.Effect<{ bytes: Uint8Array; name: string; mediaType: string } | null>;
+    /** `download` with the bytes left unread until asked for, and the content hash. */
+    openVersion(
+      userId: string,
+      versionId: string,
+    ): Effect.Effect<{
+      name: string;
+      mediaType: string;
+      sha256: string;
+      bytes: Effect.Effect<Uint8Array | null>;
+    } | null>;
     read(
       userId: string,
       projectId: string,
       target: { fileId?: string | undefined; name?: string | undefined },
     ): Effect.Effect<ProjectFileRead, ProjectFileError>;
+    /** Whether the person may still read this exact version, without loading it. */
+    canRead(
+      userId: string,
+      projectId: string,
+      target: { fileId: string; version: number },
+    ): Effect.Effect<boolean>;
     /** The current version's bytes, for a tool that takes the file itself. */
     open(
       userId: string,
@@ -284,7 +301,7 @@ export class ProjectFileService extends Context.Service<
       /** Registers bytes under the project owner; returns the blob and any key to discard. */
       const storeBytes = (ownerId: string, bytes: Uint8Array) =>
         Effect.gen(function* () {
-          const sha256 = createHash("sha256").update(bytes).digest("hex");
+          const sha256 = sha256Hex(bytes);
           const storageKey = blobStorageKey(ownerId, sha256);
           yield* registry.recordBlobCandidate(storageKey);
           yield* blobs.put(storageKey, bytes).pipe(Effect.orDie);
@@ -515,6 +532,26 @@ export class ProjectFileService extends Context.Service<
         Effect.forkScoped,
       );
 
+      const openVersion = Effect.fn("ProjectFileService.openVersion")(function* (
+        userId: string,
+        versionId: string,
+      ) {
+        const row = yield* versionRow(versionId);
+        if (!row || !(yield* projectRole(db, userId, row.projectId))) return null;
+        const [blob] = yield* db
+          .select({ sha256: attachmentBlobs.sha256 })
+          .from(attachmentBlobs)
+          .where(eq(attachmentBlobs.id, row.version.blobId))
+          .pipe(Effect.orDie);
+        if (!blob) return null;
+        return {
+          name: row.name,
+          mediaType: row.version.mediaType,
+          sha256: blob.sha256,
+          bytes: blobBytes(row.version.blobId),
+        };
+      });
+
       const open = Effect.fn("ProjectFileService.open")(function* (
         userId: string,
         projectId: string,
@@ -584,17 +621,23 @@ export class ProjectFileService extends Context.Service<
         }),
         write: writeVersion,
         saveAttachment: Effect.fn("ProjectFileService.saveAttachment")(function* (writer, input) {
+          const requested =
+            "id" in input.attachment ? input.attachment.id : input.attachment.reference;
+          const resolved = input.conversationId
+            ? yield* currentAttachmentId(
+                db,
+                { userId: writer.userId, conversationId: input.conversationId },
+                requested,
+              )
+            : requested;
           const [attachment] = yield* db
             .select({ blobId: attachments.blobId, fileName: attachments.fileName })
             .from(attachments)
             .where(
               and(
                 "id" in input.attachment
-                  ? eq(attachments.id, input.attachment.id)
-                  : or(
-                      eq(attachments.id, input.attachment.reference),
-                      eq(attachments.fileName, input.attachment.reference),
-                    ),
+                  ? eq(attachments.id, resolved)
+                  : or(eq(attachments.id, resolved), eq(attachments.fileName, resolved)),
                 eq(attachments.userId, writer.userId),
                 // The model may only move files from its own chat.
                 input.conversationId
@@ -692,12 +735,29 @@ export class ProjectFileService extends Context.Service<
           yield* changed(file.projectId);
         }),
         download: Effect.fn("ProjectFileService.download")(function* (userId, versionId) {
-          const row = yield* versionRow(versionId);
-          if (!row || !(yield* projectRole(db, userId, row.projectId))) return null;
-          const bytes = yield* blobBytes(row.version.blobId);
-          return bytes ? { bytes, name: row.name, mediaType: row.version.mediaType } : null;
+          const file = yield* openVersion(userId, versionId);
+          const bytes = file ? yield* file.bytes : null;
+          return file && bytes ? { bytes, name: file.name, mediaType: file.mediaType } : null;
         }),
+        openVersion,
         open,
+        canRead: Effect.fn("ProjectFileService.canRead")(function* (userId, projectId, target) {
+          if (!(yield* projectRole(db, userId, projectId))) return false;
+          const [row] = yield* db
+            .select({ id: projectFileVersions.id })
+            .from(projectFileVersions)
+            .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
+            .where(
+              and(
+                eq(projectFiles.projectId, projectId),
+                eq(projectFileVersions.fileId, target.fileId),
+                eq(projectFileVersions.number, target.version),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.orDie);
+          return row !== undefined;
+        }),
         read: Effect.fn("ProjectFileService.read")(function* (userId, projectId, target) {
           const { file, bytes } = yield* open(userId, projectId, target);
           const kind = attachmentKind(classifyFile(file.name, "", bytes).mediaType);

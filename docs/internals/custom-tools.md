@@ -106,6 +106,12 @@ A failed Verify, Debug or Save never replaces the stored module. Runtime invocat
 only the stored bundle and never consults npm, the registry, or the build cache.
 The external-module rule is for reproducibility, not containment.
 
+A bundle carries the authoring runtime it was built with, so a runtime change reaches a
+module only when it is saved again. Nothing rebuilds a module at invocation: that would
+consult the registry. Where an old bundle meets a contract it predates, the worker fails that
+call with a message telling an admin to save the tool again. Today that is a returned file
+without `delivery`, which only a bundle from before delivery existed can produce.
+
 `@chat/custom-tools` itself is `authoring.ts`, bundled by the Vite plugin and
 inlined into every authored module; its ambient types are
 `authoring-declaration.ts`. The two are kept in step by `builder.test.ts`,
@@ -171,43 +177,40 @@ bounded preview, character count and bounded error.
 ## Files
 
 `run` may return `{ text?, files }` where every entry comes from
-`file(bytes | string, { name, mediaType?, share? })`. The brand is a symbol, so an
-object that merely resembles that shape is still an ordinary JSON result. Files
+`file(bytes | string, { name, mediaType?, delivery, showModel?, replaces? })`.
+`delivery` is required: `"working"` creates an attempt-local revision or replaces
+an exact `working:<id>@<revision>` reference; `"publish"` delivers a finished
+attachment during this call. Only working outputs may use `replaces`. The brand
+is a symbol, so an object that merely resembles a file is ordinary JSON. Files
 cross the worker boundary on the transfer list beside the text; the worker
 enforces count and byte caps (`CUSTOM_TOOL_LIMITS.files`, `fileBytes`,
-`totalFileBytes`, the same numbers as a message's attachments).
+`totalFileBytes`).
 
-A returned file is an attachment of the assistant message, stored through
-`acceptGeneratedFile` (`chat/server/generated-files.ts`), the path a model's own
-image output already takes: the same classification as an upload, so any type is
-kept and `mediaType` is only a hint ([files](files.md)), the same
-`blob_cleanup_intents` ledger, a `message_attachments` row, an
-`assistant_output.files` entry anchored at the tool call's text offset, and a
-`file` chunk. Reload, branch, retry and edit therefore treat it exactly as a
-generated image, and the client renders images inline and everything else as the
-attachment chip with the shared preview, right after the tool row that produced
-it. The row records its files by attachment id for reload but does not render
-them a second time.
+Working outputs are not persisted as attachments while the answer runs. The host
+returns a canonical reference for each accepted output, and a later tool can consume its
+exact revision through `fileInput`; only the module that created a draft may replace it.
+Its type is classified from the bytes, never taken from `mediaType`. A rejected output is
+reported individually,
+not advertised as saved; published outputs go through the same fenced registration
+as `publish_file`. Only publishing consumes the answer's file budget and produces
+a `file` chunk and downloadable assistant attachment. Those survive reloads and
+branches. An unpublished draft is kept for later answers in the chat that offer the same
+module; see [files](files.md#files-into-tools).
 
-The model's tool result carries names, types and sizes only. `share: true` also
-puts the file in front of the model on its next round, by the rule an upload
-follows ([files](files.md#what-the-model-sees)). Retained files are replayed by
-the same rule when history is rebuilt, so switching to a narrower model later
-never fails a turn on a file it was handed earlier.
-
-The model's result also names each stored file by attachment id. That id is what
-`save_to_workspace` takes in a Work chat (see `docs/internals/desktop.md`) and
-what `save_project_file` takes in a project chat.
-
-An admin Test has no message to attach to, so its files come back inline as
-`data:` URLs (capped at `testFileBytes`) and preview through the same dialog
-without an "Open original" link.
+`showModel: true` independently puts accepted bytes in front of the model on the
+next round when supported; it does not save a second file. The durable tool row
+holds bounded result/working status and accepted attachment IDs, never the bytes
+or full output. Delivered attachments render after the tool row without another
+chip inside it. A published attachment ID can be passed to `save_to_workspace`
+in Work or `save_project_file` in a project chat. An admin Test has no chat to
+publish into: its bounded returned bytes come back inline as `data:` URLs with
+stated delivery intent, without claiming a persistent reference.
 
 ## File inputs
 
 `fileInput({ description?, accept? })` is a parameter the model fills with a
-string, a file id or name, and `run` receives as a `ToolInputFile` (`name`,
-`mediaType`, `size`, `bytes`, `text()`). The build writes the model-facing
+string, a canonical file reference or name, and `run` receives as a `ToolInputFile`
+(`name`, `mediaType`, `size`, `bytes`, `ref`, `text()`). The build writes the model-facing
 description; `accept` takes extensions or media types.
 
 - The schema decodes the string by asking the host, so a file parameter works at
@@ -215,15 +218,18 @@ description; `accept` takes extensions or media types.
   `file` message mid-call; the pool answers from the job's resolver and transfers
   a fresh copy of the bytes. The job's deadline keeps running meanwhile.
 - The resolver (`chat/server/tool-files.ts`) is built per answer and bounded by
-  the sender: files in this chat (attached or produced), then the current version
-  of a project file in a project chat. An id matches before a name; among equal
-  names the newest chat file wins. A lookup that fails, or a file `accept` refuses,
+  the sender: exact attempt-local working revisions, files in this chat (attached or
+  produced), then the current version of a project file in a project chat. Chat
+  attachments inherited by a branch resolve through its alias map before the
+  current-chat ownership check. An id matches before a name; among equal names
+  the newest chat file wins. A lookup that fails, or a file `accept` refuses,
   becomes the decode error the model reads, never a failed answer.
 - Per call, at most `inputFiles` files and `inputFileBytes` together. The result
   lists what the call read, with a project file's id and version, so the model can
   save an edited copy as the next version.
 - Test has no chat: the admin picks files in the dialog and the arguments name
-  them.
+  them. They exist for that one run, so their `ref` is a `working:` reference, the
+  kind an answer's own short-lived files carry.
 
 ## Worker lifecycle
 

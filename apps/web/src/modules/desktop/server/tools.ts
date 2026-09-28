@@ -37,6 +37,17 @@ export const readLocalFileTool = Tool.make("read_local_file", {
   failureMode: "return",
 });
 
+export const importLocalFileTool = Tool.make("import_local_file", {
+  description:
+    "Bring a PNG, JPEG or PowerPoint (.pptx) from the user's computer into this answer so " +
+    "other tools can use it. Returns a working: reference: pass a picture as imageRef, or a " +
+    "deck as sourceRef to inspect_presentation and edit_presentation. The copy lasts for this " +
+    "answer only and the original is never changed. Up to 20 MB.",
+  parameters: Schema.Struct({ path: Path }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export const findFilesTool = Tool.make("find_files", {
   description:
     "Find files and folders across the attached folders by glob, newest first: `*.ts` at any depth, " +
@@ -207,6 +218,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     findFilesTool,
     searchFilesTool,
     readLocalFileTool,
+    importLocalFileTool,
     writeLocalFileTool,
     saveToWorkspaceTool,
     editLocalFileTool,
@@ -222,6 +234,8 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       find_files: handle("find_files", DESKTOP_TIMEOUTS.quick),
       search_files: handle("search_files", DESKTOP_TIMEOUTS.quick),
       read_local_file: handle("read_local_file", DESKTOP_TIMEOUTS.quick),
+      // Up to 20 MB crosses from the machine through the page.
+      import_local_file: handle("import_local_file", DESKTOP_TIMEOUTS.command),
       // Changes wait on a person as well as a machine.
       write_local_file: handle("write_local_file", DESKTOP_TIMEOUTS.command),
       // A download plus a write; nobody is asked, but the bytes take time.

@@ -5,6 +5,7 @@ import {
   GitBranchIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
+  PlayIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -58,6 +59,38 @@ function ActionButton({
   );
 }
 
+/** The pinned "same model" action above a model list, then the divider into it. */
+function SameModelHeader({
+  label,
+  icon,
+  onPick,
+}: {
+  label: string;
+  icon: typeof PlayIcon;
+  onPick: () => void;
+}) {
+  return (
+    <div className="p-1.5 pb-0">
+      <button
+        type="button"
+        className="hover:bg-accent hover:text-accent-foreground flex w-full cursor-default items-center gap-2.5 rounded-2xl px-3 py-2 text-sm font-medium select-none [&_svg]:size-4 [&_svg]:shrink-0"
+        onClick={onPick}
+      >
+        <HugeiconsIcon icon={icon} strokeWidth={2} />
+        {label}
+      </button>
+      <div
+        className="text-muted-foreground my-1 flex items-center gap-2 px-2 text-xs"
+        role="separator"
+      >
+        <span className="bg-border h-px flex-1" />
+        or switch model
+        <span className="bg-border h-px flex-1" />
+      </div>
+    </div>
+  );
+}
+
 // The retry button is a menu, not a split control: it always opens with
 // "Retry same" pinned above the model list, so both paths share one target
 // (the t3.chat pattern).
@@ -89,27 +122,14 @@ function RetryMenu({
         side="bottom"
         emptyLabel={models === undefined ? "Loading models…" : "No models match"}
         header={({ close }) => (
-          <div className="p-1.5 pb-0">
-            <button
-              type="button"
-              className="hover:bg-accent hover:text-accent-foreground flex w-full cursor-default items-center gap-2.5 rounded-2xl px-3 py-2 text-sm font-medium select-none [&_svg]:size-4 [&_svg]:shrink-0"
-              onClick={() => {
-                close();
-                onRetry();
-              }}
-            >
-              <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
-              Retry same
-            </button>
-            <div
-              className="text-muted-foreground my-1 flex items-center gap-2 px-2 text-xs"
-              role="separator"
-            >
-              <span className="bg-border h-px flex-1" />
-              or switch model
-              <span className="bg-border h-px flex-1" />
-            </div>
-          </div>
+          <SameModelHeader
+            label="Retry same"
+            icon={ArrowReloadHorizontalIcon}
+            onPick={() => {
+              close();
+              onRetry();
+            }}
+          />
         )}
         trigger={
           <TooltipTrigger
@@ -131,6 +151,50 @@ function RetryMenu({
       </ModelPicker>
       <TooltipContent>Retry</TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * Continues a failed or stopped answer from where it ended. Like retry it
+ * opens on the same model, pinned above the list of others.
+ */
+export function ResumeMenu({
+  onResume,
+  onResumeWith,
+  modelId,
+  disabled,
+}: {
+  onResume: () => void;
+  onResumeWith: (modelId: string) => void;
+  /** Model that wrote the answer so far, marked in the list. */
+  modelId?: string | null | undefined;
+  disabled: boolean;
+}) {
+  const { data: models } = useQuery(chatModelsQuery);
+  return (
+    <ModelPicker
+      models={models ?? []}
+      value={modelId}
+      onChange={onResumeWith}
+      disabled={disabled}
+      side="bottom"
+      emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+      header={({ close }) => (
+        <SameModelHeader
+          label="Resume same"
+          icon={PlayIcon}
+          onPick={() => {
+            close();
+            onResume();
+          }}
+        />
+      )}
+      // A combobox takes no name from its content, so the label names it.
+      trigger={<Button size="sm" variant="outline" aria-label="Resume" disabled={disabled} />}
+    >
+      <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" aria-hidden />
+      Resume
+    </ModelPicker>
   );
 }
 

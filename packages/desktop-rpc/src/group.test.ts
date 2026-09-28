@@ -10,7 +10,7 @@ const path = { conversationId: CONVERSATION, path: "work/file" };
 const cases = [
   { tag: "listDirectory", payload: path },
   { tag: "readFile", payload: path },
-  { tag: "readBinary", payload: path },
+  { tag: "readBinary", payload: { ...path, purpose: "view" } },
   { tag: "writeFile", payload: { ...path, text: "hello" } },
   {
     tag: "saveToWorkspace",

@@ -4,17 +4,22 @@ import { attachmentBlobs, attachments, messageAttachments, messages } from "~/db
 import type { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import type { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import type { Db } from "~/server/db.ts";
+import { currentAttachmentId } from "./file-aliases.ts";
+import { parseFileRef, type FileRef } from "./file-ref.ts";
+import type { WorkingFiles } from "./working-files.ts";
 
 /** Where a file a tool read came from, so the model can save a result back. */
 export type ToolFileSource =
   | { readonly kind: "chat"; readonly attachmentId: string }
-  | { readonly kind: "project"; readonly fileId: string; readonly version: number };
+  | { readonly kind: "project"; readonly fileId: string; readonly version: number }
+  | { readonly kind: "working"; readonly workingFileId: string; readonly revision: number };
 
 export interface ToolFile {
   readonly name: string;
   readonly mediaType: string;
   readonly bytes: Uint8Array;
   readonly source: ToolFileSource;
+  readonly ref: FileRef;
 }
 
 /**
@@ -26,11 +31,13 @@ export interface ToolFile {
 export const makeToolFileResolver = (input: {
   db: Db["Service"];
   store: Pick<BlobStore["Service"], "get">;
-  projectFiles: Option.Option<Pick<ProjectFileService["Service"], "open">>;
+  projectFiles: Option.Option<Pick<ProjectFileService["Service"], "open" | "canRead">>;
   userId: string;
   conversationId: string;
   projectId: string | null;
+  workspace?: WorkingFiles;
 }) => {
+  const chat = { userId: input.userId, conversationId: input.conversationId };
   const chatFile = (reference: string) =>
     input.db
       .select({
@@ -58,11 +65,37 @@ export const makeToolFileResolver = (input: {
         Effect.map(([row]) => row ?? null),
       );
 
-  return (reference: string): Effect.Effect<ToolFile, string> =>
+  const resolve = (reference: string): Effect.Effect<ToolFile, string> =>
     Effect.gen(function* () {
       const trimmed = reference.trim();
       if (!trimmed) return yield* Effect.fail("Pass a file id or name.");
-      const found = yield* chatFile(trimmed);
+      const canonical = parseFileRef(trimmed);
+      if (/^(attachment|project|working):/.test(trimmed) && !canonical)
+        return yield* Effect.fail("Invalid file reference.");
+      if (canonical?.kind === "working") {
+        const workspace = input.workspace;
+        if (!workspace) return yield* Effect.fail("This working file has expired.");
+        const draft = yield* Effect.tryPromise({
+          try: async () => {
+            await workspace.load(canonical);
+            return workspace.read(canonical);
+          },
+          catch: () => "This working file has expired or changed revision.",
+        });
+        return {
+          name: draft.name,
+          mediaType: draft.mediaType,
+          bytes: draft.bytes,
+          source: { kind: "working", workingFileId: canonical.id, revision: canonical.revision },
+          ref: canonical,
+        } satisfies ToolFile;
+      }
+      const currentId = yield* currentAttachmentId(
+        input.db,
+        chat,
+        canonical?.kind === "attachment" ? canonical.id : trimmed,
+      );
+      const found = canonical?.kind === "project" ? null : yield* chatFile(currentId);
       if (found) {
         const bytes = yield* input.store
           .get(found.storageKey)
@@ -72,21 +105,31 @@ export const makeToolFileResolver = (input: {
           mediaType: found.mediaType,
           bytes,
           source: { kind: "chat", attachmentId: found.id },
+          ref: { kind: "attachment", id: found.id },
         } satisfies ToolFile;
       }
+      if (canonical?.kind === "attachment")
+        return yield* Effect.fail("That attachment is not available in this chat.");
       if (input.projectId && Option.isSome(input.projectFiles)) {
         const projectId = input.projectId;
-        const opened = yield* Effect.firstSuccessOf([
-          input.projectFiles.value.open(input.userId, projectId, { fileId: trimmed }),
-          input.projectFiles.value.open(input.userId, projectId, { name: trimmed }),
-        ]).pipe(Effect.option);
+        const opened = yield* (
+          canonical?.kind === "project"
+            ? input.projectFiles.value.open(input.userId, projectId, { fileId: canonical.id })
+            : Effect.firstSuccessOf([
+                input.projectFiles.value.open(input.userId, projectId, { fileId: trimmed }),
+                input.projectFiles.value.open(input.userId, projectId, { name: trimmed }),
+              ])
+        ).pipe(Effect.option);
         if (Option.isSome(opened)) {
           const { file, bytes } = opened.value;
+          if (canonical?.kind === "project" && canonical.version !== file.version)
+            return yield* Effect.fail("The project file changed since that version was inspected.");
           return {
             name: file.name,
             mediaType: file.mediaType,
             bytes,
             source: { kind: "project", fileId: file.id, version: file.version },
+            ref: { kind: "project", id: file.id, version: file.version },
           } satisfies ToolFile;
         }
       }
@@ -94,4 +137,36 @@ export const makeToolFileResolver = (input: {
         `No file ${JSON.stringify(trimmed)} in this chat${input.projectId ? " or its project" : ""}.`,
       );
     });
+
+  /**
+   * Whether the sender may still read the exact file a draft was opened from.
+   * Metadata only: a project version stays readable after newer ones land,
+   * and nothing is loaded just to ask.
+   */
+  const authorize = (reference: string): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      const ref = parseFileRef(reference);
+      switch (ref?.kind) {
+        case "working":
+          // Imports from the computer live only in this answer's workspace.
+          return input.workspace !== undefined;
+        case "attachment":
+          return (
+            (yield* chatFile(yield* currentAttachmentId(input.db, chat, ref.id)))?.id !== undefined
+          );
+        case "project":
+          return input.projectId !== null && Option.isSome(input.projectFiles)
+            ? yield* input.projectFiles.value.canRead(input.userId, input.projectId, {
+                fileId: ref.id,
+                version: ref.version,
+              })
+            : false;
+        default:
+          return false;
+      }
+    });
+
+  return { resolve, authorize };
 };
+
+export type ToolFileResolver = ReturnType<typeof makeToolFileResolver>;

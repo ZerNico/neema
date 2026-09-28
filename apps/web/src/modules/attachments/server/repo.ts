@@ -9,6 +9,7 @@ import {
   blobCleanupIntents,
   conversationQueueEntries,
   conversationQueueEntryAttachments,
+  conversationWorkingFiles,
   conversations,
   messageAttachments,
   messages,
@@ -38,6 +39,7 @@ export interface AttachmentWithBlob {
   fileName: string;
   blobId: string;
   storageKey: string;
+  sha256: string;
   size: number;
   mediaType: string;
   parsedText: string | null;
@@ -63,6 +65,7 @@ const withBlobColumns = {
   fileName: attachments.fileName,
   blobId: attachmentBlobs.id,
   storageKey: attachmentBlobs.storageKey,
+  sha256: attachmentBlobs.sha256,
   size: attachmentBlobs.size,
   mediaType: attachmentBlobs.mediaType,
   parsedText: attachmentBlobs.parsedText,
@@ -78,7 +81,9 @@ const withBlobColumns = {
  * message's. Every "is this upload still free" question reads this, so a
  * queued file is never swept, deleted as abandoned, or claimed a second time.
  */
-const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id})`;
+// A kept working file is the third owner kind: once its row cascades away with
+// the chat or its answer, the sweep takes the attachment and its bytes.
+const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id})`;
 
 /** Whose files these are: a transcript message, or a queued message. */
 type AttachmentOwner = { kind: "message"; id: string } | { kind: "queue"; id: string };
@@ -133,6 +138,7 @@ const lockAttachmentBlobs = (tx: DbTx, attachmentIds: ReadonlyArray<string>) =>
     );
   });
 
+/** Returns the storage keys to delete after commit. */
 const deleteAttachmentRows = (
   tx: DbTx,
   attachmentIds: ReadonlyArray<string>,
@@ -231,10 +237,18 @@ export class AttachmentRepo extends Context.Service<
         messages: ReadonlyArray<{ sourceMessageId: string; targetMessageId: string }>;
       },
     ): Effect.Effect<ReadonlyMap<string, string>>;
-    /** Releases every attachment linked to these messages (rewind/delete). */
+    /**
+     * Releases every attachment these messages own (rewind, retry, delete):
+     * their message attachments and the working files they kept.
+     */
     releaseForMessages(
       tx: DbTx,
       messageIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>>;
+    /** Releases kept working-file revisions whose row no longer claims them. */
+    releaseWorkingFiles(
+      tx: DbTx,
+      attachmentIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>>;
     /** Flat conversation projection, mirroring how tool calls are shipped. */
     listForMessages(
@@ -665,10 +679,24 @@ export class AttachmentRepo extends Context.Service<
           .from(messageAttachments)
           .where(inArray(messageAttachments.messageId, [...messageIds]))
           .pipe(Effect.orDie);
-        return yield* deleteAttachmentRows(
-          tx,
-          linked.map((row) => row.attachmentId),
-        ).pipe(Effect.orDie);
+        // A retried answer keeps its row, so its kept files are deleted here
+        // rather than left to the message cascade.
+        const kept = yield* tx
+          .delete(conversationWorkingFiles)
+          .where(inArray(conversationWorkingFiles.messageId, [...messageIds]))
+          .returning({ attachmentId: conversationWorkingFiles.attachmentId })
+          .pipe(Effect.orDie);
+        return yield* deleteAttachmentRows(tx, [
+          ...linked.map((row) => row.attachmentId),
+          ...kept.flatMap((row) => (row.attachmentId ? [row.attachmentId] : [])),
+        ]).pipe(Effect.orDie);
+      });
+
+      const releaseWorkingFiles = Effect.fn("AttachmentRepo.releaseWorkingFiles")(function* (
+        tx: DbTx,
+        attachmentIds: ReadonlyArray<string>,
+      ) {
+        return yield* deleteAttachmentRows(tx, attachmentIds).pipe(Effect.orDie);
       });
 
       const listForMessages = Effect.fn("AttachmentRepo.listForMessages")(function* (
@@ -895,6 +923,7 @@ export class AttachmentRepo extends Context.Service<
         listForQueueEntries,
         cloneForMessages,
         releaseForMessages,
+        releaseWorkingFiles,
         listForMessages,
         listForConversation,
         listWithBlobsForMessages,

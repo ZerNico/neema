@@ -1,0 +1,71 @@
+diff --git a/dist/node.d.ts b/dist/node.d.ts
+index 7fe4dab5e32eb72342d977af17f7daa88fcaa60d..66d7a560e8332a659a415031392e8c3d2b6cf050 100644
+--- a/dist/node.d.ts
++++ b/dist/node.d.ts
+@@ -61,6 +61,12 @@ interface RenderImageOptions {
+    */
+   readonly loadSystemFonts?: boolean;
+ }
++/**
++ * Maps authored font families before substitution. Return a family to keep
++ * it (its font must be passed as `fontFiles` and to the measurer), or nothing
++ * to fall back to the bundled substitutes. `null` clears it.
++ */
++declare const setFamilyResolver: (resolve: ((family: string | null | undefined) => string | null | undefined) | null) => void;
+ /** Render one slide to PNG-encoded bytes. */
+ declare const renderSlideToImage: (pres: PresentationData, slide: SlideData, opts?: RenderImageOptions) => Uint8Array;
+ /**
+@@ -73,5 +79,5 @@ declare const renderSlideToRgba: (pres: PresentationData, slide: SlideData, opts
+   readonly png: Uint8Array;
+ };
+ //#endregion
+-export { ARIAL, type AuditTextLayoutOptions, FONT_DIR, FONT_FILES, type FontSpec, type FontkitMeasurerOptions, MONO, type MeasureResult, type RegisteredFont, RenderImageOptions, type RenderSlideOptions, RgbaImage, SANS, SERIF, TIMES, type TextAuditIssue, type TextLayoutMode, type TextMeasurer, auditTextLayout, buildFontkitMeasurer, defaultMeasurer, renderSlideToImage, renderSlideToRgba, renderSlideSvg as renderSlideToSvg, substituteFamily };
++export { ARIAL, type AuditTextLayoutOptions, FONT_DIR, FONT_FILES, type FontSpec, type FontkitMeasurerOptions, MONO, type MeasureResult, type RegisteredFont, RenderImageOptions, type RenderSlideOptions, RgbaImage, SANS, SERIF, TIMES, type TextAuditIssue, type TextLayoutMode, type TextMeasurer, auditTextLayout, buildFontkitMeasurer, defaultMeasurer, renderSlideToImage, renderSlideToRgba, renderSlideSvg as renderSlideToSvg, setFamilyResolver, substituteFamily };
+ //# sourceMappingURL=node.d.ts.map
+\ No newline at end of file
+diff --git a/dist/node.js b/dist/node.js
+index bfe76c77a1c65ca9e4e5d46814d480bf18f92895..e1aba87d3e0d1c137857f6402b940908083e1a76 100644
+--- a/dist/node.js
++++ b/dist/node.js
+@@ -1,4 +1,4 @@
+-import { a as MONO, c as TIMES, d as substituteFamily, i as AVG_GLYPH_W_RATIO, l as defaultMeasurer, n as renderSlideSvg, o as SANS, r as ARIAL, s as SERIF, t as auditTextLayout, u as isCjk } from "./src-DC6HxO-i.js";
++import { a as MONO, c as TIMES, d as substituteFamily, i as AVG_GLYPH_W_RATIO, l as defaultMeasurer, n as renderSlideSvg, o as SANS, r as ARIAL, s as SERIF, t as auditTextLayout, u as isCjk, v as setFamilyResolver } from "./src-DC6HxO-i.js";
+ import { getSlideSize } from "@office-kit/pptx";
+ import { Resvg } from "@resvg/resvg-js";
+ import * as fontkit from "fontkit";
+@@ -175,6 +175,6 @@ const renderSlideToRgba = (pres, slide, opts = {}) => {
+ 	};
+ };
+ //#endregion
+-export { ARIAL, FONT_DIR, FONT_FILES, MONO, SANS, SERIF, TIMES, auditTextLayout, buildFontkitMeasurer, defaultMeasurer, renderSlideToImage, renderSlideToRgba, renderSlideSvg as renderSlideToSvg, substituteFamily };
++export { ARIAL, FONT_DIR, FONT_FILES, MONO, SANS, SERIF, TIMES, auditTextLayout, buildFontkitMeasurer, defaultMeasurer, renderSlideToImage, renderSlideToRgba, renderSlideSvg as renderSlideToSvg, setFamilyResolver, substituteFamily };
+ 
+ //# sourceMappingURL=node.js.map
+\ No newline at end of file
+diff --git a/dist/src-DC6HxO-i.js b/dist/src-DC6HxO-i.js
+index 875b96499d59aabb6976043dc0624ce71b59cfcd..8605a2b031e5feceed1c90dcdb07f0074e84f6f3 100644
+--- a/dist/src-DC6HxO-i.js
++++ b/dist/src-DC6HxO-i.js
+@@ -248,7 +248,14 @@ const SERIF = "Caladea";
+ const ARIAL = "Liberation Sans";
+ const TIMES = "Liberation Serif";
+ const MONO = "Liberation Mono";
++let familyResolver = null;
++/** Lets a host with its own font files keep the families it has; others still substitute. */
++const setFamilyResolver = (resolve) => {
++	familyResolver = resolve;
++};
+ const substituteFamily = (family) => {
++	const resolved = familyResolver?.(family);
++	if (resolved) return resolved;
+ 	if (!family) return SANS;
+ 	const f = family.trim().toLowerCase();
+ 	if (f.startsWith("calibri") || f.startsWith("aptos")) return SANS;
+@@ -5002,6 +5009,6 @@ const auditTextLayout = (pres, options = {}) => {
+ 	return issues;
+ };
+ //#endregion
+-export { MONO as a, TIMES as c, substituteFamily as d, AVG_GLYPH_W_RATIO as i, defaultMeasurer as l, renderSlideSvg as n, SANS as o, ARIAL as r, SERIF as s, auditTextLayout as t, isCjk as u };
++export { MONO as a, TIMES as c, substituteFamily as d, AVG_GLYPH_W_RATIO as i, defaultMeasurer as l, renderSlideSvg as n, SANS as o, ARIAL as r, SERIF as s, auditTextLayout as t, isCjk as u, setFamilyResolver as v };
+ 
+ //# sourceMappingURL=src-DC6HxO-i.js.map

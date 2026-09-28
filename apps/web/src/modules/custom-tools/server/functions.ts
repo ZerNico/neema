@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import { randomUUID } from "node:crypto";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
+import { formatFileRef } from "../authoring.ts";
 import {
   CustomToolCompileFailed,
   CustomToolConflict,
@@ -192,6 +194,9 @@ export const testCustomTool = createServerFn({ method: "POST" })
               name: item.name,
               bytes,
               mediaType: classifyFile(item.name, "", bytes).mediaType,
+              // Picked for this one run, like an answer's working files: they
+              // are gone when it ends, so they carry that kind of reference.
+              ref: { kind: "working" as const, id: randomUUID(), revision: 1 },
             };
           });
           if (
@@ -213,7 +218,10 @@ export const testCustomTool = createServerFn({ method: "POST" })
             captureLogs: true,
             // A Test has no chat: its file parameters name the files picked for it.
             resolveFile: (reference) => {
-              const found = testFiles.find((item) => item.name === reference.trim());
+              const found = testFiles.find(
+                (item) =>
+                  item.name === reference.trim() || formatFileRef(item.ref) === reference.trim(),
+              );
               return found
                 ? Effect.succeed(found)
                 : Effect.fail(`No test file named ${JSON.stringify(reference)}.`);

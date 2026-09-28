@@ -86,7 +86,9 @@ export const buildSearchReminder = (input: {
     );
   }
   if (input.lastCycle) sections.push(LAST_CYCLE_REMINDER);
-  sections.push(CITATION_REMINDER);
+  // With nothing to cite the system prompt's rule suffices; repeating it every
+  // round made models answer it in prose ("no sources, so no citations").
+  if (input.sources.length > 0) sections.push(CITATION_REMINDER);
   return sections.join("\n\n");
 };
 

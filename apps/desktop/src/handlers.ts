@@ -32,6 +32,14 @@ const BINARY_MEDIA_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
+/** What an import may bring in for server tools: pictures to place and decks to edit. */
+const IMPORT_MEDIA_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
 /** Files visited before a find or search gives up. Visited, not returned. */
 const WALK_LIMIT = 50_000;
 
@@ -445,15 +453,20 @@ export const makeHandlers = (shell: Shell) =>
           };
         }),
 
-      readBinary: ({ conversationId, path }) =>
+      readBinary: ({ conversationId, path, purpose }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);
-          const mediaType = BINARY_MEDIA_TYPES[extname(target.relative).toLowerCase()];
+          const importing = purpose === "import";
+          const mediaType = (importing ? IMPORT_MEDIA_TYPES : BINARY_MEDIA_TYPES)[
+            extname(target.relative).toLowerCase()
+          ];
           if (!mediaType) {
             return yield* Effect.fail(
               new DesktopError({
                 reason: "not-binary",
-                message: `${target.relative} is not an image or a PDF.`,
+                message: importing
+                  ? `${target.relative} is not a PNG, JPEG or PowerPoint (.pptx) file.`
+                  : `${target.relative} is not an image or a PDF.`,
               }),
             );
           }
@@ -477,7 +490,7 @@ export const makeHandlers = (shell: Shell) =>
             return yield* Effect.fail(
               new DesktopError({
                 reason: "too-large",
-                message: `${target.relative} is too large to send to the model.`,
+                message: `${target.relative} is larger than ${LIMITS.binaryBytes / 1024 / 1024} MB.`,
               }),
             );
           }

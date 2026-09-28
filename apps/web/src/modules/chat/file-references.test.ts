@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attachmentReferenceHint,
+  fileReferencesSystemHint,
   isFileReferenceHref,
   localFileName,
   parseFileReference,
@@ -29,6 +30,13 @@ const local = (path: string, overrides = {}) =>
   });
 
 describe("file reference destinations", () => {
+  it("keeps delivered file replies brief unless the reader wants detail", () => {
+    expect(fileReferencesSystemHint).toContain(
+      "its preview and download card are already in the answer",
+    );
+    expect(fileReferencesSystemHint).toContain("unless the reader asks for a breakdown");
+  });
+
   it("uses exact attachment identities and keeps aliases within the current conversation", () => {
     const attachments = new Map([
       [file.id, file],

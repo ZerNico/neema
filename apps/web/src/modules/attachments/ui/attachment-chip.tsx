@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode, useState } from "react";
 import type { AttachmentKind } from "../constants.ts";
 import { formatFileSize } from "../constants.ts";
-import { AttachmentPreviewDialog } from "./attachment-preview.tsx";
+import { AttachmentPreviewDialog, type AttachmentPreviewTarget } from "./attachment-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
@@ -41,6 +41,7 @@ export function AttachmentChip({
   onRemove,
   href,
   preview,
+  presentation,
   previewActions,
   onOpenPreview,
   className,
@@ -52,6 +53,8 @@ export function AttachmentChip({
   href?: string | undefined;
   /** Full-content URL; when set, clicking the chip opens an in-app preview. */
   preview?: string | null | undefined;
+  /** A deck's server-rendered slides, shown instead of "no preview". */
+  presentation?: AttachmentPreviewTarget["presentation"];
   /** Replaces the preview's "Open original" link; required for a `data:` or `blob:` preview. */
   previewActions?: ReactNode;
   /**
@@ -119,7 +122,13 @@ export function AttachmentChip({
 
   const dialog = preview ? (
     <AttachmentPreviewDialog
-      target={{ fileName: item.fileName, size: item.size, kind: item.kind, url: preview }}
+      target={{
+        fileName: item.fileName,
+        size: item.size,
+        kind: item.kind,
+        url: preview,
+        presentation,
+      }}
       {...(previewActions ? { actions: previewActions } : {})}
       open={previewOpen}
       onOpenChange={setPreviewOpen}

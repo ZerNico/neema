@@ -19,6 +19,7 @@ import {
   editMessage,
   getWorkTurnReservation,
   reserveWorkTurn,
+  resumeMessage,
   retryMessage,
   sendMessage,
   stopGeneration,
@@ -57,7 +58,7 @@ const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoi
 
 const liveDraft = vi.hoisted(() => ({
   tools: [] as ToolActivity[],
-  status: "complete" as "complete" | "streaming",
+  status: "complete" as "complete" | "streaming" | "error",
 }));
 vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
   getAgentDraft: vi.fn(),
@@ -101,6 +102,7 @@ vi.mock("../server/functions.ts", () => ({
   branchConversation: vi.fn(),
   sendMessage: vi.fn(),
   answerQuestion: vi.fn(),
+  resumeMessage: vi.fn(),
   retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stopGeneration: vi.fn(),
@@ -274,6 +276,26 @@ vi.mock("./virtual-message-list.tsx", () => ({
               Retry with Model Two
             </button>
           ) : null}
+          {message.onResume ? (
+            <button
+              type="button"
+              aria-label={`Resume ${String(message.id)}`}
+              disabled={Boolean(message.retryDisabled)}
+              onClick={message.onResume as () => void}
+            >
+              Resume same
+            </button>
+          ) : null}
+          {message.onResumeWith ? (
+            <button
+              type="button"
+              aria-label={`Resume ${String(message.id)} with m2`}
+              disabled={Boolean(message.retryDisabled)}
+              onClick={() => (message.onResumeWith as (modelId: string) => void)("m2")}
+            >
+              Resume with Model Two
+            </button>
+          ) : null}
           {message.onBranch ? (
             <button
               type="button"
@@ -391,6 +413,7 @@ const reservationStatusMock = vi.mocked(getWorkTurnReservation);
 const reserveMock = vi.mocked(reserveWorkTurn);
 const sendMock = vi.mocked(sendMessage);
 const retryMock = vi.mocked(retryMessage);
+const resumeMock = vi.mocked(resumeMessage);
 
 const BASE = new Date("2026-03-01T12:00:00Z");
 
@@ -398,7 +421,7 @@ const message = (id: string, role: "user" | "assistant" | "system", content: str
   id,
   conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
   role,
-  status: "complete" as "complete" | "streaming",
+  status: "complete" as "complete" | "streaming" | "error" | "aborted",
   content,
   reasoning: "",
   modelId: "m1",
@@ -1604,6 +1627,66 @@ describe("ChatView retry", () => {
   });
 });
 
+describe("ChatView resume", () => {
+  const ended = (status: "error" | "aborted", id = "m-answer") => ({
+    ...message(id, "assistant", "half a deck"),
+    status,
+  });
+
+  it("offers resume only on a failed or stopped last answer", () => {
+    renderView(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        ended("error"),
+        message("m-user-2", "user", "u2"),
+        ended("aborted", "m-answer-2"),
+      ],
+    });
+    expect(screen.queryByRole("button", { name: "Resume m-answer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume m-answer-2" })).toBeInTheDocument();
+  });
+
+  it("offers no resume on a completed answer", () => {
+    renderView();
+    expect(screen.queryByRole("button", { name: "Resume m-answer" })).toBeNull();
+  });
+
+  it("resumes with the answer's model and keeps the composer selection", async () => {
+    resumeMock.mockResolvedValueOnce({ assistantMessageId: "m-answer" });
+    renderView(null, { messages: [message("m-user", "user", "u1"), ended("aborted")] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume m-answer" }));
+    await waitFor(() =>
+      expect(resumeMock).toHaveBeenCalledWith({
+        data: {
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          messageId: "m-answer",
+          timeZone: "Europe/Berlin",
+        },
+      }),
+    );
+    // Resume follows the old answer's continuation instead of anchoring its question.
+    expect(screen.getByTestId("transcript")).toHaveAttribute("data-anchor-id", "");
+    // Resume never asks: nothing is removed.
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(retryMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
+  });
+
+  it("selects a switched model only once the resume succeeds", async () => {
+    resumeMock.mockRejectedValueOnce(new Error("Unknown model"));
+    renderView(null, { messages: [message("m-user", "user", "u1"), ended("error")] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume m-answer with m2" }));
+    await waitFor(() => expect(resumeMock).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("composer-model")).toHaveTextContent("m1");
+
+    resumeMock.mockResolvedValueOnce({ assistantMessageId: "m-answer" });
+    fireEvent.click(screen.getByRole("button", { name: "Resume m-answer with m2" }));
+    await waitFor(() => expect(screen.getByTestId("composer-model")).toHaveTextContent("m2"));
+  });
+});
+
 const draftReference = (
   conversationId = "01990f4e-6650-7a33-a768-611e2e4bf4c7",
   draftId = "d1",
@@ -1692,6 +1775,39 @@ describe("ChatView anchored turns", () => {
       { anchorFirstTurn: true },
     );
     expect(anchor()).toBe("m-user");
+  });
+
+  it("drops the question an ended first attempt anchored when that answer resumes", async () => {
+    resumeMock.mockResolvedValueOnce({ assistantMessageId: "m-answer" });
+    const failed = payload(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        { ...message("m-answer", "assistant", "half"), status: "error" as const },
+      ],
+    });
+    renderView(
+      null,
+      { messages: [message("m-user", "user", "u1"), streaming("m-answer", "assistant", "")] },
+      { anchorFirstTurn: true },
+    );
+    expect(anchor()).toBe("m-user");
+    // The answer fails before the reader scrolls to its end.
+    liveDraft.status = "error";
+    conversationMock.mockResolvedValue(failed as never);
+    act(() =>
+      FakeEventSource.instances.at(-1)!.emit("sync", {
+        type: "message.status",
+        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+        messageId: "m-answer",
+        status: "error",
+      }),
+    );
+    const resume = await screen.findByRole("button", { name: "Resume m-answer" });
+    expect(anchor()).toBe("m-user");
+
+    fireEvent.click(resume);
+
+    await waitFor(() => expect(anchor()).toBe(""));
   });
 
   it("opens as usual when that first answer already finished", async () => {

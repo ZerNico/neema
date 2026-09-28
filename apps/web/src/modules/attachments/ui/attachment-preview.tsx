@@ -10,9 +10,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
+import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { cn } from "~/ui/utils";
+import { PresentationPreview, type PresentationSource } from "./presentation-preview.tsx";
 
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
@@ -21,6 +23,8 @@ export interface AttachmentPreviewTarget {
   readonly kind: AttachmentKind;
   /** Authenticated bytes route, or an object URL for a not-yet-stored image. */
   readonly url: string;
+  /** Set only for a PowerPoint deck; see `presentationSource`. */
+  readonly presentation?: PresentationSource | null | undefined;
   /**
    * True when `url` already holds less than the whole file. A local file is
    * read through a capped bridge call, so the dialog cannot tell by measuring
@@ -85,7 +89,12 @@ export function AttachmentPreviewDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        {target.unsupported || target.kind === "file" ? (
+        {target.kind === "file" && target.presentation && !target.unsupported ? (
+          <PresentationPreview
+            key={`${target.presentation.kind}:${target.presentation.id}`}
+            source={target.presentation}
+          />
+        ) : target.unsupported || target.kind === "file" ? (
           <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
         ) : target.kind === "image" ? (
           <img
@@ -162,7 +171,7 @@ function TextPreview({
     return <Spinner aria-label="Loading preview" className="text-muted-foreground" />;
   }
   if (state.status === "error") {
-    return <p className="text-destructive text-sm">Could not load this file.</p>;
+    return <FieldError>Could not load this file.</FieldError>;
   }
 
   // A markdown file is the one kind with two genuinely different readings, so

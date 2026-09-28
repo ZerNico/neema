@@ -232,6 +232,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     agentDrafts: defaults.agentDrafts ?? [],
     scheduleDrafts: defaults.scheduleDrafts ?? [],
     documents: defaults.documents ?? [],
+    workingFiles: defaults.workingFiles ?? [],
     ...rows,
     referenceAttachments,
     window: { anchorId: messages[0]?.id ?? null, olderCursor },

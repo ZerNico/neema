@@ -7,7 +7,7 @@ export const attachmentReferenceHint = (file: { id: string; fileName: string }) 
   `File reference: ${JSON.stringify(file.fileName)}, attachment id ${JSON.stringify(file.id)}, link ${attachmentReferenceUrl(file.id)}.`;
 
 export const fileReferencesSystemHint =
-  "When referring to an available uploaded or tool-returned file, use a Markdown link [filename](/api/files/ATTACHMENT_ID) with its actual attachment id so the reader can preview it. Use the current file metadata, not ids copied from older answers. Never invent an id or identify a file by its name alone.";
+  "When referring to an available uploaded or tool-returned file, use a Markdown link [filename](/api/files/ATTACHMENT_ID) with its actual attachment id so the reader can preview it. Use the current file metadata, not ids copied from older answers. Never invent an id or identify a file by its name alone. When you deliver a new file, its preview and download card are already in the answer. A brief completion line is enough; do not repeat the file link or list its contents unless the reader asks for a breakdown or explanation.";
 
 export const isFileReferenceHref = (href: string) =>
   /^\/(?:api\/files(?:\/|[?#]|$)|local-file(?:[/?#]|$))/.test(href);

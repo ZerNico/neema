@@ -73,8 +73,8 @@ export default defineModule({
     run: () => ({
       text: { generated: 2 },
       files: [
-        file("%PDF-1.4 minimal", { name: "report.pdf", mediaType: "application/pdf" }),
-        file("a,b\\n1,2\\n", { name: "report.csv", mediaType: "text/csv", share: true }),
+        file("%PDF-1.4 minimal", { name: "report.pdf", mediaType: "application/pdf", delivery: "publish" }),
+        file("a,b\\n1,2\\n", { name: "report.csv", mediaType: "text/csv", delivery: "publish", showModel: true }),
       ],
     }),
   }),
@@ -90,7 +90,7 @@ export default defineModule({
     parameters: Schema.Struct({}),
     run: () => ({
       files: Array.from({ length: 6 }, (_, index) =>
-        file("x", { name: "f" + index + ".txt", mediaType: "text/plain" }),
+        file("x", { name: "f" + index + ".txt", mediaType: "text/plain", delivery: "publish" }),
       ),
     }),
   }),
@@ -159,6 +159,7 @@ describe("custom tool core", () => {
           name: "notes.md",
           mediaType: "text/plain",
           bytes: new TextEncoder().encode("hi"),
+          ref: { kind: "attachment" as const, id: "00000000-0000-0000-0000-000000000001" },
         };
         const shout = (reference: string) =>
           runtime.run({
@@ -334,7 +335,7 @@ describe("custom tool core", () => {
           timeoutMs: 5_000,
         });
         expect(report).toMatchObject({ ok: true, output: '{\n  "generated": 2\n}' });
-        expect(report.files?.map((item) => [item.name, item.mediaType, item.share])).toEqual([
+        expect(report.files?.map((item) => [item.name, item.mediaType, item.showModel])).toEqual([
           ["report.pdf", "application/pdf", false],
           ["report.csv", "text/csv", true],
         ]);

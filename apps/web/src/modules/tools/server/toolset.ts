@@ -1,5 +1,5 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
-import { Effect, type Scope } from "effect";
+import { Effect, Schema, type Scope } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
@@ -19,6 +19,17 @@ export interface PreparedWebTools {
   tools: { search: boolean; reader: boolean };
   group: ToolGroup;
 }
+
+/**
+ * A parameter the model is offered as `jsonSchema` but that decodes anything,
+ * absent included, so the handler can explain a malformed call instead of the
+ * whole generation failing at decode. `Any`, not `Unknown`: the generator drops
+ * the annotation on `Unknown` and the model is offered `{}`.
+ */
+export const advertisedParameter = (jsonSchema: Record<string, unknown>) =>
+  Schema.optionalKey(
+    Schema.Any.check(Schema.makeFilter(() => true, { toJsonSchema: () => jsonSchema })),
+  );
 
 type DynamicToolkit = Toolkit.Toolkit<Record<string, Tool.Any>>;
 

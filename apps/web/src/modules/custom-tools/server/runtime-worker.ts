@@ -9,6 +9,8 @@ import {
   isCustomToolFile,
   type CustomToolDefinition,
   type CustomToolModule,
+  type WorkingFileRef,
+  type FileRef,
 } from "../authoring.ts";
 import {
   CUSTOM_TOOL_LIMITS,
@@ -47,7 +49,12 @@ export interface WorkerInvokeRequest {
 export interface WorkerFileReply {
   readonly type: "file";
   readonly requestId: number;
-  readonly file?: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array };
+  readonly file?: {
+    readonly name: string;
+    readonly mediaType: string;
+    readonly bytes: Uint8Array;
+    readonly ref: FileRef;
+  };
   readonly error?: string;
 }
 
@@ -57,7 +64,9 @@ export type WorkerRequest = WorkerInspectRequest | WorkerInvokeRequest | WorkerF
 export interface WorkerRunFile {
   readonly name: string;
   readonly mediaType: string;
-  readonly share: boolean;
+  readonly delivery: "working" | "publish";
+  readonly replaces?: WorkingFileRef;
+  readonly showModel: boolean;
   readonly bytes: Uint8Array;
 }
 
@@ -338,6 +347,9 @@ const normalizeText = (value: unknown): string => {
   return JSON.stringify(toJsonValue(value, new WeakSet()), null, 2);
 };
 
+const STALE_BUNDLE =
+  "This tool was built with an older file runtime. An admin must open it in Custom tools and save it again to rebuild it.";
+
 /**
  * `{ text?, files }` with every entry made by `file(...)` is the file form;
  * anything else, including a look-alike object without the brand, is JSON.
@@ -356,6 +368,11 @@ const normalizeResult = (value: unknown): { text: string; files: WorkerRunFile[]
   }
   let total = 0;
   for (const item of files) {
+    // `file()` in the current runtime always sets delivery, so a file without it
+    // came from a bundle built before delivery existed.
+    if (item.delivery !== "working" && item.delivery !== "publish") throw new Error(STALE_BUNDLE);
+    if (item.replaces && (item.delivery !== "working" || item.replaces.kind !== "working"))
+      throw new Error(`File ${item.name} has an invalid replacement reference.`);
     if (item.bytes.length === 0) throw new Error(`File ${item.name} is empty.`);
     if (item.bytes.length > CUSTOM_TOOL_LIMITS.fileBytes) {
       throw new Error(`File ${item.name} exceeds ${CUSTOM_TOOL_LIMITS.fileBytes} bytes.`);
@@ -371,7 +388,9 @@ const normalizeResult = (value: unknown): { text: string; files: WorkerRunFile[]
     files: files.map((item) => ({
       name: item.name,
       mediaType: item.mediaType,
-      share: item.share,
+      delivery: item.delivery,
+      ...(item.replaces ? { replaces: item.replaces } : {}),
+      showModel: item.showModel,
       bytes: new Uint8Array(item.bytes),
     })),
   };

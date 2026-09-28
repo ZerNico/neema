@@ -14,6 +14,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  max,
   ne,
   not,
   or,
@@ -61,6 +62,7 @@ import {
   workTurnReservations,
   conversationIntegrations,
 } from "~/db/schema/index.ts";
+import { readKeptWorkingFiles } from "./kept-working-files.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import { projectRole } from "~/modules/projects/server/access.ts";
@@ -68,6 +70,9 @@ import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
+import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
+import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
+import { ToolFileActivity } from "../tool-file-schema.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
@@ -159,6 +164,36 @@ const draftSummary = (draft: {
  * `(created_at, id)`. Compared in SQL: a JS Date drops the microseconds that
  * tell apart the rows of one turn.
  */
+/**
+ * A branch's tool rows name its own copies of the files they delivered, so a
+ * file card still groups under the call that produced it there.
+ */
+const withClonedFileIds = (
+  toolName: string,
+  result: JsonValue | null,
+  cloned: ReadonlyMap<string, string>,
+): JsonValue | null => {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const copy = (id: string) => {
+    const cloneId = cloned.get(id);
+    return cloneId ? [cloneId] : [];
+  };
+  if (toolName === "publish_file") {
+    const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ToolFileActivity)(result));
+    if (stored?.attachmentId) {
+      const next = { ...result };
+      delete next.attachmentId;
+      const [id] = copy(stored.attachmentId);
+      return id ? { ...next, attachmentId: id } : next;
+    }
+  }
+  if (isCustomToolName(toolName)) {
+    const stored = Option.getOrUndefined(Schema.decodeUnknownOption(CustomToolActivity)(result));
+    if (stored?.fileIds) return { ...result, fileIds: stored.fileIds.flatMap(copy) };
+  }
+  return result;
+};
+
 const positionBefore = (id: string) =>
   sql`(${messages.createdAt}, ${messages.id}) < (select position.created_at, position.id from ${messages} as position where position.id = ${id})`;
 
@@ -190,6 +225,8 @@ export interface ConversationDefaults {
   readonly scheduleDrafts?: ReadonlyArray<DraftSummary>;
   /** Mutable chat documents stay out of history; the loader carries summaries only. */
   readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
+  /** Unpublished working files kept for later answers, named so a rewind can say it removes them. */
+  readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
 }
 export type ResolveError =
   | AgentNotAvailable
@@ -346,7 +383,7 @@ const GENERATION_LEASE = sql`interval '45 seconds'`;
 const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
 export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
 
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer";
+export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
@@ -575,6 +612,11 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .where(eq(documents.conversationId, conversationId))
     .orderBy(asc(documents.id))
     .pipe(Effect.orDie);
+  const workingFiles = (yield* readKeptWorkingFiles(tx, conversationId)).map((file) => ({
+    id: file.latest.workingFileId,
+    name: file.latest.name,
+    messageId: file.createdBy,
+  }));
   const [conversation] = yield* tx
     .select({ mode: conversations.mode, projectId: conversations.projectId })
     .from(conversations)
@@ -585,6 +627,7 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     agentDrafts: drafts.filter((draft) => draft.kind === "agent").map(draftSummary),
     scheduleDrafts: drafts.filter((draft) => draft.kind === "schedule").map(draftSummary),
     documents: documentRows,
+    workingFiles,
     mode: conversation?.mode ?? "chat",
     projectId: conversation?.projectId ?? null,
   } satisfies ConversationDefaults;
@@ -685,6 +728,16 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       )
       .pipe(Effect.orDie);
 });
+
+/** An answer's text or reasoning as its chunks spell it, the way the reaper reads it. */
+export const joinChunks = (
+  chunks: ReadonlyArray<{ kind: string; delta: string }>,
+  kind: "text" | "reasoning",
+) =>
+  chunks
+    .filter((chunk) => chunk.kind === kind)
+    .map((chunk) => chunk.delta)
+    .join("");
 
 export class ChatRepo extends Context.Service<
   ChatRepo,
@@ -995,6 +1048,8 @@ export class ChatRepo extends Context.Service<
       chunks: ReadonlyArray<{ seq: number; kind: ChunkKind; delta: string }>,
     ): Effect.Effect<void>;
     chunksAfter(messageId: string, afterSeq: number): Effect.Effect<ChunkRow[]>;
+    /** The message's highest chunk seq, 0 when it has none. */
+    lastChunkSeq(messageId: string): Effect.Effect<number>;
     insertToolCall(input: {
       id: string;
       messageId: string;
@@ -1116,6 +1171,20 @@ export class ChatRepo extends Context.Service<
         searchEnabled?: boolean | undefined;
       },
       AttachmentNotAvailable | ResolveError | ConversationBusy
+    >;
+    /**
+     * Claims the conversation's last answer, failed or stopped, for a new
+     * generation that continues it. Unlike retry nothing it produced is
+     * removed: text, chunks, tool rows, files and drafts all stay.
+     */
+    resumeMessage(input: {
+      userId: string;
+      messageId: string;
+      modelId: string;
+      resolve?: ResolveGeneration | undefined;
+    }): Effect.Effect<
+      { claimed: false } | { claimed: true; generationId: string; searchEnabled: boolean },
+      ResolveError | ConversationBusy
     >;
     createAssistantForEdit(
       input: EditContent & {
@@ -2623,6 +2692,14 @@ export class ChatRepo extends Context.Service<
                       .pipe(Effect.orDie);
                 }
 
+                const attachmentIds = yield* attachments.cloneForMessages(tx, {
+                  userId: input.userId,
+                  messages: [...clonedIds].map(([sourceMessageId, targetMessageId]) => ({
+                    sourceMessageId,
+                    targetMessageId,
+                  })),
+                });
+
                 // Tool calls are part of the answer, not of its generation:
                 // the sources panel and the citation numbering both read them.
                 const toolCalls = yield* tx
@@ -2648,7 +2725,7 @@ export class ChatRepo extends Context.Service<
                               ...(call.result as object),
                               progress: clonedProgress.get(call.id),
                             } as JsonValue)
-                          : call.result,
+                          : withClonedFileIds(call.toolName, call.result, attachmentIds),
                         messageId: clonedIds.get(call.messageId)!,
                       })),
                     )
@@ -2711,13 +2788,6 @@ export class ChatRepo extends Context.Service<
                     )
                     .pipe(Effect.orDie);
 
-                const attachmentIds = yield* attachments.cloneForMessages(tx, {
-                  userId: input.userId,
-                  messages: [...clonedIds].map(([sourceMessageId, targetMessageId]) => ({
-                    sourceMessageId,
-                    targetMessageId,
-                  })),
-                });
                 const fileReferenceAliases = composeFileReferenceAliases({
                   sourceConversationId: source.id,
                   inherited: source.fileReferenceAliases,
@@ -3081,11 +3151,7 @@ export class ChatRepo extends Context.Service<
                     .where(eq(messageChunks.messageId, row.id))
                     .orderBy(asc(messageChunks.seq))
                     .pipe(Effect.orDie);
-                  const joined = (kind: "text" | "reasoning") =>
-                    chunks
-                      .filter((chunk) => chunk.kind === kind)
-                      .map((chunk) => chunk.delta)
-                      .join("");
+                  const joined = (kind: "text" | "reasoning") => joinChunks(chunks, kind);
                   // Same identity check as the fence: a retry that already
                   // reclaimed the row must not be overwritten by stale cleanup.
                   const claimed = yield* tx
@@ -3149,6 +3215,14 @@ export class ChatRepo extends Context.Service<
           return settled;
         }),
 
+        lastChunkSeq: Effect.fn("ChatRepo.lastChunkSeq")(function* (messageId) {
+          const [row] = yield* db
+            .select({ seq: max(messageChunks.seq) })
+            .from(messageChunks)
+            .where(eq(messageChunks.messageId, messageId))
+            .pipe(Effect.orDie);
+          return row?.seq ?? 0;
+        }),
         chunksAfter: Effect.fn("ChatRepo.chunksAfter")(function* (messageId, afterSeq) {
           return yield* db
             .select({
@@ -3311,11 +3385,7 @@ export class ChatRepo extends Context.Service<
                 .from(messageChunks)
                 .where(eq(messageChunks.messageId, input.messageId))
                 .orderBy(asc(messageChunks.seq));
-              const joined = (kind: "text" | "reasoning") =>
-                chunks
-                  .filter((chunk) => chunk.kind === kind)
-                  .map((chunk) => chunk.delta)
-                  .join("");
+              const joined = (kind: "text" | "reasoning") => joinChunks(chunks, kind);
               const failed = {
                 status: "error" as const,
                 error: { code: "GenerationFailed", message: input.error },
@@ -3570,6 +3640,159 @@ export class ChatRepo extends Context.Service<
                   generationId,
                   searchEnabled: config.searchEnabled,
                   orphanedKeys: orphanedKeys as ReadonlyArray<string>,
+                };
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        resumeMessage: Effect.fn("ChatRepo.resumeMessage")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const lost = { claimed: false as const };
+                const target = (yield* tx
+                  .select({ conversationId: messages.conversationId })
+                  .from(messages)
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie))[0];
+                if (!target) return lost;
+                yield* rejectReservedWorkTurn(tx, target.conversationId);
+                const owned = yield* tx
+                  .select({ id: conversations.id })
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.id, target.conversationId),
+                      eq(conversations.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .pipe(Effect.orDie);
+                if (owned.length === 0) return lost;
+                const streaming = yield* tx
+                  .select({ id: messages.id })
+                  .from(messages)
+                  .where(
+                    and(
+                      eq(messages.conversationId, target.conversationId),
+                      eq(messages.status, "streaming"),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                if (streaming.length > 0) return lost;
+                // Only the last turn can continue: a later turn would have been
+                // answered without whatever the resumed answer goes on to say.
+                const [tail] = yield* tx
+                  .select()
+                  .from(messages)
+                  .where(turnMessagesOf(target.conversationId))
+                  .orderBy(desc(messages.createdAt), desc(messages.id))
+                  .limit(1)
+                  .pipe(Effect.orDie);
+                if (
+                  tail?.id !== input.messageId ||
+                  tail.role !== "assistant" ||
+                  (tail.status !== "error" && tail.status !== "aborted")
+                )
+                  return lost;
+                const config = yield* resolveAttempt(
+                  tx,
+                  yield* readDefaults(tx, target.conversationId),
+                  input.resolve,
+                  yield* readConfig(tx, input.messageId),
+                );
+                const chunks = yield* tx
+                  .select({ kind: messageChunks.kind, delta: messageChunks.delta })
+                  .from(messageChunks)
+                  .where(eq(messageChunks.messageId, input.messageId))
+                  .orderBy(asc(messageChunks.seq))
+                  .pipe(Effect.orDie);
+                // A branch copies an answer's text but never its chunks. The
+                // client rebuilds a streaming answer from chunks alone, so the
+                // copied text becomes the first ones; otherwise the chunks are
+                // the text, as the reaper reads them.
+                if (chunks.length === 0) {
+                  const seeded = [
+                    ...(tail.reasoning
+                      ? [{ kind: "reasoning" as const, delta: tail.reasoning }]
+                      : []),
+                    ...(tail.content ? [{ kind: "text" as const, delta: tail.content }] : []),
+                  ];
+                  if (seeded.length > 0)
+                    yield* tx
+                      .insert(messageChunks)
+                      .values(
+                        seeded.map((chunk, index) => ({
+                          messageId: input.messageId,
+                          seq: index + 1,
+                          ...chunk,
+                        })),
+                      )
+                      .pipe(Effect.orDie);
+                }
+                const joined = (kind: "text" | "reasoning") => joinChunks(chunks, kind);
+                const generationId = uuidv7();
+                const claimed = yield* tx
+                  .update(messages)
+                  .set({
+                    status: "streaming",
+                    generationId,
+                    generationLeaseUntil: freshLease(),
+                    error: null,
+                    completedAt: null,
+                    modelId: input.modelId,
+                    ...(chunks.length > 0
+                      ? { content: joined("text"), reasoning: joined("reasoning") }
+                      : {}),
+                    // Signed image turns belong to the model that wrote them;
+                    // another model's turns are never merged into them.
+                    ...(input.modelId === tail.modelId ? {} : { providerReplay: null }),
+                  })
+                  .where(
+                    and(
+                      eq(messages.id, input.messageId),
+                      inArray(messages.status, ["error", "aborted"]),
+                    ),
+                  )
+                  .returning({ id: messages.id })
+                  .pipe(Effect.orDie);
+                if (claimed.length === 0) return lost;
+                // A steer sent to the ended attempt was meant for this answer,
+                // so the attempt that continues it takes it in.
+                yield* tx
+                  .update(conversationQueueEntries)
+                  .set({ steerGenerationId: generationId })
+                  .where(
+                    and(
+                      eq(conversationQueueEntries.conversationId, target.conversationId),
+                      eq(conversationQueueEntries.steerMessageId, input.messageId),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .update(conversations)
+                  .set({ archivedAt: null })
+                  .where(
+                    and(
+                      eq(conversations.id, target.conversationId),
+                      isNotNull(conversations.archivedAt),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .delete(messageKnowledgeVersions)
+                  .where(eq(messageKnowledgeVersions.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* tx
+                  .delete(messageGenerationConfig)
+                  .where(eq(messageGenerationConfig.messageId, input.messageId))
+                  .pipe(Effect.orDie);
+                yield* writeConfig(tx, input.messageId, config);
+                return {
+                  claimed: true as const,
+                  generationId,
+                  searchEnabled: config.searchEnabled,
                 };
               }),
             )

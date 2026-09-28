@@ -1,31 +1,25 @@
 import { Effect, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { PLAN_LIMITS, PlanSnapshot, PlanToolResult } from "../plan-schema.ts";
-import type { ToolGroup } from "./toolset.ts";
+import { advertisedParameter, type ToolGroup } from "./toolset.ts";
 
 // As with ask_user and save_memory, validate inside the handler so malformed
 // model arguments come back as a recoverable tool result instead of failing
 // parameter decoding mid-stream.
 const TransportParams = Schema.Struct({
-  steps: Schema.optionalKey(
-    Schema.Any.check(
-      Schema.makeFilter(() => true, {
-        toJsonSchema: () => ({
-          type: "array",
-          minItems: 1,
-          maxItems: PLAN_LIMITS.steps,
-          items: {
-            type: "object",
-            required: ["step", "status"],
-            properties: {
-              step: { type: "string", minLength: 1, maxLength: PLAN_LIMITS.stepLength },
-              status: { type: "string", enum: ["pending", "in_progress", "completed"] },
-            },
-          },
-        }),
-      }),
-    ),
-  ),
+  steps: advertisedParameter({
+    type: "array",
+    minItems: 1,
+    maxItems: PLAN_LIMITS.steps,
+    items: {
+      type: "object",
+      required: ["step", "status"],
+      properties: {
+        step: { type: "string", minLength: 1, maxLength: PLAN_LIMITS.stepLength },
+        status: { type: "string", enum: ["pending", "in_progress", "completed"] },
+      },
+    },
+  }),
 });
 
 export const updatePlanTool = Tool.make("update_plan", {
@@ -47,10 +41,11 @@ export interface PreparedPlanTool {
 /**
  * One checklist per generation. Each accepted call replaces it, so the prompt
  * carries a single current list rather than a history of revisions, and a
- * failed or stopped generation keeps the last honest snapshot.
+ * failed or stopped generation keeps the last honest snapshot. A resumed
+ * answer starts from that snapshot.
  */
-export function preparePlanTool(): PreparedPlanTool {
-  let current: PlanSnapshot | null = null;
+export function preparePlanTool(initial: PlanSnapshot | null = null): PreparedPlanTool {
+  let current = initial;
   const handler = (params: { readonly steps?: unknown }) =>
     Effect.sync((): PlanToolResult => {
       const decoded = Schema.decodeUnknownOption(PlanSnapshot)(params);

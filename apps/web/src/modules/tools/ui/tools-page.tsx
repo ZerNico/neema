@@ -1,5 +1,10 @@
 import { NumberField, integerBetween, useInvalidateTools } from "./tool-fields.tsx";
-import { Brain02Icon, GlobalSearchIcon, Link01Icon } from "@hugeicons/core-free-icons";
+import {
+  Brain02Icon,
+  GlobalSearchIcon,
+  Link01Icon,
+  Presentation01Icon,
+} from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useState } from "react";
@@ -17,14 +22,17 @@ import { cn } from "~/ui/utils";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
   getMemoryTool,
+  getOfficeFilesTool,
   getUrlReaderTool,
   getWebSearchTool,
   testSearchConnection,
   updateMemoryTool,
+  updateOfficeFilesTool,
   updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { PresentationFontsRow } from "~/modules/presentations/ui/presentation-fonts.tsx";
 
 export const memoryToolQuery = queryOptions({
   queryKey: ["admin", "tools", "memory"],
@@ -39,6 +47,11 @@ export const webSearchToolQuery = queryOptions({
 export const urlReaderToolQuery = queryOptions({
   queryKey: ["admin", "tools", "url-reader"],
   queryFn: () => getUrlReaderTool(),
+});
+
+export const officeFilesToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "office-files"],
+  queryFn: () => getOfficeFilesTool(),
 });
 
 type TestResult =
@@ -58,10 +71,11 @@ const UrlReaderForm = Schema.Struct({
 
 export function ToolsPage() {
   return (
-    <Page title="Tools" description="Web tools and memory available in chats.">
+    <Page title="Tools" description="Web tools, memory and Office files available in chats.">
       <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
+      <OfficeFilesSection />
     </Page>
   );
 }
@@ -423,6 +437,50 @@ function UrlReaderSection() {
             </FormActions>
           </form>
         </ListRow>
+      </ListCard>
+    </Section>
+  );
+}
+
+/**
+ * Whether chats may create and edit Office files, and the fonts their previews
+ * draw. Previews of existing files keep working when editing is off.
+ */
+function OfficeFilesSection() {
+  const { data: tool } = useSuspenseQuery(officeFilesToolQuery);
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => updateOfficeFilesTool({ data: { enabled } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: officeFilesToolQuery.queryKey }),
+    onError: (error) => toastError("Could not update Office files.", error),
+  });
+
+  if (!tool) {
+    return (
+      <Section title="Office files">
+        <EmptyState icon={Presentation01Icon} title="This tool isn’t set up yet" />
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Office files">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Create and edit PowerPoint files</span>
+            <span className="text-muted-foreground text-xs">
+              Lets the model make and change decks, look at its slides and deliver the file.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+            aria-label="Office files enabled"
+          />
+        </ListRow>
+        <PresentationFontsRow />
       </ListCard>
     </Section>
   );

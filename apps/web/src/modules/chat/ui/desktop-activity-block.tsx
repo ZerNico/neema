@@ -2,6 +2,7 @@ import {
   ArrowDown01Icon,
   Delete02Icon,
   Download04Icon,
+  FileImportIcon,
   Edit02Icon,
   File01Icon,
   Folder01Icon,
@@ -38,6 +39,7 @@ const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
   read_local_file: File01Icon,
+  import_local_file: FileImportIcon,
   write_local_file: PencilEdit02Icon,
   save_to_workspace: Download04Icon,
   edit_local_file: Edit02Icon,
@@ -78,6 +80,7 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
   const args = activity.args ?? {};
   switch (activity.name) {
     case "read_local_file":
+    case "import_local_file":
     case "write_local_file":
     case "edit_local_file":
       return text(args.path) || null;
@@ -100,6 +103,8 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Searching for ${what}` : "Searching files";
     case "read_local_file":
       return what ? `Reading ${what}` : "Reading a file";
+    case "import_local_file":
+      return what ? `Importing ${what}` : "Importing a file";
     case "write_local_file":
       return what ? `Writing ${what}` : "Writing a file";
     case "save_to_workspace":

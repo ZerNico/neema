@@ -12,6 +12,7 @@ import {
   getWebSearchTool,
   testSearchConnection,
   updateMemoryTool,
+  updateOfficeFilesTool,
   updateUrlReaderTool,
   updateWebSearchTool,
 } from "../server/functions.ts";
@@ -28,9 +29,16 @@ vi.mock("../server/functions.ts", () => ({
   updateWebSearchTool: vi.fn(),
   updateUrlReaderTool: vi.fn(),
   updateDocumentParserTool: vi.fn(),
+  getOfficeFilesTool: vi.fn(),
+  updateOfficeFilesTool: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("~/modules/presentations/server/font-functions.ts", () => ({
+  listPresentationFonts: vi.fn(async () => []),
+  uploadPresentationFont: vi.fn(),
+  deletePresentationFont: vi.fn(),
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children, ...rest }: Record<string, unknown> & { children?: unknown }) => (
@@ -66,7 +74,11 @@ const tool = (
 
 const renderPage = ({
   webSearch = tool("web_search", { backend: "searxng", baseUrl: "http://searx", maxResults: 8 }),
-}: { webSearch?: ReturnType<typeof tool> | null } = {}) => {
+  officeFiles = tool("office_files", {}),
+}: {
+  webSearch?: ReturnType<typeof tool> | null;
+  officeFiles?: ReturnType<typeof tool> | null;
+} = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const memory = tool("memory", {});
   vi.mocked(getMemoryTool).mockResolvedValue(memory);
@@ -76,6 +88,8 @@ const renderPage = ({
     tool("document_parser", { maxChars: 120000, maxPages: 200 }),
   );
   client.setQueryData(["admin", "tools", "memory"], memory);
+  client.setQueryData(["admin", "presentation-fonts"], []);
+  client.setQueryData(["admin", "tools", "office-files"], officeFiles);
   client.setQueryData(["admin", "tools", "web-search"], webSearch);
   client.setQueryData(
     ["admin", "tools", "url-reader"],
@@ -297,8 +311,21 @@ describe("ToolsPage", () => {
   });
 
   it("shows an empty state when the tool row is missing", () => {
-    renderPage({ webSearch: null });
-    expect(screen.getByText("This tool isn’t set up yet")).toBeInTheDocument();
+    renderPage({ webSearch: null, officeFiles: null });
+    expect(screen.getAllByText("This tool isn’t set up yet")).toHaveLength(2);
     expect(screen.queryByText(/migrations/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Office files enabled" })).toBeNull();
+  });
+
+  it("switches Office file editing off", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateOfficeFilesTool).mockResolvedValue(undefined as never);
+    renderPage();
+
+    await user.click(screen.getByRole("switch", { name: "Office files enabled" }));
+
+    await waitFor(() =>
+      expect(updateOfficeFilesTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+    );
   });
 });

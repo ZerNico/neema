@@ -52,7 +52,14 @@ import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { earlierSkillMessage, prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
+import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
+import { ToolsRepo } from "~/modules/tools/server/repo.ts";
+import { PresentationProcessor } from "~/modules/presentations/server/processor.ts";
+import { presentationActivitySummary } from "~/modules/presentations/activity.ts";
+import { preparePresentationTools } from "~/modules/presentations/server/tools.ts";
+import { PresentationToolName } from "~/modules/presentations/tool-schema.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint, fileReferencesSystemHint } from "../file-references.ts";
@@ -88,7 +95,7 @@ import {
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
-import { PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
+import { PlanSnapshot, PlanToolResult, renderPlanReminder } from "~/modules/tools/plan-schema.ts";
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
@@ -96,6 +103,11 @@ import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analyti
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { Db } from "~/server/db.ts";
 import { makeToolFileResolver } from "./tool-files.ts";
+import { createWorkingFiles, type WorkingFiles } from "./working-files.ts";
+import { KeptWorkingFiles } from "./kept-working-files.ts";
+import { formatFileRef, parseFileRef } from "./file-ref.ts";
+import { preparePublishFileTool } from "./publish-file.ts";
+import { ToolFileActivity } from "../tool-file-schema.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachments/server/repo.ts";
 import {
@@ -162,7 +174,16 @@ import {
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
 } from "./compaction.ts";
-import { buildHistoryMessages, type HistorySteer, type PromptDeps } from "./prompt.ts";
+import {
+  buildHistoryMessages,
+  loadResumedImages,
+  RESUME_REMINDER,
+  resumeFirstTurn,
+  resumedRounds,
+  type HistorySteer,
+  type PromptDeps,
+} from "./prompt.ts";
+import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -197,20 +218,14 @@ export type StreamEvent =
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
-// model → tool_calls → execute → feed results back → model continues.
-const MAX_TOOL_ROUNDS = 4;
-/**
- * Work on a folder is many small steps: list, read, edit, run, read again.
- * Four rounds is a couple of files, which is why knowledge already raises its
- * own ceiling rather than living with the default.
- */
-const MAX_DESKTOP_TOOL_ROUNDS = 24;
-/**
- * Knowledge-backed chats list, read and compare documents in batches, which
- * takes more rounds than a web lookup. A ceiling, not a target: the budget of
- * knowledge operations and the tools-off final pass still apply.
- */
-const MAX_KNOWLEDGE_TOOL_ROUNDS = 24;
+// model → tool_calls → execute → feed results back → model continues. One
+// ceiling for every chat: a runaway loop, not a budget. Per-tool budgets and
+// the tools-off final pass still apply.
+const MAX_TOOL_ROUNDS = 128;
+/** A file name inside a policy or reminder block is data: quoted, and unable to close the block. */
+const quotedName = (name: string) => JSON.stringify(name.replace(/[<>]/g, ""));
+/** Slide images one answer may put in front of the model, which it pays for per round. */
+const PREVIEW_FEEDBACK_LIMITS = { slides: 256, bytes: 128 * 1024 * 1024 } as const;
 
 // Projected activities are literal structs; one widening at the boundary
 // beats an assertion chain at every persistence site.
@@ -270,6 +285,8 @@ export class StreamEngine extends Context.Service<
       timeZone?: string | undefined;
       /** The document open in the panel, so it is the one the model reads first. */
       openDocumentId?: string | undefined;
+      /** Continue the answer from its stored rounds instead of starting it over. */
+      resume?: boolean | undefined;
       /**
        * Invoked inside the generation fiber once it reaches a terminal status.
        * The engine cannot reach the chat service, so queue dispatch arrives
@@ -340,6 +357,9 @@ export class StreamEngine extends Context.Service<
       const skillReader = yield* SkillReader;
       const customToolRuntime = yield* CustomToolRuntime;
       const customToolRepo = yield* CustomToolRepo;
+      const presentationProcessor = yield* Effect.serviceOption(PresentationProcessor);
+      const presentationFonts = yield* Effect.serviceOption(PresentationFonts);
+      const toolRegistry = yield* Effect.serviceOption(ToolsRepo);
       const policy = yield* FeaturePolicy;
       const integrations = yield* IntegrationService;
       const integrationApprovals = yield* IntegrationApprovals;
@@ -360,6 +380,9 @@ export class StreamEngine extends Context.Service<
       // Optional for the same reason; without it a tool's file parameter
       // simply finds no files.
       const database = yield* Effect.serviceOption(Db);
+      // Unpublished working files outlive their answer only where storage
+      // exists; test engines without it keep none.
+      const keptFiles = Option.getOrUndefined(yield* Effect.serviceOption(KeptWorkingFiles));
 
       // messageId -> the deferred its generation races against. Completing it
       // is how "stop" works: the fiber winds itself down and still runs
@@ -435,6 +458,7 @@ export class StreamEngine extends Context.Service<
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
+        resume?: boolean | undefined;
         abort: Deferred.Deferred<void>;
       }) {
         const fence = yield* GenerationFence;
@@ -473,6 +497,33 @@ export class StreamEngine extends Context.Service<
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
+        // A resumed answer starts from what it already produced: its rows are
+        // the rounds this attempt continues, read once here.
+        const resuming = input.resume === true && currentMessage !== null;
+        const ownCalls = resuming ? yield* repo.listToolCalls([input.messageId]) : [];
+        const ownCompactions = resuming ? yield* repo.listCompactionEvents([input.messageId]) : [];
+        const ownSteers = resuming
+          ? history.filter(
+              (m) => m.steeredIntoMessageId === input.messageId && m.status === "complete",
+            )
+          : [];
+        const ownFiles = resuming ? (currentMessage.assistantOutput?.files ?? []) : [];
+        // Past every position the answer has used, so unique row positions and
+        // turn order stay one space. The service refused a resume with none left.
+        const firstTurn = resuming
+          ? resumeFirstTurn({
+              calls: ownCalls,
+              compactions: ownCompactions,
+              steerTurns: ownSteers.map((m) => m.steerTurnIndex ?? -1),
+              files: ownFiles,
+              replay: currentMessage.providerReplay,
+            })
+          : 0;
+        // Each attempt gets the full budget, bounded only by research's space.
+        const roundLimit = Math.max(
+          0,
+          Math.min(MAX_TOOL_ROUNDS, RESEARCH_TURN_BASE - 1 - firstTurn),
+        );
         const settled = history.filter(
           (m) =>
             m.id !== input.messageId &&
@@ -533,18 +584,20 @@ export class StreamEngine extends Context.Service<
         const readerUrls = extractUserMessageUrls([
           ...completed,
           ...[...steersByAnswer.values()].flat(),
+          ...ownSteers,
         ]);
 
-        // Conversation-scoped citations (Onyx-style): gather every source from
-        // earlier messages' persisted tool calls. They seed the numbering (so
-        // new searches continue the sequence) and, when search is on, a recap
-        // block that makes earlier indexes legitimately citable again. History
-        // keeps its markers, which resolve once the recap is present.
-        const priorToolCalls = yield* repo.listToolCalls(
-          history
-            .filter((m) => m.id !== input.messageId && m.role === "assistant")
-            .map((m) => m.id),
-        );
+        // Seed conversation citation numbers and the recap from persisted sources.
+        // A resumed answer's own sources count: its text already cites them,
+        // and links it found must remain readable.
+        const priorToolCalls = [
+          ...(yield* repo.listToolCalls(
+            history
+              .filter((m) => m.id !== input.messageId && m.role === "assistant")
+              .map((m) => m.id),
+          )),
+          ...ownCalls,
+        ];
         const priorSources = mergeSources(
           priorToolCalls.flatMap((call) => {
             const result = call.result as { sources?: ReadonlyArray<Source> } | null;
@@ -560,11 +613,21 @@ export class StreamEngine extends Context.Service<
             .filter((m) => m.role === "assistant" && m.usage?.firstInputTokens !== undefined)
             .at(-1)?.usage ?? null;
 
-        let seq = 0;
-        let assembled = "";
-        let assembledReasoning = "";
+        const earlierUsage = resuming ? currentMessage.usage : null;
+        // The resume claim set the row's text to what its chunks spell.
+        let seq = resuming ? yield* repo.lastChunkSeq(input.messageId) : 0;
+        let assembled = resuming ? currentMessage.content : "";
+        let assembledReasoning = resuming ? (currentMessage.reasoning ?? "") : "";
         let acceptedImages = 0;
-        let replay: ProviderReplay | null = null;
+        // A resumed image answer keeps the signed turns its model wrote; the
+        // resume transaction already cleared them for a different model.
+        const storedReplay = resuming ? currentMessage.providerReplay : null;
+        let replay: ProviderReplay | null =
+          storedReplay &&
+          storedReplay.providerId === model?.providerId &&
+          storedReplay.modelKey === model.modelKey
+            ? storedReplay
+            : null;
         const imageOutput = model?.capabilities.imageOutput === true;
         let imageCostIncomplete = false;
         let modelCallOpen = false;
@@ -652,8 +715,10 @@ export class StreamEngine extends Context.Service<
               ...(totals.sawUsage
                 ? {
                     usage: {
-                      inputTokens: totals.inputTokens,
-                      outputTokens: totals.outputTokens,
+                      // The row's text spans every attempt of a resumed answer,
+                      // so its usage does too; the ledger keeps one row per attempt.
+                      inputTokens: (earlierUsage?.inputTokens ?? 0) + totals.inputTokens,
+                      outputTokens: (earlierUsage?.outputTokens ?? 0) + totals.outputTokens,
                       // Only useful as a pair; either alone calibrates nothing.
                       ...(firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
                         ? { firstInputTokens, estimatedFirstInputTokens }
@@ -853,26 +918,164 @@ export class StreamEngine extends Context.Service<
               : null;
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
-          const planTools = config.planEnabled ? preparePlanTool() : undefined;
+          // Resume continues that same work, so it keeps the last accepted list.
+          const resumedPlan = ownCalls
+            .filter((call) => call.toolName === "update_plan" && call.status === "complete")
+            .map((call) => Schema.decodeUnknownOption(PlanSnapshot)(call.result))
+            .findLast(Option.isSome);
+          const planTools = config.planEnabled
+            ? preparePlanTool(resumedPlan?.value ?? null)
+            : undefined;
+          // Admins switch Office file editing off in Tools; read per attempt so
+          // it applies to the next answer. A missing row keeps the default, on.
+          const officeFiles = Option.isSome(toolRegistry)
+            ? yield* toolRegistry.value.getTool("office_files")
+            : null;
+          const presentationsOffered =
+            (officeFiles?.enabled ?? true) &&
+            Option.isSome(database) &&
+            Option.isSome(presentationProcessor);
           // Admin-authored tools are resolved once as this generation starts,
           // then held stable for its remaining tool rounds. An edit or deletion
-          // mid-flight changes nothing here.
-          const customTools = customToolManifests.length
-            ? prepareCustomTools(
-                customToolManifests,
-                customToolRuntime,
-                Option.isSome(database)
-                  ? makeToolFileResolver({
-                      db: database.value,
-                      store: promptDeps.store,
-                      projectFiles,
-                      userId: input.userId,
-                      conversationId: input.conversationId,
-                      projectId: config.resolvedProject?.id ?? null,
-                    })
-                  : undefined,
+          // mid-flight changes nothing here. A module revises only its own drafts.
+          const customToolOwners = new Map(
+            customToolManifests.flatMap((tool) =>
+              tool.functions.map(
+                (fn) =>
+                  [customToolName(tool.slug, fn.key), `custom:${tool.toolId}` as const] as const,
+              ),
+            ),
+          );
+          const offeredOwners = new Set<string>([
+            ...(presentationsOffered ? ["presentation"] : []),
+            ...customToolOwners.values(),
+          ]);
+          // Drafts earlier answers left, for the editors this answer is offered.
+          const kept = keptFiles
+            ? (yield* keptFiles.list(input.conversationId)).filter((file) =>
+                offeredOwners.has(file.owner),
               )
+            : [];
+          // After each round and when the answer ends however it ends: changed
+          // drafts under the fence, so a crash loses at most one round and a
+          // stopped, failed or questioning answer leaves them for the next one.
+          // A superseded attempt is fenced out and saves nothing.
+          const keepChanges = (workspace: WorkingFiles) =>
+            fence && keptFiles
+              ? Effect.forEach(
+                  workspace.changes(),
+                  (file) =>
+                    keptFiles.keep(fence, file).pipe(
+                      Effect.andThen(Effect.sync(() => workspace.markKept(file.ref))),
+                      Effect.catchTag("AttachmentRejected", (error) =>
+                        Effect.logWarning(`working file ${file.name} not kept: ${error.reason}`),
+                      ),
+                    ),
+                  { discard: true },
+                ).pipe(Effect.exit, Effect.asVoid)
+              : Effect.void;
+          const workingFiles = yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              createWorkingFiles({
+                kept,
+                // A draft opened from a chat or project file is only as readable
+                // as that file still is for the sender.
+                load: async (file) => {
+                  if (
+                    file.source !== undefined &&
+                    !(await Effect.runPromise(
+                      toolFiles?.authorize(file.source) ?? Effect.succeed(false),
+                    ))
+                  )
+                    throw new Error("The file this draft was opened from is no longer available.");
+                  if (!keptFiles) throw new Error("This working file is no longer available.");
+                  return Effect.runPromise(keptFiles.load(file));
+                },
+              }),
+            ),
+            (workspace) =>
+              keepChanges(workspace).pipe(Effect.ensuring(Effect.sync(() => workspace.dispose()))),
+          );
+          const toolFiles = Option.isSome(database)
+            ? makeToolFileResolver({
+                db: database.value,
+                store: promptDeps.store,
+                projectFiles,
+                userId: input.userId,
+                conversationId: input.conversationId,
+                projectId: config.resolvedProject?.id ?? null,
+                workspace: workingFiles,
+              })
             : undefined;
+          let previewTurnFiles: Array<Prompt.UserMessagePartEncoded> = [];
+          let previewCount = 0;
+          let previewBytes = 0;
+          const presentationTools =
+            presentationsOffered && toolFiles && Option.isSome(presentationProcessor)
+              ? preparePresentationTools({
+                  runtime: presentationProcessor.value,
+                  workingFiles,
+                  resolveFile: toolFiles.resolve,
+                  ...(Option.isSome(presentationFonts)
+                    ? { fonts: () => Effect.runPromise(presentationFonts.value.families()) }
+                    : {}),
+                  ...(model?.capabilities.vision
+                    ? {
+                        onPreview: async (
+                          slides: readonly { slideId: number; png: Uint8Array; label: string }[],
+                        ) => {
+                          const bytes = slides.reduce(
+                            (total, slide) => total + slide.png.length,
+                            0,
+                          );
+                          if (
+                            previewCount + slides.length > PREVIEW_FEEDBACK_LIMITS.slides ||
+                            previewBytes + bytes > PREVIEW_FEEDBACK_LIMITS.bytes
+                          )
+                            throw new Error(
+                              "This attempt has exhausted its visual preview budget.",
+                            );
+                          const feedback = await Promise.all(
+                            slides.map((slide) =>
+                              Effect.runPromise(
+                                fileForModel(promptDeps.parser, {
+                                  fileName: `${slide.label}.png`,
+                                  mediaType: "image/png",
+                                  bytes: slide.png,
+                                  vision: true,
+                                  files: model.capabilities.files ?? false,
+                                }),
+                              ),
+                            ),
+                          );
+                          previewCount += slides.length;
+                          previewBytes += bytes;
+                          previewTurnFiles.push(...feedback);
+                        },
+                      }
+                    : {}),
+                })
+              : undefined;
+          const customTools = customToolManifests.length
+            ? prepareCustomTools(customToolManifests, customToolRuntime, toolFiles?.resolve)
+            : undefined;
+          // Drafts exist only where an editor is offered, and so does delivery.
+          const publishFileTool =
+            presentationTools || customTools ? preparePublishFileTool(workingFiles) : undefined;
+          // Fixed for the whole answer: it sits ahead of this answer's rounds,
+          // so changing it between rounds would uncache every round after it.
+          // Names are file data, so they are quoted rather than trusted as policy.
+          const keptNotice: ReadonlyArray<Prompt.MessageEncoded> =
+            kept.length && publishFileTool
+              ? [
+                  {
+                    role: "user",
+                    content: `<application-policy>\nUnpublished working files kept from ${resuming ? "this answer before it was interrupted, or from earlier answers," : "earlier answers"} in this chat. Continue one by passing its reference to the tool that made it (a presentation tool takes it as workingRef, alone, never with sourceRef); publish_file delivers it. Each reference names the draft's latest saved revision.\n${kept
+                      .map((file) => `- ${formatFileRef(file.ref)} ${quotedName(file.name)}`)
+                      .join("\n")}\n</application-policy>`,
+                  },
+                ]
+              : [];
           // Display names by model-facing tool name. This map, not the
           // `custom_` prefix, decides what is a custom tool call: a model can
           // invent a `custom_…` name, and the SDK still forwards that part.
@@ -914,6 +1117,7 @@ export class StreamEngine extends Context.Service<
               })
             : undefined;
           let knowledgeContext: PreparedKnowledgeContext | null = null;
+          let contextRowWritten = false;
           const knowledgeTools = knowledgeSession
             ? yield* prepareKnowledgeTools({
                 userId: input.userId,
@@ -938,6 +1142,7 @@ export class StreamEngine extends Context.Service<
             memoryDisabled: temporary,
           });
           const { memoryTools } = conversationContext;
+          const memorySpent = ownCalls.some((call) => call.toolName === "save_memory");
           // Research is a tool on an ordinary turn: the model writes the brief
           // and answers from the evidence. The run it starts is owned by its
           // tool call and fenced by this generation.
@@ -981,7 +1186,9 @@ export class StreamEngine extends Context.Service<
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
+            ...(presentationTools ? [presentationTools.group] : []),
             ...(customTools ? [customTools.group] : []),
+            ...(publishFileTool ? [publishFileTool.group] : []),
             ...(integrationTools ? [integrationTools.group] : []),
             ...(askTools ? [askTools] : []),
           ];
@@ -1157,11 +1364,36 @@ export class StreamEngine extends Context.Service<
             historySuffix.some(
               (message) => message.role === "assistant" && /\[\^\d+\]/.test(message.content),
             );
+          let currentRound = 0;
+          // The round whose results a steer followed; its next call alone is told how to read it.
+          let steeredAfter: number | null = null;
+          // Unfinished drafts by reference; a name is file data, so it is quoted.
+          const draftList = () =>
+            workingFiles
+              .unfinished()
+              .map((file) => `${formatFileRef(file.ref)} ${quotedName(file.name)}`)
+              .join(", ");
+          // Only where drafts can exist, and only near the end.
+          const draftReminder = (lastCycle: boolean) => {
+            const roundsRemaining = Math.max(0, roundLimit - currentRound);
+            if (!publishFileTool || roundsRemaining > 8) return null;
+            const drafts = draftList();
+            return lastCycle
+              ? `No tool rounds remain. Unpublished working files (${drafts || "none"}) cannot be delivered in this response; edited drafts stay in this chat for a later answer. Do not claim they are attached.`
+              : `Tool rounds remaining: ${roundsRemaining}. ${drafts ? `Publish unfinished working files before tools become unavailable: ${drafts}.` : "Finish the response when ready."}`;
+          };
           const reminderPrompt = (lastCycle: boolean) => {
             const sections = [
+              resuming && currentRound === 0 ? RESUME_REMINDER : null,
+              draftReminder(lastCycle),
               webTools ? buildSearchReminder({ sources: recapSources(), lastCycle }) : null,
               citesNothing
                 ? "Citation markers like [^1] in earlier answers point at sources from earlier turns. This answer has no sources to cite, so write no citation markers."
+                : null,
+              // Arriving after tool results, a bare user message reads like a new
+              // turn, and models answered a progress question then stopped.
+              steeredAfter === currentRound - 1
+                ? "The user sent the message above while you were working. Address it briefly, then continue the task unless it asks you to stop or change course."
                 : null,
               knowledgeReminder(),
               planReminder(),
@@ -1181,6 +1413,7 @@ export class StreamEngine extends Context.Service<
             ...(permissions.documents ? documents.messages() : []),
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
+            ...keptNotice,
             runtimeContext,
           ];
           // Reminders are appended per request rather than stored in the
@@ -1275,6 +1508,7 @@ export class StreamEngine extends Context.Service<
               toolSchemaTokens,
               existingCheckpoint: selected?.checkpoint ?? null,
               textOffset: assembled.length,
+              beforeTurnIndex: firstTurn,
               maxStartIndex,
               messages: historySuffix,
               renderedMessages: historyMessages,
@@ -1316,17 +1550,38 @@ export class StreamEngine extends Context.Service<
             }).pipe(Effect.provideService(KnowledgeService, knowledgeService));
             knowledgeContext = prepared;
             retrievalEnabled = prepared.mode === "retrieval";
-            if (prepared.activity) {
+            for (const source of prepared.activity?.sources ?? [])
+              sourcesByIndex.set(
+                source.index,
+                mergeSource(sourcesByIndex.get(source.index), source),
+              );
+            // A resumed answer already shows the row, unless this attempt's
+            // context brought sources it lacks.
+            const shownContext = ownCalls.filter((call) =>
+              call.providerCallId.startsWith("knowledge-context:"),
+            );
+            const shownIndexes = new Set(
+              shownContext.flatMap(
+                (call) =>
+                  (call.result as { sources?: ReadonlyArray<Source> } | null)?.sources?.map(
+                    (source) => source.index,
+                  ) ?? [],
+              ),
+            );
+            if (
+              prepared.activity &&
+              (shownContext.length === 0 ||
+                !prepared.activity.sources.every((source) => shownIndexes.has(source.index)))
+            ) {
               // Direct context registers its sources like a tool would, through
               // an application-authored activity: replay, reload and branch all
               // render these citations from the same durable row.
               const rowId = uuidv7();
+              const position = { turnIndex: firstTurn, callIndex: 0, textOffset: assembled.length };
               yield* repo.insertToolCall({
                 id: rowId,
                 messageId: input.messageId,
-                turnIndex: 0,
-                callIndex: 0,
-                textOffset: 0,
+                ...position,
                 providerCallId: `knowledge-context:${rowId}`,
                 toolName: "knowledge_context",
                 arguments: {},
@@ -1337,15 +1592,8 @@ export class StreamEngine extends Context.Service<
                 phase: "start",
                 callId: rowId,
                 name: "knowledge_context",
-                turnIndex: 0,
-                callIndex: 0,
-                textOffset: 0,
+                ...position,
               });
-              for (const source of prepared.activity.sources)
-                sourcesByIndex.set(
-                  source.index,
-                  mergeSource(sourcesByIndex.get(source.index), source),
-                );
               yield* repo.completeToolCall({
                 id: rowId,
                 result: json(prepared.activity),
@@ -1358,11 +1606,22 @@ export class StreamEngine extends Context.Service<
                 name: "knowledge_context",
                 ...prepared.activity,
               });
+              contextRowWritten = true;
             }
           }
+          const pinnedBefore = new Set(
+            ownCalls
+              .filter(
+                (call) =>
+                  call.researchRunId === null && call.providerCallId.startsWith("skill-context:"),
+              )
+              .map((call) => (call.result as { skillId?: unknown } | null)?.skillId),
+          );
           for (const [index, entry] of (config.skills ?? [])
             .filter((entry) => entry.explicit)
             .entries()) {
+            // Still pinned in the prompt; only the row a resumed answer shows is not repeated.
+            if (pinnedBefore.has(entry.skillId)) continue;
             const rowId = uuidv7();
             const activity = {
               family: "skill" as const,
@@ -1376,9 +1635,9 @@ export class StreamEngine extends Context.Service<
             yield* repo.insertToolCall({
               id: rowId,
               messageId: input.messageId,
-              turnIndex: 0,
+              turnIndex: firstTurn,
               callIndex: -5 + index,
-              textOffset: 0,
+              textOffset: assembled.length,
               providerCallId: `skill-context:${rowId}`,
               toolName: "load_skill",
               arguments: {},
@@ -1389,9 +1648,9 @@ export class StreamEngine extends Context.Service<
               phase: "start",
               callId: rowId,
               name: "load_skill",
-              turnIndex: 0,
+              turnIndex: firstTurn,
               callIndex: -5 + index,
-              textOffset: 0,
+              textOffset: assembled.length,
               skillId: entry.skillId,
               skillName: entry.name,
               path: "SKILL.md",
@@ -1407,16 +1666,9 @@ export class StreamEngine extends Context.Service<
           const toolkit = memoryTools
             ? yield* mergeToolGroups([...executionGroups, memoryTools.group])
             : nonMemoryToolkit;
-          // Keyed on which families are actually active, so a family that
-          // needs more rounds adds a case instead of another boolean.
-          const maxToolRounds = Math.max(
-            MAX_TOOL_ROUNDS,
-            retrievalEnabled ? MAX_KNOWLEDGE_TOOL_ROUNDS : 0,
-            desktopTools ? MAX_DESKTOP_TOOL_ROUNDS : 0,
-          );
 
           // Direct context reserves the first call slot; model calls start after.
-          const firstCallIndex = knowledgeContext?.activity ? 1 : 0;
+          const firstCallIndex = contextRowWritten ? 1 : 0;
 
           // Hydrate only the retained suffix after compaction. Subsequent overflow
           // repair can drop these whole units, never resurrect earlier image bytes.
@@ -1478,7 +1730,34 @@ export class StreamEngine extends Context.Service<
             ]);
           };
           let activeSummary: string | null = null;
-          let activeRounds: ReadonlyArray<ActiveRound> = [];
+          // A resumed answer's earlier rounds come first, each one compactable
+          // like a round this attempt runs. Its steers sit where they arrived.
+          const steerPrompts = ownSteers.length
+            ? yield* buildHistoryMessages(promptDeps, {
+                messages: ownSteers,
+                loadedBytes,
+                modelSupportsFiles: model?.capabilities.files ?? false,
+                modelSupportsVision: model?.capabilities.vision ?? false,
+              })
+            : [];
+          const imageParts = yield* loadResumedImages(promptDeps, {
+            messageId: input.messageId,
+            files: ownFiles,
+            modelSupportsVision: model?.capabilities.vision ?? false,
+            loadedBytes,
+          });
+          let activeRounds: ReadonlyArray<ActiveRound> = resumedRounds({
+            content: assembled,
+            calls: ownCalls,
+            files: ownFiles,
+            imageParts,
+            replay,
+            steers: ownSteers.map((message, index) => ({
+              turnIndex: message.steerTurnIndex ?? -1,
+              textOffset: message.steerTextOffset ?? 0,
+              message: steerPrompts[index]!,
+            })),
+          }).map((round) => ({ turnIndex: round.turnIndex, prompt: Prompt.make(round.messages) }));
           const buildTranscript = () =>
             compileActivePrompt({
               basePrompt: buildBaseTranscript(),
@@ -1497,9 +1776,9 @@ export class StreamEngine extends Context.Service<
           // Persist the raw estimate of the exact first request. The provider's
           // actual/raw pair then learns one stable calibration multiplier.
           estimatedFirstInputTokens = estimateRequestPrompt(false);
-          // Pass indexes are local to one before-turn position. Turn 0 reserves
-          // pass 0 for the initial history planner, whether or not it emitted.
-          const nextPassByTurn = new Map<number, number>([[0, 1]]);
+          // Pass indexes are local to one before-turn position. The first turn
+          // reserves pass 0 for the initial history planner, emitted or not.
+          const nextPassByTurn = new Map<number, number>([[firstTurn, 1]]);
           const nextPassIndex = (beforeTurnIndex: number) => {
             const next = nextPassByTurn.get(beforeTurnIndex) ?? 0;
             nextPassByTurn.set(beforeTurnIndex, next + 1);
@@ -1536,7 +1815,12 @@ export class StreamEngine extends Context.Service<
             });
 
           let questionPresented = false;
-          for (let turn = 0; turn <= maxToolRounds; turn++) {
+          for (let round = 0; round <= roundLimit; round++) {
+            // Rows and chunks are keyed by turn, which a resumed answer
+            // continues; budgets and first-call logic count this attempt's rounds.
+            const turn = firstTurn + round;
+            currentRound = round;
+            if (round > 0) yield* keepChanges(workingFiles);
             yield* authoring.refresh();
             yield* scheduleAuthoring.refresh();
             yield* documents.refresh();
@@ -1547,9 +1831,9 @@ export class StreamEngine extends Context.Service<
               firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
                 ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
                 : calibrationFactor(priorUsage);
-            const schemaReserve = turn < maxToolRounds ? toolSchemaTokens : 0;
+            const schemaReserve = round < roundLimit ? toolSchemaTokens : 0;
             while (true) {
-              const trailing = reminderPrompt(turn >= maxToolRounds);
+              const trailing = reminderPrompt(round >= roundLimit);
               const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
                 { gateway, repo, providers, analytics },
                 {
@@ -1582,9 +1866,7 @@ export class StreamEngine extends Context.Service<
               webToolsEnabled: webTools !== undefined,
               toolSchemaTokens: schemaReserve,
             }).input;
-            while (
-              Math.ceil(estimateRequestPrompt(turn >= maxToolRounds) * factor) > requestBudget
-            ) {
+            while (Math.ceil(estimateRequestPrompt(round >= roundLimit) * factor) > requestBudget) {
               const active = compileActivePrompt({
                 basePrompt: Prompt.empty,
                 summary: activeSummary,
@@ -1600,14 +1882,14 @@ export class StreamEngine extends Context.Service<
                   ...fixedPrefix,
                   ...(active.content as ReadonlyArray<Prompt.MessageEncoded>),
                 ],
-                trailingMessages: historyBudgetTail(turn >= maxToolRounds),
+                trailingMessages: historyBudgetTail(round >= roundLimit),
                 calibrationFactor: factor,
               });
               if (!shrunk)
                 return yield* new ContextTooLarge({
                   conversationId: input.conversationId,
                   estimatedInputTokens: Math.ceil(
-                    estimateRequestPrompt(turn >= maxToolRounds) * factor,
+                    estimateRequestPrompt(round >= roundLimit) * factor,
                   ),
                   inputBudget: requestBudget,
                 });
@@ -1616,18 +1898,19 @@ export class StreamEngine extends Context.Service<
               transcript = buildTranscript();
               yield* recordHardTruncation(turn);
             }
-            if (turn === 0) estimatedFirstInputTokens = estimateRequestPrompt(false);
+            if (round === 0) estimatedFirstInputTokens = estimateRequestPrompt(false);
             if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
             else if (knowledgeSession) yield* knowledgeSession.authorize();
-            const toolRoundsLeft = turn < maxToolRounds;
+            const toolRoundsLeft = round < roundLimit;
             let finishReason: Response.FinishReason | undefined;
-            let callIndex = turn === 0 ? firstCallIndex : 0;
+            let callIndex = round === 0 ? firstCallIndex : 0;
             const turnParts: Response.AnyPart[] = [];
             // Bytes a local read produced for the model this turn. A tool
             // result is text on the wire, so an image or PDF rides as a user
             // file part appended to the round, the way an attachment would.
             const turnFiles: Array<Prompt.UserMessagePartEncoded> = [];
+            previewTurnFiles = turnFiles;
             const turnStartOffset = assembled.length;
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
@@ -1644,8 +1927,10 @@ export class StreamEngine extends Context.Service<
             // Suspended so an overflow retry re-reads the shrunken transcript
             // rather than the one the provider just rejected.
             const drain = Effect.suspend(() => {
-              // A generation gets one memory save attempt across all tool rounds.
-              const activeToolkit = memoryTools?.attempted() ? nonMemoryToolkit : toolkit;
+              // An answer gets one memory save attempt across all tool rounds,
+              // including those an interrupted attempt already ran.
+              const activeToolkit =
+                memorySpent || memoryTools?.attempted() ? nonMemoryToolkit : toolkit;
               modelCallOpen = true;
               return gateway
                 .streamChat({
@@ -1676,7 +1961,10 @@ export class StreamEngine extends Context.Service<
                           part.type === "tool-call" &&
                             (part.name === "save_memory" || part.name === "update_plan")
                             ? { ...part, params: {} }
-                            : part.type === "tool-result" && Schema.is(DesktopToolName)(part.name)
+                            : part.type === "tool-result" &&
+                                Schema.is(DesktopToolName)(part.name) &&
+                                // An import's handler rewrites this very part below.
+                                part.name !== "import_local_file"
                               ? withoutDesktopFile(part)
                               : part.type === "tool-result" && part.name === "update_plan"
                                 ? {
@@ -1774,20 +2062,25 @@ export class StreamEngine extends Context.Service<
                                         ? "ask"
                                         : part.name === "update_plan"
                                           ? "plan"
-                                          : Schema.is(SkillToolName)(part.name)
-                                            ? "skill"
-                                            : Schema.is(KnowledgeToolName)(part.name)
-                                              ? "knowledge"
-                                              : part.name === "deep_research"
-                                                ? "research"
-                                                : part.name === "web_search" ||
-                                                    part.name === "read_url"
-                                                  ? "web"
-                                                  : customToolNames.has(part.name)
-                                                    ? "custom"
-                                                    : integrationTools?.names.has(part.name)
-                                                      ? "integration"
-                                                      : null;
+                                          : part.name === "publish_file" && publishFileTool
+                                            ? "tool-file"
+                                            : presentationTools &&
+                                                Schema.is(PresentationToolName)(part.name)
+                                              ? "presentation"
+                                              : Schema.is(SkillToolName)(part.name)
+                                                ? "skill"
+                                                : Schema.is(KnowledgeToolName)(part.name)
+                                                  ? "knowledge"
+                                                  : part.name === "deep_research"
+                                                    ? "research"
+                                                    : part.name === "web_search" ||
+                                                        part.name === "read_url"
+                                                      ? "web"
+                                                      : customToolNames.has(part.name)
+                                                        ? "custom"
+                                                        : integrationTools?.names.has(part.name)
+                                                          ? "integration"
+                                                          : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -1814,6 +2107,8 @@ export class StreamEngine extends Context.Service<
                               family === "schedule-draft" ||
                               family === "document" ||
                               family === "project-file" ||
+                              family === "tool-file" ||
+                              family === "presentation" ||
                               family === "research" ||
                               family === "integration"
                                 ? {}
@@ -1832,6 +2127,35 @@ export class StreamEngine extends Context.Service<
                               rowId,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
+                            });
+                            return;
+                          }
+                          if (
+                            family === "presentation" &&
+                            Schema.is(PresentationToolName)(part.name)
+                          ) {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "presentation",
+                              phase: "start",
+                              callId: rowId,
+                              name: part.name,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "tool-file") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "tool-file",
+                              phase: "start",
+                              callId: rowId,
+                              name: "publish_file",
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
                             });
                             return;
                           }
@@ -2239,7 +2563,64 @@ export class StreamEngine extends Context.Service<
                                     detail: "The computer did not report a usable result.",
                                     truncated: false,
                                   };
-                            if (result.file) {
+                            // An import is bytes for tools, not for the model to
+                            // look at: it becomes this attempt's working file and
+                            // the model is told the reference to pass on.
+                            if (part.name === "import_local_file") {
+                              const imported = result.ok ? result.file : undefined;
+                              const created = yield* Effect.try({
+                                try: () => {
+                                  if (!imported) throw new Error(result.detail);
+                                  return workingFiles.create({
+                                    bytes: new Uint8Array(Buffer.from(imported.base64, "base64")),
+                                    name: imported.name,
+                                    mediaType: imported.mediaType,
+                                    owner: "local",
+                                  });
+                                },
+                                catch: (error) =>
+                                  error instanceof Error ? error.message : "Could not import it.",
+                              }).pipe(Effect.result);
+                              const { file: _bytes, ...rest } = result;
+                              const answer: DesktopToolResult =
+                                created._tag === "Success"
+                                  ? {
+                                      ...rest,
+                                      detail: `${rest.detail}\nReference for other tools: ${formatFileRef(created.success.ref)}`,
+                                    }
+                                  : result.ok
+                                    ? {
+                                        v: 1,
+                                        ok: false,
+                                        summary: "That file could not be imported",
+                                        detail: created.failure,
+                                        truncated: false,
+                                      }
+                                    : rest;
+                              Object.assign(part, { result: answer, encodedResult: answer });
+                              const stored = forTranscript(answer);
+                              yield* repo.completeToolCall({
+                                id: rowId,
+                                result: json(stored),
+                                status: answer.ok ? "complete" : "error",
+                                ...(answer.ok
+                                  ? {}
+                                  : {
+                                      error: { code: "DesktopToolFailed", message: answer.summary },
+                                    }),
+                              });
+                              yield* pushToolChunk({
+                                v: 1,
+                                family: "desktop",
+                                phase: "result",
+                                callId: rowId,
+                                name: part.name,
+                                result: stored,
+                              });
+                              return;
+                            }
+                            // Only a read shows the model bytes, and only a kind it can take.
+                            if (result.file && attachmentKind(result.file.mediaType) !== "file") {
                               turnFiles.push(
                                 yield* fileForModel(promptDeps.parser, {
                                   fileName: result.file.name,
@@ -2304,6 +2685,130 @@ export class StreamEngine extends Context.Service<
                               result,
                             });
                             if (ok) questionPresented = true;
+                            return;
+                          }
+                          if (presentationTools && Schema.is(PresentationToolName)(part.name)) {
+                            if (isPreliminary) return;
+                            const activity = presentationActivitySummary(
+                              part.result,
+                              part.isFailure,
+                            );
+                            const { outcome, message } = activity;
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: outcome === "error" ? "error" : "complete",
+                              ...(outcome === "error"
+                                ? { error: { code: "PresentationFailed", message } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "presentation",
+                              phase: "result",
+                              callId: rowId,
+                              name: part.name,
+                              ...activity,
+                            });
+                            return;
+                          }
+                          if (part.name === "publish_file" && publishFileTool) {
+                            if (isPreliminary) return;
+                            const pending = publishFileTool.take(part.id);
+                            const raw = Option.getOrUndefined(
+                              Schema.decodeUnknownOption(ToolFileActivity)(part.result),
+                            );
+                            let attachmentId = raw?.attachmentId;
+                            let error = raw?.error;
+                            if (pending) {
+                              if (part.isFailure) {
+                                error = "File publication was interrupted.";
+                              } else if (!fence || Option.isNone(imageAttachments)) {
+                                error = "File delivery is unavailable.";
+                              } else if (
+                                pending.file.source !== undefined &&
+                                !(toolFiles && (yield* toolFiles.authorize(pending.file.source)))
+                              ) {
+                                error =
+                                  "The file this draft was opened from is no longer available.";
+                              } else {
+                                yield* flush;
+                                const accepted = yield* writer.withPermits(1)(
+                                  acceptGeneratedFile(imageAttachments.value, {
+                                    fence,
+                                    fileName: pending.name,
+                                    mediaType: pending.file.mediaType,
+                                    bytes: pending.file.bytes,
+                                    origin: { toolCallId: rowId },
+                                    // Delivered and no longer a draft, in one commit.
+                                    ...(keptFiles
+                                      ? {
+                                          inTransaction: (tx: DbTx) =>
+                                            keptFiles.consume(tx, fence, pending.ref.id),
+                                        }
+                                      : {}),
+                                    textOffset: assembled.length,
+                                    turnIndex: turn,
+                                    callIndex,
+                                    eventIndex: seq + 1,
+                                    seq: seq + 1,
+                                  }).pipe(
+                                    Effect.tap((file) =>
+                                      Effect.gen(function* () {
+                                        seq += 1;
+                                        yield* PubSub.publish(pubsub, {
+                                          kind: "chunk",
+                                          messageId: input.messageId,
+                                          runId: fence.generationId,
+                                          seq,
+                                          chunkKind: "file",
+                                          delta: JSON.stringify(file),
+                                        });
+                                      }),
+                                    ),
+                                    Effect.uninterruptible,
+                                    Effect.result,
+                                  ),
+                                );
+                                if (accepted._tag === "Success")
+                                  attachmentId = accepted.success.attachment.id;
+                                else error = accepted.failure.reason;
+                              }
+                              workingFiles.finishPublish(pending.ref, attachmentId);
+                            }
+                            const ok = !part.isFailure && !error && !!attachmentId;
+                            const publishedRef = raw?.ref ? parseFileRef(raw.ref) : null;
+                            const workingFileId =
+                              publishedRef?.kind === "working" ? publishedRef.id : undefined;
+                            const result: ToolFileActivity = {
+                              ok,
+                              ...(raw?.ref ? { ref: raw.ref } : {}),
+                              ...(workingFileId ? { workingFileId } : {}),
+                              ...(attachmentId ? { attachmentId } : {}),
+                              ...(!ok ? { error: error ?? "Publication failed." } : {}),
+                            };
+                            Object.assign(part, { result, encodedResult: result });
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(result),
+                              status: ok ? "complete" : "error",
+                              ...(!ok
+                                ? {
+                                    error: {
+                                      code: "PublicationFailed",
+                                      message: result.error ?? "Publication failed.",
+                                    },
+                                  }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "tool-file",
+                              phase: "result",
+                              callId: rowId,
+                              name: "publish_file",
+                              ...result,
+                            });
                             return;
                           }
                           if (part.name === "update_plan") {
@@ -2490,18 +2995,55 @@ export class StreamEngine extends Context.Service<
 
                           if (customToolNames.has(part.name)) {
                             if (isPreliminary) return;
-                            // Files the call returned become attachments of
-                            // this answer, stored under the fence like a
-                            // model's own image; a shared one also rides the
-                            // next round as a user file part.
                             const fileIds: string[] = [];
-                            // Ids by returned name, patched into the result the
-                            // model reads so a later save_to_workspace can name
-                            // the file; the part is already in turnParts and
-                            // the round has not been folded yet.
-                            const storedIds = new Map<string, string>();
+                            const workingOutputs: Array<{
+                              id: string;
+                              revision: number;
+                              name: string;
+                            }> = [];
+                            const outcomes: Array<Record<string, unknown>> = [];
+                            const errors: string[] = [];
+                            const owner = customToolOwners.get(part.name)!;
                             for (const item of customTools?.takeFiles(part.id) ?? []) {
-                              if (!fence || Option.isNone(imageAttachments)) break;
+                              if (item.delivery === "working") {
+                                const committed = yield* Effect.try({
+                                  try: () =>
+                                    item.replaces
+                                      ? workingFiles.replace(item.replaces, { ...item, owner })
+                                      : workingFiles.create({ ...item, owner }),
+                                  catch: (cause) =>
+                                    cause instanceof Error ? cause.message : String(cause),
+                                }).pipe(Effect.result);
+                                if (committed._tag === "Failure") {
+                                  errors.push(`${item.name}: ${committed.failure}`);
+                                  outcomes.push({ error: committed.failure });
+                                  continue;
+                                }
+                                const ref = formatFileRef(committed.success.ref);
+                                workingOutputs.push({
+                                  id: committed.success.ref.id,
+                                  revision: committed.success.ref.revision,
+                                  name: item.name,
+                                });
+                                outcomes.push({ ref, revision: committed.success.ref.revision });
+                                if (item.showModel)
+                                  turnFiles.push(
+                                    yield* fileForModel(promptDeps.parser, {
+                                      id: ref,
+                                      fileName: item.name,
+                                      mediaType: committed.success.mediaType,
+                                      bytes: item.bytes,
+                                      vision: model?.capabilities.vision ?? false,
+                                      files: model?.capabilities.files ?? false,
+                                    }),
+                                  );
+                                continue;
+                              }
+                              if (!fence || Option.isNone(imageAttachments)) {
+                                errors.push(`${item.name}: file delivery is unavailable.`);
+                                outcomes.push({ error: "File delivery is unavailable." });
+                                continue;
+                              }
                               yield* flush;
                               const stored = yield* writer.withPermits(1)(
                                 acceptGeneratedFile(imageAttachments.value, {
@@ -2530,43 +3072,49 @@ export class StreamEngine extends Context.Service<
                                     }),
                                   ),
                                   Effect.uninterruptible,
-                                  // A file the validator refuses (wrong bytes for
-                                  // its type, over the answer's budget) is dropped
-                                  // with a log line; the text result still lands.
-                                  Effect.catchTag("AttachmentRejected", (error) =>
-                                    Effect.logWarning(
-                                      `custom tool file ${item.name} rejected: ${error.reason}`,
-                                    ).pipe(Effect.as(null)),
-                                  ),
+                                  Effect.result,
                                 ),
                               );
-                              if (!stored) continue;
-                              fileIds.push(stored.attachment.id);
-                              storedIds.set(item.name, stored.attachment.id);
-                              if (item.share)
+                              if (stored._tag === "Failure") {
+                                errors.push(`${item.name}: ${stored.failure.reason}`);
+                                outcomes.push({ error: stored.failure.reason });
+                                continue;
+                              }
+                              fileIds.push(stored.success.attachment.id);
+                              outcomes.push({
+                                attachmentId: stored.success.attachment.id,
+                                ref: formatFileRef({
+                                  kind: "attachment",
+                                  id: stored.success.attachment.id,
+                                }),
+                              });
+                              if (item.showModel)
                                 turnFiles.push(
                                   yield* fileForModel(promptDeps.parser, {
-                                    id: stored.attachment.id,
+                                    id: stored.success.attachment.id,
                                     fileName: item.name,
-                                    mediaType: stored.attachment.mediaType,
+                                    mediaType: stored.success.attachment.mediaType,
                                     bytes: item.bytes,
                                     vision: model?.capabilities.vision ?? false,
                                     files: model?.capabilities.files ?? false,
                                   }),
                                 );
                             }
-                            if (storedIds.size > 0) {
+                            if (outcomes.length > 0) {
                               const result = part.result as {
                                 files?: ReadonlyArray<{ name: string }>;
                               };
-                              const named = {
+                              const delivered = {
                                 ...result,
-                                files: (result.files ?? []).map((file) => {
-                                  const attachmentId = storedIds.get(file.name);
-                                  return attachmentId ? { ...file, attachmentId } : file;
-                                }),
+                                ...(errors.length
+                                  ? { ok: false, error: errors.join("; ").slice(0, 500) }
+                                  : {}),
+                                files: (result.files ?? []).map((file, index) => ({
+                                  ...file,
+                                  ...outcomes[index],
+                                })),
                               };
-                              Object.assign(part, { result: named, encodedResult: named });
+                              Object.assign(part, { result: delivered, encodedResult: delivered });
                             }
                             const activity = projectCustomToolResult({
                               name: part.name,
@@ -2574,6 +3122,7 @@ export class StreamEngine extends Context.Service<
                               raw: part.result,
                               isFailure: part.isFailure,
                               fileIds,
+                              workingFiles: workingOutputs,
                             });
                             yield* repo.completeToolCall({
                               id: rowId,
@@ -2599,6 +3148,9 @@ export class StreamEngine extends Context.Service<
                                 : {}),
                               ...(activity.error ? { error: activity.error } : {}),
                               ...(activity.fileIds ? { fileIds: activity.fileIds } : {}),
+                              ...(activity.workingFiles
+                                ? { workingFiles: activity.workingFiles }
+                                : {}),
                             });
                             return;
                           }
@@ -2725,6 +3277,24 @@ export class StreamEngine extends Context.Service<
                         // decoded call settles it.
                         case "tool-params-start":
                           documents.live.start(part.id, part.name);
+                          // A deck edit is one long call the model can spend
+                          // minutes writing; say so before it completes.
+                          if (part.name === "edit_presentation") {
+                            pushChunk(
+                              "writing",
+                              JSON.stringify({
+                                v: 1,
+                                id: part.id,
+                                name: part.name,
+                                textOffset: assembled.length,
+                                turnIndex: turn,
+                                // A resumed answer replays this chunk; the attempt
+                                // it names tells the client it is no longer writing.
+                                ...(fence ? { runId: fence.generationId } : {}),
+                              }),
+                            );
+                            yield* flush;
+                          }
                           return;
                         case "tool-params-delta":
                           yield* documents.live.delta(part.id, part.delta);
@@ -2825,7 +3395,7 @@ export class StreamEngine extends Context.Service<
                     compaction = { ...compaction, ...shrunk, mode: "truncated" };
                     syncEarlierSkills(compaction.startIndex);
                     transcript = buildTranscript();
-                    if (turn === 0) {
+                    if (round === 0) {
                       estimatedFirstInputTokens = estimateRequestPrompt(!toolRoundsLeft);
                     }
                     yield* recordHardTruncation(turn);
@@ -2865,7 +3435,7 @@ export class StreamEngine extends Context.Service<
             // and the model is about to be called again anyway, so nothing in
             // flight is cut short. The last round has no call after it.
             const steered =
-              fence && turn < maxToolRounds
+              fence && round < roundLimit
                 ? yield* repo.claimSteeredEntries({
                     conversationId: input.conversationId,
                     messageId: input.messageId,
@@ -2893,6 +3463,7 @@ export class StreamEngine extends Context.Service<
               },
             ];
             if (steered.length > 0) {
+              steeredAfter = round;
               // Built exactly as history builds a user message, so a steered
               // file reaches the model the way an attached one does: native
               // when it can read it, extracted text when it cannot.
@@ -2946,6 +3517,7 @@ export class StreamEngine extends Context.Service<
           }
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
+          // A resumed answer starts from its earlier text, so it is never empty.
           if (!questionPresented && assembled.trim().length === 0 && acceptedImages === 0)
             return yield* Effect.fail(new Error("[ResponseEmpty]"));
         });
@@ -2977,6 +3549,7 @@ export class StreamEngine extends Context.Service<
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocumentId?: string | undefined;
+        resume?: boolean | undefined;
         onSettled?: (input: {
           userId: string;
           conversationId: string;

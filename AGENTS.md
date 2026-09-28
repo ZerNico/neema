@@ -133,7 +133,8 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
-  schedule-draft, document, project-file, desktop, custom, integration.
+  schedule-draft, document, project-file, desktop, custom, integration, presentation,
+  tool-file.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -224,7 +225,9 @@ skipped one on purpose.
 - `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,
   exact-match and streamed model edits, live sync and the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
-  kind served only as a download, what the model sees of a file, files into tools.
+  kind served only as a download, what the model sees, working drafts and publication.
+- `docs/internals/presentations.md`: trusted PPTX operations, visual feedback,
+  preview authorization, preservation boundary and native-compatibility gate.
 - `docs/internals/projects.md`: roles, private chats in a shared project, attempt-time
   access, project documents, files and memory, file retention, deletion.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
@@ -236,6 +239,8 @@ skipped one on purpose.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
   boundary, queued files as a second owner kind, and why only a desktop app can
   start queued Work.
+- `docs/internals/resume.md`: continuing a failed or stopped last answer. Same row, new
+  generation, one continuous chunk and turn space, earlier rounds read as records.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
 - `docs/internals/temporary-chats.md`: the flag, where it is read, the sweep and
@@ -271,6 +276,9 @@ All release candidates. Pin exactly; never float to `latest`.
   old patch there with `patch -p1`, then `pnpm patch-commit`.
   Nine tests in `image-replay.test.ts` and `gateway.test.ts` run the real adapter
   and fail if the patch stops applying.
+- `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
+  instead of the bundled substitutes. On a bump, check the substitution still runs through
+  one function and regenerate the patch the same way.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
   a bump.
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module

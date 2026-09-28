@@ -110,7 +110,7 @@ const readLocalFile = async (
   const imageType = IMAGE_MEDIA_TYPES[extension];
   if (imageType !== undefined || extension === "pdf") {
     const file = await run(
-      client.readBinary({ conversationId, path, callId: crypto.randomUUID() }),
+      client.readBinary({ conversationId, path, callId: crypto.randomUUID(), purpose: "view" }),
     );
     return {
       fileName,

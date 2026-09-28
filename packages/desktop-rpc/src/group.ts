@@ -151,12 +151,17 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
-  /** The raw bytes of an image or document, for a model that can take them. */
+  /**
+   * The raw bytes of a file. `view` is an image or PDF for a model or a person
+   * to look at; `import` also takes a PowerPoint, for server tools to use for
+   * the rest of the answer.
+   */
   Rpc.make("readBinary", {
     payload: {
       conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
+      purpose: Schema.Literals(["view", "import"]),
     },
     success: BinaryContents,
     error: DesktopError,

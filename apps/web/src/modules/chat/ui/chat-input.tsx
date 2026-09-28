@@ -77,6 +77,7 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import { useFileDrop } from "~/ui/use-file-drop.ts";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { CollapseItem, MotionSwap, collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
@@ -360,10 +361,6 @@ export const ChatInput = forwardRef<
     enabled: attachments !== undefined && workspaceImports === undefined,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // dragenter/dragleave fire for every child; a depth counter keeps the
-  // highlight from flickering as the pointer crosses the textarea.
-  const dragDepth = useRef(0);
-  const [dragging, setDragging] = useState(false);
   const noModels = models.length === 0;
   const selectedModel = resolveChatModel(models, modelId);
 
@@ -438,37 +435,15 @@ export const ChatInput = forwardRef<
 
   const pickFiles = () => fileInputRef.current?.click();
 
-  const acceptDrop = (event: React.DragEvent) =>
-    target !== undefined && !controlsDisabled && event.dataTransfer.types.includes("Files");
+  const { dragging, handlers: dropHandlers } = useFileDrop({
+    enabled: target !== undefined && !controlsDisabled,
+    onDrop: (files) => target?.addFiles(files),
+  });
 
   return (
     <div
       className={cn("relative", CHAT_INPUT_SHELL_CLASS, dragging && "border-ring/60", className)}
-      onDragEnter={(event) => {
-        if (!acceptDrop(event)) return;
-        event.preventDefault();
-        dragDepth.current += 1;
-        setDragging(true);
-      }}
-      onDragOver={(event) => {
-        if (!acceptDrop(event)) return;
-        event.preventDefault();
-      }}
-      onDragLeave={(event) => {
-        if (!acceptDrop(event)) return;
-        dragDepth.current -= 1;
-        if (dragDepth.current <= 0) {
-          dragDepth.current = 0;
-          setDragging(false);
-        }
-      }}
-      onDrop={(event) => {
-        if (!acceptDrop(event)) return;
-        event.preventDefault();
-        dragDepth.current = 0;
-        setDragging(false);
-        target?.addFiles(event.dataTransfer.files);
-      }}
+      {...dropHandlers}
     >
       {/* Present on the first render when an edit opens with files or skills, so
           the row is already full height for the edit swap's measurement. */}

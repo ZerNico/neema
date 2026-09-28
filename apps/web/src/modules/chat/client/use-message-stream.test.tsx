@@ -27,6 +27,98 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("presentation writing events", () => {
+  it("discards writing callbacks from the previous attempt", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      { wrapper, initialProps: { runId: "generation-1" } },
+    );
+    const old = FakeEventSource.instances.at(-1)!;
+    const delta = JSON.stringify({
+      v: 1,
+      id: "edit-1",
+      name: "edit_presentation",
+      textOffset: 0,
+      turnIndex: 0,
+    });
+    act(() => old.emit("chunk", { runId: "generation-1", seq: 1, kind: "writing", delta }));
+    expect(result.current.tools).toHaveLength(1);
+    rerender({ runId: "generation-2" });
+    expect(result.current.tools).toEqual([]);
+    act(() => old.emit("chunk", { runId: "generation-1", seq: 2, kind: "writing", delta }));
+    expect(result.current.tools).toEqual([]);
+    expect(result.current.live.lastSeq).toBe(0);
+  });
+
+  it("shows streamed argument activity and replaces it with the decoded call", () => {
+    const { result, source } = renderStream();
+    act(() =>
+      source.emit("chunk", {
+        seq: 1,
+        kind: "writing",
+        delta: JSON.stringify({
+          v: 1,
+          id: "edit-1",
+          name: "edit_presentation",
+          textOffset: 0,
+          turnIndex: 0,
+        }),
+      }),
+    );
+    expect(result.current.tools).toMatchObject([
+      { callId: "writing:edit-1", writing: true, status: "running" },
+    ]);
+    expect(result.current.files).toEqual([]);
+    act(() =>
+      source.emit("chunk", {
+        seq: 2,
+        kind: "tool",
+        delta: JSON.stringify({
+          v: 1,
+          family: "presentation",
+          phase: "start",
+          callId: "edit-1",
+          name: "edit_presentation",
+          textOffset: 0,
+          turnIndex: 0,
+          callIndex: 0,
+        }),
+      }),
+    );
+    expect(result.current.tools).toHaveLength(1);
+    expect(result.current.tools[0]).toMatchObject({ callId: "edit-1", status: "running" });
+    expect(result.current.tools[0]).not.toHaveProperty("writing");
+  });
+
+  it.each(["complete", "error", "aborted"] as const)(
+    "clears unfinished writing on %s",
+    (status) => {
+      const { result, source } = renderStream();
+      act(() =>
+        source.emit("chunk", {
+          seq: 1,
+          kind: "writing",
+          delta: JSON.stringify({
+            v: 1,
+            id: "edit-1",
+            name: "edit_presentation",
+            textOffset: 0,
+            turnIndex: 0,
+          }),
+        }),
+      );
+      expect(result.current.tools).toHaveLength(1);
+      act(() => source.emit("done", { status }));
+      expect(result.current.tools).toEqual([]);
+      expect(result.current.status).toBe(status);
+    },
+  );
+});
+
 describe("useMessageStream ask replay", () => {
   it.each(["updated", "read", "conflict"] as const)(
     "invalidates a document query when a streamed %s result identifies it",
@@ -189,6 +281,54 @@ describe("research attempt identity", () => {
     expect(result.current.status).toBe("streaming");
     act(() => source.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
     expect(result.current.live.lastSeq).toBe(0);
+  });
+});
+
+describe("resumed answer", () => {
+  it("continues from the kept chunks without repeating them or a dead writing marker", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const kept = {
+      text: "Half an answer. ",
+      reasoning: "",
+      reasoningSeen: false,
+      tools: [],
+      compactions: [],
+      lastSeq: 3,
+    };
+    const { result } = renderHook(() => useMessageStream("m1", kept, "c1", 1, "run-2"), {
+      wrapper,
+    });
+    const source = FakeEventSource.instances.at(-1)!;
+    expect(source.url).toContain("after=3&runId=run-2");
+    const writing = (runId: string, id: string) =>
+      JSON.stringify({ v: 1, id, name: "edit_presentation", textOffset: 0, turnIndex: 0, runId });
+    act(() => {
+      // Replay labels every stored chunk with the current attempt.
+      source.emit("chunk", { runId: "run-2", seq: 3, delta: "Half an answer. " });
+      source.emit("chunk", {
+        runId: "run-2",
+        seq: 4,
+        kind: "writing",
+        delta: writing("run-1", "a"),
+      });
+      source.emit("chunk", { runId: "run-2", seq: 5, delta: "The rest." });
+    });
+    expect(result.current.tools).toEqual([]);
+    act(() =>
+      source.emit("chunk", {
+        runId: "run-2",
+        seq: 6,
+        kind: "writing",
+        delta: writing("run-2", "b"),
+      }),
+    );
+    expect(result.current.tools).toMatchObject([{ callId: "writing:b", writing: true }]);
+    expect(result.current.live.lastSeq).toBe(6);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(result.current.live.getSnapshot().text).toBe("Half an answer. The rest.");
   });
 });
 

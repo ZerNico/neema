@@ -7,6 +7,7 @@ import { IMAGE_MEDIA_TYPES, type AttachmentKind } from "~/modules/attachments/co
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
 import { type AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
 
 /** Strict base64 only: remote outputs are refused, never fetched. */
 export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Array) =>
@@ -44,8 +45,9 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
 
 /**
  * Blob candidate/write precede the fenced atomic registration + ref-only
- * event. The same path stores a model's image output and a custom tool's
- * returned file; only the caller-supplied validation differs.
+ * event. The same path stores a model's image output and a tool's delivered
+ * file; only the caller-supplied validation differs. `inTransaction` joins the
+ * registration's transaction and returns storage keys to delete after commit.
  */
 export const acceptGeneratedFile = (
   service: AttachmentService["Service"],
@@ -56,6 +58,7 @@ export const acceptGeneratedFile = (
     bytes: Uint8Array;
     allowedKinds?: ReadonlyArray<AttachmentKind>;
     origin?: { toolCallId: string };
+    inTransaction?: (tx: DbTx) => Effect.Effect<ReadonlyArray<string>>;
     textOffset: number;
     turnIndex: number;
     eventIndex: number;
@@ -66,6 +69,7 @@ export const acceptGeneratedFile = (
   Effect.gen(function* () {
     let file: AssistantFile | undefined;
     let previous: ReadonlyArray<AssistantFile> = [];
+    let discard: ReadonlyArray<string> = [];
     yield* service.upload({
       userId: input.fence.userId,
       fileName: input.fileName,
@@ -120,10 +124,12 @@ export const acceptGeneratedFile = (
                 delta: JSON.stringify(file),
               })
               .pipe(Effect.orDie);
+            if (input.inTransaction) discard = yield* input.inTransaction(tx);
           }),
       },
     });
     if (!file) return yield* Effect.die(new Error("Generated file registration failed."));
+    yield* service.deleteBlobs(discard);
     return file;
   });
 

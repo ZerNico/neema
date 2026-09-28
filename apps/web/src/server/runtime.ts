@@ -33,6 +33,9 @@ import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
+import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
+import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
+import { PresentationProcessor } from "~/modules/presentations/server/processor.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
@@ -95,6 +98,7 @@ const CoreLayer = Layer.mergeAll(
   CustomToolsLayer,
   AttachmentService.layer,
   DocumentParser.layer,
+  PresentationProcessor.layer.pipe(Layer.provideMerge(PresentationFonts.layer)),
   DraftService.layer,
   IntegrationService.layer,
   IntegrationApprovals.layer,
@@ -112,6 +116,7 @@ const KnowledgeLayer = Layer.mergeAll(
   SharingService.layer,
   SkillService.layer,
   ProjectFileService.layer,
+  KeptWorkingFiles.layer,
 ).pipe(Layer.provideMerge(EmbeddingSpace.layer), Layer.provideMerge(CoreLayer));
 const CoreWithMemoryLayer = MemoryService.layer.pipe(Layer.provideMerge(KnowledgeLayer));
 const StreamedLayer = StreamEngine.layer.pipe(Layer.provideMerge(CoreWithMemoryLayer));

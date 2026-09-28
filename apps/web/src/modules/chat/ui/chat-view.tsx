@@ -1,4 +1,7 @@
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import { presentationActivitySummary } from "~/modules/presentations/activity.ts";
+import { PresentationToolName } from "~/modules/presentations/tool-schema.ts";
+import { ToolFileActivity } from "../tool-file-schema.ts";
 import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
 import { IntegrationToolActivity as StoredIntegrationActivity } from "~/modules/integrations/tool-schema.ts";
@@ -58,7 +61,8 @@ import { browserTimeZone } from "../client/time-zone.ts";
 import {
   applyCompactionChunk,
   applySteerChunk,
-  applyToolChunk,
+  applyToolActivityChunk,
+  isStaleWriting,
   toMemoryActivityOutcome,
   toMemoryActivityReason,
   readTextOffset,
@@ -77,6 +81,7 @@ import {
   editMessage,
   getWorkTurnReservation,
   reserveWorkTurn,
+  resumeMessage,
   retryMessage,
   sendMessage,
   stopGeneration,
@@ -431,6 +436,35 @@ export function toActivity(row: {
     };
   }
 
+  if (Schema.is(PresentationToolName)(row.toolName)) {
+    return {
+      family: "presentation",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...presentationActivitySummary(row.result, row.status === "error"),
+      ...(row.error ? { error: row.error.message } : {}),
+    };
+  }
+  if (row.toolName === "publish_file") {
+    const result = Option.getOrNull(Schema.decodeUnknownOption(ToolFileActivity)(row.result));
+    return {
+      family: "tool-file",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      ...(result?.attachmentId ? { attachmentId: result.attachmentId } : {}),
+      ...(result?.workingFileId ? { workingFileId: result.workingFileId } : {}),
+      ...(row.error ? { error: row.error.message } : result?.error ? { error: result.error } : {}),
+    };
+  }
+
   if (isCustomToolName(row.toolName)) {
     // Must precede the web fallback below: a `custom_…` row holds a
     // CustomToolActivity, not web targets.
@@ -448,6 +482,7 @@ export function toActivity(row: {
       ...(stored?.resultChars !== undefined ? { resultChars: stored.resultChars } : {}),
       ...(row.error ? { error: row.error.message } : stored?.error ? { error: stored.error } : {}),
       ...(stored?.fileIds?.length ? { fileIds: stored.fileIds } : {}),
+      ...(stored?.workingFiles?.length ? { workingFiles: stored.workingFiles } : {}),
     };
   }
 
@@ -735,12 +770,16 @@ export function ChatView({
       .map(toActivity);
     // Starts can land between snapshots. Replay explicit anchors for every
     // family; terminal durable activities ignore older progress in the reducer.
-    const tools = data.pendingChunks
-      .filter((chunk) => chunk.kind === "tool")
-      .reduce<ToolActivity[]>(
-        (current, chunk) => applyToolChunk(current, chunk.delta),
-        durableTools,
-      );
+    // A deck edit still being written replays too, until its call starts.
+    const tools = data.pendingChunks.reduce<ToolActivity[]>(
+      (current, chunk) =>
+        chunk.kind === "tool" ||
+        (chunk.kind === "writing" &&
+          !isStaleWriting(chunk.delta, streamingMessage.generationId ?? null))
+          ? applyToolActivityChunk(current, chunk.kind, chunk.delta)
+          : current,
+      durableTools,
+    );
     // Seed durable activity first; replayed chunks then idempotently overlay
     // any terminal marker that landed after the query snapshot.
     const durableCompactions = data.compactionEvents
@@ -1020,12 +1059,15 @@ export function ChatView({
     }
   };
   const checkWorkReady = () => work.check();
-  const beforeGeneration = async () => {
+  const prepareGeneration = async () => {
     checkWorkReady();
     await flushAgentDraft();
     await flushScheduleDraft();
     await flushDocuments();
     closeEdit();
+  };
+  const beforeGeneration = async () => {
+    await prepareGeneration();
     setAnchorRequested(true);
   };
   const cancelAnchor = () => setAnchorRequested(false);
@@ -1160,6 +1202,37 @@ export function ChatView({
     },
   });
 
+  // Continues the last answer where it ended. The row keeps its chunks and
+  // the new generation continues their sequence, so the subscription is
+  // seeded from the refetched cursor, exactly as after a retry.
+  const resumeMutation = useMutation({
+    onMutate: async () => {
+      await prepareGeneration();
+      // The earlier answer is already on screen; follow its continuation instead
+      // of keeping the question its first attempt anchored.
+      cancelAnchor();
+      releaseAnchor();
+    },
+    onError: (error) => {
+      toastError("Could not resume the answer.", error);
+    },
+    mutationFn: async (input: { messageId: string; modelId?: string }) =>
+      resumeMessage({
+        data: {
+          conversationId,
+          ...input,
+          ...(await work.attemptFields()),
+          timeZone: browserTimeZone(),
+          ...documentFocus(),
+        },
+      }),
+    onSuccess: async (_result, input) => {
+      if (input.modelId !== undefined) changeModel(input.modelId);
+      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      setRetryEpoch((e) => e + 1);
+    },
+  });
+
   // Branching leaves this conversation untouched and opens the copy, so the
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
@@ -1251,6 +1324,7 @@ export function ChatView({
   });
 
   const mutateRetry = retryMutation.mutate;
+  const mutateResume = resumeMutation.mutate;
   const mutateBranch = branchMutation.mutate;
   const mutateEdit = editMutation.mutate;
   const mutateQuestionEdit = editMutation.mutateAsync;
@@ -1269,6 +1343,7 @@ export function ChatView({
     sendMutation.isPending ||
     answerMutation.isPending ||
     retryMutation.isPending ||
+    resumeMutation.isPending ||
     editMutation.isPending;
   // The request settles before the refetch that reports the row it started, and
   // an unlocked frame in that gap flickers the panel. Hold from the request
@@ -1286,6 +1361,7 @@ export function ChatView({
     questionNeedsRefresh ||
     sendMutation.isPending ||
     retryMutation.isPending ||
+    resumeMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
   // An open edit locks nothing: its draft is local to the row, another message's
@@ -1295,6 +1371,7 @@ export function ChatView({
     questionNeedsRefresh ||
     generating ||
     retryMutation.isPending ||
+    resumeMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
   // Generation actions (edit/retry/answer/save) wait on the folder; branch
@@ -1325,9 +1402,9 @@ export function ChatView({
   );
   const tailMessageId = turnMessages.at(-1)?.id;
 
-  // A rewind takes the documents and drafts those answers created with it, so
-  // the dialog names them: a checklist someone has been ticking, or settings
-  // someone has been adjusting, is not a silent casualty.
+  // A rewind takes the documents, drafts and unpublished files those answers
+  // created with it, so the dialog names them: a checklist someone has been
+  // ticking, or a deck someone has been building, is not a silent casualty.
   const documentLoss = useCallback(
     (fromMessageId: string, inclusive: boolean) => {
       const index = data.messages.findIndex((message) => message.id === fromMessageId);
@@ -1347,9 +1424,10 @@ export function ChatView({
           noun: "schedule draft",
           name: draft.name,
         })),
+        ...lost(data.workingFiles).map((file) => ({ noun: "unpublished file", name: file.name })),
       ]);
     },
-    [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts],
+    [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts, data.workingFiles],
   );
 
   // A steer goes with the answer it was sent into, and it is the person's own
@@ -1829,6 +1907,17 @@ export function ChatView({
               branchDisabled: actionsDisabled,
             }
           : {}),
+        // Only the last answer can continue: a later turn was already
+        // answered without whatever it would go on to say.
+        ...(message.role === "assistant" &&
+        (message.status === "error" || message.status === "aborted") &&
+        message.id === tailMessageId
+          ? {
+              onResume: () => mutateResume({ messageId: message.id }),
+              onResumeWith: (pickedModelId: string) =>
+                mutateResume({ messageId: message.id, modelId: pickedModelId }),
+            }
+          : {}),
         ...(retryTarget !== undefined
           ? {
               onRetry: () => void retry(retryTarget),
@@ -1857,6 +1946,7 @@ export function ChatView({
     respondToQuestion,
     tailMessageId,
     modelByMessage,
+    mutateResume,
     nextAssistantAfter,
     openEdit,
     retry,
@@ -2198,6 +2288,7 @@ export function ChatView({
                   disabled={
                     questionNeedsRefresh ||
                     retryMutation.isPending ||
+                    resumeMutation.isPending ||
                     editMutation.isPending ||
                     branchMutation.isPending
                   }

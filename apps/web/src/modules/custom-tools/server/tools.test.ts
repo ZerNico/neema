@@ -103,6 +103,10 @@ describe("prepareCustomTools", () => {
           name,
           mediaType: "text/plain",
           bytes: new Uint8Array(1),
+          ref:
+            name === "deck.pptx"
+              ? { kind: "project" as const, id: "00000000-0000-0000-0000-000000000002", version: 3 }
+              : { kind: "attachment" as const, id: "00000000-0000-0000-0000-000000000001" },
           source:
             name === "deck.pptx"
               ? { kind: "project" as const, fileId: "file-1", version: 3 }

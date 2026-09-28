@@ -610,6 +610,8 @@ export type CompactionEvent =
 
 export interface CompactionInput {
   readonly textOffset?: number;
+  /** The turn this attempt starts at; a resumed answer continues past its own. */
+  readonly beforeTurnIndex?: number;
   readonly maxStartIndex?: number | undefined;
   readonly userId: string;
   readonly conversationId: string;
@@ -653,7 +655,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
 ) {
   const notify = (event: CompactionEvent) => input.onCompaction?.(event) ?? Effect.void;
   const eventPosition = {
-    beforeTurnIndex: 0,
+    beforeTurnIndex: input.beforeTurnIndex ?? 0,
     passIndex: 0,
     textOffset: input.textOffset ?? 0,
     scope: "history" as const,

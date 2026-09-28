@@ -53,7 +53,11 @@ export const LIMITS = {
   matchChars: 400,
   /** Paths accepted in one delete. A cleanup is one call, not one per file. */
   deletedPaths: 100,
-  /** Bytes of one binary file (image or document) sent to the model. */
+  /**
+   * Bytes of one binary file read or written whole: an image or document for
+   * the model, an import, an attachment saved to disk. The web app's
+   * attachment limit is this number, so either side can carry the other's file.
+   */
   binaryBytes: 20 * 1024 * 1024,
   /**
    * Decoded bytes of one composer import that travels as base64 over IPC:

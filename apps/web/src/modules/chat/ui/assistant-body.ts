@@ -2,7 +2,9 @@ import type { AssistantFile } from "../assistant-output.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
+  PresentationActivity,
   ToolActivity,
+  ToolFileActivity,
   WebToolActivity,
   KnowledgeToolActivity,
   SkillToolActivity,
@@ -37,9 +39,36 @@ export type AssistantBodyPart =
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
-  | { kind: "tool"; key: string; activity: Exclude<ToolActivity, WebToolActivity> }
+  | WorkingFilePart
+  | {
+      kind: "tool";
+      key: string;
+      activity: Exclude<ToolActivity, WebToolActivity | PresentationActivity | ToolFileActivity>;
+    }
   | { kind: "compaction"; key: string; activity: CompactionActivity }
   | { kind: "steer"; key: string; steer: AssistantSteer };
+
+/**
+ * One working file's run of calls: presentation steps, the publish that
+ * delivered it, and the delivered file itself, so a draft reads as one activity
+ * rather than a row per call plus a separate file card.
+ */
+export interface WorkingFilePart {
+  kind: "working-file";
+  key: string;
+  workingFileId?: string;
+  steps: Array<PresentationActivity | ToolFileActivity>;
+  file?: AssistantFile;
+}
+
+/** A draft still being worked on is its own live signal; nothing else needs to say "Thinking". */
+export const liveWorkingFile = (parts: ReadonlyArray<AssistantBodyPart>) => {
+  const last = parts.at(-1);
+  return (
+    last?.kind === "working-file" &&
+    !last.steps.some((step) => step.family === "tool-file" && step.status === "complete")
+  );
+};
 
 const turnOf = (item: PositionedActivity) =>
   item.kind !== "compaction" ? (item.activity.turnIndex ?? 0) : item.activity.beforeTurnIndex;
@@ -74,8 +103,22 @@ export function projectAssistantBody({
       activity.family === "research" && activity.progress ? [activity.progress.runId] : [],
     ),
   );
+  const published = new Map(
+    tools.flatMap((activity) =>
+      activity.family === "tool-file" && activity.attachmentId
+        ? [[activity.attachmentId, activity.callId] as const]
+        : [],
+    ),
+  );
+  const claimed = new Map<string, AssistantFile>();
   const activities: PositionedActivity[] = [
-    ...files.map((activity): PositionedActivity => ({ kind: "file", activity })),
+    ...files
+      .filter((activity) => {
+        const publish = published.get(activity.attachment.id);
+        if (publish) claimed.set(publish, activity);
+        return !publish;
+      })
+      .map((activity): PositionedActivity => ({ kind: "file", activity })),
     ...tools
       .filter(
         (activity) =>
@@ -161,6 +204,30 @@ export function projectAssistantBody({
           key: `knowledge-${item.activity.callId}`,
           activities: [item.activity],
         });
+    } else if (item.activity.family === "presentation" || item.activity.family === "tool-file") {
+      const step = item.activity;
+      const last = parts.at(-1);
+      // A step joins the draft before it unless it names a different file; a
+      // running call has no file ID yet and must not flash into its own row.
+      let group: WorkingFilePart;
+      if (
+        last?.kind === "working-file" &&
+        (!step.workingFileId || !last.workingFileId || step.workingFileId === last.workingFileId)
+      ) {
+        group = last;
+        group.steps.push(step);
+        if (!group.workingFileId && step.workingFileId) group.workingFileId = step.workingFileId;
+      } else {
+        group = {
+          kind: "working-file",
+          key: `working-file-${step.callId}`,
+          ...(step.workingFileId ? { workingFileId: step.workingFileId } : {}),
+          steps: [step],
+        };
+        parts.push(group);
+      }
+      const file = claimed.get(step.callId);
+      if (file) group.file = file;
     } else {
       parts.push({ kind: "tool", key: `tool-${item.activity.callId}`, activity: item.activity });
     }

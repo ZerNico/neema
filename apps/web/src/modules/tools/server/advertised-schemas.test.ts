@@ -6,6 +6,14 @@ import { prepareDocumentTools } from "~/modules/documents/server/document-tools.
 import { saveMemoryTool } from "~/modules/memory/server/memory-tool.ts";
 import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts";
 import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";
+import { preparePublishFileTool } from "~/modules/chat/server/publish-file.ts";
+import { createWorkingFiles } from "~/modules/chat/server/working-files.ts";
+import {
+  editPresentationTool,
+  inspectPresentationTool,
+  renderPresentationTool,
+} from "~/modules/presentations/server/tools.ts";
+import { parsePresentationOperations } from "~/modules/presentations/operations.ts";
 import { askUserTool } from "./ask-user.ts";
 import { updatePlanTool } from "./plan-tool.ts";
 
@@ -45,10 +53,16 @@ describe("tool parameters the model is offered", () => {
       ...toolsOf(agentDrafts.group.toolkit),
       ...toolsOf(scheduleDrafts.group.toolkit),
       ...toolsOf(projectFiles.group.toolkit),
+      ...toolsOf(preparePublishFileTool(createWorkingFiles()).group.toolkit),
+      inspectPresentationTool,
+      editPresentationTool,
+      renderPresentationTool,
       saveMemoryTool,
       askUserTool,
       updatePlanTool,
     ];
+    // Schema.Number advertises "NaN" and "Infinity" as strings; models then send them.
+    expect(JSON.stringify(tools.map((tool) => Tool.getJsonSchema(tool)))).not.toContain('"NaN"');
     const empty = tools.flatMap((tool) => {
       const properties = (Tool.getJsonSchema(tool) as { properties?: Record<string, object> })
         .properties;
@@ -57,6 +71,57 @@ describe("tool parameters the model is offered", () => {
         .map(([key]) => `${tool.name}.${key}`);
     });
     expect(empty).toEqual([]);
+  });
+
+  it("keeps presentation top-level parameters optional and canonical selectors in runtime parity", () => {
+    for (const tool of [inspectPresentationTool, editPresentationTool, renderPresentationTool]) {
+      expect((Tool.getJsonSchema(tool) as { required?: string[] }).required ?? []).toEqual([]);
+    }
+    const schema = Tool.getJsonSchema(editPresentationTool) as {
+      properties: {
+        operations: {
+          items: {
+            anyOf: Array<{
+              properties: {
+                kind: { enum: string[] };
+                placeholder?: { pattern: string; maxLength: number };
+              };
+            }>;
+          };
+        };
+      };
+    };
+    const selector = schema.properties.operations.items.anyOf.find(
+      (branch) => branch.properties.kind.enum[0] === "setText",
+    )!.properties.placeholder!;
+    expect(selector.maxLength).toBe(10);
+    for (const name of [
+      "title",
+      "subtitle",
+      "body",
+      "body2",
+      "body5",
+      "body10",
+      "body999999",
+      "body1",
+      "body0",
+      "body02",
+      "body1000000",
+      "obj",
+      "ctrTitle",
+      "ftr",
+      "body-2",
+      "body2.0",
+    ]) {
+      const advertised =
+        new RegExp(selector.pattern).test(name) && name.length <= selector.maxLength;
+      const parse = () =>
+        parsePresentationOperations([
+          { kind: "setText", slideRef: "first", placeholder: name, text: "Text" },
+        ]);
+      if (advertised) expect(parse).not.toThrow();
+      else expect(parse).toThrow(/placeholder/);
+    }
   });
 
   it("tells the model edit_document takes text for old and new", async () => {

@@ -67,14 +67,13 @@ describe("buildSearchReminder", () => {
     expect(text).not.toContain("    ");
   });
 
-  it("still reminds about citations when nothing was consulted yet", () => {
-    const text = buildSearchReminder({ sources: [], lastCycle: false });
-    expect(text).not.toContain("already consulted");
-    expect(text).toContain("cite inline");
+  it("says nothing while there is nothing to cite", () => {
+    expect(buildSearchReminder({ sources: [], lastCycle: false })).toBe("");
+    expect(buildSearchReminder({ sources: [], lastCycle: true })).not.toContain("cite inline");
   });
 
   it("announces the last cycle ahead of the citation reminder", () => {
-    const text = buildSearchReminder({ sources: [], lastCycle: true });
+    const text = buildSearchReminder({ sources: [source(1)], lastCycle: true });
     expect(text).toContain("no tool calls left");
     expect(text.indexOf("no tool calls left")).toBeLessThan(text.indexOf("cite inline"));
   });

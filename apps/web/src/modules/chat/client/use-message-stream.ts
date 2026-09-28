@@ -4,6 +4,7 @@ import {
   agentDraftResultOk,
   type AgentDraftActivityResult,
 } from "~/modules/agents/tool-schema.ts";
+import type { PresentationActivitySummary } from "~/modules/presentations/activity.ts";
 import {
   DocumentToolEnvelope,
   documentResultOk,
@@ -40,6 +41,8 @@ import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schem
 import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createLiveText, type LiveText } from "./live-text.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
+import { PresentationToolEnvelope } from "~/modules/presentations/tool-schema.ts";
+import { ToolFileEnvelope } from "../tool-file-schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
 
@@ -152,6 +155,21 @@ export interface DesktopToolActivity extends ToolActivityBase {
   result?: DesktopToolResult;
 }
 
+/** One publish of a working file; the attachment it delivered, once it has. */
+export interface ToolFileActivity extends ToolActivityBase {
+  family: "tool-file";
+  attachmentId?: string;
+  workingFileId?: string;
+}
+
+/** One deck call, carrying only the bounded summary the transcript shows. */
+export interface PresentationActivity
+  extends ToolActivityBase, Partial<PresentationActivitySummary> {
+  family: "presentation";
+  /** Stands in for a call the model is still writing; replaced when it starts. */
+  writing?: true;
+}
+
 /** One admin-authored code tool call; the display name rides the envelope. */
 export interface CustomToolActivity extends ToolActivityBase {
   family: "custom";
@@ -160,6 +178,7 @@ export interface CustomToolActivity extends ToolActivityBase {
   resultChars?: number;
   /** Attachments the call produced; the bytes live in the message's files. */
   fileIds?: ReadonlyArray<string>;
+  workingFiles?: ReadonlyArray<{ id: string; revision: number; name: string }>;
 }
 
 /** One call into a connected service; a declined or unpermitted call is `refused`. */
@@ -180,6 +199,8 @@ export type ToolActivity =
   | IntegrationToolActivity
   | ScheduleDraftToolActivity
   | CustomToolActivity
+  | ToolFileActivity
+  | PresentationActivity
   | DocumentToolActivity
   | ProjectFileToolActivity
   | DesktopToolActivity
@@ -322,6 +343,8 @@ export function applyToolChunk(
     e.family !== "agent-draft" &&
     e.family !== "schedule-draft" &&
     e.family !== "custom" &&
+    e.family !== "tool-file" &&
+    e.family !== "presentation" &&
     e.family !== "integration" &&
     e.family !== "document" &&
     e.family !== "project-file" &&
@@ -390,6 +413,61 @@ export function applyToolChunk(
       ? [...tools, next]
       : tools.map((activity, i) => (i === index ? next : activity));
   }
+  if (family === "presentation") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(PresentationToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const next: PresentationActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status:
+        parsed.phase === "start" ? "running" : parsed.outcome === "error" ? "error" : "complete",
+      ...(parsed.phase === "result"
+        ? (({
+            v: _v,
+            family: _family,
+            phase: _phase,
+            callId: _callId,
+            name: _name,
+            ...summary
+          }) => ({
+            ...summary,
+            ...(summary.outcome === "error" ? { error: summary.message } : {}),
+          }))(parsed)
+        : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "tool-file") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ToolFileEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const next: ToolFileActivity = {
+      family,
+      ...position,
+      callId: parsed.callId,
+      name: parsed.name,
+      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
+      callIndex:
+        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
+      status: parsed.phase === "start" ? "running" : parsed.ok ? "complete" : "error",
+      ...(parsed.phase === "result" && parsed.attachmentId
+        ? { attachmentId: parsed.attachmentId }
+        : {}),
+      ...(parsed.phase === "result" && parsed.workingFileId
+        ? { workingFileId: parsed.workingFileId }
+        : {}),
+      ...(parsed.phase === "result" && parsed.error ? { error: parsed.error } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
   if (family === "custom") {
     const parsed = Option.getOrNull(Schema.decodeUnknownOption(CustomToolEnvelope)(envelope));
     if (!parsed || (existing && parsed.phase === "start")) return tools;
@@ -409,6 +487,7 @@ export function applyToolChunk(
             ...(parsed.resultChars !== undefined ? { resultChars: parsed.resultChars } : {}),
             ...(parsed.error ? { error: parsed.error } : {}),
             ...(parsed.fileIds?.length ? { fileIds: parsed.fileIds } : {}),
+            ...(parsed.workingFiles?.length ? { workingFiles: parsed.workingFiles } : {}),
           }
         : {}),
     };
@@ -848,7 +927,7 @@ export function applyCompactionChunk(
 }
 
 /** Every chunk kind the server writes; see `ChunkKind` in the chat repo. */
-type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer";
+type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
 
 /** Adds a steer from its envelope; a replayed or malformed one changes nothing. */
 export const applySteerChunk = (
@@ -883,6 +962,77 @@ export const applyFileChunk = (
   }
 };
 
+/** A call still being written leaves once any call starts or the answer ends. */
+const withoutWriting = (tools: ReadonlyArray<ToolActivity>) =>
+  tools.filter((tool) => tool.family !== "presentation" || !tool.writing);
+
+/**
+ * A writing marker from an earlier attempt of a resumed answer. That attempt
+ * ended mid-call, so nothing will ever replace the marker.
+ */
+export const isStaleWriting = (delta: string, runId: string | null) => {
+  try {
+    const writing = JSON.parse(delta) as { runId?: unknown };
+    return typeof writing.runId === "string" && runId !== null && writing.runId !== runId;
+  } catch {
+    return false;
+  }
+};
+
+/** A deck edit the model has begun writing, shown as a running step until it starts. */
+export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: string) => {
+  try {
+    const writing = JSON.parse(delta) as {
+      v?: unknown;
+      id?: unknown;
+      name?: unknown;
+      textOffset?: unknown;
+      turnIndex?: unknown;
+    };
+    if (
+      writing.v !== 1 ||
+      typeof writing.id !== "string" ||
+      writing.name !== "edit_presentation" ||
+      typeof writing.textOffset !== "number" ||
+      typeof writing.turnIndex !== "number"
+    )
+      return [...tools];
+    return [
+      ...withoutWriting(tools),
+      {
+        family: "presentation" as const,
+        name: writing.name,
+        callId: `writing:${writing.id}`,
+        status: "running" as const,
+        textOffset: writing.textOffset,
+        turnIndex: writing.turnIndex,
+        callIndex: Number.MAX_SAFE_INTEGER,
+        writing: true as const,
+      },
+    ];
+  } catch {
+    return [...tools];
+  }
+};
+
+const startsCall = (delta: string) => {
+  try {
+    return (JSON.parse(delta) as { phase?: unknown }).phase === "start";
+  } catch {
+    return false;
+  }
+};
+
+/** Tool and writing chunks in stream order, for the live reducer and a reload's replay alike. */
+export const applyToolActivityChunk = (
+  tools: ReadonlyArray<ToolActivity>,
+  kind: "tool" | "writing",
+  delta: string,
+): ToolActivity[] =>
+  kind === "writing"
+    ? applyWritingChunk(tools, delta)
+    : applyToolChunk(startsCall(delta) ? withoutWriting(tools) : [...tools], delta);
+
 type StateChunkKind = Extract<Action, { kind: "chunk" }>["chunkKind"];
 
 function applyChunk(state: StreamState, kind: StateChunkKind, delta: string): StreamState {
@@ -893,8 +1043,9 @@ function applyChunk(state: StreamState, kind: StateChunkKind, delta: string): St
       return { ...state, compactions: applyCompactionChunk(state.compactions, delta) };
     case "steer":
       return { ...state, steers: applySteerChunk(state.steers, delta) };
+    case "writing":
     case "tool":
-      return { ...state, tools: applyToolChunk(state.tools, delta) };
+      return { ...state, tools: applyToolActivityChunk(state.tools, kind, delta) };
   }
 }
 
@@ -911,7 +1062,7 @@ function reducer(state: StreamState, action: Action): StreamState {
     case "chunk":
       return applyChunk(state, action.chunkKind, action.delta);
     case "done":
-      return { ...state, status: action.status };
+      return { ...state, tools: withoutWriting(state.tools), status: action.status };
   }
 }
 
@@ -1018,6 +1169,7 @@ export function useMessageStream(
       };
       if (!acceptsRun(data.runId) || !live.claim(data.seq)) return;
       const chunkKind = data.kind ?? "text";
+      if (chunkKind === "writing" && isStaleWriting(data.delta, runId)) return;
       if (chunkKind === "text" || chunkKind === "reasoning") live.append(chunkKind, data.delta);
       else dispatch({ kind: "chunk", chunkKind, delta: data.delta });
       if (data.kind === "tool") {

@@ -311,6 +311,7 @@ describe("once a folder is attached", () => {
         callId: "t",
         conversationId: CONVERSATION,
         path: join(root, "src", "logo.png"),
+        purpose: "view",
       }),
     );
     expect(image.mediaType).toBe("image/png");
@@ -322,6 +323,45 @@ describe("once a folder is attached", () => {
           callId: "t",
           conversationId: CONVERSATION,
           path: join(root, "src", "index.ts"),
+          purpose: "view",
+        }),
+      ),
+    ).toBe("not-binary");
+  });
+
+  it("imports a picture or PowerPoint for server tools, and a plain read still refuses a deck", async () => {
+    const deck = join(root, "src", "deck.pptx");
+    await writeFile(deck, Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
+    const imported = await Effect.runPromise(
+      handlers.readBinary({
+        callId: "t",
+        conversationId: CONVERSATION,
+        path: deck,
+        purpose: "import",
+      }),
+    );
+    expect(imported).toMatchObject({
+      path: "site/src/deck.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      bytes: 7,
+    });
+    expect(
+      await failureOf(
+        handlers.readBinary({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: deck,
+          purpose: "view",
+        }),
+      ),
+    ).toBe("not-binary");
+    expect(
+      await failureOf(
+        handlers.readBinary({
+          callId: "t",
+          conversationId: CONVERSATION,
+          path: join(root, "src", "index.ts"),
+          purpose: "import",
         }),
       ),
     ).toBe("not-binary");

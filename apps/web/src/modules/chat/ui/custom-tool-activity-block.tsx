@@ -12,15 +12,26 @@ import {
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
+import { workingFileState } from "./working-file-activity-block.tsx";
 
 /**
  * One admin-authored code tool call. The row carries the tool's display name
  * and status; the result preview sits behind a disclosure, since the full
- * output already went to the model and is never retransmitted here. Files the
- * call returned are not listed: they render inline right after this row, at
- * the same text offset, and a second chip here read as a second file.
+ * output already went to the model and is never retransmitted here. Working
+ * files show their lifecycle; published attachments render after this row, not
+ * as a second chip inside it.
  */
-export function CustomToolActivityBlock({ activity }: { activity: CustomToolActivity }) {
+export function CustomToolActivityBlock({
+  activity,
+  terminal = false,
+  published,
+}: {
+  activity: CustomToolActivity;
+  /** The answer has ended, so an unpublished file stays a draft. */
+  terminal?: boolean;
+  /** Working files some publish in this answer delivered. */
+  published?: ReadonlySet<string>;
+}) {
   const [open, setOpen] = useState(false);
   const running = activity.status === "running";
   const failed = activity.status === "error";
@@ -29,8 +40,17 @@ export function CustomToolActivityBlock({ activity }: { activity: CustomToolActi
     : failed
       ? `${activity.displayName} failed`
       : activity.displayName;
+  const workingFiles = (activity.workingFiles ?? []).map((file) => ({
+    file,
+    state: workingFileState(published?.has(file.id) ?? false, terminal),
+  }));
+  const workingState = !workingFiles.length
+    ? null
+    : workingFiles.every(({ state }) => state === "Published")
+      ? "Published"
+      : workingFileState(false, terminal);
 
-  if (!activity.resultPreview && !activity.error)
+  if (!activity.resultPreview && !activity.error && !workingFiles.length)
     return (
       <div className={cn(activityRowClassName, "mb-2", failed && "text-destructive")}>
         <HugeiconsIcon icon={CodeIcon} strokeWidth={2} className="size-4" aria-hidden />
@@ -42,7 +62,10 @@ export function CustomToolActivityBlock({ activity }: { activity: CustomToolActi
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <HugeiconsIcon icon={CodeIcon} strokeWidth={2} className="size-4 shrink-0" aria-hidden />
-        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
+        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>
+          {label}
+          {workingState ? ` · ${workingState}` : ""}
+        </span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           strokeWidth={2}
@@ -61,6 +84,14 @@ export function CustomToolActivityBlock({ activity }: { activity: CustomToolActi
               {activity.error}
             </p>
           ) : null}
+          {workingFiles.map(({ file, state }) => (
+            <p
+              key={`${file.id}@${file.revision}`}
+              className="text-muted-foreground text-xs [overflow-wrap:anywhere]"
+            >
+              {file.name} · {state}
+            </p>
+          ))}
           {activity.resultPreview ? (
             <p className="text-muted-foreground text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
               {activity.resultPreview}

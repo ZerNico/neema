@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectAssistantBody } from "./assistant-body.ts";
+import { liveWorkingFile, projectAssistantBody } from "./assistant-body.ts";
 import type { CompactionActivity, ToolActivity } from "../client/use-message-stream.ts";
 
 const web = (callId: string, textOffset: number, callIndex = 0): ToolActivity => ({
@@ -284,5 +284,87 @@ describe("projectAssistantBody steers", () => {
       steers: [steer(offset)],
     });
     expect(parts.map((part) => part.kind)).toEqual(["text"]);
+  });
+
+  describe("working files", () => {
+    const step = (
+      callId: string,
+      turnIndex: number,
+      workingFileId?: string,
+      status: "running" | "complete" = "complete",
+    ): ToolActivity => ({
+      family: "presentation",
+      name: "edit_presentation",
+      callId,
+      textOffset: 0,
+      turnIndex,
+      callIndex: 0,
+      status,
+      ...(workingFileId ? { workingFileId } : {}),
+    });
+    const publish = (
+      turnIndex: number,
+      workingFileId: string,
+      attachmentId?: string,
+    ): ToolActivity => ({
+      family: "tool-file",
+      name: "publish_file",
+      callId: `publish-${workingFileId}`,
+      textOffset: 0,
+      turnIndex,
+      callIndex: 0,
+      status: attachmentId ? "complete" : "running",
+      workingFileId,
+      ...(attachmentId ? { attachmentId } : {}),
+    });
+    const file = {
+      v: 1 as const,
+      attachment: {
+        id: "deck",
+        fileName: "Deck.pptx",
+        size: 1,
+        mediaType: "application/octet-stream",
+        kind: "file" as const,
+      },
+      textOffset: 0,
+      turnIndex: 3,
+      eventIndex: 1,
+      callIndex: 0,
+    };
+    const project = (tools: ToolActivity[], content = "", files = [file]) =>
+      projectAssistantBody({ content, streaming: true, tools, compactions: [], files }).parts;
+
+    it("folds a draft's steps, its publish and the delivered file into one part", () => {
+      const parts = project([step("a", 0, "d1"), step("b", 1, "d1"), publish(2, "d1", "deck")]);
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ kind: "working-file", workingFileId: "d1", file });
+      expect(
+        parts[0]?.kind === "working-file" && parts[0].steps.map((item) => item.callId),
+      ).toEqual(["a", "b", "publish-d1"]);
+      expect(liveWorkingFile(parts)).toBe(false);
+    });
+
+    it("keeps a running step without a file ID in the draft before it", () => {
+      const parts = project([step("a", 0, "d1"), step("b", 1, undefined, "running")], "", []);
+      expect(parts).toHaveLength(1);
+      expect(liveWorkingFile(parts)).toBe(true);
+    });
+
+    it("starts a new part for another file or after intervening text", () => {
+      expect(project([step("a", 0, "d1"), step("b", 1, "d2")], "", [])).toHaveLength(2);
+      const split = projectAssistantBody({
+        content: "Now the second pass.",
+        streaming: false,
+        tools: [step("a", 0, "d1"), { ...step("b", 1, "d1"), textOffset: 20 }],
+        compactions: [],
+      }).parts;
+      expect(split.map((part) => part.kind)).toEqual(["working-file", "text", "working-file"]);
+    });
+
+    it("gives another tool's published file its own part without a file card duplicate", () => {
+      const parts = project([publish(0, "custom-1", "deck")]);
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ kind: "working-file", file });
+    });
   });
 });

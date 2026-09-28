@@ -14,6 +14,7 @@ vi.mock("../server/functions.ts", () => ({
   branchConversation: vi.fn(),
   sendMessage: vi.fn(),
   answerQuestion: vi.fn(),
+  resumeMessage: vi.fn(),
   retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stopGeneration: vi.fn(),

@@ -22,13 +22,17 @@ import { eq, sql } from "drizzle-orm";
 import {
   conversationDrafts,
   conversations,
+  conversationWorkingFiles,
   schedules,
   groups,
   groupMembers,
   attachmentBlobs,
+  conversationQueueEntries,
   attachments,
   messageAttachments,
   messageChunks,
+  messageCompactionEvents,
+  messageToolCalls,
   messageGenerationConfig,
   messages,
   models,
@@ -60,7 +64,9 @@ import { loadConversationDetail } from "~/modules/chat/server/conversation-detai
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { EditNotAllowed } from "~/modules/chat/errors.ts";
+import { imageStandIn, RESUME_REMINDER } from "~/modules/chat/server/prompt.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { GenerationFence, QueueSweepInterval } from "~/modules/chat/server/generation-fence.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -114,7 +120,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | AttachmentRepo
   | AttachmentService
   | ExternalCompletion
-  | ScheduleRepo,
+  | ScheduleRepo
+  | KeptWorkingFiles,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */
@@ -133,8 +140,11 @@ const editedPng = Buffer.from(
 let nextGeneratedImage: Uint8Array | undefined;
 let terminalFixtures: ChatStreamPart[][] | undefined;
 /** Set by a test that pins a custom tool; the runtime is otherwise never called. */
-let customToolRun: ((input: { functionKey: string }) => Effect.Effect<CustomToolRunResult>) | null =
-  null;
+let customToolRun:
+  | ((
+      input: Parameters<CustomToolRuntime["Service"]["run"]>[0],
+    ) => Effect.Effect<CustomToolRunResult>)
+  | null = null;
 const generatedBlobs = new Map<string, Uint8Array>();
 const ImageBlobStore = Layer.succeed(BlobStore, {
   put: (key, bytes) =>
@@ -343,7 +353,11 @@ beforeAll(async () => {
     ),
   ).pipe(Layer.provideMerge(ReposLayer));
   const EngineLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
+    Layer.provideMerge(
+      KeptWorkingFiles.layer.pipe(
+        Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
+      ),
+    ),
   );
   // No background sweep: tests that assert queue state would otherwise race a
   // start nobody asked for. Settled hooks and explicit dispatch still run.
@@ -1310,7 +1324,7 @@ describe("conversational agent authoring", () => {
     };
     authoringScript = (input) => {
       round++;
-      // Four tool rounds is the ceiling; the fifth call has no toolkit.
+      // Four tool rounds, then the answer.
       if (round === 1)
         return authoringTool(input, "draft_agent", {
           changes: { name: "Alpha", instructions: "Alpha body" },
@@ -2717,6 +2731,10 @@ describe("queued turns", () => {
     // The continuation read the steered file, not just its words.
     expect(result.continuation).toContain("Steer file body 42");
     expect(result.continuation).toContain("use a different ending");
+    // Told after it that this came mid-task, so a question does not end the work.
+    expect(result.continuation.indexOf("use a different ending")).toBeLessThan(
+      result.continuation.indexOf("Address it briefly, then continue the task"),
+    );
     // It arrived after the first round's text and tool, which is where it is drawn.
     expect(result.steer).toMatchObject({
       content: "use a different ending",
@@ -2802,11 +2820,13 @@ describe("queued turns", () => {
 
     // One replay turn per model call, so later history is rebuilt from them.
     expect(result.replay).toEqual([0, 1]);
-    // Live: the round's call and results, then the steer, then the next call.
-    expect(promptShape(result.continuation).slice(-3)).toEqual([
+    // Live: the round's call and results, then the steer and the reminder that
+    // it came mid-task, then the next call.
+    expect(promptShape(result.continuation).slice(-4)).toEqual([
       "assistant:turn0",
       "tool",
       "user:steer",
+      "user:other",
     ]);
     // Next turn: the same order rebuilt from the replay turns.
     const history = promptShape(result.history);
@@ -5231,8 +5251,20 @@ describe("custom tool calls", () => {
         logs: [],
         durationMs: 1,
         files: [
-          { name: "q3.pdf", mediaType: "application/pdf", share: false, bytes: pdf },
-          { name: "q3.csv", mediaType: "text/csv", share: true, bytes: csv },
+          {
+            name: "q3.pdf",
+            mediaType: "application/pdf",
+            delivery: "publish",
+            showModel: false,
+            bytes: pdf,
+          },
+          {
+            name: "q3.csv",
+            mediaType: "text/csv",
+            delivery: "publish",
+            showModel: true,
+            bytes: csv,
+          },
         ],
       });
     const created = await runtime.runPromise(
@@ -5327,6 +5359,754 @@ describe("custom tool calls", () => {
       customToolRun = null;
     }
   }, 60_000);
+
+  it("revises a custom working file repeatedly before publishing one attachment", async () => {
+    const seed = await runtime.runPromise(setupConversation);
+    const name = `editor_${seed.userId.slice(-8)}`;
+    const created = await runtime.runPromise(
+      CustomToolRepo.use((repo) =>
+        repo.create({
+          slug: name,
+          name: "Editor",
+          description: "",
+          createdBy: seed.userId,
+          build: {
+            source: "",
+            dependencies: [],
+            compiled: "",
+            functions: [
+              {
+                key: "revise",
+                name: "Revise",
+                description: "Revise a draft.",
+                modelName: `custom_${name}__revise`,
+                parametersSchema: { type: "object", properties: { ref: { type: "string" } } },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    const conversationId = (
+      await runtime.runPromise(
+        ChatRepo.use((repo) =>
+          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+        ),
+      )
+    ).id;
+    const calls = created.functions[0]!.modelName;
+    let round = 0;
+    let nextRef: string | undefined;
+    let revisions = 0;
+    customToolRun = (input) => {
+      const ref = (input.args as { ref?: string }).ref;
+      if (!ref)
+        return Effect.succeed({
+          ok: true,
+          output: "Draft prepared.",
+          logs: [],
+          durationMs: 1,
+          files: [
+            {
+              name: "notes.txt",
+              mediaType: "text/plain",
+              delivery: "working",
+              showModel: false,
+              bytes: Buffer.from("0"),
+            },
+          ],
+        });
+      return Effect.gen(function* () {
+        const source = yield* input.resolveFile!(ref);
+        if (source.ref.kind !== "working") throw new Error("Expected a working revision.");
+        expect(Buffer.from(source.bytes).toString()).toBe(String(revisions));
+        revisions += 1;
+        return {
+          ok: true,
+          output: "Draft updated.",
+          logs: [],
+          durationMs: 1,
+          files: [
+            {
+              name: "notes.txt",
+              mediaType: "text/plain",
+              delivery: "working" as const,
+              showModel: false,
+              replaces: source.ref,
+              bytes: Buffer.from(String(revisions)),
+            },
+          ],
+        } satisfies CustomToolRunResult;
+      }).pipe(Effect.orDie);
+    };
+    authoringScript = (input) => {
+      round += 1;
+      if (round > 1) {
+        const refs = JSON.stringify(input.prompt).match(/working:[a-f\d-]+@\d+/g);
+        nextRef = refs?.at(-1);
+      }
+      if (round <= 7) return authoringTool(input, calls, nextRef ? { ref: nextRef } : {});
+      if (round === 8) return authoringTool(input, "publish_file", { ref: nextRef });
+      return reply();
+    };
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: textModelId,
+            content: "Revise the draft six times and deliver it.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+        ),
+      );
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      expect(detail.messages.at(-1)?.status).toBe("complete");
+      expect(round).toBe(9);
+      expect(revisions).toBe(6);
+      expect(detail.attachments.filter((row) => row.messageId === assistantMessageId)).toHaveLength(
+        1,
+      );
+      const customCalls = detail.toolCalls.filter((row) => row.toolName === calls);
+      expect(customCalls).toHaveLength(7);
+      expect(
+        customCalls.every(
+          (row) => (row.result as { workingFiles?: unknown[] })?.workingFiles?.length === 1,
+        ),
+      ).toBe(true);
+      expect(detail.toolCalls.find((row) => row.toolName === "publish_file")?.status).toBe(
+        "complete",
+      );
+    } finally {
+      authoringScript = null;
+      customToolRun = null;
+    }
+  }, 60_000);
+
+  describe("unpublished working files across answers", () => {
+    const keptSetup = Effect.gen(function* () {
+      const seed = yield* setupConversation;
+      const name = `keeper_${seed.userId.slice(-8)}`;
+      const created = yield* CustomToolRepo.use((repo) =>
+        repo.create({
+          slug: name,
+          name: "Keeper",
+          description: "",
+          createdBy: seed.userId,
+          build: {
+            source: "",
+            dependencies: [],
+            compiled: "",
+            functions: [
+              {
+                key: "revise",
+                name: "Revise",
+                description: "Revise a draft.",
+                modelName: `custom_${name}__revise`,
+                parametersSchema: { type: "object", properties: { ref: { type: "string" } } },
+              },
+            ],
+          },
+        }),
+      );
+      const conversation = yield* ChatRepo.use((repo) =>
+        repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+      );
+      return {
+        seed,
+        conversationId: conversation.id,
+        tool: created.functions[0]!.modelName,
+        toolId: created.id,
+      };
+    });
+    // Creates "0", then each revision stores the previous value plus one.
+    const keeperRun: typeof customToolRun = (input) =>
+      Effect.gen(function* () {
+        const ref = (input.args as { ref?: string }).ref;
+        const source = ref ? yield* input.resolveFile!(ref) : null;
+        if (source && source.ref.kind !== "working")
+          throw new Error("Expected a working revision.");
+        return {
+          ok: true,
+          output: "Draft saved.",
+          logs: [],
+          durationMs: 1,
+          files: [
+            {
+              name: "notes.txt",
+              mediaType: "text/plain",
+              delivery: "working" as const,
+              showModel: false,
+              ...(source?.ref.kind === "working" ? { replaces: source.ref } : {}),
+              bytes: Buffer.from(source ? String(Number(Buffer.from(source.bytes)) + 1) : "0"),
+            },
+          ],
+        } satisfies CustomToolRunResult;
+      }).pipe(Effect.orDie);
+    const answer = (userId: string, conversationId: string, content: string) =>
+      Effect.gen(function* () {
+        const { assistantMessageId } = yield* ChatService.use((service) =>
+          service.sendMessage({
+            userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        );
+        yield* Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+        );
+        return assistantMessageId;
+      });
+    const keptRows = (conversationId: string) =>
+      Effect.flatMap(Db, (db) =>
+        db
+          .select()
+          .from(conversationWorkingFiles)
+          .where(eq(conversationWorkingFiles.conversationId, conversationId)),
+      ).pipe(Effect.orDie);
+    const userAttachments = (userId: string) =>
+      Effect.flatMap(Db, (db) =>
+        db
+          .select({ id: attachments.id, sha256: attachmentBlobs.sha256 })
+          .from(attachments)
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(eq(attachments.userId, userId)),
+      ).pipe(Effect.orDie);
+    const sha256Of = (text: string) => createHash("sha256").update(text).digest("hex");
+    const refIn = (input: { prompt: unknown }) =>
+      JSON.stringify(input.prompt)
+        .match(/working:[a-f\d-]+@\d+/g)
+        ?.at(-1);
+    // One answer that creates the draft and revises it twice, publishing nothing.
+    const draftTwice = (tool: string) => {
+      let round = 0;
+      authoringScript = (input) => {
+        round += 1;
+        if (round === 1) return authoringTool(input, tool, {});
+        if (round <= 3) return authoringTool(input, tool, { ref: refIn(input) });
+        return reply();
+      };
+    };
+
+    const retry = (userId: string, conversationId: string, messageId: string) =>
+      Effect.gen(function* () {
+        yield* ChatService.use((service) =>
+          service.retryMessage({ userId, conversationId, messageId }),
+        );
+        yield* Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runCollect(engine.subscribe(messageId, 0)),
+        );
+      });
+    /** Runs one answer whose first model call is recorded, then replies. */
+    const promptOf = async (userId: string, conversationId: string) => {
+      let first: GatewayInput | undefined;
+      authoringScript = (input) => {
+        first ??= input;
+        return reply();
+      };
+      await runtime.runPromise(answer(userId, conversationId, "What is kept?"));
+      return first!;
+    };
+
+    it("keeps the latest revision for the next answer; retrying the answer that published it brings it back", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        draftTwice(tool);
+        const first = await runtime.runPromise(answer(seed.userId, conversationId, "Draft notes."));
+        const [kept, ...others] = await runtime.runPromise(keptRows(conversationId));
+        expect(others).toEqual([]);
+        expect(kept).toMatchObject({ revision: 3, name: "notes.txt", messageId: first });
+        // Earlier revisions left nothing behind: one attachment, holding "2".
+        const stored = await runtime.runPromise(userAttachments(seed.userId));
+        expect(stored.map((row) => row.id)).toEqual([kept!.attachmentId]);
+        expect(stored[0]!.sha256).toBe(sha256Of("2"));
+
+        let round = 0;
+        let notice = "";
+        let laterRound = "";
+        authoringScript = (input) => {
+          round += 1;
+          if (round === 1) {
+            notice = JSON.stringify(input.prompt);
+            return authoringTool(input, tool, { ref: `working:${kept!.workingFileId}@3` });
+          }
+          if (round === 2) {
+            laterRound = JSON.stringify(input.prompt);
+            return authoringTool(input, "publish_file", { ref: refIn(input) });
+          }
+          return reply();
+        };
+        const second = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Finish and deliver the notes."),
+        );
+        // A reference, then the name quoted as data.
+        const line = `working:${kept!.workingFileId}@3 \\"notes.txt\\"`;
+        expect(notice).toContain(line);
+        // Fixed for the whole answer, so the cached prefix holds: the next round
+        // still reads @3 though the draft is at revision 4 by then.
+        expect(laterRound).toContain(`working:${kept!.workingFileId}@4`);
+        expect(laterRound.indexOf(line)).toBe(notice.indexOf(line));
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        expect(detail.toolCalls.find((row) => row.toolName === "publish_file")?.status).toBe(
+          "complete",
+        );
+        const published = detail.attachments.filter((row) => row.messageId === second);
+        expect(published).toHaveLength(1);
+        // Delivered, so no longer offered; the first answer's copy stays for a retry.
+        expect(detail.workingFiles).toEqual([]);
+        expect(
+          (await runtime.runPromise(keptRows(conversationId))).map((row) => [
+            row.messageId,
+            row.attachmentId,
+          ]),
+        ).toEqual(
+          expect.arrayContaining([
+            [first, kept!.attachmentId],
+            [second, null],
+          ]),
+        );
+
+        await runtime.runPromise(retry(seed.userId, conversationId, second));
+        expect(
+          (await runtime.runPromise(keptRows(conversationId))).map((row) => row.messageId),
+        ).toEqual([first]);
+        // The retried answer's delivery went with it; the draft it consumed is back.
+        const remaining = await runtime.runPromise(userAttachments(seed.userId));
+        expect(remaining.map((row) => row.id)).toEqual([kept!.attachmentId]);
+        expect(JSON.stringify((await promptOf(seed.userId, conversationId)).prompt)).toContain(
+          line,
+        );
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("restores the revision an answer started from when that answer is retried", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        draftTwice(tool);
+        const first = await runtime.runPromise(answer(seed.userId, conversationId, "Draft notes."));
+        const [kept] = await runtime.runPromise(keptRows(conversationId));
+        let round = 0;
+        authoringScript = (input) => {
+          round += 1;
+          if (round === 1)
+            return authoringTool(input, tool, { ref: `working:${kept!.workingFileId}@3` });
+          return reply();
+        };
+        const second = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Revise the notes."),
+        );
+        const revised = await runtime.runPromise(keptRows(conversationId));
+        expect(revised.find((row) => row.messageId === second)).toMatchObject({ revision: 4 });
+
+        await runtime.runPromise(retry(seed.userId, conversationId, second));
+        const [restored, ...others] = await runtime.runPromise(keptRows(conversationId));
+        expect(others).toEqual([]);
+        expect(restored).toMatchObject({ messageId: first, revision: 3 });
+        const stored = await runtime.runPromise(userAttachments(seed.userId));
+        expect(stored.map((row) => row.sha256)).toEqual([sha256Of("2")]);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("lets a new answer draft beside eight kept drafts", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        let round = 0;
+        authoringScript = (input) => {
+          round += 1;
+          return round <= 8 ? authoringTool(input, tool, {}) : reply();
+        };
+        await runtime.runPromise(answer(seed.userId, conversationId, "Start eight drafts."));
+        expect(await runtime.runPromise(keptRows(conversationId))).toHaveLength(8);
+        round = 8;
+        authoringScript = (input) => {
+          round += 1;
+          return round === 9 ? authoringTool(input, tool, {}) : reply();
+        };
+        const next = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Start one more."),
+        );
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        const call = detail.toolCalls.find(
+          (row) => row.messageId === next && row.toolName === tool,
+        );
+        expect(call?.status).toBe("complete");
+        expect(await runtime.runPromise(keptRows(conversationId))).toHaveLength(9);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("offers kept drafts only to the editor that made them, and publish_file only with one", async () => {
+      const { seed, conversationId, tool, toolId } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        draftTwice(tool);
+        const first = await runtime.runPromise(answer(seed.userId, conversationId, "Draft notes."));
+        const [custom] = await runtime.runPromise(keptRows(conversationId));
+        // A deck an earlier answer left while presentations were offered.
+        const deckId = uuidv7();
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const deck = yield* AttachmentService.use((service) =>
+              service.upload({
+                userId: seed.userId,
+                fileName: "deck.pptx",
+                declaredMediaType: "application/octet-stream",
+                bytes: Buffer.from("deck"),
+              }),
+            );
+            yield* Effect.flatMap(Db, (db) =>
+              db.insert(conversationWorkingFiles).values({
+                workingFileId: deckId,
+                messageId: first,
+                conversationId,
+                attachmentId: deck.id,
+                name: "deck.pptx",
+                mediaType: deck.mediaType,
+                owner: "presentation",
+                revision: 2,
+                fingerprint: sha256Of("deck"),
+              }),
+            );
+          }).pipe(Effect.orDie),
+        );
+        const offered = await promptOf(seed.userId, conversationId);
+        const text = JSON.stringify(offered.prompt);
+        expect(text).toContain(`working:${custom!.workingFileId}@3`);
+        // No presentation tools here, so their draft is not advertised.
+        expect(text).not.toContain(deckId);
+        expect(Object.keys(offered.toolkit?.tools ?? {})).toContain("publish_file");
+
+        // Another module's offer does not reach this module's draft.
+        await runtime.runPromise(
+          CustomToolRepo.use((repo) => repo.setEnabled(toolId, false)).pipe(Effect.orDie),
+        );
+        expect(JSON.stringify((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
+          custom!.workingFileId,
+        );
+        // With no editor offered at all there is nothing to continue or deliver.
+        const enabled = await runtime.runPromise(
+          CustomToolRepo.use((repo) => repo.list()).pipe(
+            Effect.map((rows) => rows.filter((row) => row.enabled).map((row) => row.id)),
+          ),
+        );
+        const setAll = (value: boolean) =>
+          runtime.runPromise(
+            Effect.forEach(enabled, (id) =>
+              CustomToolRepo.use((repo) => repo.setEnabled(id, value)).pipe(Effect.orDie),
+            ),
+          );
+        await setAll(false);
+        try {
+          const without = await promptOf(seed.userId, conversationId);
+          expect(JSON.stringify(without.prompt)).not.toContain("Unpublished working files kept");
+          expect(Object.keys(without.toolkit?.tools ?? {})).not.toContain("publish_file");
+        } finally {
+          await setAll(true);
+        }
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("keeps each round's revision before the next model call", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      let calls = 0;
+      let duringSecondCall: ReadonlyArray<{ revision: number }> = [];
+      customToolRun = (input) =>
+        Effect.gen(function* () {
+          calls += 1;
+          // Written at the round boundary, so a crash here would still leave round one.
+          if (calls === 2)
+            duringSecondCall = yield* Effect.promise(() =>
+              runtime.runPromise(keptRows(conversationId)),
+            );
+          return yield* keeperRun!(input);
+        });
+      try {
+        draftTwice(tool);
+        const answered = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Draft notes."),
+        );
+        expect(duringSecondCall.map((row) => row.revision)).toEqual([1]);
+        // One row per answer: later boundaries replace it rather than add rows.
+        const rows = await runtime.runPromise(keptRows(conversationId));
+        expect(rows.map((row) => [row.messageId, row.revision])).toEqual([[answered, 3]]);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("keeps what a stopped answer drafted", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      let calls = 0;
+      customToolRun = (input) =>
+        Effect.gen(function* () {
+          calls += 1;
+          // The second call is where the person presses Stop.
+          if (calls === 2)
+            yield* Effect.promise(() =>
+              runtime.runPromise(
+                Effect.gen(function* () {
+                  const [latest] = yield* Effect.flatMap(Db, (db) =>
+                    db
+                      .select()
+                      .from(messages)
+                      .where(eq(messages.conversationId, conversationId))
+                      .orderBy(sql`${messages.createdAt} desc`)
+                      .limit(1),
+                  );
+                  yield* ChatService.use((service) =>
+                    service.stopGeneration({
+                      userId: seed.userId,
+                      conversationId,
+                      messageId: latest!.id,
+                      generationId: latest!.generationId ?? undefined,
+                    }),
+                  );
+                }).pipe(Effect.orDie),
+              ),
+            );
+          return yield* keeperRun!(input);
+        });
+      try {
+        draftTwice(tool);
+        const stopped = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Draft notes."),
+        );
+        expect(
+          (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(stopped))))?.status,
+        ).toBe("aborted");
+        const [kept, ...others] = await runtime.runPromise(keptRows(conversationId));
+        expect(others).toEqual([]);
+        // The first call's draft at least; the call Stop cut short may not land.
+        expect(kept?.messageId).toBe(stopped);
+        expect([1, 2]).toContain(kept?.revision);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("continues a stopped answer's draft from its last kept revision", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      let calls = 0;
+      customToolRun = (input) =>
+        Effect.gen(function* () {
+          calls += 1;
+          if (calls === 2)
+            yield* Effect.promise(() =>
+              runtime.runPromise(
+                Effect.gen(function* () {
+                  const [latest] = yield* Effect.flatMap(Db, (db) =>
+                    db
+                      .select()
+                      .from(messages)
+                      .where(eq(messages.conversationId, conversationId))
+                      .orderBy(sql`${messages.createdAt} desc`)
+                      .limit(1),
+                  );
+                  yield* ChatService.use((service) =>
+                    service.stopGeneration({
+                      userId: seed.userId,
+                      conversationId,
+                      messageId: latest!.id,
+                      generationId: latest!.generationId ?? undefined,
+                    }),
+                  );
+                }).pipe(Effect.orDie),
+              ),
+            );
+          return yield* keeperRun!(input);
+        });
+      try {
+        draftTwice(tool);
+        const stopped = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Draft notes."),
+        );
+        const [kept] = await runtime.runPromise(keptRows(conversationId));
+        expect(kept?.messageId).toBe(stopped);
+        customToolRun = keeperRun;
+        let round = 0;
+        let notice = "";
+        authoringScript = (input) => {
+          round += 1;
+          if (round === 1) {
+            notice = JSON.stringify(input.prompt);
+            return authoringTool(input, tool, { ref: refIn(input) });
+          }
+          return reply();
+        };
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            yield* ChatService.use((service) =>
+              service.resumeMessage({ userId: seed.userId, conversationId, messageId: stopped }),
+            );
+            yield* Effect.flatMap(StreamEngine, (engine) =>
+              Stream.runCollect(engine.subscribe(stopped, 0)),
+            );
+          }),
+        );
+        expect(notice).toContain(`working:${kept!.workingFileId}@${kept!.revision}`);
+        expect(notice).toContain("this answer before it was interrupted");
+        // The same answer keeps the same row, one revision further on.
+        const after = await runtime.runPromise(keptRows(conversationId));
+        expect(after).toHaveLength(1);
+        expect(after[0]).toMatchObject({ messageId: stopped, revision: kept!.revision + 1 });
+        expect(
+          (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(stopped))))?.status,
+        ).toBe("complete");
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("keeps nothing for an attempt that no longer owns its answer", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        draftTwice(tool);
+        const first = await runtime.runPromise(answer(seed.userId, conversationId, "Draft notes."));
+        const before = await runtime.runPromise(keptRows(conversationId));
+        const attachmentsBefore = await runtime.runPromise(userAttachments(seed.userId));
+        // The answer has settled, as after a Stop or a retry that superseded it.
+        const exit = await runtime.runPromise(
+          KeptWorkingFiles.use((kept) =>
+            kept.keep(
+              {
+                userId: seed.userId,
+                conversationId,
+                messageId: first,
+                generationId: uuidv7(),
+              },
+              {
+                ref: { kind: "working", id: before[0]!.workingFileId, revision: 9 },
+                name: "notes.txt",
+                mediaType: "text/plain",
+                bytes: Buffer.from("late"),
+                fingerprint: sha256Of("late"),
+                owner: before[0]!.customToolId
+                  ? `custom:${before[0]!.customToolId}`
+                  : "presentation",
+              },
+            ),
+          ).pipe(Effect.exit),
+        );
+        expect(exit._tag).toBe("Failure");
+        expect(await runtime.runPromise(keptRows(conversationId))).toEqual(before);
+        expect(await runtime.runPromise(userAttachments(seed.userId))).toEqual(attachmentsBefore);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
+    it("marks a deck edit while its arguments are written, even one that never completes", async () => {
+      const { seed, conversationId } = await runtime.runPromise(keptSetup);
+      authoringScript = () =>
+        Stream.make(
+          AiResponse.makePart("tool-params-start", {
+            id: "deck-call",
+            name: "edit_presentation",
+            providerExecuted: false,
+          }),
+          AiResponse.makePart("tool-params-end", { id: "deck-call" }),
+          AiResponse.makePart("text-delta", { id: "t", delta: "Never mind." }),
+          authoringFinish(),
+        );
+      try {
+        const id = await runtime.runPromise(answer(seed.userId, conversationId, "Build a deck."));
+        const chunks = await runtime.runPromise(ChatRepo.use((repo) => repo.chunksAfter(id, 0)));
+        const writing = chunks.filter((chunk) => chunk.kind === "writing");
+        expect(writing).toHaveLength(1);
+        expect(JSON.parse(writing[0]!.delta)).toMatchObject({
+          v: 1,
+          id: "deck-call",
+          name: "edit_presentation",
+          textOffset: 0,
+          turnIndex: 0,
+        });
+        // A marker, not content: the answer is only what was written as text.
+        expect(
+          (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(id))))?.content,
+        ).toBe("Never mind.");
+      } finally {
+        authoringScript = null;
+      }
+    }, 60_000);
+
+    it("drops a kept draft with the answer that is retried, and with the deleted chat", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      customToolRun = keeperRun;
+      try {
+        draftTwice(tool);
+        const first = await runtime.runPromise(answer(seed.userId, conversationId, "Draft notes."));
+        expect(await runtime.runPromise(keptRows(conversationId))).toHaveLength(1);
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        // Named for the rewind confirmation, like documents.
+        expect(detail.workingFiles).toEqual([
+          expect.objectContaining({ name: "notes.txt", messageId: first }),
+        ]);
+
+        authoringScript = () => reply();
+        await runtime.runPromise(
+          ChatService.use((service) =>
+            service.retryMessage({ userId: seed.userId, conversationId, messageId: first }),
+          ),
+        );
+        await runtime.runPromise(
+          Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(first, 0))),
+        );
+        expect(await runtime.runPromise(keptRows(conversationId))).toEqual([]);
+        expect(await runtime.runPromise(userAttachments(seed.userId))).toEqual([]);
+
+        draftTwice(tool);
+        await runtime.runPromise(answer(seed.userId, conversationId, "Draft them again."));
+        expect(await runtime.runPromise(keptRows(conversationId))).toHaveLength(1);
+        await runtime.runPromise(
+          ChatService.use((service) =>
+            service.deleteConversation({ userId: seed.userId, conversationId }),
+          ),
+        );
+        // Deleting the chat releases the kept copy at once, not at the next sweep.
+        expect(await runtime.runPromise(userAttachments(seed.userId))).toEqual([]);
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+  });
 });
 
 describe("local tools on the user's machine", () => {
@@ -6061,6 +6841,80 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
+  it("imports a local file as a working reference for tools, never as bytes the model sees or the row keeps", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "import_local_file", { path: "logo.png" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Imported." }),
+        authoringFinish(),
+      );
+    };
+    const png = generatedPng.toString("base64");
+    try {
+      const sent = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: visionModelId,
+            content: "Use the logo on a slide.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [folder],
+          }),
+        ),
+      );
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => ({
+            v: 1,
+            ok: true,
+            summary: "Imported logo.png",
+            detail: "image/png, 70 B",
+            truncated: false,
+            file: { mediaType: "image/png", base64: png, name: "logo.png" },
+          }));
+          yield* Fiber.join(bridge.fiber);
+          return {
+            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
+            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
+          };
+        }),
+      );
+      expect(prompts).toHaveLength(2);
+      const second = prompts[1]!.prompt.content as ReadonlyArray<{
+        role: string;
+        content: unknown;
+      }>;
+      const toolResults = JSON.stringify(second.filter((message) => message.role === "tool"));
+      // The model is told a reference for its tools, and is not shown the picture.
+      expect(toolResults).toMatch(/Reference for other tools: working:[0-9a-f-]+@1/);
+      expect(
+        second.some(
+          (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === "file"),
+        ),
+      ).toBe(false);
+      for (const text of [
+        toolResults,
+        JSON.stringify(result.detail),
+        JSON.stringify(result.chunks),
+      ])
+        expect(text).not.toContain(png.slice(0, 40));
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
@@ -6464,6 +7318,771 @@ describe("local tools on the user's machine", () => {
       // A browser tab never sees these names, which is what keeps the model
       // from proposing work it has no way to do.
       expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+});
+
+describe("resuming an interrupted answer", () => {
+  const settle = (messageId: string) =>
+    Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(messageId, 0)));
+  const resume = (userId: string, conversationId: string, messageId: string, modelId?: string) =>
+    Effect.gen(function* () {
+      yield* ChatService.use((service) =>
+        service.resumeMessage({
+          userId,
+          conversationId,
+          messageId,
+          ...(modelId ? { modelId } : {}),
+        }),
+      );
+      yield* settle(messageId);
+    });
+  const text = (delta: string) => ({ type: "text-delta", id: "t", delta }) as ChatStreamPart;
+  const says = (delta: string) =>
+    Stream.make(text(delta), {
+      type: "finish",
+      reason: "stop",
+      usage: { inputTokens: { total: 100 }, outputTokens: { total: 10 } },
+    } as ChatStreamPart);
+  /** Text, then one native call, dispatched through the SDK like a real round. */
+  const saysThenCalls = (input: GatewayInput, delta: string, name: string, params: unknown) => {
+    const id = uuidv7();
+    const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+    return Stream.unwrap(
+      LanguageModel.make({
+        generateText: () => Effect.die("only streaming is used here"),
+        streamText: () =>
+          Stream.make(
+            AiResponse.makePart("text-delta", { id: "t", delta }),
+            AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
+            authoringFinish("tool-calls"),
+          ).pipe(
+            Stream.mapEffect((part) => encodePart(part)),
+            Stream.orDie,
+          ),
+      }).pipe(
+        Effect.map((model) => model.streamText({ prompt: input.prompt, toolkit: input.toolkit! })),
+      ),
+    ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+  };
+  const chatOf = Effect.gen(function* () {
+    const seed = yield* setupConversation;
+    const conversation = yield* ChatRepo.use((repo) =>
+      repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+    );
+    return { userId: seed.userId, conversationId: conversation.id };
+  });
+  const send = (userId: string, conversationId: string, content: string) =>
+    Effect.gen(function* () {
+      const { assistantMessageId } = yield* ChatService.use((service) =>
+        service.sendMessage({
+          userId,
+          conversation: { kind: "existing", id: conversationId },
+          modelId: textModelId,
+          content,
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        }),
+      );
+      yield* settle(assistantMessageId);
+      return assistantMessageId;
+    });
+  /** An answer a crash or provider error ended, written as rows. */
+  const failedAnswer = (content: string) =>
+    Effect.gen(function* () {
+      const seed = yield* setupConversation;
+      const db = yield* Db;
+      yield* db
+        .insert(messageChunks)
+        .values({ messageId: seed.assistant.id, seq: 1, kind: "text", delta: content });
+      yield* db
+        .update(messages)
+        .set({
+          status: "error",
+          content,
+          modelId: textModelId,
+          error: { tag: "GenerationFailed", message: "provider exploded" },
+          completedAt: new Date(),
+        })
+        .where(eq(messages.id, seed.assistant.id));
+      return seed;
+    });
+  const contiguous = (chunks: ReadonlyArray<{ seq: number }>) =>
+    chunks.map((chunk) => chunk.seq).every((seq, index) => seq === index + 1);
+
+  it("continues a failed answer from its text and rounds, one ledger row per attempt", async () => {
+    const { userId, conversationId } = await runtime.runPromise(chatOf);
+    let round = 0;
+    let resumedPrompt = "";
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1)
+        return saysThenCalls(input, "Drafting the notes. ", "create_document", {
+          title: "Notes",
+          content: "- one",
+        });
+      if (round === 2)
+        return Stream.make(text("Half of the")).pipe(
+          Stream.concat(Stream.die("provider exploded")),
+        );
+      if (round === 3) {
+        resumedPrompt = JSON.stringify(input.prompt);
+        return saysThenCalls(input, " answer.", "create_document", {
+          title: "More notes",
+          content: "- two",
+        });
+      }
+      return says(" Done.");
+    };
+    try {
+      const messageId = await runtime.runPromise(send(userId, conversationId, "Write notes."));
+      const failed = await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(messageId)));
+      expect(failed).toMatchObject({
+        status: "error",
+        content: "Drafting the notes. Half of the",
+      });
+      const before = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.chunksAfter(messageId, 0)),
+      );
+
+      await runtime.runPromise(resume(userId, conversationId, messageId));
+
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          return {
+            message: yield* repo.getMessage(messageId),
+            chunks: yield* repo.chunksAfter(messageId, 0),
+            calls: yield* repo.listToolCalls([messageId]),
+            ledger: yield* db
+              .select()
+              .from(usageEvents)
+              .where(eq(usageEvents.messageId, messageId))
+              .orderBy(usageEvents.createdAt),
+            detail: yield* loadConversationDetail(userId, conversationId),
+          };
+        }),
+      );
+      expect(result.message).toMatchObject({
+        status: "complete",
+        content: "Drafting the notes. Half of the answer. Done.",
+        error: null,
+      });
+      expect(result.message!.generationId).not.toBe(failed!.generationId);
+      // The kept chunks are the start of one contiguous sequence.
+      expect(result.chunks.slice(0, before.length)).toEqual(before);
+      expect(contiguous(result.chunks)).toBe(true);
+      expect(
+        result.chunks
+          .filter((chunk) => chunk.kind === "text")
+          .map((chunk) => chunk.delta)
+          .join(""),
+      ).toBe(result.message!.content);
+      // Earlier rounds stay; the new one continues the turn space after them.
+      expect(result.calls.map((call) => [call.toolName, call.turnIndex])).toEqual([
+        ["create_document", 0],
+        ["create_document", 1],
+      ]);
+      expect(result.calls[1]!.textOffset).toBe("Drafting the notes. Half of the answer.".length);
+      expect(result.detail.documents.map((document) => document.title).toSorted()).toEqual([
+        "More notes",
+        "Notes",
+      ]);
+      // The model read its own earlier work as text and records, never as
+      // replayed native calls, then the one-time reminder.
+      expect(resumedPrompt).toContain("Drafting the notes. ");
+      expect(resumedPrompt).toContain("<application-record>");
+      expect(resumedPrompt).toContain("- create_document: completed.");
+      expect(resumedPrompt).toContain("Half of the");
+      expect(resumedPrompt).toContain(RESUME_REMINDER);
+      expect(resumedPrompt).not.toContain('"type":"tool-call"');
+      expect(result.ledger.map((row) => row.inputTokens)).toEqual([100, 200]);
+      expect(result.message!.usage).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("continues a stopped answer after its last word", async () => {
+    const { userId, conversationId } = await runtime.runPromise(chatOf);
+    const reached = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    hold = { after: 2, reached, release };
+    try {
+      const sent = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: textModelId,
+            content: "Count.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      const messageId = sent.assistantMessageId;
+      await runtime.runPromise(Deferred.await(reached));
+      const generationId = (await runtime.runPromise(ChatRepo.use((r) => r.getMessage(messageId))))!
+        .generationId!;
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.stopGeneration({ userId, conversationId, messageId, generationId }),
+        ),
+      );
+      await runtime.runPromise(settle(messageId));
+      hold = null;
+      await runtime.runPromise(Deferred.interrupt(release));
+      const stopped = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(messageId)));
+      expect(stopped?.status).toBe("aborted");
+      // Whatever was written before the stop, and only a part of the answer.
+      const partial = stopped!.content;
+      expect(partial).not.toBe("");
+      expect("alpha beta gamma delta epsilon".startsWith(partial)).toBe(true);
+
+      const calls = streamPrompts.length;
+      await runtime.runPromise(resume(userId, conversationId, messageId));
+      const final = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(messageId)));
+      expect(final).toMatchObject({
+        status: "complete",
+        content: `${partial}alpha beta gamma delta epsilon`,
+      });
+      const prompt = streamPrompts[calls]!;
+      const messagesSent = prompt.content;
+      // The partial text is the model's own turn, then the reminder follows it.
+      expect(messagesSent.at(-2)).toMatchObject({ role: "assistant" });
+      expect(JSON.stringify(messagesSent.at(-2))).toContain(partial);
+      expect(JSON.stringify(messagesSent.at(-1))).toContain(RESUME_REMINDER);
+      const chunks = await runtime.runPromise(ChatRepo.use((r) => r.chunksAfter(messageId, 0)));
+      expect(contiguous(chunks)).toBe(true);
+    } finally {
+      hold = null;
+    }
+  }, 60_000);
+
+  it("resumes a reaped crash with its steers in place, retargets a queued steer and keeps a late research row", async () => {
+    const seed = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const content = "Checking the machine. ";
+        yield* db
+          .insert(messageChunks)
+          .values({ messageId: seed.assistant.id, seq: 1, kind: "text", delta: content });
+        yield* repo.insertToolCall({
+          id: uuidv7(),
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          textOffset: content.length,
+          providerCallId: "command-1",
+          toolName: "run_command",
+          arguments: { command: "ls" },
+        });
+        const researchRow = uuidv7();
+        yield* repo.insertToolCall({
+          id: researchRow,
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 1,
+          textOffset: content.length,
+          providerCallId: "research-1",
+          toolName: "deep_research",
+          arguments: {},
+        });
+        // A steer the crashed attempt took in after its first round.
+        const steer = yield* repo.insertMessage({
+          conversationId: seed.conversation.id,
+          role: "user",
+          content: "use the staging box",
+        });
+        yield* db
+          .update(messages)
+          .set({
+            steeredIntoMessageId: seed.assistant.id,
+            steerTurnIndex: 0,
+            steerTextOffset: content.length,
+          })
+          .where(eq(messages.id, steer.id));
+        const entryId = uuidv7();
+        yield* db.insert(conversationQueueEntries).values({
+          id: entryId,
+          conversationId: seed.conversation.id,
+          userId: seed.userId,
+          content: "and check the logs",
+          input: { modelId: textModelId, searchEnabled: false, researchEnabled: false },
+          steerMessageId: seed.assistant.id,
+          steerGenerationId: seed.assistant.generationId,
+        });
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
+          .where(eq(messages.id, seed.assistant.id));
+        yield* (yield* StreamEngine).reapOrphans;
+        // A run settles its own call after the generation ended (research.md).
+        yield* db.execute(
+          sql`update message_tool_calls set status = 'complete', result = '{"outcome":"evidence"}'::jsonb where id = ${researchRow}`,
+        );
+        return { ...seed, entryId, researchRow };
+      }),
+    );
+    const reaped = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(seed.assistant.id)));
+    expect(reaped?.status).toBe("error");
+
+    const gate = Deferred.makeUnsafe<void>();
+    let first = "";
+    authoringScript = (input) => {
+      first ||= JSON.stringify(input.prompt);
+      return Stream.fromEffectDrain(Deferred.await(gate)).pipe(Stream.concat(says("Done.")));
+    };
+    try {
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.resumeMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            modelId: textModelId,
+          }),
+        ),
+      );
+      const claimed = await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const [entry] = yield* db
+            .select()
+            .from(conversationQueueEntries)
+            .where(eq(conversationQueueEntries.id, seed.entryId));
+          // Removed before the answer ends, so no queued turn follows it here.
+          yield* db
+            .delete(conversationQueueEntries)
+            .where(eq(conversationQueueEntries.id, seed.entryId));
+          return { entry, message: yield* (yield* ChatRepo).getMessage(seed.assistant.id) };
+        }),
+      );
+      expect(claimed.entry?.steerGenerationId).toBe(claimed.message?.generationId);
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await runtime.runPromise(settle(seed.assistant.id));
+
+      expect(first).toContain(
+        '- run_command with {\\"command\\":\\"ls\\"}: outcome unknown, interrupted while running.',
+      );
+      expect(first).toContain("- deep_research: completed.");
+      // After the round's record, where it arrived, and before the reminder.
+      const record = first.indexOf("<application-record>");
+      const steered = first.indexOf("use the staging box");
+      expect(record).toBeGreaterThan(-1);
+      expect(steered).toBeGreaterThan(record);
+      expect(first.indexOf(RESUME_REMINDER)).toBeGreaterThan(steered);
+      const after = await runtime.runPromise(
+        ChatRepo.use((r) =>
+          Effect.all({
+            message: r.getMessage(seed.assistant.id),
+            calls: r.listToolCalls([seed.assistant.id]),
+          }),
+        ),
+      );
+      expect(after.message).toMatchObject({
+        status: "complete",
+        content: "Checking the machine. Done.",
+      });
+      expect(after.calls.find((call) => call.id === seed.researchRow)).toMatchObject({
+        status: "complete",
+        result: { outcome: "evidence" },
+      });
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("replays a failed answer's generated image as bytes when resumed", async () => {
+    const { userId, conversationId } = await runtime.runPromise(chatOf);
+    let calls = 0;
+    const promptsBefore = streamPrompts.length;
+    authoringScript = () => {
+      calls += 1;
+      if (calls === 1)
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "See this: " }),
+          AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }),
+          AiResponse.makePart("finish", {
+            reason: "error",
+            usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
+          }),
+        );
+      return Stream.make(
+        text(" continued"),
+        AiResponse.makePart("finish", {
+          reason: "stop",
+          usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
+          metadata: {
+            openrouter: { usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } },
+          },
+        }),
+      );
+    };
+    try {
+      const messageId = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: imageModelId,
+            content: "Draw this.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ).pipe(
+          Effect.flatMap(({ assistantMessageId }) =>
+            settle(assistantMessageId).pipe(Effect.as(assistantMessageId)),
+          ),
+        ),
+      );
+      const failed = await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(messageId)));
+      expect(failed).toMatchObject({ status: "error", content: "See this: " });
+      expect(failed?.assistantOutput?.files).toHaveLength(1);
+      await runtime.runPromise(resume(userId, conversationId, messageId));
+      const resumedPrompt = streamPrompts[promptsBefore + 1]!;
+      const images = resumedPrompt.content.flatMap((message) =>
+        message.role === "assistant"
+          ? message.content.flatMap((part) =>
+              part.type === "file" && part.data instanceof Uint8Array
+                ? [Buffer.from(part.data).toString("base64")]
+                : [],
+            )
+          : [],
+      );
+      expect(images).toEqual([generatedPng.toString("base64")]);
+      const final = await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(messageId)));
+      expect(final).toMatchObject({ status: "complete", content: "See this:  continued" });
+      expect(final?.assistantOutput?.files).toHaveLength(1);
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("resumes an image answer on a model without vision, and later turns read it too", async () => {
+    const { userId, conversationId } = await runtime.runPromise(chatOf);
+    let calls = 0;
+    const promptsBefore = streamPrompts.length;
+    authoringScript = () => {
+      calls += 1;
+      if (calls === 1)
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "See this: " }),
+          AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }),
+          AiResponse.makePart("finish", {
+            reason: "error",
+            usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
+          }),
+        );
+      return says(calls === 2 ? " continued" : "Sure.");
+    };
+    try {
+      const messageId = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.sendMessage({
+            userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: imageModelId,
+            content: "Draw this.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ).pipe(
+          Effect.flatMap(({ assistantMessageId }) =>
+            settle(assistantMessageId).pipe(Effect.as(assistantMessageId)),
+          ),
+        ),
+      );
+      await runtime.runPromise(resume(userId, conversationId, messageId, textModelId));
+      const resumed = await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(messageId)));
+      expect(resumed).toMatchObject({ status: "complete", modelId: textModelId });
+      expect(resumed?.assistantOutput?.files).toHaveLength(1);
+      await runtime.runPromise(send(userId, conversationId, "Thanks, and now?"));
+      const [resumedPrompt, followup] = streamPrompts.slice(promptsBefore + 1);
+      for (const prompt of [resumedPrompt!, followup!]) {
+        const text = JSON.stringify(prompt.content);
+        expect(text).not.toContain('"type":"file"');
+        expect(text).toContain(
+          JSON.stringify(
+            imageStandIn(resumed!.assistantOutput!.files[0]!.attachment.fileName),
+          ).slice(1, -1),
+        );
+      }
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("refuses up front an answer out of turns, leaving it as it was", async () => {
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const attempt = (
+          seed: { userId: string; conversation: { id: string }; assistant: { id: string } },
+          modelId?: string,
+        ) =>
+          chat
+            .resumeMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: seed.assistant.id,
+              ...(modelId ? { modelId } : {}),
+            })
+            .pipe(
+              Effect.flip,
+              Effect.map((error) =>
+                error._tag === "ResumeNotAllowed" ? error.reason : error._tag,
+              ),
+            );
+        // Its host turns are used up; the next would enter research's space.
+        const full = yield* failedAnswer("Partial ");
+        yield* repo.insertToolCall({
+          id: uuidv7(),
+          messageId: full.assistant.id,
+          turnIndex: 999,
+          callIndex: 0,
+          textOffset: 8,
+          providerCallId: "last-host-round",
+          toolName: "read_url",
+          arguments: {},
+        });
+        return {
+          full: yield* attempt(full),
+          fullAfter: yield* repo.getMessage(full.assistant.id),
+        };
+      }),
+    );
+    expect(outcome.full).toContain("continuation limit");
+    expect(outcome.fullAfter).toMatchObject({
+      status: "error",
+      error: { tag: "GenerationFailed", message: "provider exploded" },
+    });
+  }, 60_000);
+
+  it("continues on another model and drops the old model's signed turns", async () => {
+    const seed = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* failedAnswer("Partial ");
+        yield* (yield* Db)
+          .update(messages)
+          .set({
+            providerReplay: {
+              v: 1,
+              providerId: "p",
+              modelKey: "text",
+              turns: [{ turnIndex: 0, startOffset: 0, endOffset: 8, reasoningDetails: [] }],
+            },
+          })
+          .where(eq(messages.id, seed.assistant.id));
+        return seed;
+      }),
+    );
+    await runtime.runPromise(
+      resume(seed.userId, seed.conversation.id, seed.assistant.id, visionModelId),
+    );
+    const final = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(seed.assistant.id)));
+    expect(final).toMatchObject({
+      status: "complete",
+      modelId: visionModelId,
+      providerReplay: null,
+      content: "Partial alpha beta gamma delta epsilon",
+    });
+  }, 60_000);
+
+  it("refuses anything but the last failed or stopped answer, and only its owner", async () => {
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const attempt = (userId: string, conversationId: string, messageId: string) =>
+          chat.resumeMessage({ userId, conversationId, messageId }).pipe(
+            Effect.flip,
+            Effect.map((error) => error._tag),
+          );
+        const streaming = yield* setupConversation;
+        const completed = yield* failedAnswer("done");
+        yield* (yield* Db)
+          .update(messages)
+          .set({ status: "complete", error: null })
+          .where(eq(messages.id, completed.assistant.id));
+        const earlier = yield* failedAnswer("half");
+        yield* repo.insertMessage({
+          conversationId: earlier.conversation.id,
+          role: "user",
+          content: "never mind",
+        });
+        const stranger = yield* failedAnswer("mine");
+        return {
+          streaming: yield* attempt(
+            streaming.userId,
+            streaming.conversation.id,
+            streaming.assistant.id,
+          ),
+          completed: yield* attempt(
+            completed.userId,
+            completed.conversation.id,
+            completed.assistant.id,
+          ),
+          earlier: yield* attempt(earlier.userId, earlier.conversation.id, earlier.assistant.id),
+          earlierRow: yield* repo.getMessage(earlier.assistant.id),
+          stranger: yield* attempt(
+            streaming.userId,
+            stranger.conversation.id,
+            stranger.assistant.id,
+          ),
+        };
+      }),
+    );
+    expect(outcome).toMatchObject({
+      streaming: "ResumeNotAllowed",
+      completed: "ResumeNotAllowed",
+      earlier: "ResumeNotAllowed",
+      stranger: "ConversationNotFound",
+    });
+    // A refused claim leaves the answer exactly as it was.
+    expect(outcome.earlierRow).toMatchObject({ status: "error", content: "half" });
+  }, 60_000);
+
+  it("fences the ended attempt out once a resume has claimed the answer", async () => {
+    const seed = await runtime.runPromise(failedAnswer("Partial "));
+    const oldFence = {
+      userId: seed.userId,
+      conversationId: seed.conversation.id,
+      messageId: seed.assistant.id,
+      generationId: seed.assistant.generationId!,
+    };
+    const gate = Deferred.makeUnsafe<void>();
+    authoringScript = () =>
+      Stream.fromEffectDrain(Deferred.await(gate)).pipe(Stream.concat(says("rest")));
+    try {
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.resumeMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+          }),
+        ),
+      );
+      const stale = await runtime.runPromise(
+        ChatRepo.use((repo) =>
+          Effect.exit(
+            repo
+              .appendChunks(seed.assistant.id, [{ seq: 2, kind: "text", delta: "STALE" }])
+              .pipe(Effect.provideService(GenerationFence, oldFence)),
+          ),
+        ),
+      );
+      expect(Exit.hasInterrupts(stale)).toBe(true);
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await runtime.runPromise(settle(seed.assistant.id));
+      const final = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(seed.assistant.id)));
+      expect(final).toMatchObject({ status: "complete", content: "Partial rest" });
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("continues past the row positions the answer already used", async () => {
+    const seed = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* failedAnswer("Otters hold hands [^3]. ");
+        const db = yield* Db;
+        const row = (overrides: Partial<typeof messageToolCalls.$inferInsert>) => ({
+          id: uuidv7(),
+          messageId: seed.assistant.id,
+          turnIndex: 0,
+          callIndex: 0,
+          textOffset: 0,
+          providerCallId: uuidv7(),
+          toolName: "web_search",
+          arguments: {},
+          status: "complete" as const,
+          ...overrides,
+        });
+        // Where an attempt writes its direct context, pinned skills and the
+        // initial history compaction: all at the first turn.
+        yield* db.insert(messageToolCalls).values([
+          row({
+            providerCallId: `knowledge-context:${uuidv7()}`,
+            toolName: "knowledge_context",
+            result: { sources: [] },
+          }),
+          row({
+            callIndex: -5,
+            providerCallId: `skill-context:${uuidv7()}`,
+            toolName: "load_skill",
+            result: { skillId: "s1" },
+          }),
+          row({
+            callIndex: 1,
+            arguments: { queries: ["otters"] },
+            result: {
+              sources: [
+                {
+                  index: 3,
+                  kind: "web",
+                  title: "Otter facts",
+                  url: "https://otters.example/facts",
+                  snippet: "Otters hold hands.",
+                  read: false,
+                },
+              ],
+            },
+          }),
+        ]);
+        yield* db.insert(messageCompactionEvents).values({
+          id: uuidv7(),
+          messageId: seed.assistant.id,
+          beforeTurnIndex: 0,
+          passIndex: 0,
+          scope: "history",
+          status: "complete",
+          outcome: "hard_truncation",
+        });
+        return seed;
+      }),
+    );
+    let round = 0;
+    let first = "";
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) {
+        first = JSON.stringify(input.prompt);
+        return saysThenCalls(input, "More: ", "create_document", { title: "Otters", content: "-" });
+      }
+      return says("done.");
+    };
+    try {
+      await runtime.runPromise(resume(seed.userId, seed.conversation.id, seed.assistant.id));
+      const calls = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.listToolCalls([seed.assistant.id])),
+      );
+      expect(calls.map((call) => [call.toolName, call.turnIndex, call.callIndex])).toEqual([
+        ["load_skill", 0, -5],
+        ["knowledge_context", 0, 0],
+        ["web_search", 0, 1],
+        ["create_document", 1, 0],
+      ]);
+      // Only the model's own call is on the record; application rows are not.
+      expect(first).toContain("- web_search with");
+      expect(first).not.toContain("- knowledge_context");
+      expect(first).not.toContain("- load_skill");
+      expect(
+        (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(seed.assistant.id))))
+          ?.status,
+      ).toBe("complete");
     } finally {
       authoringScript = null;
     }

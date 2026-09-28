@@ -7,6 +7,7 @@ import {
   attachmentBlobs,
   attachments,
   conversations as conversationsTable,
+  conversationWorkingFiles,
   messageAttachments,
   messages,
   models,
@@ -23,6 +24,7 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
+import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -363,6 +365,7 @@ describe("branching a conversation", () => {
           agentDrafts: [],
           scheduleDrafts: [],
           documents: [],
+          workingFiles: [],
         });
         expect(forked.messages.map((message) => message.content)).toEqual(["u", "a"]);
         yield* db.execute(
@@ -375,6 +378,7 @@ describe("branching a conversation", () => {
           agentDrafts: [],
           scheduleDrafts: [],
           documents: [],
+          workingFiles: [],
         });
       }),
     );
@@ -500,6 +504,96 @@ describe("branching a conversation", () => {
     // clone can never reuse the attachment row the source already claimed.
     expect(result.cloned.every((a) => a.blobId === result.blobId)).toBe(true);
     expect(result.cloned.filter((a) => result.original.some((o) => o.id === a.id))).toEqual([]);
+  });
+
+  it("points copied publish and custom tool rows at the branch's files and copies no kept draft", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const attachmentRepo = yield* AttachmentRepo;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "make a deck", assistant: "Done." }]);
+        const answer = source.messages[1]!;
+        const { blobId } = yield* attach(userId, answer.id, [
+          { fileName: "deck.pptx", position: 0 },
+          { fileName: "export.csv", position: 1 },
+        ]);
+        const delivered = yield* attachmentRepo.listWithBlobsForMessages([answer.id]);
+        const idOf = (name: string) => delivered.find((file) => file.fileName === name)!.id;
+        let callIndex = 0;
+        const call = (toolName: string, result: JsonValue) =>
+          Effect.gen(function* () {
+            const id = uuidv7();
+            yield* repo.insertToolCall({
+              id,
+              messageId: answer.id,
+              turnIndex: 0,
+              callIndex: callIndex++,
+              providerCallId: id,
+              toolName,
+              arguments: {},
+            });
+            yield* repo.completeToolCall({ id, status: "complete", result });
+          });
+        const workingFileId = uuidv7();
+        yield* call("publish_file", {
+          ok: true,
+          ref: `working:${workingFileId}@2`,
+          workingFileId,
+          attachmentId: idOf("deck.pptx"),
+        });
+        yield* call("custom_exporter__csv", {
+          family: "custom",
+          version: 1,
+          name: "custom_exporter__csv",
+          displayName: "CSV export",
+          status: "complete",
+          fileIds: [idOf("export.csv")],
+        });
+        // A draft the answer left unpublished: the source chat's alone.
+        const keptAttachment = uuidv7();
+        yield* db
+          .insert(attachments)
+          .values({ id: keptAttachment, userId, blobId, fileName: "draft.pptx" });
+        yield* db.insert(conversationWorkingFiles).values({
+          workingFileId: uuidv7(),
+          messageId: answer.id,
+          conversationId: source.conversation.id,
+          attachmentId: keptAttachment,
+          name: "draft.pptx",
+          mediaType: "application/octet-stream",
+          owner: "presentation",
+          revision: 2,
+          fingerprint: "0".repeat(64),
+        });
+
+        const forked = yield* branch(userId, source.conversation.id, answer.id);
+        const clonedAnswer = forked.messages[1]!;
+        return {
+          calls: yield* repo.listToolCalls([clonedAnswer.id]),
+          files: yield* attachmentRepo.listWithBlobsForMessages([clonedAnswer.id]),
+          kept: yield* db
+            .select()
+            .from(conversationWorkingFiles)
+            .where(eq(conversationWorkingFiles.conversationId, forked.conversation.id)),
+          defaults: yield* repo.getConversationDefaults(forked.conversation.id),
+          original: delivered.map((file) => file.id),
+        };
+      }),
+    );
+    const copyOf = (name: string) => result.files.find((file) => file.fileName === name)!.id;
+    expect(result.original).not.toContain(copyOf("deck.pptx"));
+    // The file card groups under its publish step by attachment id, in the branch too.
+    expect(result.calls.find((row) => row.toolName === "publish_file")?.result).toMatchObject({
+      ok: true,
+      attachmentId: copyOf("deck.pptx"),
+    });
+    expect(
+      result.calls.find((row) => row.toolName === "custom_exporter__csv")?.result,
+    ).toMatchObject({ fileIds: [copyOf("export.csv")] });
+    expect(result.kept).toEqual([]);
+    expect(result.defaults.workingFiles).toEqual([]);
   });
 
   it("flattens file aliases for a shorter branch after its source was deleted", async () => {

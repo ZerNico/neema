@@ -49,6 +49,7 @@ allowBuilds:
   # used for releases never runs it.
   electron-winstaller: false
 
-# Behaviour @effect/ai-openrouter does not have upstream; see CLAUDE.md.
+# Behaviour these packages do not have upstream; see Version pins in AGENTS.md.
 patchedDependencies:
   "@effect/ai-openrouter@4.0.0-rc.117": patches/@effect__ai-openrouter@4.0.0-rc.117.patch
+  "@office-kit/pptx-preview@0.11.0": patches/@office-kit__pptx-preview@0.11.0.patch

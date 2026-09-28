@@ -511,8 +511,16 @@ Full local file bytes are transient. Text reads and JS search pull a bounded
 prefix from disk rather than buffering the whole file; edits refuse a file
 larger than a write. Images and PDFs become model file parts where supported,
 with server extraction fallback; persisted tool rows and chunks retain only
-bounded summaries. The page's result is untrusted: summary, detail and file
-bytes are capped and sniffed once, in the server function that accepts them,
+bounded summaries. `import_local_file` is the same read under the same consent,
+but its bytes are for server tools rather than the model. `readBinary` names its purpose,
+`view` or `import`, on every call, and only an import admits a PowerPoint: a PNG, JPEG or PowerPoint
+becomes a `local` working file of the attempt, and the model gets only its `working:`
+reference, so presentation tools can place or open it. It is never stored and dies with
+the attempt; the way back to disk is publishing and `save_to_workspace`. The import
+rewrites the very part the continuation replays, which is why the generic desktop
+byte-stripping skips it. The page's result is untrusted: summary, detail and file
+bytes are capped at one attachment's size and classified once, like any stored file, in the
+server function that accepts them,
 before they reach the model or process memory; the generation loop only checks
 the shape. Native and Hermes loops share this handling.
 Research keeps its existing server-side investigation and synthesis paths; this

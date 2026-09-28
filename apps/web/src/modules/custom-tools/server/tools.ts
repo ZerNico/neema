@@ -87,6 +87,7 @@ export function prepareCustomTools(
                       name: item.name,
                       mediaType: item.mediaType,
                       size: item.bytes.length,
+                      delivery: item.delivery,
                     })),
                   }
                 : {}),

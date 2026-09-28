@@ -20,13 +20,53 @@ const functionSlugMax = 27;
  */
 const fileBrand: unique symbol = Symbol.for("chat/custom-tools/file");
 
+export interface WorkingFileRef {
+  readonly kind: "working";
+  readonly id: string;
+  readonly revision: number;
+}
+
+/** A file pinned exactly: the host's canonical reference, shared with the server. */
+export type FileRef =
+  | { readonly kind: "attachment"; readonly id: string }
+  | { readonly kind: "project"; readonly id: string; readonly version: number }
+  | WorkingFileRef;
+
+export const formatFileRef = (ref: FileRef): string => {
+  switch (ref.kind) {
+    case "attachment":
+      return `attachment:${ref.id}`;
+    case "project":
+      return `project:${ref.id}@${ref.version}`;
+    case "working":
+      return `working:${ref.id}@${ref.revision}`;
+  }
+};
+
+type FileOptions =
+  | {
+      readonly name: string;
+      readonly mediaType?: string;
+      readonly delivery: "working";
+      readonly replaces?: WorkingFileRef;
+      readonly showModel?: boolean;
+    }
+  | {
+      readonly name: string;
+      readonly mediaType?: string;
+      readonly delivery: "publish";
+      readonly replaces?: never;
+      readonly showModel?: boolean;
+    };
+
 export interface CustomToolFile {
   readonly [fileBrand]: true;
   readonly name: string;
   readonly mediaType: string;
   readonly bytes: Uint8Array;
-  /** Also put the file in front of the model on its next turn. Off by default. */
-  readonly share: boolean;
+  readonly delivery: "working" | "publish";
+  readonly replaces?: WorkingFileRef;
+  readonly showModel: boolean;
 }
 
 /** What `run` may return: text, JSON, or text plus files. */
@@ -35,18 +75,21 @@ export interface CustomToolOutput {
   readonly files?: ReadonlyArray<CustomToolFile>;
 }
 
-export function file(
-  data: Uint8Array | string,
-  options: { readonly name: string; readonly mediaType?: string; readonly share?: boolean },
-): CustomToolFile {
+export function file(data: Uint8Array | string, options: FileOptions): CustomToolFile {
   if (!options.name.trim()) throw new Error("A tool file needs a name.");
+  if (options.delivery !== "working" && options.delivery !== "publish")
+    throw new Error("A tool file needs working or publish delivery.");
+  if (options.replaces && (options.delivery !== "working" || options.replaces.kind !== "working"))
+    throw new Error("Only a working file may replace a working revision.");
   return Object.freeze({
     [fileBrand]: true as const,
     name: options.name,
     // Only a hint: the server decides the type from the bytes and the name.
     mediaType: options.mediaType?.trim() || "application/octet-stream",
     bytes: typeof data === "string" ? new TextEncoder().encode(data) : data,
-    share: options.share ?? false,
+    delivery: options.delivery,
+    ...(options.replaces ? { replaces: options.replaces } : {}),
+    showModel: options.showModel ?? false,
   });
 }
 
@@ -61,6 +104,7 @@ export interface ToolInputFile {
   readonly mediaType: string;
   readonly size: number;
   readonly bytes: Uint8Array;
+  readonly ref: FileRef;
   /** The bytes as UTF-8 text. */
   text(): string;
 }
@@ -77,9 +121,12 @@ export interface FileInputOptions {
  * into the file's bytes, or explains why it cannot.
  */
 const fileResolverKey = Symbol.for("chat/custom-tools/file-resolver");
-type FileResolver = (
-  reference: string,
-) => Promise<{ readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array }>;
+type FileResolver = (reference: string) => Promise<{
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+  readonly ref: FileRef;
+}>;
 
 const extensionOf = (name: string) => {
   const dot = name.lastIndexOf(".");
@@ -133,6 +180,7 @@ export function fileInput(options: FileInputOptions = {}): Schema.Codec<ToolInpu
               mediaType: found.mediaType,
               size: found.bytes.length,
               bytes: found.bytes,
+              ref: found.ref,
               text: () => new TextDecoder().decode(found.bytes),
             };
             return input;
@@ -143,7 +191,7 @@ export function fileInput(options: FileInputOptions = {}): Schema.Codec<ToolInpu
             }),
         }),
       ),
-      encode: SchemaGetter.transform((input: ToolInputFile) => input.name),
+      encode: SchemaGetter.transform((input: ToolInputFile) => formatFileRef(input.ref)),
     }),
   );
 }

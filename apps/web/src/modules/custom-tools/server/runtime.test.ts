@@ -147,4 +147,29 @@ describe("custom tool runtime", () => {
       }),
     ),
   );
+
+  it.effect("tells an admin to rebuild a bundle whose file runtime predates delivery", () =>
+    withRuntime(
+      Effect.gen(function* () {
+        const runtime = yield* CustomToolRuntime;
+        // What `file()` returned before delivery existed: the brand and `share`.
+        const compiled = module(
+          tool(
+            "export",
+            `() => ({ files: [{ [Symbol.for("chat/custom-tools/file")]: true, name: "a.txt", mediaType: "text/plain", bytes: new TextEncoder().encode("a"), share: false }] })`,
+          ),
+        );
+        const result = yield* runtime.run({
+          compiled,
+          functionKey: "export",
+          args: {},
+          timeoutMs: 5_000,
+        });
+        expect(result).toMatchObject({
+          ok: false,
+          error: expect.stringContaining("save it again to rebuild"),
+        });
+      }),
+    ),
+  );
 });

@@ -34,6 +34,12 @@ export const CUSTOM_ACTIVITY_LIMITS = {
 
 const bounded = (max: number) => Schema.String.check(Schema.isMaxLength(max));
 
+const WorkingFileActivity = Schema.Struct({
+  id: Schema.String,
+  revision: Schema.Int,
+  name: bounded(CUSTOM_ACTIVITY_LIMITS.name),
+});
+
 export const CustomToolActivity = Schema.Struct({
   family: Schema.Literal("custom"),
   version: Schema.Literal(1),
@@ -48,6 +54,7 @@ export const CustomToolActivity = Schema.Struct({
   error: Schema.optional(bounded(CUSTOM_ACTIVITY_LIMITS.error)),
   /** Attachments the call produced, in return order. */
   fileIds: Schema.optional(Schema.Array(Schema.String)),
+  workingFiles: Schema.optional(Schema.Array(WorkingFileActivity)),
 });
 export type CustomToolActivity = typeof CustomToolActivity.Type;
 
@@ -77,6 +84,7 @@ export const CustomToolEnvelope = Schema.Union([
     resultChars: Schema.optionalKey(Schema.Int),
     error: Schema.optionalKey(bounded(CUSTOM_ACTIVITY_LIMITS.error)),
     fileIds: Schema.optionalKey(Schema.Array(Schema.String)),
+    workingFiles: Schema.optionalKey(Schema.Array(WorkingFileActivity)),
   }),
 ]);
 
@@ -94,6 +102,7 @@ export function projectCustomToolResult(input: {
   raw: unknown;
   isFailure: boolean;
   fileIds?: ReadonlyArray<string>;
+  workingFiles?: ReadonlyArray<{ id: string; revision: number; name: string }>;
 }): CustomToolActivity {
   const parsed = Schema.decodeUnknownOption(CustomToolResult)(input.raw);
   const result = parsed._tag === "Some" ? parsed.value : null;
@@ -117,5 +126,13 @@ export function projectCustomToolResult(input: {
       : {}),
     ...(!ok && error ? { error: clamp(String(error), CUSTOM_ACTIVITY_LIMITS.error) } : {}),
     ...(input.fileIds?.length ? { fileIds: [...input.fileIds] } : {}),
+    ...(input.workingFiles?.length
+      ? {
+          workingFiles: input.workingFiles.map((file) => ({
+            ...file,
+            name: clamp(file.name, CUSTOM_ACTIVITY_LIMITS.name),
+          })),
+        }
+      : {}),
   };
 }

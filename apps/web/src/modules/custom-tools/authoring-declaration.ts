@@ -18,13 +18,19 @@ declare module "@chat/custom-tools" {
 
   export type CustomToolModule = Readonly<Record<string, CustomToolDefinition>>;
 
+  export type FileRef =
+    | { readonly kind: "attachment"; readonly id: string }
+    | { readonly kind: "project"; readonly id: string; readonly version: number }
+    | { readonly kind: "working"; readonly id: string; readonly revision: number };
+
   /** A file a tool hands back; make one with \`file(...)\`. */
   export interface CustomToolFile {
     readonly name: string;
     readonly mediaType: string;
     readonly bytes: Uint8Array;
-    /** Also put the file in front of the model on its next turn. Off by default. */
-    readonly share: boolean;
+    readonly delivery: "working" | "publish";
+    readonly replaces?: Extract<FileRef, { kind: "working" }>;
+    readonly showModel: boolean;
   }
 
   /** Text (or any JSON) for the model plus files for the user; either half may be omitted. */
@@ -36,7 +42,9 @@ declare module "@chat/custom-tools" {
   /** \`mediaType\` is optional; the server decides the type from the bytes and the name. */
   export function file(
     data: Uint8Array | string,
-    options: { readonly name: string; readonly mediaType?: string; readonly share?: boolean },
+    options:
+      | { readonly name: string; readonly mediaType?: string; readonly delivery: "working"; readonly replaces?: Extract<FileRef, { kind: "working" }>; readonly showModel?: boolean }
+      | { readonly name: string; readonly mediaType?: string; readonly delivery: "publish"; readonly replaces?: never; readonly showModel?: boolean },
   ): CustomToolFile;
 
   /** A file the model passed to a tool, resolved and permission-checked by the host. */
@@ -45,6 +53,7 @@ declare module "@chat/custom-tools" {
     readonly mediaType: string;
     readonly size: number;
     readonly bytes: Uint8Array;
+    readonly ref: FileRef;
     /** The bytes as UTF-8 text. */
     text(): string;
   }

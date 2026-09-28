@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from "react";
 import type { LiveText, LiveTextSnapshot } from "../client/live-text.ts";
 import { NO_INHERITED_SOURCES, type InheritedSources } from "./inherited-sources.ts";
@@ -33,7 +34,8 @@ import {
 } from "./assistant-markdown.tsx";
 import { FileReferenceMachine } from "./file-reference.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
-import { projectAssistantBody, type AssistantSteer } from "./assistant-body.ts";
+import { liveWorkingFile, projectAssistantBody, type AssistantSteer } from "./assistant-body.ts";
+import { WorkingFileActivityBlock } from "./working-file-activity-block.tsx";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
 import { ChatInput } from "./chat-input.tsx";
@@ -64,20 +66,20 @@ import {
   SaveToProjectActions,
   useWritableChatProject,
 } from "~/modules/projects/ui/save-to-project.tsx";
-import type { AttachmentKind } from "~/modules/attachments/constants.ts";
 import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
-import { MessageActions } from "./message-actions.tsx";
+import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
-import type { MessageAttachment } from "~/modules/attachments/schema.ts";
+import type { Attachment, MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
+import { presentationSource } from "~/modules/attachments/ui/presentation-preview.tsx";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -248,6 +250,10 @@ export interface DisplayMessage {
   retryModelId?: string | null;
   /** Disables the retry button (e.g. while another generation runs). */
   retryDisabled?: boolean;
+  /** Continue this failed or stopped last answer from where it ended. */
+  onResume?: () => void;
+  /** Continue it with a different model. */
+  onResumeWith?: (modelId: string) => void;
   /**
    * The stream behind the one live answer. Its text is read by the row, never
    * copied into this object, so a pacing tick re-renders that row alone.
@@ -509,7 +515,7 @@ function StoredAttachmentChip({
   attachment,
   thumbnail = true,
 }: {
-  attachment: { id: string; fileName: string; size: number; kind: AttachmentKind };
+  attachment: Attachment;
   thumbnail?: boolean;
 }) {
   const url = attachmentUrl(attachment.id);
@@ -524,6 +530,7 @@ function StoredAttachmentChip({
       }}
       href={url}
       preview={url}
+      presentation={presentationSource(attachment, { kind: "attachment", id: attachment.id })}
       {...(project
         ? {
             previewActions: (
@@ -628,27 +635,41 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
   );
 }
 
+type BodyParts = ReturnType<typeof projectAssistantBody>["parts"];
+
 const AssistantBody = memo(function AssistantBody({
   message,
+  parts,
   sources,
   onOpenSources,
 }: {
   message: DisplayMessage;
+  parts: BodyParts;
   sources: ToolSource[];
   onOpenSources?: () => void;
 }) {
   const streaming = message.status === "streaming";
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
-  const { parts } = projectAssistantBody({
-    content: message.content,
-    rawTextLength: message.rawTextLength ?? message.content.length,
-    streaming,
-    files: message.files ?? [],
-    tools: message.toolActivities,
-    compactions: message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES,
-    steers: message.steers ?? EMPTY_STEERS,
-  });
-  return parts.map((part) => {
+  // Working files a publish in this answer delivered, whichever tool made them.
+  const publishedFiles: ReadonlySet<string> = useMemo(
+    () =>
+      new Set(
+        message.toolActivities.flatMap((step) =>
+          step.family === "tool-file" && step.status === "complete" && step.workingFileId
+            ? [step.workingFileId]
+            : [],
+        ),
+      ),
+    [message.toolActivities],
+  );
+  const lastPartOfFile = new Map(
+    parts.flatMap((part, index) =>
+      part.kind === "working-file" && part.workingFileId
+        ? [[part.workingFileId, index] as const]
+        : [],
+    ),
+  );
+  return parts.map((part, index) => {
     if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
@@ -690,6 +711,21 @@ const AssistantBody = memo(function AssistantBody({
         />
       );
     }
+    if (part.kind === "working-file")
+      return (
+        <WorkingFileActivityBlock
+          key={part.key}
+          part={part}
+          state={{
+            streaming,
+            live: index === parts.length - 1,
+            published: !!part.workingFileId && publishedFiles.has(part.workingFileId),
+            final: !part.workingFileId || lastPartOfFile.get(part.workingFileId) === index,
+          }}
+        >
+          {part.file ? <AssistantFileAttachment file={part.file} /> : null}
+        </WorkingFileActivityBlock>
+      );
     if (part.activity.family === "research") {
       const runId = part.activity.progress?.runId;
       return (
@@ -723,7 +759,14 @@ const AssistantBody = memo(function AssistantBody({
     if (part.activity.family === "project-file")
       return <ProjectFileActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "custom") {
-      return <CustomToolActivityBlock key={part.key} activity={part.activity} />;
+      return (
+        <CustomToolActivityBlock
+          key={part.key}
+          activity={part.activity}
+          terminal={!streaming}
+          published={publishedFiles}
+        />
+      );
     }
     if (part.activity.family === "integration")
       return <IntegrationActivityBlock key={part.key} activity={part.activity} />;
@@ -853,10 +896,12 @@ function GenerationFailure({
   error,
   onRetry,
   retryDisabled,
+  resume,
 }: {
   error: string | null | undefined;
   onRetry: (() => void) | undefined;
   retryDisabled: boolean;
+  resume: ReactNode;
 }) {
   const copy = generationFailureCopy(error);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -909,22 +954,21 @@ function GenerationFailure({
             ) : null}
           </div>
         </div>
-        {onRetry ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onRetry}
-            disabled={retryDisabled}
-            className="ml-11 self-start sm:ml-0"
-          >
-            <HugeiconsIcon
-              icon={RefreshIcon}
-              strokeWidth={2}
-              data-icon="inline-start"
-              aria-hidden
-            />
-            Try again
-          </Button>
+        {resume || onRetry ? (
+          <div className="ml-11 flex gap-2 self-start sm:ml-0">
+            {resume}
+            {onRetry ? (
+              <Button size="sm" variant="outline" onClick={onRetry} disabled={retryDisabled}>
+                <HugeiconsIcon
+                  icon={RefreshIcon}
+                  strokeWidth={2}
+                  data-icon="inline-start"
+                  aria-hidden
+                />
+                Try again
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -948,9 +992,44 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
     streaming && message.content.length === 0 && !message.files?.length && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
-  const compactionActivities = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
-  const compacting = compactionActivities.some((activity) => activity.status === "running");
+  const compactions = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
+  const compacting = compactions.some((activity) => activity.status === "running");
+  const steers = message.steers ?? EMPTY_STEERS;
+  // Projected once here: the body renders it and the Thinking line reads it.
+  const parts = useMemo(
+    () =>
+      projectAssistantBody({
+        content: message.content,
+        rawTextLength: message.rawTextLength ?? message.content.length,
+        streaming,
+        files: message.files ?? [],
+        tools: message.toolActivities,
+        compactions,
+        steers,
+      }).parts,
+    [
+      message.content,
+      message.rawTextLength,
+      streaming,
+      message.files,
+      message.toolActivities,
+      compactions,
+      steers,
+    ],
+  );
+  // An unfinished draft's own row already says the model is working on it.
+  const draftLive = streaming && liveWorkingFile(parts);
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
+  // The chat view wires resume only on the last answer.
+  const resume =
+    message.onResume && message.onResumeWith ? (
+      <ResumeMenu
+        onResume={message.onResume}
+        onResumeWith={message.onResumeWith}
+        modelId={message.retryModelId}
+        disabled={message.retryDisabled ?? false}
+      />
+    ) : null;
 
   // Search hits remain in activity; the answer lists cited or extracted evidence.
   const sources = useMemo(
@@ -974,6 +1053,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         ) : null}
         <AssistantBody
           message={message}
+          parts={parts}
           sources={sources}
           {...(sources.length > 0 ? { onOpenSources: openSources } : {})}
         />
@@ -982,7 +1062,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         !message.files?.length &&
         !showReasoning &&
         !toolRunning &&
-        !compacting ? (
+        !compacting &&
+        !draftLive ? (
           <span className="text-shimmer">Thinking…</span>
         ) : null}
         {message.status === "error" ? (
@@ -990,9 +1071,13 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
             error={message.error}
             onRetry={message.onRetry}
             retryDisabled={message.retryDisabled ?? false}
+            resume={resume}
           />
         ) : message.status === "aborted" ? (
-          <p className="text-muted-foreground mt-2 text-xs">Stopped.</p>
+          <div className="mt-2 flex items-center gap-3">
+            <p className="text-muted-foreground text-xs">Stopped.</p>
+            {resume}
+          </div>
         ) : null}
         {/* A turn that only asked a question or only ran research has nothing to
             copy and no answer to branch from; the row would be chrome around
