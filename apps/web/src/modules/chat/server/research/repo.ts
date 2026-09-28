@@ -1,9 +1,10 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   conversations,
+  messageCompactionEvents,
   messages,
   messageToolCalls,
   models,
@@ -331,8 +332,41 @@ export const createResearchStore = (db: Db["Service"]) => {
         }),
       )
       .pipe(Effect.orDie);
+  // The highest position an earlier run on this message used. Runs never
+  // overlap (one active per user), so the next one starts above it.
+  const lastRunPosition = (fence: ResearchFence) =>
+    locked(fence, (tx) =>
+      Effect.all([
+        tx
+          .select({ value: max(messageToolCalls.turnIndex) })
+          .from(messageToolCalls)
+          .where(
+            and(
+              eq(messageToolCalls.messageId, fence.messageId),
+              isNotNull(messageToolCalls.researchRunId),
+              ne(messageToolCalls.researchRunId, fence.runId),
+            ),
+          ),
+        tx
+          .select({ value: max(messageCompactionEvents.beforeTurnIndex) })
+          .from(messageCompactionEvents)
+          .where(
+            and(
+              eq(messageCompactionEvents.messageId, fence.messageId),
+              isNotNull(messageCompactionEvents.researchRunId),
+              ne(messageCompactionEvents.researchRunId, fence.runId),
+            ),
+          ),
+      ]).pipe(
+        Effect.orDie,
+        Effect.map(([calls, events]) =>
+          Math.max(-1, calls[0]?.value ?? -1, events[0]?.value ?? -1),
+        ),
+      ),
+    );
   return {
     locked,
+    lastRunPosition,
     get,
     finalize,
     // Caller holds the owned conversation row lock. Checkpoint observed usage

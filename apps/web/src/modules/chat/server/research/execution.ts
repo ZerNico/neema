@@ -63,11 +63,11 @@ import { boundedSourceManifest } from "./evidence.ts";
 
 /**
  * Child rows of a run share `message_tool_calls` with the host turn that made
- * the call, and that table is unique on (message, turn, call). The run keeps
- * its own ordinal space above every reachable host turn so the two never
- * collide; the transcript hides these rows behind the call anyway.
+ * the call, and that table is unique on (message, turn, call). Runs keep their
+ * ordinal space above every reachable host turn so the two never collide; each
+ * run starts past the positions earlier runs on the message used.
  */
-const RESEARCH_TURN_BASE = 1000;
+export const RESEARCH_TURN_BASE = 1000;
 
 const json = (value: unknown) => value as JsonValue;
 
@@ -143,6 +143,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   const specs = researchPhaseSpecs(caps, COMPACTION_CONFIG.summaryMaxOutputTokens);
   const maxSearches = yield* deps.webSearch.researchSearchLimit();
   const budget = new ResearchBudget(deps.startedAt, Date.now, caps, maxSearches);
+  const turnBase = Math.max(RESEARCH_TURN_BASE, (yield* store.lastRunPosition(fence)) + 1);
   const external = yield* Semaphore.make(RESEARCH_LIMITS.externalOps);
   const progressWriter = yield* Semaphore.make(1);
   const sources = new Map<number, Source>();
@@ -313,7 +314,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           id: rowId,
           messageId: fence.messageId,
           researchRunId: fence.runId,
-          turnIndex: RESEARCH_TURN_BASE,
+          turnIndex: turnBase,
           callIndex: -5 + index,
           textOffset: 0,
           providerCallId: `skill-context:${rowId}`,
@@ -331,7 +332,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       callId: rowId,
       runId: fence.runId,
       name: "load_skill",
-      turnIndex: RESEARCH_TURN_BASE,
+      turnIndex: turnBase,
       callIndex: -5 + index,
       textOffset: 0,
       skillId: entry.skillId,
@@ -524,7 +525,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   messageId: fence.messageId,
                   researchRunId: fence.runId,
                   researchTaskId: input.taskId ?? null,
-                  turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                  turnIndex: turnBase + reservation.ordinal,
                   callIndex: index,
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
@@ -543,7 +544,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -554,7 +555,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -565,7 +566,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 phase: "start",
                 callId: rowId,
                 name: part.name as AgentDraftToolName,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -582,7 +583,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name as typeof SkillToolName.Type,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
                 skillId: entry?.skillId ?? "",
@@ -603,7 +604,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name as typeof KnowledgeToolName.Type,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
               });
@@ -616,7 +617,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                 runId: fence.runId,
                 ...(input.taskId ? { taskId: input.taskId } : {}),
                 name: part.name,
-                turnIndex: RESEARCH_TURN_BASE + reservation.ordinal,
+                turnIndex: turnBase + reservation.ordinal,
                 callIndex: index,
                 textOffset,
                 args: { targets: args.queries ?? args.urls ?? [] },
@@ -897,7 +898,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       createCompactionEvent: (input) =>
         Effect.gen(function* () {
           const position = {
-            beforeTurnIndex: RESEARCH_TURN_BASE + budget.calls + 1,
+            beforeTurnIndex: turnBase + budget.calls + 1,
             passIndex: ++compactionPosition,
             scope: input.scope,
             ...(taskId ? { taskId } : {}),

@@ -2,7 +2,7 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import {
   messages,
@@ -123,6 +123,13 @@ let searchDown = false;
 let finishWorkersEarly = false;
 /** How many `deep_research` calls the host makes before answering from them. */
 let hostPlan: 0 | 1 | 2 = 1;
+/**
+ * Caps research calls across the whole test. The prompt stops showing an
+ * earlier call once compaction drops it, so a small window needs a count
+ * that compaction cannot erase.
+ */
+let hostCallCap: number | null = null;
+let hostCallsMade = 0;
 let hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
 /** The host asks one question before it is willing to write a brief. */
 let hostAsksFirst = false;
@@ -289,7 +296,12 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
         (message) =>
           message.role === "assistant" && JSON.stringify(message).includes("deep_research"),
       ).length;
-      if (input.toolkit?.tools["deep_research"] && madeCalls < hostPlan) {
+      if (
+        input.toolkit?.tools["deep_research"] &&
+        madeCalls < hostPlan &&
+        (hostCallCap === null || hostCallsMade < hostCallCap)
+      ) {
+        hostCallsMade++;
         const research = {
           name: "deep_research",
           params: { brief: hostBrief },
@@ -528,6 +540,8 @@ beforeEach(async () => {
   searchDown = false;
   finishWorkersEarly = false;
   hostPlan = 1;
+  hostCallCap = null;
+  hostCallsMade = 0;
   hostBrief = "Find out whether the claim holds, and what evidence would settle it.";
   hostAsksFirst = false;
   hostAsks = 0;
@@ -946,6 +960,22 @@ describe("deep research as a tool call", () => {
           new Set(roots.map((call) => call.id)),
         );
         expect(new Set(roots.map((call) => `${call.turnIndex}:${call.callIndex}`)).size).toBe(2);
+        // Each run numbers its own rows above the one before it.
+        const children = yield* db
+          .select()
+          .from(messageToolCalls)
+          .where(
+            and(
+              eq(messageToolCalls.messageId, message.id),
+              isNotNull(messageToolCalls.researchRunId),
+            ),
+          );
+        const [first, second] = runs.map((run) =>
+          children.filter((call) => call.researchRunId === run.id).map((call) => call.turnIndex),
+        );
+        expect(first!.length).toBeGreaterThan(0);
+        expect(second!.length).toBeGreaterThan(0);
+        expect(Math.min(...second!)).toBeGreaterThan(Math.max(...first!));
       }),
     );
   });
@@ -1073,6 +1103,7 @@ describe("durable deep research", () => {
       finishWorkersEarly = true;
       dispatchWaves = 3;
       reportRepeats = 70;
+      hostCallCap = 1;
       compactionFails = failSummary;
       await runtime.runPromise(
         Db.use((db) =>
