@@ -1,10 +1,23 @@
 import { and, asc, eq, exists, inArray, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Schema, type Redacted } from "effect";
-import { DefaultModelIds, InvalidDefaultModelOrder, markDefaultModel } from "../default-models.ts";
+import {
+  DefaultModelIds,
+  InvalidDefaultModelOrder,
+  InvalidUtilityModel,
+  markDefaultModel,
+} from "../default-models.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
-import { groupMembers, modelGroupAccess, models, providers, user } from "~/db/schema/index.ts";
+import {
+  MODEL_SETTINGS_ID,
+  groupMembers,
+  modelGroupAccess,
+  modelSettings,
+  models,
+  providers,
+  user,
+} from "~/db/schema/index.ts";
 import {
   actionableReasoningEfforts,
   normalizeModelSettings,
@@ -67,6 +80,9 @@ export class ProviderRepo extends Context.Service<
     setDefaultModelOrder(
       modelIds: ReadonlyArray<string>,
     ): Effect.Effect<void, InvalidDefaultModelOrder>;
+    /** The model side generations prefer, or null to use each chat's own. */
+    getUtilityModelId(): Effect.Effect<string | null>;
+    setUtilityModelId(modelId: string | null): Effect.Effect<void, InvalidUtilityModel>;
     /**
      * May this user use this model right now: the listChatModelsFor access
      * predicate plus an enabled provider. The model's own enabled/type flags
@@ -291,6 +307,37 @@ export class ProviderRepo extends Context.Service<
                 error instanceof InvalidDefaultModelOrder ? Effect.fail(error) : Effect.die(error),
               ),
             );
+        }),
+
+        getUtilityModelId: Effect.fn("ProviderRepo.getUtilityModelId")(function* () {
+          const rows = yield* db
+            .select({ id: modelSettings.utilityModelId })
+            .from(modelSettings)
+            .where(eq(modelSettings.id, MODEL_SETTINGS_ID))
+            .pipe(Effect.orDie);
+          return rows[0]?.id ?? null;
+        }),
+
+        setUtilityModelId: Effect.fn("ProviderRepo.setUtilityModelId")(function* (modelId) {
+          if (modelId !== null) {
+            const rows = yield* db
+              .select({ type: models.type })
+              .from(models)
+              .where(eq(models.id, modelId))
+              .pipe(Effect.orDie);
+            if (rows[0]?.type !== "chat")
+              return yield* new InvalidUtilityModel({
+                reason: "That model is no longer available for chat. Refresh and try again.",
+              });
+          }
+          yield* db
+            .insert(modelSettings)
+            .values({ id: MODEL_SETTINGS_ID, utilityModelId: modelId })
+            .onConflictDoUpdate({
+              target: modelSettings.id,
+              set: { utilityModelId: modelId, updatedAt: new Date() },
+            })
+            .pipe(Effect.orDie);
         }),
 
         isModelAccessible: Effect.fn("ProviderRepo.isModelAccessible")(function* (userId, modelId) {

@@ -17,7 +17,7 @@ export interface TitleDeps {
   readonly gateway: Pick<AiGateway["Service"], "generateText">;
   readonly repo: Pick<ChatRepo["Service"], "setTitleIfPending">;
   readonly sync: Pick<SyncBus["Service"], "publish">;
-  readonly providers: Pick<ProviderRepo["Service"], "getModel">;
+  readonly providers: Pick<ProviderRepo["Service"], "getModel" | "getUtilityModelId">;
   readonly analytics: Pick<AnalyticsRepo["Service"], "record">;
 }
 
@@ -144,17 +144,18 @@ export const generateConversationTitle = Effect.fn("chat.generateConversationTit
 const recordTitleUsage = Effect.fn("chat.recordTitleUsage")(function* (
   deps: TitleDeps,
   input: TitleInput,
+  modelId: string,
   result: { usage: Parameters<typeof addFinishUsage>[1]["usage"]; finishMetadata: unknown },
 ) {
   const totals = emptyUsageTotals();
   addFinishUsage(totals, { usage: result.usage, metadata: result.finishMetadata });
   if (!totals.sawUsage) return;
-  const model = yield* deps.providers.getModel(input.modelId);
+  const model = yield* deps.providers.getModel(modelId);
   yield* deps.analytics.record({
     userId: input.userId,
     kind: "title",
-    modelId: model ? input.modelId : null,
-    modelName: model?.displayName ?? input.modelId,
+    modelId: model ? modelId : null,
+    modelName: model?.displayName ?? modelId,
     conversationId: input.conversationId,
     status: "complete",
     inputTokens: totals.inputTokens,
@@ -165,22 +166,36 @@ const recordTitleUsage = Effect.fn("chat.recordTitleUsage")(function* (
   });
 });
 
+const generateWith = (deps: TitleDeps, input: TitleInput, modelId: string) =>
+  deps.gateway.generateText({ modelId, prompt: buildTitlePrompt(input) }).pipe(
+    Effect.timeout(TITLE_TIMEOUT),
+    Effect.tap((result) => recordTitleUsage(deps, input, modelId, result)),
+    Effect.map((result) => sanitizeTitle(result.text)),
+    // A failed or slow side generation is a log line, not a broken
+    // conversation, since a fallback still resolves the placeholder.
+    Effect.catch((cause) =>
+      Effect.as(Effect.logInfo("Title generation failed", { modelId, cause: String(cause) }), null),
+    ),
+  );
+
+/**
+ * The admin's utility model when one is set and enabled, which keeps a cheap
+ * task off an expensive chat model; the chat's own model when it is not, or
+ * when it fails.
+ */
+const titleModels = Effect.fn("chat.titleModels")(function* (deps: TitleDeps, input: TitleInput) {
+  const utilityId = yield* deps.providers.getUtilityModelId();
+  if (!utilityId || utilityId === input.modelId) return [input.modelId];
+  const utility = yield* deps.providers.getModel(utilityId);
+  return utility?.enabled && utility.type === "chat" ? [utilityId, input.modelId] : [input.modelId];
+});
+
 const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, input: TitleInput) {
-  const generated = yield* deps.gateway
-    .generateText({
-      modelId: input.modelId,
-      prompt: buildTitlePrompt(input),
-    })
-    .pipe(
-      Effect.timeout(TITLE_TIMEOUT),
-      Effect.tap((result) => recordTitleUsage(deps, input, result)),
-      Effect.map((result) => sanitizeTitle(result.text)),
-      // A failed or slow side generation is a log line, not a broken
-      // conversation, since the fallback below still resolves the placeholder.
-      Effect.catch((cause) =>
-        Effect.as(Effect.logInfo("Title generation failed", { cause: String(cause) }), null),
-      ),
-    );
+  let generated: string | null = null;
+  for (const modelId of yield* titleModels(deps, input)) {
+    generated = yield* generateWith(deps, input, modelId);
+    if (generated) break;
+  }
 
   const title = generated ?? fallbackTitle(input);
 

@@ -57,6 +57,8 @@ async function setup() {
       getProviderWithKey: unexpected,
       listModels: unexpected,
       setDefaultModelOrder: unexpected,
+      getUtilityModelId: unexpected,
+      setUtilityModelId: unexpected,
       isModelAccessible: unexpected,
       updateModelAccess: unexpected,
       listModelAccess: unexpected,

@@ -5,6 +5,10 @@ import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
 export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
 
+export const UpdateUtilityModelInput = Schema.Struct({
+  modelId: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
+});
+
 export const CreateProviderInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   kind: Schema.Literals(["openrouter", "openai-compatible"]),

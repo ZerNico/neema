@@ -77,3 +77,17 @@ export const models = pgTable(
   },
   (t) => [index("models_provider_id_idx").on(t.providerId)],
 );
+
+/**
+ * Instance-wide model choices that are not per chat. One row at most, keyed by
+ * a constant so a second insert conflicts instead of creating a rival.
+ */
+export const modelSettings = pgTable("model_settings", {
+  id: text().primaryKey(),
+  // Side generations (chat titles) run on this model when set; null, or a
+  // model that fails, falls back to the chat's own model.
+  utilityModelId: text("utility_model_id").references(() => models.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const MODEL_SETTINGS_ID = "instance";

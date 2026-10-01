@@ -11,6 +11,11 @@ export class InvalidDefaultModelOrder extends Schema.TaggedError<InvalidDefaultM
   { reason: Schema.String },
 ) {}
 
+export class InvalidUtilityModel extends Schema.TaggedError<InvalidUtilityModel>()(
+  "InvalidUtilityModel",
+  { reason: Schema.String },
+) {}
+
 /**
  * Input is already authorized and in display order. Rank affects selection,
  * never presentation; strip it before returning rows to the chat client.

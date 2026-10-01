@@ -68,6 +68,12 @@ the whole input again on every turn.
 - Each load changes the advertised tools, so it costs one cache miss per family per chat.
   The catalogue itself never changes as families load.
 
+## Side generations
+
+- A title is a small fresh prompt with nothing to share with the chat's cache, so it runs
+  on the admin's utility model (`model_settings`) when one is set and enabled, falling back
+  to the chat's own model if that fails.
+
 ## What still breaks the cache, deliberately
 
 - The composer's search and research toggles change the tool list, and so the whole

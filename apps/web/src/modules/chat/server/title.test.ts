@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "@effect/vitest";
 import { Duration, Effect, Fiber } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import type { Prompt, Response } from "effect/unstable/ai";
+import type { ModelRow } from "~/modules/providers/server/repo.ts";
 import {
   buildTitlePrompt,
   fallbackTitle,
@@ -136,11 +137,21 @@ const input = (overrides: Partial<TitleInput> = {}): TitleInput => ({
 // before touching providers or analytics.
 const emptyUsage = { inputTokens: {}, outputTokens: {} } as Response.Usage;
 
-const harness = (options: { generate?: Effect.Effect<string, never>; applied?: boolean } = {}) => {
-  const generateText = vi.fn(() =>
-    (options.generate ?? Effect.succeed("Postgres vs SQLite")).pipe(
-      Effect.map((text) => ({ text, usage: emptyUsage, finishMetadata: undefined })),
-    ),
+const harness = (
+  options: {
+    generate?: Effect.Effect<string, never>;
+    applied?: boolean;
+    /** Per-model outcomes; a model missing here generates `generate`. */
+    byModel?: Record<string, Effect.Effect<string, never>>;
+    utility?: { id: string; enabled: boolean } | null;
+  } = {},
+) => {
+  const generateText = vi.fn((input: { modelId: string }) =>
+    (
+      options.byModel?.[input.modelId] ??
+      options.generate ??
+      Effect.succeed("Postgres vs SQLite")
+    ).pipe(Effect.map((text) => ({ text, usage: emptyUsage, finishMetadata: undefined }))),
   );
   const setTitleIfPending = vi.fn(() => Effect.succeed(options.applied ?? true));
   const publish = vi.fn(() => Effect.void);
@@ -149,11 +160,54 @@ const harness = (options: { generate?: Effect.Effect<string, never>; applied?: b
     gateway: { generateText },
     repo: { setTitleIfPending },
     sync: { publish },
-    providers: { getModel: () => Effect.succeed(null) },
+    providers: {
+      getModel: (id: string) =>
+        Effect.succeed(
+          options.utility?.id === id
+            ? ({ type: "chat", enabled: options.utility.enabled } as ModelRow)
+            : null,
+        ),
+      getUtilityModelId: () => Effect.succeed(options.utility?.id ?? null),
+    },
     analytics: { record },
   } as TitleDeps;
   return { deps, generateText, setTitleIfPending, publish, record };
 };
+
+describe("the model that writes a title", () => {
+  const titled = (deps: TitleDeps) => generateConversationTitle(deps, input());
+
+  it.effect("is the admin's utility model when one is set", () =>
+    Effect.gen(function* () {
+      const { deps, generateText } = harness({ utility: { id: "cheap", enabled: true } });
+      yield* titled(deps);
+      expect(generateText.mock.calls.map(([call]) => call.modelId)).toEqual(["cheap"]);
+    }),
+  );
+
+  it.effect("falls back to the chat's model when the utility model fails", () =>
+    Effect.gen(function* () {
+      const { deps, generateText, setTitleIfPending } = harness({
+        utility: { id: "cheap", enabled: true },
+        byModel: { cheap: Effect.fail("unreachable") as never },
+      });
+      yield* titled(deps);
+      expect(generateText.mock.calls.map(([call]) => call.modelId)).toEqual([
+        "cheap",
+        input().modelId,
+      ]);
+      expect(setTitleIfPending).toHaveBeenCalledWith(input().conversationId, "Postgres vs SQLite");
+    }),
+  );
+
+  it.effect("skips a disabled utility model", () =>
+    Effect.gen(function* () {
+      const { deps, generateText } = harness({ utility: { id: "cheap", enabled: false } });
+      yield* titled(deps);
+      expect(generateText.mock.calls.map(([call]) => call.modelId)).toEqual([input().modelId]);
+    }),
+  );
+});
 
 describe("generateConversationTitle", () => {
   it.effect("titles the conversation with the model picked for that turn", () =>

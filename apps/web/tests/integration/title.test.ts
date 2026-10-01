@@ -111,7 +111,10 @@ const depsWith = (repo: ChatRepo["Service"], generated: string) => {
     repo,
     sync: { publish } as TitleDeps["sync"],
     // Empty usage above means recordTitleUsage returns before touching these.
-    providers: { getModel: () => Effect.succeed(null) },
+    providers: {
+      getModel: () => Effect.succeed(null),
+      getUtilityModelId: () => Effect.succeed(null),
+    },
     analytics: { record: () => Effect.void },
   };
   return { deps, publish };

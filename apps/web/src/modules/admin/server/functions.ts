@@ -22,6 +22,7 @@ import {
   UpdateGroupMemberSharingInput,
   UpdateModelInput,
   UpdateProviderInput,
+  UpdateUtilityModelInput,
 } from "../schema.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -90,6 +91,29 @@ export const updateDefaultModelOrder = createServerFn({ method: "POST" })
           );
       }).pipe(
         Effect.catchTag("InvalidDefaultModelOrder", (error) =>
+          Effect.die(new Response(error.reason, { status: 400 })),
+        ),
+      ),
+    ),
+  );
+
+export const getUtilityModel = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() =>
+    runtime.runPromise(
+      ProviderRepo.use((repo) => repo.getUtilityModelId()).pipe(
+        Effect.map((modelId) => ({ modelId })),
+      ),
+    ),
+  );
+
+export const updateUtilityModel = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateUtilityModelInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      ProviderRepo.use((repo) => repo.setUtilityModelId(data.modelId)).pipe(
+        Effect.catchTag("InvalidUtilityModel", (error) =>
           Effect.die(new Response(error.reason, { status: 400 })),
         ),
       ),

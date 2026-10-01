@@ -253,3 +253,19 @@ describe("default model priority", () => {
     ]).toContainEqual(result);
   });
 });
+
+describe("the utility model", () => {
+  const repo = ProviderRepo;
+  it("accepts a chat model, refuses others, and clears when its model goes", async () => {
+    expect(await run(Effect.flatMap(repo, (r) => r.getUtilityModelId()))).toBeNull();
+    await run(Effect.flatMap(repo, (r) => r.setUtilityModelId("c")));
+    expect(await run(Effect.flatMap(repo, (r) => r.getUtilityModelId()))).toBe("c");
+    const refused = await run(
+      Effect.flatMap(repo, (r) => r.setUtilityModelId("embed")).pipe(Effect.flip),
+    );
+    expect(refused._tag).toBe("InvalidUtilityModel");
+    expect(await run(Effect.flatMap(repo, (r) => r.getUtilityModelId()))).toBe("c");
+    await run(Effect.flatMap(Db, (db) => db.delete(models).where(eq(models.id, "c"))));
+    expect(await run(Effect.flatMap(repo, (r) => r.getUtilityModelId()))).toBeNull();
+  });
+});
