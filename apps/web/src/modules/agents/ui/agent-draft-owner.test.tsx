@@ -14,6 +14,7 @@ import { AgentDraftOwner, type AgentDraftHandle } from "./agent-draft-owner.tsx"
 import {
   DetailPanelProvider,
   DetailPanelRail,
+  DetailPanelToggle,
   useDetailPanel,
   type DetailPanelApi,
 } from "~/ui/detail-panel.tsx";
@@ -144,6 +145,7 @@ const fixture = async ({ open = true, present = true, activities = [reference()]
               <Probe />
             </main>
             <DetailPanelRail />
+            <DetailPanelToggle />
           </DetailPanelProvider>
         </ConfirmProvider>
       </AppMotionProvider>
@@ -243,7 +245,7 @@ describe("conversation-owned agent draft", () => {
     view.renderOwner(true, []);
     remote(view.client, { description: "Changed offscreen" });
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Local work");
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     view.renderOwner(true, [reference(), reference("second")]);
     const widgets = await screen.findAllByRole("button", { name: "Open agent draft: Local work" });
     fireEvent.click(widgets[1]!);
@@ -428,7 +430,7 @@ describe("conversation-owned agent draft", () => {
     const view = await fixture();
     const name = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(name, { target: { value: "Persistent input" } });
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     remote(view.client, { description: "Does not reopen" });
     await waitFor(() =>
       expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument(),

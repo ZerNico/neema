@@ -20,9 +20,14 @@ import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
-import { AppHeader } from "~/ui/desktop-chrome.tsx";
+import { AppHeader, TitlebarCorner } from "~/ui/desktop-chrome.tsx";
 import { HistoryButtons } from "~/ui/history-buttons.tsx";
-import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import {
+  DetailPanelProvider,
+  DetailPanelRail,
+  DetailPanelToggle,
+  PanelToggleSpace,
+} from "~/ui/detail-panel.tsx";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
@@ -75,24 +80,31 @@ function AuthenticatedLayout({
               <CommandPaletteProvider>
                 <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
                 <SidebarInset className="h-svh overflow-hidden">
-                  <DetailPanelProvider>
+                  <DetailPanelProvider userId={identity.userId}>
                     <HeaderSlotProvider>
-                      <AppHeader>
-                        <SidebarTrigger />
-                        <HistoryButtons />
-                        <SearchButton />
-                        <HeaderSlot />
-                        <WorkAttention />
-                      </AppHeader>
-                      <IntegrationApprovalNotifier />
-                      <WorkConnectionNotice />
-                      {/* The detail rail is a sibling of the content, not an overlay:
-                opening it shrinks the chat column instead of covering it. */}
-                      <div className="flex min-h-0 flex-1">
-                        <main className="min-w-0 flex-1">
-                          <Outlet />
-                        </main>
+                      {/* The detail rail is a sibling of the page column, header
+                          included, so it runs the full height and opening it
+                          shrinks the chat instead of covering it. */}
+                      <div className="relative flex min-h-0 flex-1">
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <AppHeader>
+                            <SidebarTrigger />
+                            <HistoryButtons />
+                            <SearchButton />
+                            <HeaderSlot />
+                            <WorkAttention />
+                            <PanelToggleSpace />
+                          </AppHeader>
+                          <IntegrationApprovalNotifier />
+                          <WorkConnectionNotice />
+                          <main className="min-h-0 min-w-0 flex-1">
+                            <Outlet />
+                          </main>
+                        </div>
                         <DetailPanelRail />
+                        <TitlebarCorner>
+                          <DetailPanelToggle />
+                        </TitlebarCorner>
                       </div>
                     </HeaderSlotProvider>
                   </DetailPanelProvider>

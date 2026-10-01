@@ -74,8 +74,9 @@ className={buttonVariants({...})}>`.
   scrolls, because the chat view pins its composer/virtual list to that height. Every other route needs
   its own scroller; never nest another `overflow-y-auto` inside `Page`. On a capable desktop, viewport
   shells use the available height below the document’s native-control row. Fixed sidebar and sheet
-  surfaces reserve that row once; the detail rail stays in normal flex layout. Browser sizing is
-  unchanged. Pinned by `page-shell.test.tsx` and the desktop chrome tests.
+  surfaces reserve that row once; the detail rail stays in normal flex layout beside the page column,
+  header included, and portals its tab strip into the titlebar's right end (see the detail panel
+  below). Browser sizing is unchanged. Pinned by `page-shell.test.tsx` and the desktop chrome tests.
 - Loading a page's data is the **route loader's** job (`ensureQueryData`, or `prefetchQuery` + `retry:
 false`), so a page body is written against data already there. This includes local Electron folder
   state needed for the first Work composer render: client loaders await it in the same QueryClient
@@ -118,12 +119,38 @@ false`), so a page body is written against data already there. This includes loc
 
 ## The detail panel
 
-- `DetailPanelRequest` has an `actions` slot the shell renders pinned under the panel
-  header, outside the scroller, and a `body` it renders inside. A body must never pin
-  itself: the desktop rail and the mobile sheet pad their scrollers differently, so a
-  body sticking to the scroll edge can only be right in one of them, and the agent draft
-  spent two rounds of negative margins learning that. Actions that submit a form in the
-  body reach it with the `form` attribute rather than moving back inside it.
+- The panel holds tabs, one per `DetailPanelRequest.id`, scoped to the page on screen. The scope is
+  the rendered leaf match's pathname, not the location being loaded: a pending route keeps its
+  predecessor mounted, and that page's owners must never see the next page's tabs. Only the
+  selected tab's body is mounted, so a hidden tab holds no React subtree and no live connection;
+  owners keep state that must survive a switch (a document's controller, a draft's form).
+- One toggle shows and hides the panel. It lives in the top right corner (`TitlebarCorner`), above
+  whichever of the header or the open panel's strip reaches it, so it never moves; both rows end
+  with `PanelToggleSpace` to leave it room. Showing a panel with no tabs opens a new tab, and the
+  strip's plus adds more; a new tab is never restorable. Hiding keeps the tabs. Closing a tab
+  selects its right neighbour, else its left one; the last one closing hides the panel. Tabs
+  reorder by dragging (`@dnd-kit/react`, pointer sensor only: its keyboard sensor would take the
+  Enter and Space that select a tab) and by Alt+Shift+arrows.
+- On a narrow screen the same rail covers the page below the header and slides in from the right,
+  rather than rising as a bottom sheet, so the corner toggle and its right-panel icon mean the same
+  thing at every width. Until someone drags the rail's edge its width is a share of the window; a
+  dragged width is kept.
+- A `restorable` request's tab outlives navigation and restarts: its id and title, never its body,
+  are stored per account in `localStorage` (`detail-panel-tabs.ts`). A restored tab shows a pending
+  body until the owner of its kind refreshes it, and owners refresh every tab of their kind, not
+  just the selected one. `release` (an owner unmounting) leaves a restorable tab pending; only the
+  page that owns a kind can prove an item gone, through `useDetailPanelReconciler`. A phone never
+  opens a restored panel by itself.
+- On a shell drawing its own titlebar the rail's tab strip portals into a second titlebar target,
+  and the rail publishes its live width as `--detail-panel-inset`, so the header ends and the strip
+  begins at the rail's edge through the open and close animation. The strip ends where
+  `env(titlebar-area-*)` ends, which on Windows and Linux leaves the window controls overlay its
+  corner above the rail.
+- `DetailPanelRequest` has an `actions` slot the shell renders pinned under the tab strip, outside
+  the scroller, and a `body` it renders inside. A body must never pin itself to the scroll edge: the
+  shell owns the scroller's padding, and the agent draft spent two rounds of negative margins
+  learning that. Actions that submit a form in the body reach it with the `form` attribute rather
+  than moving back inside it.
 
 ## Errors and confirmations
 
@@ -235,8 +262,8 @@ false`), so a page body is written against data already there. This includes loc
   it as the conversation’s agent.
 - Transcript activity for an editable conversation resource opens its detail; it never owns the
   editor. A draft or document the answer being watched just created (seen in the live stream, not
-  in what the page loaded with) opens its panel once by itself, never on a phone, where the panel is
-  a sheet over the answer; reloads, sync and old chats only ever open one on click. `AgentDraftOwner` and `DocumentOwner` mount one controller per
+  in what the page loaded with) opens its panel once by itself, never on a phone, where the panel
+  covers the answer; reloads, sync and old chats only ever open one on click. `AgentDraftOwner` and `DocumentOwner` mount one controller per
   known id at conversation level, above the virtualiser, so a widget scrolling out of view, a
   panel replacement or a removed tool row cannot take local edits with it. Widgets only look the
   controller up by id. Owners refresh only the selected detail and publish only visible entry

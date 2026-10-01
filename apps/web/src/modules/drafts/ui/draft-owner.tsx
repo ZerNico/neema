@@ -1,3 +1,4 @@
+import type { IconSvgElement } from "@hugeicons/react";
 import { useBlocker } from "@tanstack/react-router";
 import {
   type Context,
@@ -14,7 +15,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
+import {
+  useDetailPanel,
+  useDetailPanelReconciler,
+  useDetailPanelSelectedId,
+} from "~/ui/detail-panel.tsx";
 import { ErrorState, FormActions, ListSkeleton } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
@@ -57,6 +62,8 @@ export interface DraftKindUi<S extends Record<string, unknown>> {
   noun: string;
   /** Capitalised for titles: "Agent draft", "Create agent". */
   Noun: string;
+  /** The transcript widget's icon, repeated on the panel tab. */
+  icon: IconSvgElement;
   labels: Record<keyof S & string, string>;
   /** The `withForm` component for this kind's settings. */
   Fields: FunctionComponent<{ form: DraftController<S>["form"] }>;
@@ -114,6 +121,7 @@ export function DraftOwner<S extends Record<string, unknown>>({
   ref?: Ref<DraftHandle> | undefined;
 }) {
   const [sessions, setSessions] = useState<ReadonlyMap<string, Session>>(new Map());
+  useDetailPanelReconciler(`${ui.kind}-draft:`, draftIds);
   // The controller is a fresh object each render, so a session publishes on every
   // commit. Only a visible change may set state, or the two re-render each other
   // forever. A skipped update leaves a stale `open`, which self-corrects when the
@@ -220,6 +228,8 @@ function DraftSession<S extends Record<string, unknown>>({
       // The title names the draft: several can exist and the panel shows one.
       title: controller.draft ? name : `${ui.Noun} draft`,
       subtitle: status,
+      icon: ui.icon,
+      restorable: true,
       actions: <DraftActions ui={ui} controller={controller} formId={formId(id)} />,
       body: <DraftBody ui={ui} controller={controller} formId={formId(id)} />,
     }),
@@ -228,7 +238,7 @@ function DraftSession<S extends Record<string, unknown>>({
   useEffect(() => {
     panel.refresh(request);
   }, [panel, request]);
-  useEffect(() => () => panel.closeIfSelected(id), [id, panel]);
+  useEffect(() => () => panel.release(id), [id, panel]);
   const available = controller.draft !== null;
   // Opens the panel once, when a draft this answer just created has loaded.
   // Only live ones are passed in, so reloads and old chats never pop a panel.

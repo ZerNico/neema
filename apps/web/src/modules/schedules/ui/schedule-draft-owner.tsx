@@ -1,3 +1,4 @@
+import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode, Ref } from "react";
 import {
@@ -17,6 +18,7 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
   kind: "schedule",
   noun: "schedule",
   Noun: "Schedule",
+  icon: Calendar03Icon,
   useController: useScheduleDraft,
   labels: {
     name: "Name",

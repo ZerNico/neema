@@ -285,6 +285,8 @@ All release candidates. Pin exactly; never float to `latest`.
 - `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
   instead of the bundled substitutes. On a bump, check the substitution still runs through
   one function and regenerate the patch the same way.
+- `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
+  matched set; re-check the panel's tab dragging on a bump.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
   a bump.
 - `@office-kit/xlsx` (pre-1.0) and `@formulajs/formulajs` are pinned exact. Formulas are

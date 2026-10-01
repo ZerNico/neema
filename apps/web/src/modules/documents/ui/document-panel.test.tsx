@@ -170,6 +170,6 @@ describe("document panel", () => {
     for (const name of [/Rename document/, /Delete document/, /Download document/])
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
 
-    act(() => panel.close());
+    act(() => panel.hide());
   });
 });

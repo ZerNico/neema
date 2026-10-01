@@ -3,7 +3,6 @@ import { useCallback, useSyncExternalStore } from "react";
 const STORAGE_KEY = "chat.detail-panel-width";
 /** Below this the header row and a Markdown line stop being readable. */
 export const DETAIL_PANEL_MIN = 320;
-export const DETAIL_PANEL_DEFAULT = 352;
 /** Keyboard resizing moves in this step, so arrows stay predictable. */
 export const DETAIL_PANEL_STEP = 24;
 
@@ -17,14 +16,20 @@ export const detailPanelMax = (viewport: number) =>
 export const clampDetailPanelWidth = (width: number, viewport: number) =>
   Math.min(Math.max(Math.round(width), DETAIL_PANEL_MIN), detailPanelMax(viewport));
 
+/**
+ * Until someone drags the rail, its width is a share of the window, so a large
+ * screen opens it roomier than a laptop does. A dragged width is kept as is.
+ */
+export const defaultDetailPanelWidth = (viewport: number) =>
+  clampDetailPanelWidth(viewport * 0.38, viewport);
+
 const listeners = new Set<() => void>();
 let override: number | null = null;
 
 const read = (): number => {
   if (override !== null) return override;
-  if (typeof window === "undefined") return DETAIL_PANEL_DEFAULT;
   const stored = Number(localStorage.getItem(STORAGE_KEY));
-  if (!Number.isFinite(stored) || stored <= 0) return DETAIL_PANEL_DEFAULT;
+  if (!Number.isFinite(stored) || stored <= 0) return defaultDetailPanelWidth(window.innerWidth);
   return clampDetailPanelWidth(stored, window.innerWidth);
 };
 
@@ -69,7 +74,8 @@ const subscribe = (listener: () => void) => {
 };
 
 export function useDetailPanelWidth() {
-  const width = useSyncExternalStore(subscribe, read, () => DETAIL_PANEL_DEFAULT);
+  // Client-only: the panel mounts below the app's client boundary.
+  const width = useSyncExternalStore(subscribe, read, read);
   const resize = useCallback((next: number, persist = true) => {
     setDetailPanelWidth(clampDetailPanelWidth(next, window.innerWidth), persist);
   }, []);

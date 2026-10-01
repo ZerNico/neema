@@ -12,6 +12,8 @@ import {
   AppHeader,
   DesktopChromeFrame,
   DesktopChromeProvider,
+  PanelTitlebar,
+  TitlebarCorner,
   desktopChromeInitScript,
 } from "./desktop-chrome.tsx";
 import { setTheme } from "./theme.tsx";
@@ -216,4 +218,37 @@ it("reserves first-paint space only for a complete supported capability", () => 
   vi.stubGlobal("__chatDesktop", { chrome: { platform: "darwin" } });
   runInNewContext(desktopChromeInitScript, { window, document });
   expect(document.documentElement).not.toHaveAttribute("data-desktop-chrome");
+});
+
+function Panel() {
+  return (
+    <DesktopChromeProvider>
+      <aside>
+        <PanelTitlebar>
+          <button>Panel tab</button>
+        </PanelTitlebar>
+      </aside>
+      <TitlebarCorner>
+        <button>Corner</button>
+      </TitlebarCorner>
+    </DesktopChromeProvider>
+  );
+}
+
+it("puts the panel's header row in the titlebar beside the app header, inline without a shell", () => {
+  const inline = render(<Panel />);
+  expect(screen.getByRole("button", { name: "Panel tab" }).closest("aside")).not.toBeNull();
+  inline.unmount();
+
+  vi.stubGlobal("__chatDesktop", { chrome });
+  render(<Panel />);
+  const tab = screen.getByRole("button", { name: "Panel tab" });
+  expect(tab.closest("aside")).toBeNull();
+  expect(tab.closest(".desktop-titlebar-panel")).not.toBeNull();
+  // Its strip opts its controls out of window dragging, like the header does.
+  expect(tab.closest(".desktop-panel-strip")).not.toBeNull();
+  // The corner is its own target, so its control stays put as the panel opens.
+  expect(screen.getByRole("button", { name: "Corner" }).parentElement).toHaveClass(
+    "desktop-titlebar-corner",
+  );
 });

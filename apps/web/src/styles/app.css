@@ -187,10 +187,6 @@ html[data-desktop-chrome] [data-slot="sheet-content"][data-side="top"] {
   top: var(--desktop-titlebar-height);
 }
 
-html[data-desktop-chrome] .detail-panel-sheet {
-  max-height: min(80svh, var(--desktop-content-height));
-}
-
 html:not([data-desktop-chrome]) .desktop-titlebar {
   display: none;
 }
@@ -228,9 +224,68 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
   width: 100%;
 }
 
+/* The open detail rail owns the titlebar above it (`--detail-panel-inset` is its
+   live width), so the header ends at the rail's edge and the rail's tab strip takes
+   the rest. The strip ends where the content area does: on Windows and Linux the
+   window controls overlay sits past it, over the rail's top right corner. */
+.desktop-titlebar-panel {
+  display: none;
+}
+
+html[data-detail-panel] .desktop-titlebar-panel {
+  display: block;
+  position: absolute;
+  top: 0;
+  height: 100%;
+  left: calc(100% - var(--detail-panel-inset, 0px));
+  right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100% - 160px)));
+}
+
+html[data-detail-panel] .desktop-titlebar-content {
+  width: min(
+    env(titlebar-area-width, calc(100% - 160px)),
+    calc(100% - var(--detail-panel-inset, 0px) - env(titlebar-area-x, 0px))
+  );
+}
+
+html[data-desktop-chrome="darwin"][data-detail-panel] .desktop-titlebar-panel,
+html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-panel {
+  right: 0;
+}
+
+html[data-desktop-chrome="darwin"][data-detail-panel] .desktop-titlebar-content {
+  width: min(
+    env(titlebar-area-width, calc(100% - 96px)),
+    calc(100% - var(--detail-panel-inset, 0px) - env(titlebar-area-x, 96px))
+  );
+}
+
+html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-content {
+  width: calc(100% - var(--detail-panel-inset, 0px));
+}
+
+/* Sits above the header or the open panel's strip, whichever reaches the corner,
+   and stops before the window controls overlay like they do. */
+.desktop-titlebar-corner {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100% - 160px)));
+  display: flex;
+  align-items: center;
+  padding-right: 0.75rem;
+}
+
+html[data-desktop-chrome="darwin"] .desktop-titlebar-corner,
+html[data-desktop-fullscreen="true"] .desktop-titlebar-corner {
+  right: 0;
+}
+
 /* Interactive children opt out individually, leaving the row's gaps draggable. */
 .desktop-header :is(button, a, input, select, textarea, [role="button"], [tabindex]),
-.desktop-header [data-slot="dropdown-menu-trigger"] {
+.desktop-header [data-slot="dropdown-menu-trigger"],
+.desktop-panel-strip :is(button, a, [role="button"], [role="tab"], [tabindex], [data-panel-tab]),
+.desktop-titlebar-corner :is(button, a, [role="button"], [tabindex]) {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }

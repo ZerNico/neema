@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScheduleDraftToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { ScheduleDraftActivityBlock } from "~/modules/chat/ui/schedule-draft-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail, DetailPanelToggle } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion";
 import { EMPTY_SCHEDULE_DRAFT, type ScheduleDraft } from "../draft-schema.ts";
 import {
@@ -145,6 +145,7 @@ const fixture = async ({
               </ScheduleDraftOwner>
             </main>
             <DetailPanelRail />
+            <DetailPanelToggle />
           </DetailPanelProvider>
         </ConfirmProvider>
       </AppMotionProvider>
@@ -224,7 +225,7 @@ describe("conversation-owned schedule draft", () => {
     const view = await fixture({ open: false, autoOpen: true });
     // No click: the panel opens as soon as the new draft has loaded.
     expect(await screen.findByRole("combobox", { name: "Frequency" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     await waitFor(() =>
       expect(screen.queryByRole("combobox", { name: "Frequency" })).not.toBeInTheDocument(),
     );

@@ -1,4 +1,10 @@
-import { Alert02Icon, File01Icon, Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  File01Icon,
+  GlobalSearchIcon,
+  Search01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo } from "react";
 import type {
@@ -10,11 +16,7 @@ import type {
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
-import {
-  useDetailPanel,
-  useDetailPanelSelectedId,
-  type DetailPanelRequest,
-} from "~/ui/detail-panel";
+import { useDetailPanel, useDetailPanelTabIds, type DetailPanelRequest } from "~/ui/detail-panel";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
@@ -283,6 +285,8 @@ function researchPanelRequest(
     id: researchPanelId(messageId, runId),
     title: "Deep research",
     subtitle: running ? "In progress" : `${webActivities.length} steps`,
+    icon: GlobalSearchIcon,
+    restorable: true,
     body: (
       <ResearchActivityBody
         progress={activity.progress}
@@ -309,21 +313,32 @@ export function useResearchPanel(
 /**
  * Mounted by ChatView beside virtualization. Its input is the final persisted +
  * stream display, not a second message cache. The rail can live outside ChatView.
+ * Every research tab is kept current, open or not, so a restored one comes back.
  */
 export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<DisplayMessage> }) {
+  const tabIds = useDetailPanelTabIds();
+  return tabIds
+    .filter((id) => id.startsWith("research:"))
+    .map((id) => <ResearchTabOwner key={id} id={id} messages={messages} />);
+}
+
+function ResearchTabOwner({
+  id,
+  messages,
+}: {
+  id: string;
+  messages: ReadonlyArray<DisplayMessage>;
+}) {
   const panel = useDetailPanel();
-  const selectedId = useDetailPanelSelectedId();
-  const selectedMessage = selectedId?.startsWith("research:")
-    ? messages.find((message) =>
-        message.toolActivities.some((activity) => {
-          if (activity.family !== "research") return false;
-          const runId = runIdOf(activity);
-          return !!runId && researchPanelId(message.id, runId) === selectedId;
-        }),
-      )
-    : undefined;
-  const messageId = selectedMessage?.id;
-  const activities = selectedMessage?.toolActivities;
+  const message = messages.find((candidate) =>
+    candidate.toolActivities.some(
+      (activity) =>
+        activity.family === "research" &&
+        researchPanelId(candidate.id, runIdOf(activity) ?? "") === id,
+    ),
+  );
+  const messageId = message?.id;
+  const activities = message?.toolActivities;
   // Text smoothing changes display rows every token, but does not change their
   // activity data. Neither text nor the refreshed detail request is a dependency.
   const request = useMemo(() => {
@@ -331,7 +346,7 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
     const activity = activities.find(
       (candidate): candidate is ResearchToolActivity =>
         candidate.family === "research" &&
-        researchPanelId(messageId, runIdOf(candidate) ?? "") === selectedId,
+        researchPanelId(messageId, runIdOf(candidate) ?? "") === id,
     );
     if (!activity) return null;
     const runId = runIdOf(activity);
@@ -343,12 +358,11 @@ export function ResearchPanelOwner({ messages }: { messages: ReadonlyArray<Displ
         candidate.runId === runId,
     );
     return researchPanelRequest(messageId, activity, webActivities);
-  }, [messageId, activities, selectedId]);
+  }, [messageId, activities, id]);
 
   useEffect(() => {
-    if (!selectedId?.startsWith("research:")) return;
     if (request) panel.refresh(request);
-    else panel.closeIfSelected(selectedId);
-  }, [panel, selectedId, request]);
+    else panel.closeTab(id);
+  }, [panel, id, request]);
   return null;
 }

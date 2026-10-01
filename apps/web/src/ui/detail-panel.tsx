@@ -1,27 +1,42 @@
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  Cancel01Icon,
+  File01Icon,
+  PanelRightCloseIcon,
+  PanelRightIcon,
+  PanelRightOpenIcon,
+  PlusSignIcon,
+} from "@hugeicons/core-free-icons";
+import { RestrictToHorizontalAxis } from "@dnd-kit/abstract/modifiers";
+import { RestrictToElement } from "@dnd-kit/dom/modifiers";
+import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
+import { isSortable, useSortable } from "@dnd-kit/react/sortable";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useRouterState } from "@tanstack/react-router";
 import * as m from "motion/react-m";
 import {
+  Fragment,
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import { PanelTitlebar } from "~/ui/desktop-chrome.tsx";
 import {
   DETAIL_PANEL_MIN,
   DETAIL_PANEL_STEP,
   detailPanelMax,
   useDetailPanelWidth,
 } from "~/ui/detail-panel-width.ts";
-import { useAppReducedMotion } from "~/ui/motion";
+import { readPanelScope, writePanelScope, type StoredPanelScope } from "~/ui/detail-panel-tabs.ts";
+import { MotionSwap, useAppReducedMotion } from "~/ui/motion";
+import { EmptyState, ListSkeleton } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "~/ui/primitives/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useIsMobile } from "~/ui/use-mobile";
 import { cn } from "~/ui/utils";
@@ -41,14 +56,112 @@ export interface DetailPanelRequest {
   actions?: ReactNode;
   /** Props are snapshotted at open time, then updated by re-open or refresh. */
   body: ReactNode;
+  /** Shown in the tab strip; a generic file otherwise. */
+  icon?: IconSvgElement;
+  /**
+   * The tab outlives navigation and restarts. Only for content an owner can
+   * rebuild from the id alone: until it refreshes, the tab shows a pending body.
+   */
+  restorable?: boolean;
 }
 
 export interface DetailPanelApi {
+  /** Adds the tab if it is new, selects it and shows the panel. */
   open: (request: DetailPanelRequest) => void;
-  close: () => void;
-  /** Update only the currently selected identity; never open or switch a panel. */
+  /** Updates the tab with this id wherever it is; never adds, selects or shows one. */
   refresh: (request: DetailPanelRequest) => void;
-  closeIfSelected: (id: string) => void;
+  select: (id: string) => void;
+  /** Removes the tab and selects a neighbour; the panel hides with its last tab. */
+  closeTab: (id: string) => void;
+  /**
+   * The owner unmounted. A restorable tab keeps its place with a pending body,
+   * since the same owner may come straight back; any other tab closes.
+   */
+  release: (id: string) => void;
+  /** Keeps every tab, so the header toggle brings them back. */
+  hide: () => void;
+  /** Shows the panel, on a new tab when it has none. */
+  show: () => void;
+  newTab: () => void;
+  /** Moves the tab to `index` in the strip, clamped to its ends. */
+  moveTab: (id: string, index: number) => void;
+}
+
+interface PanelTab {
+  id: string;
+  title: string;
+  icon?: IconSvgElement;
+  restorable: boolean;
+  /** Null for a restored tab whose owner has not refreshed it yet. */
+  request: DetailPanelRequest | null;
+}
+
+interface PanelState {
+  scope: string;
+  tabs: ReadonlyArray<PanelTab>;
+  activeId: string | null;
+  visible: boolean;
+}
+
+export interface DetailPanelTabSummary {
+  id: string;
+  title: string;
+  icon?: IconSvgElement;
+}
+
+interface TabsView {
+  tabs: ReadonlyArray<DetailPanelTabSummary>;
+  activeId: string | null;
+  visible: boolean;
+}
+
+const tabOf = (request: DetailPanelRequest): PanelTab => ({
+  id: request.id,
+  title: request.title,
+  ...(request.icon ? { icon: request.icon } : {}),
+  restorable: request.restorable === true,
+  request,
+});
+
+function withoutTab(state: PanelState, id: string): PanelState {
+  const index = state.tabs.findIndex((tab) => tab.id === id);
+  if (index < 0) return state;
+  const tabs = state.tabs.toSpliced(index, 1);
+  if (state.activeId !== id) return { ...state, tabs };
+  // Like a browser: the tab to the right takes its place, else the one before.
+  const next = tabs[index] ?? tabs[index - 1];
+  return next
+    ? { ...state, tabs, activeId: next.id }
+    : { ...state, tabs, activeId: null, visible: false };
+}
+
+function restoredState(userId: string | undefined, scope: string, mobile: boolean): PanelState {
+  const stored = userId ? readPanelScope(userId, scope) : null;
+  const tabs = (stored?.tabs ?? []).map(({ id, title }): PanelTab => ({
+    id,
+    title,
+    restorable: true,
+    request: null,
+  }));
+  const first = tabs[0];
+  if (!stored || !first) return { scope, tabs: [], activeId: null, visible: false };
+  return {
+    scope,
+    tabs,
+    activeId: tabs.some((tab) => tab.id === stored.activeId) ? stored.activeId : first.id,
+    // A phone shows the panel as a sheet over the page, never by itself.
+    visible: stored.visible && !mobile,
+  };
+}
+
+function storedScope(state: PanelState): StoredPanelScope | null {
+  const tabs = state.tabs.filter((tab) => tab.restorable).map(({ id, title }) => ({ id, title }));
+  if (tabs.length === 0) return null;
+  return {
+    tabs,
+    activeId: tabs.some((tab) => tab.id === state.activeId) ? state.activeId : null,
+    visible: state.visible,
+  };
 }
 
 // Actions are split from state so that opening or closing the panel doesn't
@@ -58,6 +171,14 @@ const DetailPanelStateContext = createContext<DetailPanelRequest | null>(null);
 // Live owners subscribe to identity, not the request they refresh: updating a
 // body must not trigger another owner render and refresh feedback loop.
 const DetailPanelSelectedIdContext = createContext<string | null>(null);
+const DetailPanelTabsContext = createContext<TabsView>({
+  tabs: [],
+  activeId: null,
+  visible: false,
+});
+// Only changes when a tab is added or removed, so owners can follow their tabs
+// without re-rendering on every title or subtitle refresh.
+const DetailPanelTabIdsContext = createContext<ReadonlyArray<string>>([]);
 const DetailPanelRouteContext = createContext("");
 type PanelAction = { type: "open"; id: string } | { type: "close"; id?: string };
 // Desktop focus is handed off synchronously, before React makes outgoing content
@@ -66,18 +187,60 @@ const DetailPanelBeforeActionContext = createContext<
   (handler: (action: PanelAction) => void) => () => void
 >(() => () => {});
 
+// A restored tab waits for its owner to rebuild the body from the id.
+const PENDING_BODY = <ListSkeleton media="none" />;
+
+const NEW_TAB_BODY = (
+  <EmptyState
+    icon={PanelRightIcon}
+    title="Nothing open here yet"
+    description="Documents, drafts, research and sources you open show up as tabs."
+  />
+);
+
+// A tab of its own, so several can be open; never restorable, since nothing
+// but this page could rebuild it.
+const newTabRequest = (): DetailPanelRequest => ({
+  id: `new-tab:${crypto.randomUUID()}`,
+  title: "New tab",
+  icon: PlusSignIcon,
+  body: NEW_TAB_BODY,
+});
+
 /**
- * A general detail region beside the main content (not just for sources).
+ * A tabbed detail region beside the main content (not just for sources).
  *
  *   const panel = useDetailPanel()
  *   panel.open({ id, title, body })
  *
  * The provider supplies context; render <DetailPanelRail /> anywhere in the
  * layout. Desktop's rail is a flex sibling, shrinking content instead of
- * covering it; mobile becomes a bottom sheet.
+ * covering it; mobile becomes a bottom sheet. Each page has its own tabs;
+ * restorable ones are remembered per account when `userId` is given.
  */
-export function DetailPanelProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<DetailPanelRequest | null>(null);
+export function DetailPanelProvider({
+  userId,
+  children,
+}: {
+  userId?: string;
+  children: ReactNode;
+}) {
+  // The page on screen, not the location being loaded: while a route is still
+  // pending its predecessor stays mounted, and its owners must not see (and
+  // prune) the next page's restored tabs.
+  const scope = useRouterState({
+    select: (s) => s.matches[s.matches.length - 1]?.pathname ?? s.location.pathname,
+  });
+  const mobile = useIsMobile();
+  const [state, setState] = useState(() => restoredState(userId, scope, mobile));
+  // Derived during render, so no effect is needed and the previous page's tabs
+  // never render against the new one.
+  if (state.scope !== scope) setState(restoredState(userId, scope, mobile));
+
+  const stored = useMemo(() => JSON.stringify(storedScope(state)), [state]);
+  useEffect(() => {
+    if (userId) writePanelScope(userId, state.scope, JSON.parse(stored) as StoredPanelScope | null);
+  }, [userId, state.scope, stored]);
 
   const beforeAction = useRef<((action: PanelAction) => void) | null>(null);
   const registerBeforeAction = useCallback((handler: (action: PanelAction) => void) => {
@@ -86,45 +249,118 @@ export function DetailPanelProvider({ children }: { children: ReactNode }) {
       if (beforeAction.current === handler) beforeAction.current = null;
     };
   }, []);
-  const open = useCallback((request: DetailPanelRequest) => {
-    beforeAction.current?.({ type: "open", id: request.id });
-    setState(request);
-  }, []);
-  const close = useCallback(() => {
-    beforeAction.current?.({ type: "close" });
-    setState(null);
-  }, []);
-  const refresh = useCallback((request: DetailPanelRequest) => {
-    setState((current) => (current?.id === request.id ? request : current));
-  }, []);
-  const closeIfSelected = useCallback((id: string) => {
-    beforeAction.current?.({ type: "close", id });
-    setState((current) => (current?.id === id ? null : current));
+
+  const api = useMemo<DetailPanelApi>(() => {
+    const before = (action: PanelAction) => beforeAction.current?.(action);
+    const open = (request: DetailPanelRequest) => {
+      before({ type: "open", id: request.id });
+      setState((current) => {
+        const index = current.tabs.findIndex((tab) => tab.id === request.id);
+        const active = current.tabs.findIndex((tab) => tab.id === current.activeId);
+        const tabs =
+          index >= 0
+            ? current.tabs.with(index, tabOf(request))
+            : current.tabs.toSpliced(
+                active < 0 ? current.tabs.length : active + 1,
+                0,
+                tabOf(request),
+              );
+        return { ...current, tabs, activeId: request.id, visible: true };
+      });
+    };
+    return {
+      open,
+      refresh: (request) =>
+        setState((current) => {
+          const index = current.tabs.findIndex((tab) => tab.id === request.id);
+          return index < 0
+            ? current
+            : { ...current, tabs: current.tabs.with(index, tabOf(request)) };
+        }),
+      select: (id) => {
+        before({ type: "open", id });
+        setState((current) =>
+          current.tabs.some((tab) => tab.id === id)
+            ? { ...current, activeId: id, visible: true }
+            : current,
+        );
+      },
+      closeTab: (id) => {
+        before({ type: "close", id });
+        setState((current) => withoutTab(current, id));
+      },
+      release: (id) => {
+        before({ type: "close", id });
+        setState((current) => {
+          const index = current.tabs.findIndex((tab) => tab.id === id);
+          const tab = current.tabs[index];
+          if (!tab) return current;
+          if (!tab.restorable) return withoutTab(current, id);
+          return { ...current, tabs: current.tabs.with(index, { ...tab, request: null }) };
+        });
+      },
+      hide: () => {
+        before({ type: "close" });
+        setState((current) => (current.visible ? { ...current, visible: false } : current));
+      },
+      show: () =>
+        setState((current) => {
+          if (current.visible) return current;
+          if (current.tabs.length === 0) {
+            const tab = tabOf(newTabRequest());
+            return { ...current, tabs: [tab], activeId: tab.id, visible: true };
+          }
+          const activeId = current.tabs.some((tab) => tab.id === current.activeId)
+            ? current.activeId
+            : (current.tabs[0]?.id ?? null);
+          return { ...current, activeId, visible: true };
+        }),
+      newTab: () => open(newTabRequest()),
+      moveTab: (id, index) =>
+        setState((current) => {
+          const from = current.tabs.findIndex((tab) => tab.id === id);
+          const tab = current.tabs[from];
+          const to = Math.min(Math.max(index, 0), current.tabs.length - 1);
+          if (!tab || from === to) return current;
+          return { ...current, tabs: current.tabs.toSpliced(from, 1).toSpliced(to, 0, tab) };
+        }),
+    };
   }, []);
 
-  // Otherwise navigating away leaves the panel showing the previous page's
-  // detail. Derived during render, so no effect is needed.
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [lastPathname, setLastPathname] = useState(pathname);
-  if (lastPathname !== pathname) {
-    setLastPathname(pathname);
-    setState(null);
-  }
-
-  const api = useMemo<DetailPanelApi>(
-    () => ({ open, close, refresh, closeIfSelected }),
-    [open, close, refresh, closeIfSelected],
+  const activeTab = state.visible
+    ? (state.tabs.find((tab) => tab.id === state.activeId) ?? null)
+    : null;
+  const selected = useMemo(
+    () =>
+      activeTab
+        ? (activeTab.request ?? { id: activeTab.id, title: activeTab.title, body: PENDING_BODY })
+        : null,
+    [activeTab],
   );
+  const tabsView = useMemo<TabsView>(
+    () => ({
+      tabs: state.tabs.map(({ id, title, icon }) => ({ id, title, ...(icon ? { icon } : {}) })),
+      activeId: state.activeId,
+      visible: state.visible,
+    }),
+    [state.tabs, state.activeId, state.visible],
+  );
+  const idsKey = state.tabs.map((tab) => tab.id).join("\n");
+  const tabIds = useMemo(() => (idsKey ? idsKey.split("\n") : []), [idsKey]);
 
   return (
     <DetailPanelContext.Provider value={api}>
-      <DetailPanelSelectedIdContext.Provider value={state?.id ?? null}>
-        <DetailPanelStateContext.Provider value={state}>
-          <DetailPanelBeforeActionContext.Provider value={registerBeforeAction}>
-            <DetailPanelRouteContext.Provider value={pathname}>
-              {children}
-            </DetailPanelRouteContext.Provider>
-          </DetailPanelBeforeActionContext.Provider>
+      <DetailPanelSelectedIdContext.Provider value={activeTab?.id ?? null}>
+        <DetailPanelStateContext.Provider value={selected}>
+          <DetailPanelTabsContext.Provider value={tabsView}>
+            <DetailPanelTabIdsContext.Provider value={tabIds}>
+              <DetailPanelBeforeActionContext.Provider value={registerBeforeAction}>
+                <DetailPanelRouteContext.Provider value={state.scope}>
+                  {children}
+                </DetailPanelRouteContext.Provider>
+              </DetailPanelBeforeActionContext.Provider>
+            </DetailPanelTabIdsContext.Provider>
+          </DetailPanelTabsContext.Provider>
         </DetailPanelStateContext.Provider>
       </DetailPanelSelectedIdContext.Provider>
     </DetailPanelContext.Provider>
@@ -136,11 +372,51 @@ export function DetailPanelRail({ className }: { className?: string }) {
   const isMobile = useIsMobile();
   // Neither route changes nor breakpoint changes retain the old host/presence.
   // In particular, navigation must not animate another conversation's body out.
-  return isMobile ? (
-    <MobilePanel key={pathname} />
-  ) : (
-    <DesktopPanel key={pathname} className={className} />
+  return <PanelRail key={`${pathname}\n${isMobile}`} overlay={isMobile} className={className} />;
+}
+
+/**
+ * The panel's one switch. It never moves: the layout pins it to the top right
+ * corner, and both the header and the open panel's strip leave room for it
+ * with `PanelToggleSpace`, so showing and hiding never relocate the control.
+ */
+export function DetailPanelToggle() {
+  const panel = useDetailPanel();
+  const { tabs, visible } = useContext(DetailPanelTabsContext);
+  const label = visible
+    ? "Hide panel"
+    : tabs.length > 1
+      ? `Show panel (${tabs.length} tabs)`
+      : "Show panel";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={visible ? panel.hide : panel.show}
+            aria-label={label}
+            aria-expanded={visible}
+            className="text-muted-foreground"
+          />
+        }
+      >
+        <MotionSwap value={visible ? "hide" : "show"} kind="icon" className="size-4">
+          <HugeiconsIcon
+            icon={visible ? PanelRightCloseIcon : PanelRightOpenIcon}
+            strokeWidth={2}
+          />
+        </MotionSwap>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
+}
+
+/** Room for the corner toggle at the end of a row it would otherwise cover. */
+export function PanelToggleSpace() {
+  return <span aria-hidden className="w-10 shrink-0" />;
 }
 
 function usePanelPresentation() {
@@ -168,41 +444,215 @@ function usePanelPresentation() {
   return { ...presentation, open: selected !== null, finishExit };
 }
 
-function MobilePanel() {
+// dnd-kit will not start a drag from a button inside the dragged element, and a
+// tab is mostly its button. Only the close button keeps a press to itself.
+const TAB_SENSORS = [
+  PointerSensor.configure({
+    preventActivation: (event) =>
+      event.target instanceof Element && event.target.closest("[data-tab-close]") !== null,
+  }),
+];
+
+// Along the strip only, and never past either end of the tab list.
+const TAB_MODIFIERS = [
+  RestrictToHorizontalAxis,
+  RestrictToElement.configure({
+    element: (operation) => operation.source?.element?.closest("[role=tablist]") ?? null,
+  }),
+];
+
+/**
+ * One button per tab, with roving focus: Tab enters on the selected one, arrows
+ * move and select, Alt+Shift+arrows move the tab itself. Dragging sorts with
+ * dnd-kit, whose other tabs slide aside as one passes them; its keyboard sensor
+ * is left out because it would take Enter and Space, which select a tab.
+ */
+function DetailPanelTabStrip({ ids }: { ids: { tab: (index: number) => string; panel: string } }) {
   const panel = useDetailPanel();
-  const { request, open, generation, finishExit } = usePanelPresentation();
-  const reducedMotion = useAppReducedMotion();
+  const { tabs, activeId, visible } = useContext(DetailPanelTabsContext);
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const onKeyDown = (event: KeyboardEvent, index: number) => {
+    const tab = tabs[index];
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (tab && step !== 0 && event.altKey && event.shiftKey) {
+      event.preventDefault();
+      panel.moveTab(tab.id, index + step);
+      return;
+    }
+    const target =
+      step !== 0
+        ? tabs[(index + step + tabs.length) % tabs.length]
+        : event.key === "Home"
+          ? tabs[0]
+          : event.key === "End"
+            ? tabs.at(-1)
+            : undefined;
+    if (!target) return;
+    event.preventDefault();
+    panel.select(target.id);
+    buttons.current.get(target.id)?.focus();
+  };
+  const register = useCallback((id: string, element: HTMLButtonElement | null) => {
+    if (element) buttons.current.set(id, element);
+    else buttons.current.delete(id);
+  }, []);
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(nextOpen) => !nextOpen && panel.close()}
-      onOpenChangeComplete={(nextOpen) => !nextOpen && finishExit(generation)}
-    >
-      <SheetContent
-        side="bottom"
-        className={cn(
-          "detail-panel-sheet max-h-[80svh]",
-          reducedMotion && "!transition-none !transform-none !translate-none",
-        )}
-        aria-hidden={!open || undefined}
-        inert={!open || undefined}
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <DragDropProvider
+        sensors={TAB_SENSORS}
+        modifiers={TAB_MODIFIERS}
+        onDragEnd={(event) => {
+          const { source } = event.operation;
+          if (event.canceled || !isSortable(source)) return;
+          if (source.index !== source.initialIndex) panel.moveTab(String(source.id), source.index);
+        }}
       >
-        <SheetHeader className="pb-2">
-          <div className="min-w-0 pr-10 wrap-anywhere">
-            <SheetTitle>{request?.title}</SheetTitle>
-          </div>
-          {request?.subtitle ? (
-            <p className="text-muted-foreground text-xs wrap-anywhere">{request.subtitle}</p>
-          ) : null}
-        </SheetHeader>
-        {request?.actions ? (
-          <div className="shrink-0 border-b px-6 pb-3">{request.actions}</div>
-        ) : null}
-        <div key={request?.id} className="min-h-0 flex-1 overflow-y-auto px-6">
-          <div className="py-4">{request?.body}</div>
+        <div
+          role="tablist"
+          aria-label="Panel tabs"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+        >
+          {tabs.map((tab, index) => (
+            <PanelTab
+              key={tab.id}
+              tab={tab}
+              index={index}
+              id={ids.tab(index)}
+              panelId={ids.panel}
+              selected={visible && tab.id === activeId}
+              focusable={visible ? tab.id === activeId : index === 0}
+              register={register}
+              onKeyDown={onKeyDown}
+            />
+          ))}
         </div>
-      </SheetContent>
-    </Sheet>
+      </DragDropProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={panel.newTab}
+              aria-label="New tab"
+              className="text-muted-foreground"
+            />
+          }
+        >
+          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+        </TooltipTrigger>
+        <TooltipContent>New tab</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function PanelTab({
+  tab,
+  index,
+  id,
+  panelId,
+  selected,
+  focusable,
+  register,
+  onKeyDown,
+}: {
+  tab: DetailPanelTabSummary;
+  index: number;
+  id: string;
+  panelId: string;
+  selected: boolean;
+  focusable: boolean;
+  register: (id: string, element: HTMLButtonElement | null) => void;
+  onKeyDown: (event: KeyboardEvent, index: number) => void;
+}) {
+  const panel = useDetailPanel();
+  const { ref, isDragging } = useSortable({ id: tab.id, index });
+  return (
+    <div
+      ref={ref}
+      data-panel-tab=""
+      className={cn(
+        // The ring is inset: the strip scrolls sideways, which clips anything
+        // drawn outside a tab.
+        "group/tab ring-ring/50 flex h-8 max-w-48 min-w-0 shrink-0 items-center gap-0.5 rounded-md pr-0.5 ring-inset transition-colors has-[[role=tab]:focus-visible]:ring-2",
+        selected
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+        isDragging && "bg-muted text-foreground shadow-sm",
+      )}
+    >
+      <button
+        type="button"
+        role="tab"
+        id={id}
+        aria-selected={selected}
+        {...(selected ? { "aria-controls": panelId } : {})}
+        tabIndex={focusable ? 0 : -1}
+        ref={(element) => {
+          register(tab.id, element);
+          return () => register(tab.id, null);
+        }}
+        className="flex h-full min-w-0 items-center gap-1.5 pl-2 text-sm outline-none"
+        onClick={() => panel.select(tab.id)}
+        onAuxClick={(event) => {
+          if (event.button !== 1) return;
+          event.preventDefault();
+          panel.closeTab(tab.id);
+        }}
+        onKeyDown={(event) => onKeyDown(event, index)}
+      >
+        <HugeiconsIcon
+          icon={tab.icon ?? File01Icon}
+          strokeWidth={2}
+          className="size-4 shrink-0"
+          aria-hidden
+        />
+        <span className="truncate">{tab.title}</span>
+      </button>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        onClick={() => panel.closeTab(tab.id)}
+        aria-label={`Close ${tab.title}`}
+        data-tab-close=""
+        className={cn(
+          "text-muted-foreground",
+          !selected && "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
+        )}
+      >
+        <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+      </Button>
+    </div>
+  );
+}
+
+function useTabIds() {
+  const base = useId();
+  const { tabs, activeId } = useContext(DetailPanelTabsContext);
+  const activeIndex = tabs.findIndex((tab) => tab.id === activeId);
+  return {
+    tab: (index: number) => `${base}-tab-${index}`,
+    panel: `${base}-panel`,
+    activeTab: activeIndex < 0 ? undefined : `${base}-tab-${activeIndex}`,
+  };
+}
+
+function PanelInfo({
+  request,
+  className,
+}: {
+  request: DetailPanelRequest | null;
+  className: string;
+}) {
+  if (!request || (!request.subtitle && !request.actions)) return null;
+  return (
+    <div className={cn("flex shrink-0 flex-col gap-2 border-b", className)}>
+      {request.subtitle ? (
+        <p className="text-muted-foreground text-xs wrap-anywhere">{request.subtitle}</p>
+      ) : null}
+      {request.actions}
+    </div>
   );
 }
 
@@ -299,7 +749,39 @@ function DetailPanelResizer({
   );
 }
 
-function DesktopPanel({ className }: { className: string | undefined }) {
+/**
+ * Publishes the rail's live width for the desktop titlebar, which sits outside
+ * this tree: the header ends and the tab strip starts at the rail's edge, and
+ * both have to follow it through the open and close animation, not jump to it.
+ */
+function useTitlebarInset(root: RefObject<HTMLElement | null>, mounted: boolean) {
+  useLayoutEffect(() => {
+    const element = root.current;
+    if (!mounted || !element) return;
+    const html = document.documentElement;
+    const apply = () => {
+      const width = element.getBoundingClientRect().width;
+      html.style.setProperty("--detail-panel-inset", `${width}px`);
+      if (width > 0) html.dataset.detailPanel = "";
+      else delete html.dataset.detailPanel;
+    };
+    apply();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(apply) : null;
+    observer?.observe(element);
+    return () => {
+      observer?.disconnect();
+      html.style.removeProperty("--detail-panel-inset");
+      delete html.dataset.detailPanel;
+    };
+  }, [root, mounted]);
+}
+
+/**
+ * Beside the page on a wide screen, with a draggable edge. On a narrow one the
+ * same rail covers the page below the header and slides in from the right, so
+ * the corner toggle and its right-panel icon mean the same thing everywhere.
+ */
+function PanelRail({ className, overlay }: { className: string | undefined; overlay: boolean }) {
   const panel = useDetailPanel();
   const registerBeforeAction = useContext(DetailPanelBeforeActionContext);
   const { selected, request, open, generation, finishExit } = usePanelPresentation();
@@ -309,6 +791,9 @@ function DesktopPanel({ className }: { className: string | undefined }) {
   const [dragging, setDragging] = useState(false);
   const root = useRef<HTMLElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const ids = useTabIds();
+  // An overlay leaves the header where it is, so it publishes no inset.
+  useTitlebarInset(root, request !== null && !overlay);
 
   // A drag leaves the 8px handle almost immediately, and the cursor follows
   // whatever is under the pointer, so hold it on the document for the duration
@@ -346,11 +831,11 @@ function DesktopPanel({ className }: { className: string | undefined }) {
     return registerBeforeAction(handleAction);
   }, [registerBeforeAction, selectedId]);
 
-  // A nonmodal rail owns Escape, but never steals focus from elsewhere on close.
+  // A nonmodal rail owns Escape, but never steals focus from elsewhere on hide.
   useEffect(() => {
     if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") panel.close();
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") panel.hide();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -367,8 +852,9 @@ function DesktopPanel({ className }: { className: string | undefined }) {
   // The width belongs in the label: Motion re-runs on a changed label, not on a
   // changed variant definition, so a drag would otherwise leave the rail at the
   // width it opened with.
-  const target = `${open ? "open" : "closed"}-${generation}-${reducedMotion ? "reduced" : "animated"}-${open ? width : 0}`;
+  const target = `${open ? "open" : "closed"}-${generation}-${reducedMotion ? "reduced" : "animated"}-${open && !overlay ? width : 0}`;
   const duration = reducedMotion ? 0 : 0.2;
+  const shape = overlay ? { x: open ? "0%" : "100%" } : { width: open ? width : 0 };
   return (
     <m.aside
       ref={root}
@@ -377,12 +863,18 @@ function DesktopPanel({ className }: { className: string | undefined }) {
       inert={!open || undefined}
       className={cn(
         "flex shrink-0 flex-col overflow-hidden",
+        // Below the header in a browser; a desktop shell's header is in its
+        // titlebar, above this row altogether.
+        overlay &&
+          "bg-background absolute inset-x-0 top-12 bottom-0 z-20 [html[data-desktop-chrome]_&]:top-0",
         !open && "pointer-events-none",
         className,
       )}
-      initial={{ width: reducedMotion ? width : 0 }}
+      initial={
+        overlay ? { x: reducedMotion ? "0%" : "100%" } : { width: reducedMotion ? width : 0 }
+      }
       animate={target}
-      variants={{ [target]: { width: open ? width : 0 } }}
+      variants={{ [target]: shape }}
       // A drag must track the pointer, not ease toward it; the open and close
       // animation keeps its own duration.
       transition={dragging ? { duration: 0 } : { duration, ease: "easeInOut" }}
@@ -390,52 +882,48 @@ function DesktopPanel({ className }: { className: string | undefined }) {
         if (!open && definition === target) finishExit(generation);
       }}
     >
+      {overlay ? (
+        <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
+          <DetailPanelTabStrip ids={ids} />
+        </div>
+      ) : (
+        <PanelTitlebar>
+          <DetailPanelTabStrip ids={ids} />
+          <PanelToggleSpace />
+        </PanelTitlebar>
+      )}
+      {/* Not keyed by tab: switching tabs swaps the content below at once, and
+          only opening the panel runs this entrance. */}
       <m.div
-        key={request.id}
-        style={{ width }}
-        className="relative flex min-h-0 flex-1 flex-col border-l"
+        style={{ width: overlay ? "100%" : width }}
+        className={cn("relative flex min-h-0 flex-1 flex-col", !overlay && "border-l")}
         initial={{ opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : 8 }}
         animate={target}
         variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
         transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
       >
-        <DetailPanelResizer
-          width={width}
-          dragging={dragging}
-          onResize={resize}
-          onReset={reset}
-          onDraggingChange={setDragging}
-        />
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">{request.title}</p>
-          {request.subtitle ? (
-            <span className="text-muted-foreground shrink-0 text-xs">{request.subtitle}</span>
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={panel.close}
-                  aria-label="Close panel"
-                  className="text-muted-foreground"
-                />
-              }
-            >
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            </TooltipTrigger>
-            <TooltipContent>Close panel</TooltipContent>
-          </Tooltip>
-        </div>
-        {request.actions ? (
-          <div className="shrink-0 border-b px-4 py-3">{request.actions}</div>
-        ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4">
-          {/* A column at least as tall as the scroller, so a body that wants
-              the whole height (an editor) can grow into it with flex-1. */}
-          <div className="flex min-h-full flex-col py-4">{request.body}</div>
-        </div>
+        {overlay ? null : (
+          <DetailPanelResizer
+            width={width}
+            dragging={dragging}
+            onResize={resize}
+            onReset={reset}
+            onDraggingChange={setDragging}
+          />
+        )}
+        <Fragment key={request.id}>
+          <PanelInfo request={request} className="px-4 py-3" />
+          <div
+            role="tabpanel"
+            id={ids.panel}
+            {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
+            className="min-h-0 flex-1 overflow-y-auto px-4"
+          >
+            {/* A column at least as tall as the scroller, so a body that wants
+                the whole height (an editor) can grow into it with flex-1. */}
+            <div className="flex min-h-full flex-col py-4">{request.body}</div>
+          </div>
+        </Fragment>
       </m.div>
     </m.aside>
   );
@@ -451,4 +939,24 @@ export function useDetailPanel(): DetailPanelApi {
 /** Selection-only subscription: body/subtitle refreshes do not notify owners. */
 export function useDetailPanelSelectedId(): string | null {
   return useContext(DetailPanelSelectedIdContext);
+}
+
+/** Every tab on this page, selected or not; changes only when one opens or closes. */
+export function useDetailPanelTabIds(): ReadonlyArray<string> {
+  return useContext(DetailPanelTabIdsContext);
+}
+
+/**
+ * Closes this prefix's tabs whose item is no longer in `liveIds`. The page that
+ * owns a kind is the only one that can prove an item gone, and a restored tab
+ * has nobody else to close it.
+ */
+export function useDetailPanelReconciler(prefix: string, liveIds: ReadonlyArray<string>) {
+  const panel = useDetailPanel();
+  const tabIds = useDetailPanelTabIds();
+  useEffect(() => {
+    const live = new Set(liveIds);
+    for (const id of tabIds)
+      if (id.startsWith(prefix) && !live.has(id.slice(prefix.length))) panel.closeTab(id);
+  }, [panel, prefix, liveIds, tabIds]);
 }

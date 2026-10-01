@@ -1,3 +1,4 @@
+import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode, Ref } from "react";
 import {
@@ -17,6 +18,7 @@ const ui: DraftKindUi<DraftSettings> = {
   kind: "agent",
   noun: "agent",
   Noun: "Agent",
+  icon: PencilEdit02Icon,
   useController: useAgentDraft,
   labels: {
     name: "Name",

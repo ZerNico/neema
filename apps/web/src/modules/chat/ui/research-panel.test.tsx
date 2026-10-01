@@ -9,7 +9,7 @@ import type {
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import type { ResearchTaskProgress } from "../research-schema.ts";
-import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail, DetailPanelToggle } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 
 // The panel closes on navigation; these tests render outside a router.
@@ -106,6 +106,7 @@ const tree = (
           </main>
           {/* The real rail is outside ChatView, not a child of the virtual list. */}
           <DetailPanelRail />
+          <DetailPanelToggle />
         </DetailPanelProvider>
       </AppMotionProvider>
     </StrictMode>
@@ -136,7 +137,8 @@ describe("research panel", () => {
       "href",
       "https://example.org/report",
     );
-    expect(within(panel).queryByRole("tab")).not.toBeInTheDocument();
+    // The body itself has no tabs; the panel's own tab strip sits above it.
+    expect(within(within(panel).getByRole("tabpanel")).queryByRole("tab")).not.toBeInTheDocument();
   });
 
   it("lists knowledge steps under their task by outcome, never by document handle", () => {
@@ -398,7 +400,7 @@ describe("research panel", () => {
   it("does not reopen after explicit close and subsequent progress", () => {
     const { rerender } = renderBubble();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     rerender(
       tree([research, search, { ...read, status: "complete" }], undefined, undefined, {
         visible: false,

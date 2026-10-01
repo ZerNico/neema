@@ -1,13 +1,16 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps, ReactNode } from "react";
 import { StrictMode, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSessionIdentity } from "~/modules/auth/server/functions.ts";
 import { AppMotionProvider } from "~/ui/motion";
+import { defaultDetailPanelWidth } from "./detail-panel-width.ts";
 import {
   DetailPanelProvider,
   DetailPanelRail,
+  DetailPanelToggle,
   useDetailPanel,
+  useDetailPanelReconciler,
   useDetailPanelSelectedId,
   type DetailPanelApi,
 } from "./detail-panel.tsx";
@@ -58,6 +61,10 @@ vi.mock("~/modules/auth/client.ts", () => ({
   },
 }));
 
+// Nobody has dragged the rail yet in these tests, so it opens at its share of the window.
+const initialWidth = defaultDetailPanelWidth(window.innerWidth);
+const initial = `${initialWidth}px`;
+
 let panel: DetailPanelApi;
 function Probe() {
   const api = useDetailPanel();
@@ -83,16 +90,18 @@ function SelectionProbe() {
   return null;
 }
 
-function Harness() {
+function Harness({ userId, children }: { userId?: string; children?: ReactNode }) {
   return (
     <StrictMode>
       <AppMotionProvider>
-        <DetailPanelProvider>
+        <DetailPanelProvider {...(userId ? { userId } : {})}>
           <Probe />
           <SelectionProbe />
+          {children}
           <main tabIndex={-1}>
             <button>Open details</button>
             <button>Elsewhere</button>
+            <DetailPanelToggle />
           </main>
           <DetailPanelRail className="test-panel-class" />
         </DetailPanelProvider>
@@ -112,7 +121,7 @@ const preferenceListeners = new Set<() => void>();
 beforeEach(() => {
   // The rail width is a real preference, so it outlives a render; reset it or
   // one test's drag becomes the next test's starting width.
-  window.localStorage.removeItem("chat.detail-panel-width");
+  window.localStorage.clear();
   environment.mobile = false;
   environment.pathname = "/chat/one";
   environment.reducedMotion = true;
@@ -139,14 +148,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function deferredAnimation() {
-  let resolve!: () => void;
-  const promise = new Promise<Animation>((done) => {
-    resolve = () => done({} as Animation);
-  });
-  return { promise, resolve };
-}
-
 function lastExit() {
   for (let index = animations.length - 1; index >= 0; index--) {
     const exit = animations[index]!;
@@ -156,14 +157,12 @@ function lastExit() {
 }
 
 describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
-  it("keeps long titles readable beside the mobile close button", () => {
+  it("truncates a long title in its tab", () => {
     environment.mobile = mobile;
     render(<Harness />);
     const title = "LongDocumentTitle".repeat(15);
     act(() => panel.open({ id: "long", title, body: <p>Document</p> }));
-    const heading = screen.getByText(title);
-    if (mobile) expect(heading.parentElement).toHaveClass("pr-10", "wrap-anywhere");
-    else expect(heading).toHaveClass("truncate");
+    expect(within(screen.getByRole("tab")).getByText(title)).toHaveClass("truncate");
   });
 
   it("refreshes same-ID props without resetting body state; a different ID resets it", () => {
@@ -216,17 +215,17 @@ describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
     act(() => {
       panel.open({ id: "sources", title: "Sources", body: <p>Source snapshot</p> });
       panel.refresh(late);
-      panel.closeIfSelected("one");
+      panel.closeTab("one");
     });
     expect(screen.getByText("Source snapshot")).toBeInTheDocument();
     expect(screen.queryByText("Late progress")).not.toBeInTheDocument();
-    act(() => panel.closeIfSelected("sources"));
+    act(() => panel.closeTab("sources"));
     expect(screen.queryByText("Source snapshot")).not.toBeInTheDocument();
     act(() => panel.refresh(late));
     expect(screen.queryByText("Late progress")).not.toBeInTheDocument();
     act(() => {
       panel.open(original);
-      panel.close();
+      panel.hide();
       panel.refresh(late);
     });
     expect(screen.queryByText("Original")).not.toBeInTheDocument();
@@ -244,11 +243,11 @@ describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
     expect(screen.getByText("Progress")).toBeInTheDocument();
     expect(selectionRender).not.toHaveBeenCalled();
     expect(panel).toBe(api);
-    act(() => panel.close());
+    act(() => panel.hide());
     expect(selectionRender).toHaveBeenLastCalledWith(null);
   });
 
-  it("still closes on navigation and explicit close", () => {
+  it("drops non-restorable tabs on navigation and hides on request", () => {
     environment.mobile = mobile;
     const view = render(<Harness />);
     const original = { id: "one", title: "Details", body: <p>Panel content</p> };
@@ -259,7 +258,7 @@ describe.each([false, true])("detail panel (mobile=%s)", (mobile) => {
     act(() => panel.refresh(original));
     expect(screen.queryByText("Panel content")).not.toBeInTheDocument();
     act(() => panel.open({ id: "two", title: "Details", body: <p>Other content</p> }));
-    act(() => panel.close());
+    act(() => panel.hide());
     expect(screen.queryByText("Other content")).not.toBeInTheDocument();
   });
 });
@@ -270,12 +269,12 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
   const rail = screen.getByRole("complementary");
   const handle = screen.getByRole("separator", { name: "Resize panel" });
   const width = async (expected: string) => waitFor(() => expect(rail.style.width).toBe(expected));
-  await width("352px");
+  await width(initial);
 
   // The rail is on the right, so dragging its edge left widens it.
   fireEvent.pointerDown(handle, { button: 0, clientX: 800, pointerId: 1 });
   fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
-  await width("452px");
+  await width(`${initialWidth + 100}px`);
   fireEvent.pointerUp(handle, { clientX: 700, pointerId: 1 });
 
   // Half the window is the ceiling, so the conversation keeps its share, and
@@ -299,10 +298,10 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
   const reopened = screen.getByRole("complementary");
   await waitFor(() => expect(reopened.style.width).toBe("320px"));
   fireEvent.doubleClick(screen.getByRole("separator", { name: "Resize panel" }));
-  await waitFor(() => expect(reopened.style.width).toBe("352px"));
+  await waitFor(() => expect(reopened.style.width).toBe(initial));
 });
 
-it("closes the desktop rail on Escape", () => {
+it("hides the desktop rail on Escape", () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
   fireEvent.keyDown(window, { key: "Escape" });
@@ -315,8 +314,8 @@ it("deselects immediately, retains only inert presentation, then cleans up on de
   act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Outgoing" /> }));
   const rail = screen.getByRole("complementary");
   expect(rail).toHaveClass("test-panel-class", "overflow-hidden");
-  expect((rail.firstElementChild as HTMLElement).style.width).toBe("352px");
-  act(() => panel.close());
+  expect((rail.lastElementChild as HTMLElement).style.width).toBe(initial);
+  act(() => panel.hide());
   expect(selectionRender).toHaveBeenLastCalledWith(null);
   expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   expect(rail).toHaveAttribute("aria-hidden", "true");
@@ -335,7 +334,7 @@ it.each(["one", "two"])("ignores an old desktop exit after rapid reopen of %s", 
   act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Original" /> }));
   fireEvent.click(screen.getByRole("button", { name: "Count: 0" }));
   const shell = screen.getByRole("complementary");
-  act(() => panel.close());
+  act(() => panel.hide());
   const oldExit = lastExit();
   act(() => panel.open({ id, title: "New details", body: <StatefulBody label="Reopened" /> }));
   expect(screen.getByRole("complementary")).toBe(shell);
@@ -345,7 +344,7 @@ it.each(["one", "two"])("ignores an old desktop exit after rapid reopen of %s", 
   ).toBeInTheDocument();
   act(() => oldExit.complete(oldExit.target));
   expect(screen.getByText("Reopened")).toBeInTheDocument();
-  act(() => panel.close());
+  act(() => panel.hide());
   const newExit = lastExit();
   expect(newExit.target).not.toBe(oldExit.target);
   act(() => oldExit.complete(oldExit.target));
@@ -359,10 +358,10 @@ it("switches identities in the existing expanded desktop shell", async () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>First body</p> }));
   const rail = screen.getByRole("complementary");
-  await waitFor(() => expect(rail.style.width).toBe("352px"));
+  await waitFor(() => expect(rail.style.width).toBe(initial));
   act(() => panel.open({ id: "two", title: "Sources", body: <p>Second body</p> }));
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("352px");
+  expect(rail.style.width).toBe(initial);
   expect(screen.queryByText("First body")).not.toBeInTheDocument();
   expect(screen.getByText("Second body")).toBeInTheDocument();
 });
@@ -381,7 +380,7 @@ it("purges an exiting desktop body on navigation without restoring its opener", 
   expect(screen.queryByText("Old route")).not.toBeInTheDocument();
   expect(focus).not.toHaveBeenCalled();
   act(() => panel.open({ id: "two", title: "Details", body: <p>Exiting route</p> }));
-  act(() => panel.close());
+  act(() => panel.hide());
   const oldExit = lastExit();
   environment.pathname = "/chat/three";
   view.rerender(<Harness />);
@@ -396,7 +395,7 @@ it("cleans up immediately when reduced motion becomes preferred during an exit",
   environment.holdMotion = true;
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Outgoing</p> }));
-  act(() => panel.close());
+  act(() => panel.hide());
   expect(screen.getByText("Outgoing")).toBeInTheDocument();
   act(() => {
     environment.reducedMotion = true;
@@ -411,15 +410,15 @@ it("cleans up without a completion event when animation frames are unavailable",
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>No animation body</p> }));
   vi.stubGlobal("requestAnimationFrame", undefined);
-  act(() => panel.close());
+  act(() => panel.hide());
   expect(screen.queryByText("No animation body")).not.toBeInTheDocument();
 });
 
 it("opens at full width and removes closed content synchronously with reduced motion", () => {
   render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Reduced body</p> }));
-  expect(screen.getByRole("complementary").style.width).toBe("352px");
-  act(() => panel.close());
+  expect(screen.getByRole("complementary").style.width).toBe(initial);
+  act(() => panel.hide());
   expect(screen.queryByText("Reduced body")).not.toBeInTheDocument();
 });
 
@@ -443,7 +442,7 @@ it.each(["close", "escape", "switch"])(
     if (action === "escape") fireEvent.keyDown(window, { key: "Escape" });
     else if (action === "switch")
       act(() => panel.open({ id: "two", title: "Sources", body: <p>New body</p> }));
-    else fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    else fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(focus).toHaveBeenCalledOnce();
     expect(opener).toHaveFocus();
   },
@@ -457,120 +456,29 @@ it("uses main when a virtualized opener has disappeared and never steals outside
   act(() => panel.open(request));
   opener.remove();
   screen.getByRole("button", { name: "Count: 0" }).focus();
-  act(() => panel.close());
+  act(() => panel.hide());
   expect(screen.getByRole("main")).toHaveFocus();
   act(() => panel.open(request));
   const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
   elsewhere.focus();
-  act(() => panel.close());
+  act(() => panel.hide());
   expect(elsewhere).toHaveFocus();
 });
 
-it("retains the native mobile Sheet until its own CSS exit completes", async () => {
+it("covers the page on a phone, and swaps hosts across the breakpoint", () => {
   environment.mobile = true;
-  environment.reducedMotion = false;
-  render(<Harness />);
-  const opener = screen.getByRole("button", { name: "Open details" });
-  opener.focus();
-  act(() => panel.open({ id: "one", title: "Details", body: <p>Mobile outgoing</p> }));
-  const sheet = screen.getByRole("dialog");
-  const finished = deferredAnimation();
-  sheet.getAnimations = vi.fn(() => [{ finished: finished.promise } as Animation]);
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(selectionRender).toHaveBeenLastCalledWith(null);
-  expect(sheet).toBeInTheDocument();
-  expect(sheet).toHaveAttribute("data-ending-style");
-  expect(sheet).toHaveAttribute("inert");
-  expect(sheet).toHaveAttribute("aria-hidden", "true");
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByText("Mobile outgoing")).toBeInTheDocument();
-  await waitFor(() => expect(sheet.getAnimations).toHaveBeenCalled());
-  await act(async () => finished.resolve());
-  await waitFor(() => expect(sheet).not.toBeInTheDocument());
-  expect(opener).toHaveFocus();
-  act(() => panel.refresh({ id: "one", title: "Late", body: <p>Late mobile data</p> }));
-  expect(screen.queryByText("Late mobile data")).not.toBeInTheDocument();
-});
-
-it.each(["one", "two"])("cancels a native mobile exit when reopening %s", async (id) => {
-  environment.mobile = true;
-  environment.reducedMotion = false;
-  render(<Harness />);
-  act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Original" /> }));
-  fireEvent.click(screen.getByRole("button", { name: "Count: 0" }));
-  const sheet = screen.getByRole("dialog");
-  const oldAnimation = deferredAnimation();
-  const getAnimations = vi.fn(() => [{ finished: oldAnimation.promise } as Animation]);
-  sheet.getAnimations = getAnimations;
-  act(() => panel.close());
-  await waitFor(() => expect(getAnimations).toHaveBeenCalled());
-  act(() => panel.open({ id, title: "Reopened", body: <StatefulBody label="Mobile reopened" /> }));
-  expect(screen.getByRole("dialog")).toBe(sheet);
-  expect(sheet).not.toHaveAttribute("inert");
-  expect(
-    screen.getByRole("button", { name: id === "one" ? "Count: 1" : "Count: 0" }),
-  ).toBeInTheDocument();
-  const newAnimation = deferredAnimation();
-  getAnimations.mockImplementation(() => [{ finished: newAnimation.promise } as Animation]);
-  getAnimations.mockClear();
-  act(() => panel.close());
-  await waitFor(() => expect(getAnimations).toHaveBeenCalled());
-  await act(async () => oldAnimation.resolve());
-  expect(screen.getByText("Mobile reopened")).toBeInTheDocument();
-  await act(async () => newAnimation.resolve());
-  await waitFor(() => expect(sheet).not.toBeInTheDocument());
-});
-
-it("purges a native mobile exit on navigation or a breakpoint change", async () => {
-  environment.mobile = true;
-  environment.reducedMotion = false;
-  const view = render(<Harness />);
-  const request = { id: "one", title: "Details", body: <p>Old mobile body</p> };
-  act(() => panel.open(request));
-  const sheet = screen.getByRole("dialog");
-  const finished = deferredAnimation();
-  sheet.getAnimations = vi.fn(() => [{ finished: finished.promise } as Animation]);
-  act(() => panel.close());
-  expect(screen.getByText("Old mobile body")).toBeInTheDocument();
-  environment.pathname = "/chat/two";
-  view.rerender(<Harness />);
-  expect(screen.queryByText("Old mobile body")).not.toBeInTheDocument();
-  act(() => panel.open({ ...request, body: <p>New mobile body</p> }));
-  await act(async () => finished.resolve());
-  expect(screen.getByText("New mobile body")).toBeInTheDocument();
-  const newSheet = screen.getByRole("dialog");
-  newSheet.getAnimations = vi.fn(() => [
-    { finished: new Promise<Animation>(() => {}) } as Animation,
-  ]);
-  act(() => panel.close());
-  environment.mobile = false;
-  view.rerender(<Harness />);
-  expect(screen.queryByText("New mobile body")).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
-});
-
-it("drops the old desktop host across breakpoints and cannot resurrect its pending exit", () => {
-  environment.reducedMotion = false;
-  environment.holdMotion = true;
   const view = render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Panel body</p> }));
-  const desktop = screen.getByRole("complementary");
-  environment.mobile = true;
-  view.rerender(<Harness />);
-  expect(desktop).not.toBeInTheDocument();
-  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  const overlay = screen.getByRole("complementary");
+  expect(overlay).toHaveClass("absolute", "inset-x-0");
+  expect(screen.queryByRole("separator", { name: "Resize panel" })).not.toBeInTheDocument();
   environment.mobile = false;
   view.rerender(<Harness />);
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("complementary")).not.toBe(desktop);
-  act(() => panel.close());
-  const oldExit = lastExit();
-  environment.mobile = true;
-  view.rerender(<Harness />);
-  expect(screen.queryByText("Panel body")).not.toBeInTheDocument();
-  act(() => panel.open({ id: "two", title: "Mobile", body: <p>Mobile body</p> }));
-  act(() => oldExit.complete(oldExit.target));
-  expect(screen.getByText("Mobile body")).toBeInTheDocument();
+  const rail = screen.getByRole("complementary");
+  expect(rail).not.toBe(overlay);
+  expect(rail).not.toHaveClass("absolute");
+  expect(screen.getByRole("separator", { name: "Resize panel" })).toBeInTheDocument();
+  expect(screen.getByText("Panel body")).toBeInTheDocument();
 });
 
 it("survives an identity revalidation on tab return without replaying its open animation", async () => {
@@ -598,7 +506,7 @@ it("survives an identity revalidation on tab return without replaying its open a
   act(() => release(identity));
   act(() => panel.open({ id: "one", title: "Details", body: <StatefulBody label="Live" /> }));
   const rail = screen.getByRole("complementary");
-  await waitFor(() => expect(rail.style.width).toBe("352px"));
+  await waitFor(() => expect(rail.style.width).toBe(initial));
   fireEvent.click(screen.getByRole("button", { name: "Count: 0" }));
   const counter = screen.getByRole("button", { name: "Count: 1" });
   const openTarget = animations.at(-1)?.target;
@@ -606,15 +514,208 @@ it("survives an identity revalidation on tab return without replaying its open a
   fireEvent(document, new Event("visibilitychange"));
   fireEvent.focus(window);
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("352px");
+  expect(rail.style.width).toBe(initial);
   expect(rail).toBeVisible();
   await act(async () => release(identity));
   expect(screen.getByRole("complementary")).toBe(rail);
-  expect(rail.style.width).toBe("352px");
+  expect(rail.style.width).toBe(initial);
   expect(screen.getByRole("button", { name: "Count: 1" })).toBe(counter);
   expect(animations.at(-1)?.target).toBe(openTarget);
 
   // A real close/reopen still animates: the fix removed the false remount, not the motion.
-  act(() => panel.close());
+  act(() => panel.hide());
   expect(lastExit().target).toMatch(/^closed-/);
+});
+
+function Reconcile({ live }: { live: string[] }) {
+  useDetailPanelReconciler("doc:", live);
+  return null;
+}
+
+const selected = () => screen.getByRole("tab", { selected: true });
+const order = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
+
+// dnd-kit marks a pointerdown it accepts with its sensor; jsdom has no layout,
+// so the drag itself cannot run here. The setup's PointerEvent stand-in is
+// used because dnd-kit checks the event's type.
+function press(target: Element) {
+  const event = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+  Object.defineProperty(event, "isPrimary", { value: true });
+  target.dispatchEvent(event);
+  return (event as PointerEvent & { sensor?: unknown }).sensor;
+}
+
+describe("tabs", () => {
+  it("adds a tab per id and mounts only the selected body", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "one", title: "First", body: <StatefulBody label="First body" /> }));
+    act(() => panel.open({ id: "two", title: "Second", body: <p>Second body</p> }));
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["First", "Second"]);
+    expect(screen.getByRole("tab", { name: "Second" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Second body");
+    expect(screen.queryByText("First body")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "First" }));
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("First body");
+    expect(screen.queryByText("Second body")).not.toBeInTheDocument();
+  });
+
+  it("opens beside the selected tab, and closing one selects its neighbour", () => {
+    render(<Harness />);
+    for (const id of ["a", "b", "c"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    act(() => panel.select("a"));
+    act(() => panel.open({ id: "d", title: "d", body: <p>d</p> }));
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["a", "d", "b", "c"]);
+    fireEvent.click(screen.getByRole("button", { name: "Close d" }));
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close c" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close b" }));
+    expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close a" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(selectionRender).toHaveBeenLastCalledWith(null);
+    expect(screen.getByRole("button", { name: "Show panel" })).toBeInTheDocument();
+  });
+
+  it("opens on a new tab from the toggle, which stays the one switch", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Show panel" }));
+    expect(screen.getByRole("tab", { name: "New tab" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Nothing open here yet");
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    expect(screen.getAllByRole("tab", { name: "New tab" })).toHaveLength(2);
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("First body");
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show panel (3 tabs)" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("moves between tabs with the arrow keys, Home and End", () => {
+    render(<Harness />);
+    for (const id of ["a", "b", "c"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    fireEvent.keyDown(selected(), { key: "ArrowRight" });
+    expect(selected()).toHaveTextContent("a");
+    expect(selected()).toHaveFocus();
+    fireEvent.keyDown(selected(), { key: "End" });
+    expect(selected()).toHaveTextContent("c");
+    fireEvent.keyDown(selected(), { key: "ArrowLeft" });
+    expect(selected()).toHaveTextContent("b");
+    fireEvent.keyDown(selected(), { key: "Home" });
+    expect(selected()).toHaveTextContent("a");
+    expect(screen.getAllByRole("tab").filter((tab) => tab.tabIndex === 0)).toEqual([selected()]);
+  });
+
+  it("lets a press on a tab start a drag, but not a press on its close button", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "a", title: "a", body: <p>a</p> }));
+    expect(press(within(screen.getByRole("tab", { name: "a" })).getByText("a"))).toBeDefined();
+    expect(press(screen.getByRole("button", { name: "Close a" }))).toBeUndefined();
+  });
+
+  it("moves the focused tab with Alt+Shift+arrows, keeping it selected", () => {
+    render(<Harness />);
+    for (const id of ["a", "b", "c"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    const c = screen.getByRole("tab", { name: "c" });
+    fireEvent.keyDown(c, { key: "ArrowLeft", altKey: true, shiftKey: true });
+    expect(order()).toEqual(["a", "c", "b"]);
+    fireEvent.keyDown(c, { key: "ArrowLeft", altKey: true, shiftKey: true });
+    fireEvent.keyDown(c, { key: "ArrowLeft", altKey: true, shiftKey: true });
+    expect(order()).toEqual(["c", "a", "b"]);
+    expect(c).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("switches tabs without replaying the panel's entrance", () => {
+    environment.reducedMotion = false;
+    render(<Harness />);
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    act(() => panel.open({ id: "two", title: "Second", body: <p>Second body</p> }));
+    const container = screen.getByRole("tabpanel").parentElement;
+    fireEvent.click(screen.getByRole("tab", { name: "First" }));
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("First body");
+    expect(screen.getByRole("tabpanel").parentElement).toBe(container);
+  });
+
+  it("keeps its tabs when hidden, and the header toggle brings them back", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    act(() => panel.open({ id: "two", title: "Second", body: <p>Second body</p> }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show panel (2 tabs)" }));
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Second body");
+    expect(screen.queryByRole("button", { name: /Show panel/ })).not.toBeInTheDocument();
+  });
+
+  it("refreshes an unselected tab without selecting it", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    act(() => panel.open({ id: "two", title: "Second", body: <p>Second body</p> }));
+    act(() => panel.refresh({ id: "one", title: "Renamed", body: <p>Renamed body</p> }));
+    expect(screen.getByRole("tab", { name: "Renamed" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Second body");
+  });
+
+  it("keeps a released restorable tab pending and closes any other", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "doc", title: "Doc", body: <p>Doc body</p>, restorable: true }));
+    act(() => panel.release("doc"));
+    expect(screen.getByRole("tab", { name: "Doc" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+    expect(screen.queryByText("Doc body")).not.toBeInTheDocument();
+    act(() => panel.open({ id: "snapshot", title: "Snapshot", body: <p>Snapshot body</p> }));
+    act(() => panel.release("snapshot"));
+    expect(screen.queryByRole("tab", { name: "Snapshot" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Doc" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("restores a page's restorable tabs across navigation and restarts, per account", () => {
+    const view = render(<Harness userId="u1" />);
+    act(() => panel.open({ id: "doc", title: "Doc", body: <p>Doc body</p>, restorable: true }));
+    act(() => panel.open({ id: "snapshot", title: "Snapshot", body: <p>Snapshot body</p> }));
+    environment.pathname = "/chat/two";
+    view.rerender(<Harness userId="u1" />);
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    environment.pathname = "/chat/one";
+    view.rerender(<Harness userId="u1" />);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Doc"]);
+    // The body was never stored: its owner rebuilds it from the id.
+    expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+    act(() =>
+      panel.refresh({ id: "doc", title: "Doc", body: <p>Rebuilt body</p>, restorable: true }),
+    );
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Rebuilt body");
+
+    view.unmount();
+    const restarted = render(<Harness userId="u1" />);
+    expect(screen.getByRole("tab", { name: "Doc" })).toHaveAttribute("aria-selected", "true");
+    restarted.unmount();
+    render(<Harness userId="u2" />);
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  });
+
+  it("never opens a restored panel by itself on a phone", () => {
+    const first = render(<Harness userId="u1" />);
+    act(() => panel.open({ id: "doc", title: "Doc", body: <p>Doc body</p>, restorable: true }));
+    first.unmount();
+    environment.mobile = true;
+    render(<Harness userId="u1" />);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show panel" }));
+    expect(screen.getByRole("complementary", { name: "Doc" })).toBeInTheDocument();
+  });
+
+  it("closes a kind's tabs once the page proves their item gone", () => {
+    const view = render(<Harness />);
+    for (const id of ["doc:a", "doc:b", "other:x"])
+      act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    view.rerender(
+      <Harness>
+        <Reconcile live={["a"]} />
+      </Harness>,
+    );
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["doc:a", "other:x"]);
+  });
 });

@@ -1,3 +1,4 @@
+import { File01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
@@ -17,7 +18,11 @@ import { useDocument } from "../client/use-document.ts";
 import { taskProgress } from "../task-items.ts";
 import { DocumentPanelActions, DocumentPanelBody, documentSubtitle } from "./document-panel.tsx";
 import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
-import { useDetailPanel, useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
+import {
+  useDetailPanel,
+  useDetailPanelReconciler,
+  useDetailPanelSelectedId,
+} from "~/ui/detail-panel.tsx";
 
 export interface DocumentOwnerHandle {
   /** Every mounted document, so a send never races typing it has not stored yet. */
@@ -79,6 +84,7 @@ export function DocumentOwner({
   ref,
 }: DocumentOwnerProps) {
   const [sessions, setSessions] = useState<ReadonlyMap<string, Session>>(new Map());
+  useDetailPanelReconciler("document:", documentIds);
   const publish = useCallback(
     (documentId: string, session: Session) =>
       setSessions((current) => {
@@ -175,6 +181,8 @@ function DocumentSession({
       id,
       title: controller.document?.title ?? "Document",
       subtitle,
+      icon: File01Icon,
+      restorable: true,
       actions: (
         <DocumentPanelActions
           controller={controller}
@@ -195,7 +203,7 @@ function DocumentSession({
     latestRequest.current = request;
     panel.refresh(request);
   }, [panel, request]);
-  useEffect(() => () => panel.closeIfSelected(id), [id, panel]);
+  useEffect(() => () => panel.release(id), [id, panel]);
   const available = controller.document !== null;
   // Opens the panel once, when a document this answer just created has loaded.
   // Only live ones are passed in, so reloads and old chats never pop a panel.
