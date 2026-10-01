@@ -1,16 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { GENERIC_MEDIA_TYPE, attachmentKind } from "~/modules/attachments/constants.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
+import { fileResponse } from "~/server/file-response.ts";
 import { runtime } from "~/server/runtime.ts";
-
-// RFC 5987: an ASCII fallback for old agents plus the real UTF-8 name.
-const contentDisposition = (kind: string, fileName: string) => {
-  const ascii = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  const mode = kind === "image" || kind === "pdf" ? "inline" : "attachment";
-  return `${mode}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
-};
+import { approvedSession, unauthorized } from "~/server/approved-route.ts";
 
 /**
  * Serves attachment bytes to anyone the access policy allows. Raw route rather
@@ -20,13 +13,8 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const current = await sessionFromHeaders(request.headers);
-        // An account still waiting on approval is declined here as though
-        // signed out: only a server function can say why, and the browser
-        // is already being sent to the waiting screen by the app route.
-        if (!current?.approved) return new Response("Unauthorized", { status: 401 });
-        const session = current.session;
-
+        const session = await approvedSession(request);
+        if (!session) return unauthorized();
         const file = await runtime.runPromise(
           Effect.gen(function* () {
             const service = yield* AttachmentService;
@@ -38,26 +26,12 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
         );
         if (!file) return new Response("Not found", { status: 404 });
 
-        const kind = attachmentKind(file.mediaType);
-        return new Response(file.bytes as BodyInit, {
-          headers: {
-            // A file's stored type is descriptive only; served as bytes, it
-            // can never render as HTML or SVG on this origin.
-            "Content-Type":
-              kind === "text"
-                ? `${file.mediaType}; charset=utf-8`
-                : kind === "file"
-                  ? GENERIC_MEDIA_TYPE
-                  : file.mediaType,
-            // From the bytes actually being sent, not the size column. If
-            // store and DB ever drift the response must not be malformed.
-            "Content-Length": String(file.bytes.byteLength),
-            "Content-Disposition": contentDisposition(kind, file.fileName),
-            // Content is addressed by an opaque id, so it never changes.
-            "Cache-Control": "private, max-age=31536000, immutable",
-            "X-Content-Type-Options": "nosniff",
-          },
-        });
+        // Access is the owner's, or the owner's conversation's, and never
+        // revoked while the file exists; its id never names other bytes.
+        return fileResponse(
+          { bytes: file.bytes, name: file.fileName, mediaType: file.mediaType },
+          { inline: true, cache: "immutable" },
+        );
       },
     },
   },

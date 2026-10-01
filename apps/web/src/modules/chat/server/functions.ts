@@ -140,29 +140,17 @@ export const sendMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          AgentNotAvailable: () =>
-            Effect.die(new Response("The selected agent is not available", { status: 404 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeNotAvailable: () =>
-            Effect.die(new Response("A selected collection is not available", { status: 404 })),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("A response is still generating", { status: 409 })),
-          ToolUnavailable: (e) =>
-            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentUnsupported: (e) =>
-            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          // Claimed by another message, or gone. The chip is stale either way.
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+          AgentNotAvailable: selectedAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: selectedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ModelNotFound: unknownModel,
+          ConversationNotFound: missing,
+          ConversationBusy: busy,
+          ToolUnavailable: searchUnavailable,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
         }),
       ),
     ),
@@ -181,10 +169,10 @@ export const reserveWorkTurn = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 409 })),
+          ConversationNotFound: missing,
+          ConversationBusy: busy,
+          // Not the message's fault: the reservation no longer fits this chat.
+          InvalidMessage: notAllowed,
         }),
       ),
     ),
@@ -223,28 +211,17 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          AgentNotAvailable: () =>
-            Effect.die(new Response("The selected agent is not available", { status: 404 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeNotAvailable: () =>
-            Effect.die(new Response("A selected collection is not available", { status: 404 })),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
-          ToolUnavailable: (e) =>
-            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentUnsupported: (e) =>
-            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+          AgentNotAvailable: selectedAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: selectedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ModelNotFound: unknownModel,
+          ConversationNotFound: missing,
+          ConversationBusy: busy,
+          ToolUnavailable: searchUnavailable,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
         }),
       ),
     ),
@@ -260,11 +237,7 @@ export const getWorkTurnReservation = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           reservationId: data.reservationId,
         }),
-      ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 
@@ -324,22 +297,31 @@ const desktopDispatch = (
       }
     : undefined;
 
-const queueSubmissionErrors = {
-  ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-  ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-  WorkDesktopRequired: () =>
-    Effect.die(
-      new Response("This is a work chat; continue it from the desktop app", { status: 409 }),
-    ),
-  ToolUnavailable: (error: { reason: string }) =>
-    Effect.die(new Response(`Web search unavailable: ${error.reason}`, { status: 400 })),
-  InvalidMessage: (error: { reason: string }) =>
-    Effect.die(new Response(error.reason, { status: 400 })),
-  AttachmentUnsupported: (error: { fileName: string; reason: string }) =>
-    Effect.die(new Response(`${error.fileName}: ${error.reason}`, { status: 400 })),
-  AttachmentNotAvailable: () =>
-    Effect.die(new Response("An attachment is no longer available", { status: 409 })),
-} as const;
+/**
+ * How a message is refused, whichever way it came: a send, an answer to a
+ * question, a retry, a resume, an edit or a queued entry. Each function lists
+ * the failures its own call can raise; the wording lives here once, so the
+ * same failure reads the same wherever it surfaces.
+ */
+const refuse = (status: number, message: string) => Effect.die(new Response(message, { status }));
+const missing = () => refuse(404, "Not found");
+const unknownModel = () => refuse(400, "Unknown model");
+const busy = () => refuse(409, "A response is still generating");
+const workChat = () => refuse(409, "This is a work chat; continue it from the desktop app");
+const searchUnavailable = (error: { reason: string }) =>
+  refuse(400, `Web search unavailable: ${error.reason}`);
+const rejected = (error: { reason: string }) => refuse(400, error.reason);
+const notAllowed = (error: { reason: string }) => refuse(409, error.reason);
+const unreadable = (error: { fileName: string; reason: string }) =>
+  refuse(400, `${error.fileName}: ${error.reason}`);
+// Claimed by another message, or gone. The chip is stale either way.
+const attachmentGone = () => refuse(409, "An attachment is no longer available");
+// A new message picks its agent and collections now; a continuing one reuses
+// what its answers used, which may have gone since.
+const selectedAgentGone = () => refuse(404, "The selected agent is not available");
+const selectedKnowledgeGone = () => refuse(404, "A selected collection is not available");
+const chatAgentGone = () => refuse(409, "This chat’s agent is no longer available");
+const usedKnowledgeGone = () => refuse(409, "Knowledge this answer used is no longer available");
 
 export const queueMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -348,9 +330,14 @@ export const queueMessage = createServerFn({ method: "POST" })
     runtime.runPromise(
       ChatService.use((chat) => chat.queueMessage(queueSubmission(data, context.session))).pipe(
         Effect.catchTags({
-          ...queueSubmissionErrors,
-          QueueFull: () =>
-            Effect.die(new Response("Too many messages are queued", { status: 409 })),
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          WorkDesktopRequired: workChat,
+          ToolUnavailable: searchUnavailable,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
+          QueueFull: () => refuse(409, "Too many messages are queued"),
         }),
       ),
     ),
@@ -368,11 +355,15 @@ export const replaceQueuedMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          ...queueSubmissionErrors,
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          WorkDesktopRequired: workChat,
+          ToolUnavailable: searchUnavailable,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
           QueueEntryNotFound: () =>
-            Effect.die(
-              new Response("This queued message already started or was removed", { status: 409 }),
-            ),
+            refuse(409, "This queued message already started or was removed"),
         }),
       ),
     ),
@@ -385,11 +376,7 @@ export const removeQueuedMessage = createServerFn({ method: "POST" })
     runtime.runPromise(
       ChatService.use((chat) =>
         chat.removeQueuedMessage({ userId: context.session.user.id, ...data }),
-      ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 
@@ -402,17 +389,11 @@ export const steerQueuedMessage = createServerFn({ method: "POST" })
         chat.steerQueuedMessage({ userId: context.session.user.id, ...data }),
       ).pipe(
         Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          QueueEntryNotFound: () =>
-            Effect.die(new Response("Queued message no longer exists", { status: 409 })),
-          NoActiveGeneration: () =>
-            Effect.die(new Response("That response already finished", { status: 409 })),
+          ConversationNotFound: missing,
+          QueueEntryNotFound: () => refuse(409, "Queued message no longer exists"),
+          NoActiveGeneration: () => refuse(409, "That response already finished"),
           AttachmentUnsupported: (error) =>
-            Effect.die(
-              new Response(`The running answer can’t read ${error.fileName}: ${error.reason}`, {
-                status: 400,
-              }),
-            ),
+            refuse(400, `The running answer can’t read ${error.fileName}: ${error.reason}`),
         }),
       ),
     ),
@@ -431,9 +412,7 @@ export const dispatchQueuedMessage = createServerFn({ method: "POST" })
           desktop: desktopDispatch(data, context.session.session.id),
         }),
       ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
+        Effect.catchTag("ConversationNotFound", missing),
         // Every resolution failure reads the same to a person: the queued
         // message cannot start right now and is kept for them to decide on.
         Effect.catch(() =>
@@ -456,10 +435,7 @@ export const sendQueuedNow = createServerFn({ method: "POST" })
           desktop: desktopDispatch(data, context.session.session.id),
         }),
       ).pipe(
-        Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-        }),
+        Effect.catchTags({ ConversationNotFound: missing, MessageNotFound: missing }),
         // The reason is already on the entry; the person sees it in the strip.
         Effect.catch(() =>
           Effect.die(new Response("This message could not be started", { status: 409 })),
@@ -495,35 +471,19 @@ export const answerQuestion = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          AgentNotAvailable: () =>
-            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeNotAvailable: () =>
-            Effect.die(
-              new Response("Knowledge this answer used is no longer available", { status: 409 }),
-            ),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+          AgentNotAvailable: chatAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: usedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          ConversationBusy: busy,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
+          ToolUnavailable: searchUnavailable,
           QuestionUnavailable: () =>
-            Effect.die(
-              new Response("These questions are no longer available. Refresh the conversation.", {
-                status: 409,
-              }),
-            ),
-          ConversationBusy: () =>
-            Effect.die(new Response("A response is still generating", { status: 409 })),
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          ToolUnavailable: (e) =>
-            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("Attachment unavailable", { status: 409 })),
-          AttachmentUnsupported: (e) => Effect.die(new Response(e.reason, { status: 400 })),
+            refuse(409, "These questions are no longer available. Refresh the conversation."),
         }),
       ),
     ),
@@ -552,30 +512,18 @@ export const retryMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          RetryNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
-          AttachmentUnsupported: (e) =>
-            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          AgentNotAvailable: () =>
-            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          KnowledgeNotAvailable: () =>
-            Effect.die(
-              new Response("Knowledge this answer used is no longer available", { status: 409 }),
-            ),
+          AgentNotAvailable: chatAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: usedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          ConversationBusy: busy,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
+          MessageNotFound: missing,
+          RetryNotAllowed: notAllowed,
         }),
       ),
     ),
@@ -604,30 +552,18 @@ export const resumeMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          ResumeNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
-          AttachmentUnsupported: (e) =>
-            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          AgentNotAvailable: () =>
-            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          KnowledgeNotAvailable: () =>
-            Effect.die(
-              new Response("Knowledge this answer used is no longer available", { status: 409 }),
-            ),
+          AgentNotAvailable: chatAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: usedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          ConversationBusy: busy,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
+          MessageNotFound: missing,
+          ResumeNotAllowed: notAllowed,
         }),
       ),
     ),
@@ -646,11 +582,10 @@ export const branchConversation = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          BranchNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
+          ConversationNotFound: missing,
+          MessageNotFound: missing,
+          BranchNotAllowed: notAllowed,
+          ConversationBusy: busy,
         }),
       ),
     ),
@@ -668,12 +603,7 @@ export const stopGeneration = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           messageId: data.messageId,
         }),
-      ).pipe(
-        Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-        }),
-      ),
+      ).pipe(Effect.catchTags({ ConversationNotFound: missing, MessageNotFound: missing })),
     ),
   );
 
@@ -690,32 +620,19 @@ export const editMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
-          AgentNotAvailable: () =>
-            Effect.die(new Response("This chat’s agent is no longer available", { status: 409 })),
-          WorkDesktopRequired: () =>
-            Effect.die(
-              new Response("This is a work chat; continue it from the desktop app", {
-                status: 409,
-              }),
-            ),
-          KnowledgeNotAvailable: () =>
-            Effect.die(
-              new Response("Knowledge this answer used is no longer available", { status: 409 }),
-            ),
-          KnowledgeRejected: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          MessageNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          ModelNotFound: () => Effect.die(new Response("Unknown model", { status: 400 })),
-          ToolUnavailable: (e) =>
-            Effect.die(new Response(`Web search unavailable: ${e.reason}`, { status: 400 })),
-          EditNotAllowed: (e) => Effect.die(new Response(e.reason, { status: 409 })),
-          ConversationBusy: () =>
-            Effect.die(new Response("This conversation is busy", { status: 409 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-          AttachmentUnsupported: (e) =>
-            Effect.die(new Response(`${e.fileName}: ${e.reason}`, { status: 400 })),
-          AttachmentNotAvailable: () =>
-            Effect.die(new Response("An attachment is no longer available", { status: 409 })),
+          AgentNotAvailable: chatAgentGone,
+          WorkDesktopRequired: workChat,
+          KnowledgeNotAvailable: usedKnowledgeGone,
+          KnowledgeRejected: rejected,
+          ConversationNotFound: missing,
+          ModelNotFound: unknownModel,
+          ConversationBusy: busy,
+          InvalidMessage: rejected,
+          AttachmentUnsupported: unreadable,
+          AttachmentNotAvailable: attachmentGone,
+          MessageNotFound: missing,
+          ToolUnavailable: searchUnavailable,
+          EditNotAllowed: notAllowed,
         }),
       ),
     ),
@@ -746,12 +663,7 @@ export const updateWorkSettings = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           permissionLevel: data.permissionLevel,
         }),
-      ).pipe(
-        Effect.catchTags({
-          ConversationNotFound: () => Effect.die(new Response("Not found", { status: 404 })),
-          InvalidMessage: (e) => Effect.die(new Response(e.reason, { status: 400 })),
-        }),
-      ),
+      ).pipe(Effect.catchTags({ ConversationNotFound: missing, InvalidMessage: rejected })),
     ),
   );
 
@@ -766,11 +678,7 @@ export const renameConversation = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           title: data.title,
         }),
-      ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 
@@ -784,11 +692,7 @@ export const keepConversation = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
         }),
-      ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 
@@ -803,11 +707,7 @@ export const setConversationArchived = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           archived: data.archived,
         }),
-      ).pipe(
-        Effect.catchTag("ConversationNotFound", () =>
-          Effect.die(new Response("Not found", { status: 404 })),
-        ),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 

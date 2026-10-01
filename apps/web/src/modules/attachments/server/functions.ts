@@ -8,12 +8,15 @@ import { AttachmentService } from "./service.ts";
 import { DocumentParser } from "./document-parser.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { AttachmentRejected } from "../errors.ts";
+import { refuseUpload } from "./upload-refusal.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-// FormData has to sit at the root of `data` for the client to send a multipart
-// body, so the file is pulled out here rather than by a Schema validator.
-const readUpload = (data: FormData) => {
+/**
+ * FormData has to sit at the root of `data` for the client to send a multipart
+ * body, so the file is pulled out here rather than by a Schema validator.
+ */
+export const readUpload = (data: FormData) => {
   const file = data.get("file");
   if (!(file instanceof File)) {
     throw new Response("Expected a file", { status: 400 });
@@ -53,11 +56,7 @@ export const uploadAttachment = createServerFn({ method: "POST" })
             bytes,
           }),
         );
-      }).pipe(
-        Effect.catchTag("AttachmentRejected", (error) =>
-          Effect.die(new Response(error.reason, { status: error.cause === "size" ? 413 : 415 })),
-        ),
-      ),
+      }).pipe(Effect.catchTag("AttachmentRejected", refuseUpload)),
     );
   });
 

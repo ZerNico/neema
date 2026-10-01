@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Stream } from "effect";
 import { fromBase64 } from "lib0/buffer";
-import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
+import { approvedSession, unauthorized } from "~/server/approved-route.ts";
 
 const stateVector = (value: string | null) => {
   if (!value) return null;
@@ -25,13 +25,13 @@ export const Route = createFileRoute("/api/documents/$documentId/stream")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const current = await sessionFromHeaders(request.headers);
-        if (!current?.approved) return new Response("Unauthorized", { status: 401 });
+        const session = await approvedSession(request);
+        if (!session) return unauthorized();
         const url = new URL(request.url);
         const client = Number(url.searchParams.get("client"));
         const stream = await runtime.runPromise(
           Effect.flatMap(DocumentService, (service) =>
-            service.subscribe(current.session.user.id, params.documentId, {
+            service.subscribe(session.user.id, params.documentId, {
               stateVector: stateVector(url.searchParams.get("sv")),
               clientId: Number.isSafeInteger(client) && client >= 0 ? client : null,
             }),

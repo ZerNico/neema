@@ -18,6 +18,7 @@ import {
 import { EmbeddingSpace } from "./embedding-space.ts";
 import { KnowledgeService } from "./service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { refuseUpload } from "~/modules/attachments/server/upload-refusal.ts";
 
 const standard = Schema.toStandardSchemaV1;
 const publicResult = <A, R>(
@@ -175,11 +176,7 @@ export const uploadKnowledgeDocument = createServerFn({ method: "POST" })
             declaredMediaType: file.type,
             bytes,
           }),
-        ).pipe(
-          Effect.catchTag("AttachmentRejected", (error) =>
-            Effect.die(new Response(error.reason, { status: error.cause === "size" ? 413 : 415 })),
-          ),
-        ),
+        ).pipe(Effect.catchTag("AttachmentRejected", refuseUpload)),
       ),
     );
   });

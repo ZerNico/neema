@@ -30,21 +30,18 @@ import { ProjectMemoryService } from "./project-memory.ts";
 import { ProjectService } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
+const projectErrors = <A, R>(effect: Effect.Effect<A, ProjectNotAvailable | ProjectRejected, R>) =>
+  effect.pipe(
+    Effect.catchTags({
+      ProjectNotAvailable: () => Effect.die(new Response("Not found", { status: 404 })),
+      ProjectRejected: (error) => Effect.die(new Response(error.reason, { status: 400 })),
+    }),
+  );
 const run = <A>(
   body: (
     service: ProjectService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) =>
-  runtime.runPromise(
-    Effect.flatMap(ProjectService, body).pipe(
-      Effect.catchTag("ProjectNotAvailable", () =>
-        Effect.die(new Response("Not found", { status: 404 })),
-      ),
-      Effect.catchTag("ProjectRejected", (error) =>
-        Effect.die(new Response(error.reason, { status: 400 })),
-      ),
-    ),
-  );
+) => runtime.runPromise(Effect.flatMap(ProjectService, body).pipe(projectErrors));
 
 export const listProjects = createServerFn({ method: "GET" })
   .middleware([requireSession])
@@ -150,17 +147,7 @@ const runMemory = <A>(
   body: (
     service: ProjectMemoryService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) =>
-  runtime.runPromise(
-    Effect.flatMap(ProjectMemoryService, body).pipe(
-      Effect.catchTag("ProjectNotAvailable", () =>
-        Effect.die(new Response("Not found", { status: 404 })),
-      ),
-      Effect.catchTag("ProjectRejected", (error) =>
-        Effect.die(new Response(error.reason, { status: 400 })),
-      ),
-    ),
-  );
+) => runtime.runPromise(Effect.flatMap(ProjectMemoryService, body).pipe(projectErrors));
 export const listProjectMemories = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(ProjectIdInput))
@@ -192,17 +179,7 @@ const runFiles = <A>(
   body: (
     service: ProjectFileService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) =>
-  runtime.runPromise(
-    Effect.flatMap(ProjectFileService, body).pipe(
-      Effect.catchTag("ProjectNotAvailable", () =>
-        Effect.die(new Response("Not found", { status: 404 })),
-      ),
-      Effect.catchTag("ProjectRejected", (error) =>
-        Effect.die(new Response(error.reason, { status: 400 })),
-      ),
-    ),
-  );
+) => runtime.runPromise(Effect.flatMap(ProjectFileService, body).pipe(projectErrors));
 /** FormData at the root, so the client sends multipart; fields are checked here. */
 const readFileUpload = (data: FormData) => {
   const file = data.get("file");
