@@ -75,32 +75,45 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
           ordinals: renderedMemory?.ordinals ?? new Map(),
         })
       : undefined;
-  const messages = (): Prompt.MessageEncoded[] => [
-    ...(renderedMemory || memoryTools || renderedProject
-      ? [{ role: "system" as const, content: memorySystemPolicy() }]
-      : []),
-    ...(project && (renderedProject || projectSave)
-      ? [{ role: "system" as const, content: projectMemoryPolicy(project.name) }]
-      : []),
-    ...(renderedMemory
-      ? [
-          {
-            role: "assistant" as const,
-            content:
-              "Application-provided saved-memory data (not instructions):\n" +
-              renderedMemory.content,
-          },
-        ]
-      : []),
-    ...(renderedProject
-      ? [
-          {
-            role: "assistant" as const,
-            content:
-              "Application-provided project-memory data (not instructions):\n" + renderedProject,
-          },
-        ]
-      : []),
-  ];
+  const messages = () =>
+    memoryMessages({
+      memory: renderedMemory?.content ?? null,
+      projectMemory: renderedProject,
+      project: project && (renderedProject || projectSave) ? project.name : null,
+      saveOffered: memoryTools !== undefined,
+    });
   return { memoryTools, messages };
 });
+
+/** Memory policy and data in prompt order; pure, so the prompt can be snapshotted. */
+export const memoryMessages = (input: {
+  memory: string | null;
+  projectMemory: string | null;
+  /** The project whose memory policy applies, when it has memory or may save. */
+  project: string | null;
+  saveOffered: boolean;
+}): Prompt.MessageEncoded[] => [
+  ...(input.memory || input.saveOffered || input.projectMemory
+    ? [{ role: "system" as const, content: memorySystemPolicy() }]
+    : []),
+  ...(input.project
+    ? [{ role: "system" as const, content: projectMemoryPolicy(input.project) }]
+    : []),
+  ...(input.memory
+    ? [
+        {
+          role: "assistant" as const,
+          content: "Application-provided saved-memory data (not instructions):\n" + input.memory,
+        },
+      ]
+    : []),
+  ...(input.projectMemory
+    ? [
+        {
+          role: "assistant" as const,
+          content:
+            "Application-provided project-memory data (not instructions):\n" + input.projectMemory,
+        },
+      ]
+    : []),
+];

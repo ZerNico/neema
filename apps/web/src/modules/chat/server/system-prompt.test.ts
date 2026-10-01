@@ -1,0 +1,95 @@
+import type { Prompt } from "effect/unstable/ai";
+import { describe, expect, it } from "vitest";
+import {
+  renderMemoryContext,
+  renderProjectMemoryContext,
+} from "~/modules/memory/server/memory-prompt.ts";
+import { memoryMessages } from "./conversation-context.ts";
+import { buildFixedPrefix, type FixedPrefixInput } from "./system-prompt.ts";
+
+// Every prompt change shows up as a reviewable diff of these files.
+const render = (messages: ReadonlyArray<Prompt.MessageEncoded>) =>
+  messages
+    .map(
+      (message) =>
+        `===== ${message.role} =====\n${typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2)}`,
+    )
+    .join("\n\n") + "\n";
+
+const memory = renderMemoryContext([
+  { id: "m1", content: "Prefers metric units.", origin: "manual", editedAt: null },
+  { id: "m2", content: "Works as a data engineer.", origin: "model", editedAt: null },
+])!.content;
+
+const nothing: FixedPrefixInput = {
+  agentAuthoring: false,
+  documents: false,
+  knowledge: false,
+  askUser: false,
+  web: null,
+  integrations: null,
+  research: false,
+  desktop: null,
+  browser: false,
+  memory: [],
+  project: null,
+  agent: null,
+};
+
+const configurations: Record<string, FixedPrefixInput> = {
+  "plain-chat": {
+    ...nothing,
+    agentAuthoring: true,
+    documents: true,
+    askUser: true,
+    web: { search: true, reader: true },
+    memory: memoryMessages({ memory, projectMemory: null, project: null, saveOffered: true }),
+  },
+  "project-agent": {
+    ...nothing,
+    agentAuthoring: true,
+    documents: true,
+    knowledge: true,
+    askUser: true,
+    web: { search: false, reader: true },
+    integrations: ["Outline"],
+    memory: memoryMessages({
+      memory,
+      projectMemory: renderProjectMemoryContext([{ content: "Launch is planned for May." }]),
+      project: "Launch",
+      saveOffered: true,
+    }),
+    project: { name: "Launch", instructions: "Keep answers short." },
+    agent: { name: "Analyst", instructions: "Answer as a careful analyst." },
+  },
+  "desktop-work": {
+    ...nothing,
+    documents: true,
+    askUser: true,
+    web: { search: true, reader: true },
+    desktop: {
+      folders: [
+        { name: "workspace", path: "/Users/alex/Library/Work/c1" },
+        { name: "site", path: "/Users/alex/code/site" },
+      ],
+      commands: true,
+    },
+    browser: true,
+  },
+  research: {
+    ...nothing,
+    documents: true,
+    askUser: true,
+    web: { search: true, reader: true },
+    research: true,
+  },
+};
+
+describe("the fixed prompt prefix", () => {
+  for (const [name, input] of Object.entries(configurations))
+    it(`renders ${name}`, async () => {
+      await expect(render(buildFixedPrefix(input))).toMatchFileSnapshot(
+        `./__snapshots__/system-prompt.${name}.txt`,
+      );
+    });
+});
