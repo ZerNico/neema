@@ -55,7 +55,7 @@ edit the wrong thing.
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
   never about a person.
-- **project file / file version**: a binary working file (a deck, a spreadsheet) kept in
+- **project file / file version**: a binary working file (a deck, a spreadsheet, a Word file) kept in
   a project. Every save is a new immutable version; history is pruned, never the current
   one. Not a document and not a chat attachment, though its bytes share their blobs.
 - **custom tool**: an admin-authored TypeScript module containing one or more
@@ -134,7 +134,7 @@ skipped one on purpose.
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
   schedule-draft, document, project-file, desktop, custom, integration, presentation,
-  tool-file.
+  spreadsheet, word, tool-file.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.
@@ -216,8 +216,8 @@ skipped one on purpose.
   generation that started it and ends without touching anything else.
 - `docs/internals/knowledge-and-agents.md`: agents, sharing, collections, retrieval
   versus direct context, embedding widths, indexing and repair.
-- `docs/internals/skills.md`: skill packages, revisions, ambient versus pinned,
-  hardcoded builtins, import safety.
+- `docs/internals/skills.md`: skill packages and their binary assets, revisions, ambient
+  versus pinned, hardcoded builtins, import safety.
 - `docs/internals/schedules.md`: cron cadences, claim semantics, catch-up-once,
   run conversations, model fallback, delete-mid-run.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
@@ -226,8 +226,9 @@ skipped one on purpose.
   exact-match and streamed model edits, live sync and the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
   kind served only as a download, what the model sees, working drafts and publication.
-- `docs/internals/presentations.md`: trusted PPTX operations, visual feedback,
-  preview authorization, preservation boundary and native-compatibility gate.
+- `docs/internals/presentations.md`: trusted PPTX operations in killable worker processes,
+  visual feedback, fonts, preview authorization, preservation boundary and
+  native-compatibility gate.
 - `docs/internals/projects.md`: roles, private chats in a shared project, attempt-time
   access, project documents, files and memory, file retention, deletion.
 - `docs/internals/custom-tools.md`: admin-authored TypeScript tools. The trust
@@ -239,6 +240,11 @@ skipped one on purpose.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
   boundary, queued files as a second owner kind, and why only a desktop app can
   start queued Work.
+- `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
+  text replacement, measuring the package before the parser, structured previews.
+- `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
+  (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
+  containment and previews.
 - `docs/internals/resume.md`: continuing a failed or stopped last answer. Same row, new
   generation, one continuous chunk and turn space, earlier rounds read as records.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
@@ -281,6 +287,12 @@ All release candidates. Pin exactly; never float to `latest`.
   one function and regenerate the patch the same way.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
   a bump.
+- `@office-kit/xlsx` (pre-1.0) and `@formulajs/formulajs` are pinned exact. Formulas are
+  calculated by our own engine on formula.js, not HyperFormula, which is GPL-3.0; keep
+  the calculation MIT unless that decision is revisited. See
+  [spreadsheets](docs/internals/spreadsheets.md).
+- `@office-kit/docx` (pre-1.0) is pinned exact. It has no decompression limits, so the
+  adapter measures every part first; re-check that on a bump. See [word](docs/internals/word.md).
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.
 

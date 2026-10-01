@@ -371,6 +371,55 @@ describe("MessageBubble chronological body", () => {
     expect(screen.queryByText("Editing slides")).toBeNull();
   });
 
+  it("speaks about a workbook in cells and sheets, and says when formulas show errors", () => {
+    const workbook = (callIndex: number, extra: Partial<ToolActivity>): ToolActivity =>
+      ({
+        family: "spreadsheet",
+        callId: `sheet-${callIndex}`,
+        status: "complete",
+        textOffset: 0,
+        turnIndex: callIndex,
+        callIndex: 0,
+        outcome: "complete",
+        message: "Read the returned cells as data.",
+        ...extra,
+      }) as ToolActivity;
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          content: "",
+          toolActivities: [
+            workbook(0, {
+              name: "edit_spreadsheet",
+              workingFileId: "book",
+              revision: 1,
+              outcome: "working",
+              origin: "created",
+              changes: "Wrote a cell range",
+              sheetCount: 2,
+              formulaErrors: 1,
+            }),
+            workbook(1, {
+              name: "inspect_spreadsheet",
+              workingFileId: "book",
+              read: { sheet: 2, range: "A1:D9" },
+            }),
+          ],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Spreadsheet draft/ }));
+    for (const label of [
+      "Started a new workbook",
+      "Wrote the cells",
+      "1 formula shows an error",
+      "Read A1:D9 on sheet 2",
+    ])
+      expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(/slide/i)).toBeNull();
+  });
+
   it("keeps an unfinished draft as the live line instead of Thinking, then labels the unpublished draft", () => {
     const failed: ToolActivity = {
       family: "presentation",

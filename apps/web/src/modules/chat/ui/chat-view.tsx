@@ -1,6 +1,5 @@
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
-import { presentationActivitySummary } from "~/modules/presentations/activity.ts";
-import { PresentationToolName } from "~/modules/presentations/tool-schema.ts";
+import { OFFICE_FAMILIES, officeFamilyOfTool } from "~/modules/office/families.ts";
 import { ToolFileActivity } from "../tool-file-schema.ts";
 import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
@@ -69,6 +68,7 @@ import {
   readResearchProgress,
   useMessageStream,
   type CompactionActivity,
+  type OfficeActivity,
   type ToolActivity,
   type ToolPageStatus,
   type ToolSource,
@@ -436,18 +436,20 @@ export function toActivity(row: {
     };
   }
 
-  if (Schema.is(PresentationToolName)(row.toolName)) {
+  const office = officeFamilyOfTool(row.toolName);
+  if (office) {
     return {
-      family: "presentation",
+      family: office,
       ...position,
       callId: row.id,
       name: row.toolName,
       turnIndex: row.turnIndex,
       callIndex: row.callIndex,
       status: row.status,
-      ...presentationActivitySummary(row.result, row.status === "error"),
+      ...OFFICE_FAMILIES[office].summary(row.result, row.status === "error"),
       ...(row.error ? { error: row.error.message } : {}),
-    };
+      // The family and its summary match; the compiler cannot correlate them.
+    } as OfficeActivity;
   }
   if (row.toolName === "publish_file") {
     const result = Option.getOrNull(Schema.decodeUnknownOption(ToolFileActivity)(row.result));

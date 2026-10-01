@@ -1,10 +1,13 @@
-import { Cause, Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
-import { PPTX_MEDIA_TYPE } from "~/modules/attachments/constants.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
-import { formatFileRef, parseFileRef, type FileRef } from "~/modules/chat/server/file-ref.ts";
-import type { ToolFile } from "~/modules/chat/server/tool-files.ts";
-import type { WorkingFiles } from "~/modules/chat/server/working-files.ts";
+import { parseFileRef } from "~/modules/chat/server/file-ref.ts";
+import {
+  officeToolKit,
+  received,
+  sourceParameters,
+  type OfficeToolHost,
+} from "~/modules/office/server/tool-kit.ts";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { PresentationRead } from "../activity.ts";
 import { PresentationError } from "../errors.ts";
@@ -20,7 +23,8 @@ import {
   type SlideIdentity,
   type SlideSummary,
 } from "./inspection.ts";
-import type { PresentationRuntime, PresentationWorkResult } from "./runtime.ts";
+import type { JobResult } from "~/server/jobs.ts";
+import type { PresentationJobs, PresentationRuntime } from "./runtime.ts";
 
 const integer = (minimum: number, maximum: number, description: string) =>
   advertisedParameter({ type: "integer", minimum, maximum, description });
@@ -32,20 +36,7 @@ const slideIdList = (description: string) =>
     maxItems: PRESENTATION_LIMITS.rendersPerCall,
     description,
   });
-const sourceRef = advertisedParameter({
-  type: "string",
-  description:
-    "An authorized PPTX: attachment:<id>, project:<id>@<version>, or the working: reference import_local_file returned.",
-});
-const sourceFingerprint = advertisedParameter({
-  type: "string",
-  pattern: "^[0-9a-f]{64}$",
-  description: "The fingerprint inspect_presentation returned for sourceRef.",
-});
-const workingRef = advertisedParameter({
-  type: "string",
-  description: "An exact draft revision, working:<id>@<revision>, from the latest edit result.",
-});
+const { sourceRef, sourceFingerprint, workingRef } = sourceParameters("presentation");
 const MAX_PAGE = Math.ceil(PRESENTATION_LIMITS.slides / INSPECT_LIMITS.pageSlides) - 1;
 const MAX_LAYOUT_OFFSET = 4096;
 
@@ -184,47 +175,9 @@ export const renderPresentationTool = Tool.make("render_presentation", {
   success: Result,
 });
 
-const invalid = (message: string): never => {
-  throw new PresentationError("invalid_operation", message);
-};
-const received = (value: unknown) =>
-  Array.isArray(value) ? "an array" : value === null ? "null" : `a ${typeof value}`;
-/** Decimal strings count as numbers; everything else must already be one. */
-const whole = (raw: unknown, field: string, min: number, max: number) => {
-  const value = typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw) : raw;
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max
-    ? value
-    : invalid(`${field}: expected an integer from ${min} to ${max}; received ${received(raw)}`);
-};
-const offset = (raw: unknown, field: string, max: number) =>
-  raw === undefined ? 0 : whole(raw, field, 0, max);
-const idList = (raw: unknown, field: string, max: number) => {
-  const list = Array.isArray(raw) ? raw : [raw];
-  if (list.length < 1 || list.length > max)
-    return invalid(`${field}: expected 1 to ${max} slide IDs from slides[].slideId`);
-  return list.map((id, index) => whole(id, `${field}[${index}]`, 1, 0xffffffff));
-};
-const text = (raw: unknown, field: string) =>
-  typeof raw === "string" && raw.length > 0 && raw.length <= 200
-    ? raw
-    : invalid(`${field}: expected a reference string; received ${received(raw)}`);
-type Inspection = Extract<PresentationWorkResult, { kind: "inspection" }>["inspection"];
-type Arguments = Record<string, unknown>;
-
-/** Absent and null mean the same thing; models send both. */
-const present = (raw: unknown): Arguments => {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-    return invalid(`Arguments must be an object; received ${received(raw)}`);
-  return Object.fromEntries(
-    Object.entries(raw).filter(([, value]) => value !== null && value !== undefined),
-  );
-};
-
-export interface PresentationToolHost {
+type Inspection = JobResult<PresentationJobs, "inspect">;
+export interface PresentationToolHost extends OfficeToolHost {
   runtime: PresentationRuntime;
-  workingFiles: WorkingFiles;
-  /** The attempt's existing makeToolFileResolver; enforces sender access and project version. */
-  resolveFile: (reference: string) => Effect.Effect<ToolFile, string>;
   /** Families decks may use: the bundled ones and any an admin uploaded. */
   fonts?: () => Promise<readonly string[]>;
   /** Deliver ephemeral PNGs to the model continuation, never the persisted tool result. */
@@ -291,72 +244,23 @@ const templateTargets = (
   };
 };
 
-const execute =
-  (operation: string, work: (raw: Arguments) => Promise<PresentationToolResult>) =>
-  (raw: unknown) =>
-    Effect.tryPromise({ try: () => work(present(raw)), catch: (error) => error }).pipe(
-      Effect.catch((error) =>
-        (error instanceof PresentationError
-          ? Effect.void
-          : Effect.logError(`Presentation ${operation} failed unexpectedly`, Cause.die(error))
-        ).pipe(
-          Effect.as({
-            family: "presentation" as const,
-            operation,
-            outcome: "error",
-            message:
-              error instanceof PresentationError
-                ? `${error.code}: ${error.message}`
-                : "Presentation operation failed or access is unavailable.",
-          }),
-        ),
-      ),
-    );
-
 export function preparePresentationTools(host: PresentationToolHost): { group: ToolGroup } {
-  /** The resolver enforces access and version pins; its reason is one the model can act on. */
-  const resolve = (ref: FileRef) =>
-    Effect.runPromise(
-      host
-        .resolveFile(formatFileRef(ref))
-        .pipe(Effect.mapError((reason) => new PresentationError("unavailable", reason))),
-    );
-  const useSource = async (raw: Arguments, requireFingerprint = true) => {
-    if ((raw.sourceRef === undefined) === (raw.workingRef === undefined))
-      return invalid("Provide exactly one of sourceRef or workingRef.");
-    const field = raw.sourceRef !== undefined ? "sourceRef" : "workingRef";
-    const ref = parseFileRef(text(raw[field], field));
-    if (!ref || (field === "workingRef" && ref.kind !== "working"))
-      return invalid(
-        field === "workingRef"
-          ? "workingRef: expected working:<id>@<revision> from the latest edit result."
-          : "sourceRef: expected attachment:<id>, project:<id>@<version> or an imported working: reference.",
-      );
-    if (ref.kind === "working") {
-      await host.workingFiles.load(ref);
-      const file = host.workingFiles.read(ref);
-      // A draft is edited in place; a deck imported from the user's computer is
-      // a source like an attachment, opened into a draft of its own.
-      if (field === "workingRef" && file.owner !== "presentation")
-        invalid("workingRef: this working file is not a presentation draft; pass it as sourceRef.");
-      if (field === "sourceRef" && (file.owner !== "local" || file.mediaType !== PPTX_MEDIA_TYPE))
-        invalid("sourceRef: only an imported PowerPoint can be opened from a working reference.");
-      return { bytes: file.bytes, name: file.name, ref, draft: field === "workingRef" };
-    }
-    if (requireFingerprint && raw.sourceFingerprint === undefined)
-      return invalid(
-        "sourceFingerprint: inspect the source first and pass the fingerprint it returned.",
-      );
-    if (
-      raw.sourceFingerprint !== undefined &&
-      (typeof raw.sourceFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(raw.sourceFingerprint))
-    )
-      return invalid("sourceFingerprint: expected the 64-character hex fingerprint.");
-    const file = await resolve(ref);
-    if (raw.sourceFingerprint !== undefined && sha256Hex(file.bytes) !== raw.sourceFingerprint)
-      invalid("The source changed since its fingerprint was observed; inspect it again.");
-    // The resolved reference: in a branched chat, the attachment an old ID stands for.
-    return { bytes: file.bytes, name: file.name, ref: file.ref, draft: false };
+  const { invalid, text, execute, resolve, openSource, sourceFields, beginEdit, saveDraft } =
+    officeToolKit("presentation", host, PresentationError);
+  /** Decimal strings count as numbers; everything else must already be one. */
+  const whole = (raw: unknown, field: string, min: number, max: number) => {
+    const value = typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw) : raw;
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max
+      ? value
+      : invalid(`${field}: expected an integer from ${min} to ${max}; received ${received(raw)}`);
+  };
+  const offset = (raw: unknown, field: string, max: number) =>
+    raw === undefined ? 0 : whole(raw, field, 0, max);
+  const idList = (raw: unknown, field: string, max: number) => {
+    const list = Array.isArray(raw) ? raw : [raw];
+    if (list.length < 1 || list.length > max)
+      return invalid(`${field}: expected 1 to ${max} slide IDs from slides[].slideId`);
+    return list.map((id, index) => whole(id, `${field}[${index}]`, 1, 0xffffffff));
   };
   const availableFonts = async () => [...((await host.fonts?.()) ?? BUNDLED_FONTS)];
   /** A font must be one previews can draw; the name is normalized to its catalogue spelling. */
@@ -396,7 +300,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       const ref = typeof reference === "string" ? parseFileRef(reference) : null;
       if (!ref)
         return invalid(
-          `${field}: expected attachment:<id>, project:<id>@<version> or an imported working: reference.`,
+          `${field}: expected attachment:<id>, project:<id>@<version>, skill:<revision>/<path> or an imported working: reference.`,
         );
       const file = await resolve(ref);
       imageBytes += file.bytes.length;
@@ -417,20 +321,19 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
   };
   const rendered = async (bytes: Uint8Array, slideIds: number[], label: string) => {
     if (!host.onPreview) return "Vision feedback is unavailable; no pixels were inspected.";
-    const output = await host.runtime.run({ kind: "render", bytes, slideIds });
-    if (output.kind !== "rendered") return invalid("Unexpected render result.");
+    const slides = await host.runtime.run({ kind: "render", bytes, slideIds });
     await host.onPreview(
-      output.slides.map((slide) => ({
+      slides.map((slide) => ({
         slideId: slide.slideId,
         png: slide.png,
         label: `${label} slide ${slide.slideId}`,
       })),
     );
-    return [...new Set(output.slides.map((slide) => slide.warning).filter(Boolean))].join(" ");
+    return [...new Set(slides.map((slide) => slide.warning).filter(Boolean))].join(" ");
   };
 
-  const inspect = execute("inspect", async (raw) => {
-    const source = await useSource(raw, false);
+  const inspect = execute("inspect", async (raw): Promise<PresentationToolResult> => {
+    const source = await openSource(raw, false);
     const page = offset(raw.page, "page", MAX_PAGE);
     const shapeOffset = offset(raw.shapeOffset, "shapeOffset", PRESENTATION_LIMITS.shapesPerSlide);
     const layoutOffset = offset(raw.layoutOffset, "layoutOffset", MAX_LAYOUT_OFFSET);
@@ -439,7 +342,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         ? []
         : idList(raw.selectedSlideIds, "selectedSlideIds", INSPECT_LIMITS.selectedSlides);
     const templateId =
-      raw.templateId === undefined ? undefined : text(raw.templateId, "templateId");
+      raw.templateId === undefined ? undefined : text(raw.templateId, "templateId", 200);
     if (shapeOffset > 0 && selectedIds.length !== 1 && templateId === undefined)
       invalid("shapeOffset: select exactly one slide to page through its shapes.");
     const focused = selectedIds.length > 0 || templateId !== undefined;
@@ -451,9 +354,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
           : { slides: { page }, owners: true, catalog: true }),
       ...(templateId === undefined ? {} : { templateId }),
     };
-    const output = await host.runtime.run({ kind: "inspect", bytes: source.bytes, scope });
-    if (output.kind !== "inspection") return invalid("Unexpected inspection result.");
-    const inspection = output.inspection;
+    const inspection = await host.runtime.run({ kind: "inspect", bytes: source.bytes, scope });
     const every = inspection.slides;
     const selected = selectedIds.map((id) => {
       const slide = every.find((item) => item.slideId === id);
@@ -529,26 +430,10 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         ...(inspection.template ? { template: inspection.template.kind } : {}),
       },
       fingerprint: sha256Hex(source.bytes),
-      ...(source.draft && source.ref.kind === "working"
-        ? {
-            workingFileId: source.ref.id,
-            revision: source.ref.revision,
-            workingRef: formatFileRef(source.ref),
-          }
-        : { sourceRef: formatFileRef(source.ref) }),
+      ...sourceFields(source),
     };
   });
-  const edit = execute("edit", async (raw) => {
-    if (raw.create !== undefined && raw.create !== true && raw.create !== "true")
-      invalid("create: expected true, or leave it out.");
-    const create = raw.create !== undefined;
-    if (
-      Number(create) +
-        Number(raw.sourceRef !== undefined) +
-        Number(raw.workingRef !== undefined) !==
-      1
-    )
-      invalid("Provide exactly one of create, sourceRef or workingRef.");
+  const edit = execute("edit", async (raw): Promise<PresentationToolResult> => {
     if (raw.render !== undefined && raw.render !== "changed" && raw.render !== "all")
       invalid('render: expected "changed" or "all".');
     if (raw.render !== undefined && raw.renderSlideIds !== undefined)
@@ -557,18 +442,12 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       raw.renderSlideIds === undefined
         ? null
         : idList(raw.renderSlideIds, "renderSlideIds", PRESENTATION_LIMITS.rendersPerCall);
-    const source = create ? null : await useSource(raw);
-    const name = source?.name ?? raw.fileName ?? "Presentation.pptx";
-    if (typeof name !== "string" || name.length > 200 || !name.toLowerCase().endsWith(".pptx"))
-      return invalid("fileName: expected a name ending in .pptx.");
+    const { create, source, name } = await beginEdit(raw, "Presentation.pptx");
     const operations = await materialize(raw.operations ?? []);
-    const initial = create ? await host.runtime.run({ kind: "create" }) : null;
-    if (initial && initial.kind !== "bytes") return invalid("Unexpected creation result.");
-    const bytes = initial?.kind === "bytes" ? initial.bytes : source!.bytes;
+    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" });
     // Edits never change layouts, and an opened deck was inspected first, so
     // only a new deck's result carries the catalog.
     const output = await host.runtime.run({ kind: "edit", bytes, operations, catalog: create });
-    if (output.kind !== "edited") return invalid("Unexpected edit result.");
     const slides = output.inspection.slides.filter(isSummary);
     const renderIds =
       explicitIds ??
@@ -577,21 +456,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         : raw.render === "all"
           ? slides.slice(0, PRESENTATION_LIMITS.rendersPerCall).map((slide) => slide.slideId)
           : null);
-    const snapshot =
-      source?.draft && source.ref.kind === "working"
-        ? host.workingFiles.replace(source.ref, {
-            bytes: output.bytes,
-            name,
-            mediaType: PPTX_MEDIA_TYPE,
-            owner: "presentation",
-          })
-        : host.workingFiles.create({
-            bytes: output.bytes,
-            name,
-            mediaType: PPTX_MEDIA_TYPE,
-            owner: "presentation",
-            ...(source ? { source: formatFileRef(source.ref) } : {}),
-          });
+    const { snapshot, fields } = saveDraft(source, output.bytes, name);
     let previewWarning: string | undefined;
     if (renderIds?.length) {
       try {
@@ -614,10 +479,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       message: findings
         ? `Private draft updated with ${findings} new, increased or uncompared box overrun finding${findings === 1 ? "" : "s"}; inspect those slides. Nothing is delivered until publish_file.`
         : "Private draft updated. Nothing is delivered until publish_file.",
-      workingFileId: snapshot.ref.id,
-      revision: snapshot.ref.revision,
-      workingRef: formatFileRef(snapshot.ref),
-      fingerprint: snapshot.fingerprint,
+      ...fields,
       ...(source?.draft ? {} : { origin: create ? ("created" as const) : ("opened" as const) }),
       ...(changes ? { changes } : {}),
       ...(Object.keys(output.refs.slides).length || Object.keys(output.refs.shapes).length
@@ -645,8 +507,8 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       ...(previewWarning ? { previewWarning } : {}),
     };
   });
-  const render = execute("render", async (raw) => {
-    const source = await useSource(raw);
+  const render = execute("render", async (raw): Promise<PresentationToolResult> => {
+    const source = await openSource(raw);
     const slideIds = idList(raw.slideIds, "slideIds", PRESENTATION_LIMITS.rendersPerCall);
     const warning = await rendered(
       source.bytes,

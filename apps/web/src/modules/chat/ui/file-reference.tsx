@@ -2,7 +2,7 @@ import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, use, useState, type ReactNode } from "react";
 import type { Attachment } from "~/modules/attachments/schema.ts";
-import { presentationSource } from "~/modules/attachments/ui/presentation-preview.tsx";
+import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import {
   useLocalFileConversation,
@@ -62,7 +62,7 @@ function StoredReference({ attachment }: { attachment: Attachment }) {
         target={{
           ...attachment,
           url,
-          presentation: presentationSource(attachment, { kind: "attachment", id: attachment.id }),
+          office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
         }}
         open={open}
         onOpenChange={setOpen}

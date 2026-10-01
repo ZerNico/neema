@@ -1,3 +1,4 @@
+import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -106,30 +107,29 @@ describe("bounded portable skill remote adapter", () => {
     ).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("lists all unsupported supporting files in a rejected remote package", async () => {
+  it("keeps binary supporting files, hashed over the fetched bytes", async () => {
     const sha = "c".repeat(40);
+    const font = new Uint8Array([0, 1, 0, 0, 255]);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string) => {
         if (input.includes("/commits/")) return response({ sha });
         if (input.includes("/git/trees/"))
           return response({
-            tree: ["SKILL.md", "one.bin", "two.bin"].map((path) => ({
+            tree: ["SKILL.md", "fonts/brand.ttf"].map((path) => ({
               path,
               type: "blob",
               mode: "100644",
             })),
           });
-        return new Response(input.endsWith("SKILL.md") ? root : new Uint8Array([0]));
+        return new Response(input.endsWith("SKILL.md") ? root : font);
       }),
     );
-    await expect(
-      reviewGitHubSkill("test-binaries", "https://github.com/o/r"),
-    ).rejects.toMatchObject({
-      findings: [
-        expect.objectContaining({ path: "one.bin" }),
-        expect.objectContaining({ path: "two.bin" }),
-      ],
+    const review = await reviewGitHubSkill("test-binaries", "https://github.com/o/r");
+    expect(review.selected?.package.files.find((file) => file.path === "fonts/brand.ttf")).toEqual({
+      path: "fonts/brand.ttf",
+      binary: { size: font.length, mediaType: "font/ttf", sha256: sha256Hex(font) },
+      bytes: font,
     });
   });
   it("enforces actual streamed bytes without trusting content-length", async () => {
@@ -216,7 +216,7 @@ describe("bounded portable skill remote adapter", () => {
     );
     expect(asked.some((url) => url.endsWith("/commits/HEAD"))).toBe(true);
     expect(review.selected?.source).toMatchObject({ commit: sha, path: "skills/review" });
-    expect(review.selected?.package.files[0]!.content).toBe(updated);
+    expect(review.selected?.package.files[0]).toMatchObject({ content: updated });
   });
   it("reads only the package subtree, so a huge repository is not downloaded", async () => {
     const sha = "f".repeat(40);

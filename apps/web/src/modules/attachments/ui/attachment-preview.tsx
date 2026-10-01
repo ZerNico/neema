@@ -1,3 +1,4 @@
+import { Download01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { useEffect, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
@@ -13,8 +14,24 @@ import {
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
-import { cn } from "~/ui/utils";
-import { PresentationPreview, type PresentationSource } from "./presentation-preview.tsx";
+import type { OfficeFamily } from "~/modules/office/families.ts";
+import type { OfficeFile, OfficePreview } from "./office-preview.ts";
+import { PresentationPreview } from "./presentation-preview.tsx";
+import { PreviewAction } from "./preview-action.tsx";
+import { SpreadsheetPreview } from "./spreadsheet-preview.tsx";
+import { WordPreview } from "./word-preview.tsx";
+
+/** Each Office family's preview; the compiler keeps the table complete. */
+const OFFICE_PREVIEWS = {
+  presentation: PresentationPreview,
+  spreadsheet: SpreadsheetPreview,
+  word: WordPreview,
+} satisfies Record<OfficeFamily, (props: { source: OfficeFile }) => ReactNode>;
+
+function OfficeFilePreview({ office }: { office: OfficePreview }) {
+  const Preview = OFFICE_PREVIEWS[office.type];
+  return <Preview source={office.source} />;
+}
 
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
@@ -23,8 +40,8 @@ export interface AttachmentPreviewTarget {
   readonly kind: AttachmentKind;
   /** Authenticated bytes route, or an object URL for a not-yet-stored image. */
   readonly url: string;
-  /** Set only for a PowerPoint deck; see `presentationSource`. */
-  readonly presentation?: PresentationSource | null | undefined;
+  /** Set only for a PowerPoint deck, Excel workbook or Word document; see `officePreview`. */
+  readonly office?: OfficePreview | null | undefined;
   /**
    * True when `url` already holds less than the whole file. A local file is
    * read through a capped bridge call, so the dialog cannot tell by measuring
@@ -50,9 +67,10 @@ export function AttachmentPreviewDialog({
 }: {
   target: AttachmentPreviewTarget;
   /**
-   * Replaces the “Open original” link. A caller whose `url` is an object URL
-   * must pass this: a `blob:` tab inherits our origin, so following the link
-   * to a file the model wrote would run its script as us.
+   * Replaces the default action (download a stored file, or open it in a new
+   * tab), rendered with `PreviewAction` like it. A caller whose `url` is an
+   * object URL must pass this: a `blob:` tab inherits our origin, so following
+   * the link to a file the model wrote would run its script as us.
    */
   actions?: ReactNode;
   open: boolean;
@@ -64,62 +82,72 @@ export function AttachmentPreviewDialog({
         <DialogHeader className="min-w-0">
           {/* One row, so actions sit beside the name rather than under it. The
               right padding clears the close button; the title yields first.
-              With actions the row takes that button's height and its 16px
+              The row takes the actions' height and the close button's 16px
               offset, so the two sets of buttons sit on one line. */}
-          <div
-            className={cn("flex min-w-0 items-center gap-2 pr-10", actions ? "-mt-2 min-h-8" : "")}
-          >
+          <div className="-mt-2 flex min-h-8 min-w-0 items-center gap-2 pr-10">
             <DialogTitle className="min-w-0 flex-1 truncate">{target.fileName}</DialogTitle>
-            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+            <div className="flex shrink-0 items-center gap-2">
+              {actions ??
+                (target.kind === "file" ? (
+                  <PreviewAction
+                    icon={Download01Icon}
+                    label="Download"
+                    href={target.url}
+                    download={target.fileName}
+                  />
+                ) : (
+                  <PreviewAction icon={LinkSquare02Icon} label="Open original" href={target.url} />
+                ))}
+            </div>
           </div>
-          <DialogDescription>
-            {formatFileSize(target.size)}
-            {actions ? null : (
-              <>
-                {" · "}
-                <a
-                  href={target.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-foreground underline underline-offset-2"
-                >
-                  {target.kind === "file" ? "Download" : "Open original"}
-                </a>
-              </>
-            )}
-          </DialogDescription>
+          <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
         </DialogHeader>
-        {target.kind === "file" && target.presentation && !target.unsupported ? (
-          <PresentationPreview
-            key={`${target.presentation.kind}:${target.presentation.id}`}
-            source={target.presentation}
-          />
-        ) : target.unsupported || target.kind === "file" ? (
-          <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
-        ) : target.kind === "image" ? (
-          <img
-            src={target.url}
-            alt={target.fileName}
-            className="max-h-[70vh] w-full rounded-2xl object-contain"
-          />
-        ) : target.kind === "pdf" ? (
-          <iframe
-            src={target.url}
-            title={target.fileName}
-            className="border-border h-[70vh] w-full rounded-2xl border"
-          />
-        ) : (
-          // Keyed so a different file starts back at the loading state.
-          <TextPreview
-            key={target.url}
-            url={target.url}
-            language={textLanguage(target.fileName)}
-            shortened={target.truncated ?? false}
-            linkable={!actions}
-          />
-        )}
+        <FilePreviewBody target={target} linkable={!actions} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * A file's content as every preview shows it: the one place a kind of file
+ * gets its renderer, so a new one appears wherever files are previewed.
+ * `linkable`: the original is one link away, so a shortened text can say so.
+ */
+export function FilePreviewBody({
+  target,
+  linkable,
+}: {
+  target: AttachmentPreviewTarget;
+  linkable: boolean;
+}) {
+  return target.kind === "file" && target.office && !target.unsupported ? (
+    <OfficeFilePreview
+      key={`${target.office.source.kind}:${target.office.source.id}`}
+      office={target.office}
+    />
+  ) : target.unsupported || target.kind === "file" ? (
+    <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
+  ) : target.kind === "image" ? (
+    <img
+      src={target.url}
+      alt={target.fileName}
+      className="max-h-[70vh] w-full rounded-2xl object-contain"
+    />
+  ) : target.kind === "pdf" ? (
+    <iframe
+      src={target.url}
+      title={target.fileName}
+      className="border-border h-[70vh] w-full rounded-2xl border"
+    />
+  ) : (
+    // Keyed so a different file starts back at the loading state.
+    <TextPreview
+      key={target.url}
+      url={target.url}
+      language={textLanguage(target.fileName)}
+      shortened={target.truncated ?? false}
+      linkable={linkable}
+    />
   );
 }
 

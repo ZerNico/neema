@@ -15,12 +15,14 @@ declared type, and only the kinds we understand are shown or handed to a model.
   are each caller's rule. A `file` is stored with a descriptive type from its name
   (`fileMediaType`), which can never name one of the readable kinds, so a `.png` that does
   not sniff as PNG stays a `file`.
-- A `file` is always a download: `/api/files` and `/api/project-files` send
-  `Content-Disposition: attachment` and `nosniff`, and `/api/files` sends a `file` as
-  `application/octet-stream` whatever its stored type says. HTML and SVG are active content
-  on this origin and must never render there. An authorized PPTX may also be rendered as
-  approximate PNG slides through a separate read-only preview endpoint; the original remains
-  a download. See [presentations](presentations.md).
+- A `file` is always a download. Every route that serves stored bytes (attachments, project
+  versions, knowledge versions, skill files) answers through `fileResponse`
+  (`server/file-response.ts`): `nosniff`, a `file` sent as `application/octet-stream` whatever
+  its stored type says, and only images and PDFs ever inline. HTML and SVG are active content
+  on this origin and must never render there. Only `/api/files` caches, because an attachment's
+  access never changes while it exists; a route whose access can be revoked caches nothing.
+  Office files may also be previewed through separate read-only endpoints; the original
+  remains a download. See [presentations](presentations.md).
 
 ## What the model sees
 
@@ -68,13 +70,17 @@ The reference renderer shares existing previews, never a new active-content view
 
 A custom tool declares a file parameter with `fileInput`; see
 [custom tools](custom-tools.md#file-inputs). The host resolves what the model passed
-within what the sender may read, so a tool never touches storage or permissions.
+within what the sender may read, so a tool never touches storage or permissions. Besides
+attachments, project versions and working drafts, a file in a [skill](skills.md) resolves
+from its `skill:<revision>/<path>` reference, so a skill can carry a presentation master or
+logo that tools open directly.
 
 An answer's attempt owns a bounded working-file workspace in memory. Files returned with
 `delivery: "working"` are private revisioned drafts, not delivered files; exact
 `working:<id>@<revision>` references let later tools read or replace them. Their type is
 classified from the bytes like any stored file. Each working file names its owner (one
-custom tool module, the presentation tools, or a desktop import), and only its owner may
+custom tool module, the presentation, [spreadsheet](spreadsheets.md) or [Word](word.md) tools, or a desktop
+import), and only its owner may
 revise it. An answer may create eight drafts; the kept ones it continues do not count.
 `publish_file` seals an exact revision and registers one attachment; a second publish of a
 file already being published is refused, and one already published names its attachment. A
@@ -85,7 +91,7 @@ then a final tools-off response.
 
 An unpublished draft outlives its answer, so Stop, an error or a question never throws away
 work a later answer can continue. After each tool round, and when the answer ends however it
-ends, the latest revision of every changed presentation or custom draft is saved to
+ends, the latest revision of every changed Office or custom draft is saved to
 `conversation_working_files` under the generation fence; an attempt that was superseded
 saves nothing, a failed save is retried at the next boundary, and a process lost mid-answer
 loses at most its last round. A file has one row per answer that changed or
@@ -116,4 +122,23 @@ delivered, and the delivered file renders as that activity's result, in a branch
 a branch points copied tool rows at its own file copies. The model briefly acknowledges the
 delivery without duplicating the file card or its contents, unless the reader asks for
 detail.
+
+## Office families
+
+PowerPoint, Excel and Word are one lifecycle with three formats, so what they share is written
+once and each family supplies only its format. `modules/office/families.ts` is the registry:
+extension, media type, tool names, envelope, activity summary and wording per family. The
+stream, the reload projection, working-file owners (and the `owner` column's enum), desktop
+imports and previews iterate it, so a family missing from one of them is not possible. Tables
+that do differ per family (transcript wording, preview components, server tool preparation in
+`office/server/families.ts`) are records keyed by family, which the compiler makes complete.
+A new format is its module plus one entry in each of those.
+
+`office/server/tool-kit.ts` is what every family's tools share: one error shape, source
+resolution by reference and fingerprint, the create-or-open start of an edit and saving a
+draft revision, with messages worded per family. `office/operations.ts` is the operation
+engine behind each family's table (below); a family adds only its own field kinds and the
+checks that span fields. The engine also runs inside worker processes, which resolve no `~`
+alias, so it and the tables import relatively.
+
 See [presentations](presentations.md) for the format-specific editing boundary.

@@ -1,5 +1,4 @@
 import { FolderOpenIcon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
@@ -14,7 +13,7 @@ import {
 import { fileExtension } from "~/modules/attachments/constants.ts";
 import type { AttachmentPreviewTarget } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
-import { PendingButton } from "~/ui/pending-button.tsx";
+import { PreviewAction } from "~/modules/attachments/ui/preview-action.tsx";
 import { useDesktop } from "../client/bridge.ts";
 
 /**
@@ -179,31 +178,6 @@ const reveal = (client: DesktopClient, conversationId: string, path: string, mod
  * Beside the file name, so the label gives way before the buttons do. The
  * label is also the accessible name, which does not move with the breakpoint.
  */
-function Action({
-  icon,
-  label,
-  pending,
-  onClick,
-}: {
-  icon: IconSvgElement;
-  label: string;
-  pending: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <PendingButton
-      size="sm"
-      variant="outline"
-      aria-label={label}
-      pending={pending}
-      onClick={onClick}
-    >
-      <HugeiconsIcon icon={icon} strokeWidth={2} data-icon="inline-start" aria-hidden />
-      <span className="hidden sm:inline">{label}</span>
-    </PendingButton>
-  );
-}
-
 function LocalFileActions({
   client,
   conversationId,
@@ -226,14 +200,14 @@ function LocalFileActions({
   const openable = !UNOPENABLE_EXTENSIONS.has(`.${fileExtension(path)}`);
   return (
     <>
-      <Action
+      <PreviewAction
         icon={FolderOpenIcon}
         label="Show in folder"
         pending={act.isPending && act.variables === "reveal"}
         onClick={() => act.mutate("reveal")}
       />
       {openable ? (
-        <Action
+        <PreviewAction
           icon={LinkSquare02Icon}
           label="Open"
           pending={act.isPending && act.variables === "open"}

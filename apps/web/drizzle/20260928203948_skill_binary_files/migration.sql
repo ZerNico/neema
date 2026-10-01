@@ -1,0 +1,1 @@
+ALTER TABLE "skill_files" ADD COLUMN "media_type" text;

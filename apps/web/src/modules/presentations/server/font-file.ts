@@ -107,6 +107,8 @@ export function readFontFile(bytes: Uint8Array): FontFileInfo {
   const typographic = best(16);
   const renderFamily = typographic && printable(typographic) ? typographic : family;
 
+  checkOutlines(view, tables, format);
+
   const macStyle = head.length >= 46 ? view.getUint16(head.offset + 44) : 0;
   const weight = os2 && os2.length >= 6 ? view.getUint16(os2.offset + 4) : 400;
   const fsType = os2 && os2.length >= 10 ? view.getUint16(os2.offset + 8) : 0;
@@ -121,4 +123,154 @@ export function readFontFile(bytes: Uint8Array): FontFileInfo {
     embeddable: (fsType & 0x000f) !== 0x0002,
     format,
   };
+}
+
+type Tables = ReadonlyMap<string, { readonly offset: number; readonly length: number }>;
+
+/**
+ * Bounds what drawing any glyph can cost, from the outlines themselves. The
+ * renderer is native code a timeout cannot interrupt, so a face whose glyphs
+ * are pathological is refused before it can reach a preview.
+ */
+function checkOutlines(view: DataView, tables: Tables, format: "ttf" | "otf") {
+  if (tables.has("CFF2")) return invalid("Variable CFF2 fonts aren't supported.");
+  const maxp = tables.get("maxp");
+  if (!maxp || maxp.length < 6) return invalid("The font has no glyph count.");
+  const glyphs = view.getUint16(maxp.offset + 4);
+  if (glyphs < 1) return invalid("The font has no glyphs.");
+  if (format === "otf") return checkCharStrings(view, tables, glyphs);
+
+  const glyf = tables.get("glyf");
+  const loca = tables.get("loca");
+  const head = tables.get("head")!;
+  if (!glyf || !loca || head.length < 54) return invalid("The font has no glyph outlines.");
+  const long = view.getInt16(head.offset + 50) === 1;
+  if (loca.length < (glyphs + 1) * (long ? 4 : 2))
+    return invalid("The font's glyph index is short.");
+  const at = (index: number) =>
+    long ? view.getUint32(loca.offset + index * 4) : view.getUint16(loca.offset + index * 2) * 2;
+  const own = new Uint32Array(glyphs);
+  const parts: number[][] = Array.from({ length: glyphs }, () => []);
+  for (let glyph = 0; glyph < glyphs; glyph++) {
+    const start = at(glyph);
+    const end = at(glyph + 1);
+    if (end < start || end > glyf.length) return invalid("The font's glyph offsets are malformed.");
+    if (end === start) continue;
+    if (end - start < 10) return invalid("A glyph in the font is truncated.");
+    const base = glyf.offset + start;
+    const contours = view.getInt16(base);
+    if (contours >= 0) {
+      if (contours > 0) {
+        if (10 + contours * 2 > end - start) return invalid("A glyph in the font is truncated.");
+        own[glyph] = view.getUint16(base + 10 + (contours - 1) * 2) + 1;
+      }
+      continue;
+    }
+    // A composite: other glyphs placed with offsets and optional scales.
+    let cursor = base + 10;
+    for (let more = true; more;) {
+      if (cursor + 4 > glyf.offset + end) return invalid("A composite glyph is truncated.");
+      const flags = view.getUint16(cursor);
+      const child = view.getUint16(cursor + 2);
+      if (child >= glyphs) return invalid("A composite glyph names a missing glyph.");
+      parts[glyph]!.push(child);
+      if (parts[glyph]!.length > FONT_LIMITS.componentsPerGlyph)
+        return invalid("A composite glyph has too many parts.");
+      cursor +=
+        4 +
+        (flags & 0x0001 ? 4 : 2) +
+        (flags & 0x0008 ? 2 : flags & 0x0040 ? 4 : flags & 0x0080 ? 8 : 0);
+      more = (flags & 0x0020) !== 0;
+    }
+  }
+  // Composites resolve to the points they draw; a cycle or a deep tree is refused.
+  const points = new Float64Array(glyphs).fill(-1);
+  const resolve = (glyph: number, depth: number): number => {
+    if (depth > FONT_LIMITS.compositeDepth) return invalid("A composite glyph nests too deeply.");
+    if (points[glyph]! >= 0) return points[glyph]!;
+    const children = parts[glyph]!;
+    const total = children.length
+      ? children.reduce((sum, child) => sum + resolve(child, depth + 1), 0)
+      : own[glyph]!;
+    if (total > FONT_LIMITS.pointsPerGlyph)
+      return invalid("A glyph in the font is too complex to draw safely.");
+    points[glyph] = total;
+    return total;
+  };
+  for (let glyph = 0; glyph < glyphs; glyph++) resolve(glyph, 0);
+}
+
+/**
+ * CFF outlines are programs: each glyph's charstring must be indexed and
+ * bounded. Subroutine calls can still repeat work; the renderer's kill timeout
+ * is what bounds those.
+ */
+function checkCharStrings(view: DataView, tables: Tables, glyphs: number) {
+  const cff = tables.get("CFF ");
+  if (!cff || cff.length < 4) return invalid("The font has no glyph outlines.");
+  const end = cff.offset + cff.length;
+  const offsetOf = (at: number, size: number) => {
+    let value = 0;
+    for (let i = 0; i < size; i++) value = value * 256 + view.getUint8(at + i);
+    return value;
+  };
+  /** An INDEX's items as [start, end) pairs, and where the next structure begins. */
+  const index = (at: number) => {
+    if (at + 2 > end) return invalid("The font's outline table is truncated.");
+    const count = view.getUint16(at);
+    if (count === 0) return { items: [] as Array<[number, number]>, next: at + 2 };
+    const size = view.getUint8(at + 2);
+    if (size < 1 || size > 4 || at + 3 + (count + 1) * size > end)
+      return invalid("The font's outline table is malformed.");
+    const data = at + 2 + (count + 1) * size;
+    const items: Array<[number, number]> = [];
+    for (let i = 0; i < count; i++) {
+      const from = data + offsetOf(at + 3 + i * size, size);
+      const to = data + offsetOf(at + 3 + (i + 1) * size, size);
+      if (to < from || to > end + 1) return invalid("The font's outline table is malformed.");
+      items.push([from, to]);
+    }
+    return { items, next: data + offsetOf(at + 3 + count * size, size) };
+  };
+  const names = index(cff.offset + view.getUint8(cff.offset + 2));
+  const top = index(names.next);
+  const dict = top.items[0];
+  if (!dict) return invalid("The font's outline table has no top dictionary.");
+  // Operator 17 in the top dictionary is the CharStrings INDEX offset.
+  let charStrings: number | null = null;
+  const operands: number[] = [];
+  for (let cursor = dict[0]; cursor < dict[1];) {
+    const byte = view.getUint8(cursor);
+    if (byte <= 21) {
+      if (byte === 17) charStrings = operands.at(-1) ?? null;
+      operands.length = 0;
+      cursor += byte === 12 ? 2 : 1;
+    } else if (byte === 28) {
+      operands.push(view.getInt16(cursor + 1));
+      cursor += 3;
+    } else if (byte === 29) {
+      operands.push(view.getInt32(cursor + 1));
+      cursor += 5;
+    } else if (byte === 30) {
+      // A real number: nibbles until one is 0xf.
+      cursor += 1;
+      while (cursor < dict[1] && (view.getUint8(cursor++) & 0x0f) !== 0x0f);
+      operands.push(0);
+    } else if (byte >= 32 && byte <= 246) {
+      operands.push(byte - 139);
+      cursor += 1;
+    } else if (byte >= 247 && byte <= 250) {
+      operands.push((byte - 247) * 256 + view.getUint8(cursor + 1) + 108);
+      cursor += 2;
+    } else if (byte >= 251 && byte <= 254) {
+      operands.push(-(byte - 251) * 256 - view.getUint8(cursor + 1) - 108);
+      cursor += 2;
+    } else return invalid("The font's outline table is malformed.");
+  }
+  if (charStrings === null || charStrings <= 0) return invalid("The font has no glyph outlines.");
+  const { items } = index(cff.offset + charStrings);
+  if (items.length !== glyphs) return invalid("The font's outlines don't match its glyph count.");
+  for (const [from, to] of items)
+    if (to - from > FONT_LIMITS.charStringBytes)
+      return invalid("A glyph in the font is too complex to draw safely.");
 }

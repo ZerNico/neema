@@ -616,7 +616,6 @@ describe("presentation tool group", () => {
     const runtime = createPresentationRuntime(workerUrl);
     const workingFiles = createWorkingFiles();
     const initial = await runtime.run({ kind: "create" });
-    if (initial.kind !== "bytes") throw new Error("Expected a created presentation.");
     const sourceRef = "attachment:22e51456-8901-4cb2-96ed-44d69e845c30";
     const { group } = preparePresentationTools({
       runtime,
@@ -624,7 +623,7 @@ describe("presentation tool group", () => {
       resolveFile: (ref) =>
         ref === sourceRef
           ? Effect.succeed({
-              bytes: initial.bytes,
+              bytes: initial,
               name: "Deck.pptx",
               mediaType:
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -641,7 +640,7 @@ describe("presentation tool group", () => {
       expect(valid.outcome).toBe("complete");
       // What it covered, by position, so the activity row can say so.
       expect(valid.read).toEqual({ from: 1, to: valid.slideCount });
-      expect(valid.fingerprint).toBe(fingerprint(initial.bytes));
+      expect(valid.fingerprint).toBe(fingerprint(initial));
       expect(valid.sourceRef).toBe(sourceRef);
       expect(
         (await invoke(group.handlers.edit_presentation, { sourceRef, operations: [] })).outcome,
@@ -658,7 +657,7 @@ describe("presentation tool group", () => {
         (
           await invoke(group.handlers.inspect_presentation, {
             sourceRef: "attachment:other",
-            sourceFingerprint: fingerprint(initial.bytes),
+            sourceFingerprint: fingerprint(initial),
           })
         ).outcome,
       ).toBe("error");
@@ -666,7 +665,7 @@ describe("presentation tool group", () => {
         (
           await invoke(group.handlers.edit_presentation, {
             sourceRef,
-            sourceFingerprint: fingerprint(initial.bytes),
+            sourceFingerprint: fingerprint(initial),
             operations: [{ kind: "addImage", slideId: 256, image: [1, 2, 3] }],
           })
         ).outcome,
@@ -674,7 +673,7 @@ describe("presentation tool group", () => {
       expect(workingFiles.unfinished()).toHaveLength(0);
       const draft = await invoke(group.handlers.edit_presentation, {
         sourceRef,
-        sourceFingerprint: fingerprint(initial.bytes),
+        sourceFingerprint: fingerprint(initial),
         operations: [],
       });
       expect(draft.outcome).toBe("working");
@@ -849,9 +848,8 @@ describe("presentation tool group", () => {
     const runtime = createPresentationRuntime(workerUrl);
     const workingFiles = createWorkingFiles();
     const created = await runtime.run({ kind: "create" });
-    if (created.kind !== "bytes") throw new Error("Expected a deck.");
     const deck = workingFiles.create({
-      bytes: created.bytes,
+      bytes: created,
       name: "Local.pptx",
       mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       owner: "local",
@@ -909,7 +907,7 @@ describe("presentation tool group", () => {
       // A new draft of its own; the import itself stays untouched for another use.
       expect(opened).toMatchObject({ outcome: "working", origin: "opened", revision: 1 });
       expect(opened.workingFileId).not.toBe(deck.ref.id);
-      expect(workingFiles.read(deck.ref).bytes).toEqual(created.bytes);
+      expect(workingFiles.read(deck.ref).bytes).toEqual(created);
       const misuse = await invoke(group.handlers.edit_presentation, {
         workingRef: deckRef,
         operations: [],
@@ -925,7 +923,6 @@ describe("presentation tool group", () => {
     const runtime = createPresentationRuntime(workerUrl);
     const workingFiles = createWorkingFiles();
     const created = await runtime.run({ kind: "create" });
-    if (created.kind !== "bytes") throw new Error("Expected a deck.");
     const [asked, current] = [
       "2da5d185-e869-4d2a-8a20-3efffa46c40b",
       "22e51456-8901-4cb2-96ed-44d69e845c30",
@@ -935,7 +932,7 @@ describe("presentation tool group", () => {
       workingFiles,
       resolveFile: () =>
         Effect.succeed({
-          bytes: created.bytes,
+          bytes: created,
           name: "Branched.pptx",
           mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           source: { kind: "chat" as const, attachmentId: current },
@@ -1015,6 +1012,34 @@ describe("presentation tool group", () => {
       expect(result.message).toContain("fileName: expected a name ending in .pptx");
       expect(kinds).toEqual([]);
       expect(workingFiles.unfinished()).toHaveLength(0);
+    } finally {
+      workingFiles.dispose();
+      await runtime.close();
+    }
+  });
+
+  it("refuses a source that isn't a deck before any worker opens it", async () => {
+    const sourceRef = "attachment:2da5d185-e869-4d2a-8a20-3efffa46c40c";
+    const runtime = createPresentationRuntime(workerUrl);
+    const workingFiles = createWorkingFiles();
+    const { group } = preparePresentationTools({
+      runtime,
+      workingFiles,
+      resolveFile: () =>
+        Effect.succeed({
+          bytes: new Uint8Array([1, 2, 3]),
+          name: "Budget.xlsx",
+          mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          source: { kind: "chat" as const, attachmentId: sourceRef.slice(11) },
+          ref: { kind: "attachment" as const, id: sourceRef.slice(11) },
+        }),
+    });
+    try {
+      const refused = await invoke(group.handlers.inspect_presentation, { sourceRef });
+      expect(refused).toMatchObject({
+        outcome: "error",
+        message: "invalid_operation: Budget.xlsx is not a .pptx presentation.",
+      });
     } finally {
       workingFiles.dispose();
       await runtime.close();

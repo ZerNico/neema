@@ -36,6 +36,8 @@ import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
 import { PresentationProcessor } from "~/modules/presentations/server/processor.ts";
+import { SpreadsheetProcessor } from "~/modules/spreadsheets/server/runtime.ts";
+import { WordProcessor } from "~/modules/word/server/runtime.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
@@ -99,6 +101,8 @@ const CoreLayer = Layer.mergeAll(
   AttachmentService.layer,
   DocumentParser.layer,
   PresentationProcessor.layer.pipe(Layer.provideMerge(PresentationFonts.layer)),
+  SpreadsheetProcessor.layer,
+  WordProcessor.layer,
   DraftService.layer,
   IntegrationService.layer,
   IntegrationApprovals.layer,

@@ -41,7 +41,7 @@ export function AttachmentChip({
   onRemove,
   href,
   preview,
-  presentation,
+  office,
   previewActions,
   onOpenPreview,
   className,
@@ -53,8 +53,8 @@ export function AttachmentChip({
   href?: string | undefined;
   /** Full-content URL; when set, clicking the chip opens an in-app preview. */
   preview?: string | null | undefined;
-  /** A deck's server-rendered slides, shown instead of "no preview". */
-  presentation?: AttachmentPreviewTarget["presentation"];
+  /** A deck's slides or a workbook's sheets, shown instead of "no preview". */
+  office?: AttachmentPreviewTarget["office"];
   /** Replaces the preview's "Open original" link; required for a `data:` or `blob:` preview. */
   previewActions?: ReactNode;
   /**
@@ -127,7 +127,7 @@ export function AttachmentChip({
         size: item.size,
         kind: item.kind,
         url: preview,
-        presentation,
+        office,
       }}
       {...(previewActions ? { actions: previewActions } : {})}
       open={previewOpen}

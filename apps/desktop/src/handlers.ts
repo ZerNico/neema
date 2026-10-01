@@ -32,12 +32,14 @@ const BINARY_MEDIA_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
-/** What an import may bring in for server tools: pictures to place and decks to edit. */
+/** What an import may bring in for server tools: pictures to place, Office files to edit. */
 const IMPORT_MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 
 /** Files visited before a find or search gives up. Visited, not returned. */
@@ -465,7 +467,7 @@ export const makeHandlers = (shell: Shell) =>
               new DesktopError({
                 reason: "not-binary",
                 message: importing
-                  ? `${target.relative} is not a PNG, JPEG or PowerPoint (.pptx) file.`
+                  ? `${target.relative} is not a PNG, JPEG, PowerPoint (.pptx), Excel (.xlsx) or Word (.docx) file.`
                   : `${target.relative} is not an image or a PDF.`,
               }),
             );

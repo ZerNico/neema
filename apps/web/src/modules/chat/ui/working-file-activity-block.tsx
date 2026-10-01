@@ -1,4 +1,10 @@
-import { Alert02Icon, ArrowDown01Icon, Presentation01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  ArrowDown01Icon,
+  Doc01Icon,
+  Presentation01Icon,
+  Xls01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState, type ReactNode } from "react";
 import {
@@ -12,11 +18,17 @@ import {
 import { MotionSwap } from "~/ui/motion.tsx";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
+import { OFFICE_FAMILIES, type OfficeFamily } from "~/modules/office/families.ts";
+import type { OfficeActivity } from "../client/use-message-stream.ts";
 import type { WorkingFilePart } from "./assistant-body.ts";
 
 type Step = WorkingFilePart["steps"][number];
+type OfficeStep = OfficeActivity;
 
 const slides = (count: number) => `${count} ${count === 1 ? "slide" : "slides"}`;
+const sheets = (count: number) => `${count} ${count === 1 ? "sheet" : "sheets"}`;
+const blocks = (count: number) =>
+  `${count} ${count === 1 ? "paragraph or table" : "paragraphs and tables"}`;
 
 /**
  * One word for a working file's state wherever the transcript shows it. An
@@ -25,15 +37,6 @@ const slides = (count: number) => `${count} ${count === 1 ? "slide" : "slides"}`
  */
 export const workingFileState = (published: boolean, terminal: boolean) =>
   published ? "Published" : terminal ? "Draft" : "Working";
-
-/** `drafted`: a draft exists, or the deck was read first, so an edit changes an existing deck. */
-function runningLabel(step: Step, drafted: boolean) {
-  if (step.family === "tool-file") return "Publishing";
-  if (step.writing) return "Writing changes";
-  if (step.name === "render_presentation") return "Checking appearance";
-  if (step.name === "inspect_presentation") return "Reading slides";
-  return drafted ? "Editing slides" : "Creating the deck";
-}
 
 /** "slide 5", "slides 3–6" when consecutive, else "slides 1, 4 and 9". */
 function positions(numbers: ReadonlyArray<number>) {
@@ -44,41 +47,120 @@ function positions(numbers: ReadonlyArray<number>) {
   return `slides ${sorted.slice(0, -1).join(", ")} and ${sorted.at(-1)}`;
 }
 
-/** Which part of the deck a read covered; rows from before that was recorded stay general. */
-function readLabel(step: Step) {
-  if (step.family !== "presentation" || !step.read) return "Read presentation";
-  const { read } = step;
-  if (read.template) return read.template === "master" ? "Read slide master" : "Read slide layout";
-  if (read.slides?.length) return `Read ${positions(read.slides)}`;
-  return read.from === read.to ? `Read slide ${read.from}` : `Read slides ${read.from}–${read.to}`;
+/**
+ * How the transcript speaks about each Office editor. Everything shown comes
+ * from bounded numbers and positions, never from the file's own text.
+ */
+const WORDING = {
+  presentation: {
+    icon: Presentation01Icon,
+    noun: "presentation",
+    inspect: OFFICE_FAMILIES.presentation.inspect,
+    edit: OFFICE_FAMILIES.presentation.edit,
+    reading: "Reading slides",
+    editing: "Editing slides",
+    creating: "Creating the deck",
+    started: "Started a new deck",
+    built: "Built the slides",
+    edited: "Edited the slides",
+    count: (step: OfficeStep) =>
+      step.family === "presentation" && step.slideCount ? slides(step.slideCount) : null,
+    read: (step: OfficeStep) => {
+      if (step.family !== "presentation" || !step.read) return "Read presentation";
+      const { read } = step;
+      if (read.template)
+        return read.template === "master" ? "Read slide master" : "Read slide layout";
+      if (read.slides?.length) return `Read ${positions(read.slides)}`;
+      return read.from === read.to
+        ? `Read slide ${read.from}`
+        : `Read slides ${read.from}–${read.to}`;
+    },
+  },
+  spreadsheet: {
+    icon: Xls01Icon,
+    noun: "spreadsheet",
+    inspect: OFFICE_FAMILIES.spreadsheet.inspect,
+    edit: OFFICE_FAMILIES.spreadsheet.edit,
+    reading: "Reading cells",
+    editing: "Editing cells",
+    creating: "Creating the workbook",
+    started: "Started a new workbook",
+    built: "Wrote the cells",
+    edited: "Edited the cells",
+    count: (step: OfficeStep) =>
+      step.family === "spreadsheet" && step.sheetCount ? sheets(step.sheetCount) : null,
+    read: (step: OfficeStep) => {
+      if (step.family !== "spreadsheet" || !step.read) return "Read spreadsheet";
+      const { sheet, range } = step.read;
+      return range ? `Read ${range} on sheet ${sheet}` : `Read sheet ${sheet}`;
+    },
+  },
+  word: {
+    icon: Doc01Icon,
+    noun: "document",
+    inspect: OFFICE_FAMILIES.word.inspect,
+    edit: OFFICE_FAMILIES.word.edit,
+    reading: "Reading the document",
+    editing: "Editing the document",
+    creating: "Creating the document",
+    started: "Started a new document",
+    built: "Wrote the document",
+    edited: "Edited the document",
+    count: (step: OfficeStep) =>
+      step.family === "word" && step.blockCount ? blocks(step.blockCount) : null,
+    read: (step: OfficeStep) => {
+      if (step.family !== "word" || !step.read) return "Read the document";
+      const { from, blockCount } = step.read;
+      return from === 0 ? "Read the document" : `Read on from block ${from} of ${blockCount}`;
+    },
+  },
+} as const satisfies Record<OfficeFamily, unknown>;
+type Wording = (typeof WORDING)[OfficeFamily];
+
+/** `drafted`: a draft exists, or the file was read first, so an edit changes an existing one. */
+function runningLabel(step: Step, drafted: boolean, words: Wording) {
+  if (step.family === "tool-file") return "Publishing";
+  if (step.writing) return "Writing changes";
+  if (step.name === "render_presentation") return "Checking appearance";
+  if (step.name === words.inspect) return words.reading;
+  return drafted ? words.editing : words.creating;
 }
 
 /**
  * A failed step in reader words. The error text was written for the model
  * (operation paths, codes), so it stays out of the transcript.
  */
-function failureLabel(step: Step) {
+function failureLabel(step: Step, words?: Wording) {
   if (step.family === "tool-file") return "Couldn’t publish the file";
-  if (step.name === "inspect_presentation") return "Couldn’t read the presentation";
+  if (words && step.name === words.inspect) return `Couldn’t read the ${words.noun}`;
   if (step.name === "render_presentation") return "Couldn’t check the slides";
   return "Couldn’t apply an edit";
 }
 
-function stepLabels(step: Step, fileName: string | undefined, drafted: boolean): string[] {
-  if (step.status === "running") return [runningLabel(step, drafted)];
-  if (step.status === "error") return [failureLabel(step)];
-  if (step.family === "tool-file") return [`Published ${fileName ?? "the presentation"}`];
-  if (step.name === "inspect_presentation") return [readLabel(step)];
-  if (step.name === "render_presentation") {
+function stepLabels(
+  step: Step,
+  fileName: string | undefined,
+  drafted: boolean,
+  words: Wording,
+): string[] {
+  if (step.status === "running") return [runningLabel(step, drafted, words)];
+  if (step.status === "error") return [failureLabel(step, words)];
+  if (step.family === "tool-file") return [`Published ${fileName ?? `the ${words.noun}`}`];
+  if (step.name === words.inspect) return [words.read(step)];
+  if (step.family === "presentation" && step.name === "render_presentation") {
     const count = step.renderedSlideIds?.length;
     return [count ? `Checked appearance of ${slides(count)}` : "Checked slide appearance"];
   }
   const labels: string[] = [];
-  if (step.origin === "created") labels.push("Started a new deck");
+  if (step.origin === "created") labels.push(words.started);
   if (step.origin === "opened") labels.push("Opened the file for editing");
-  if (step.changes)
-    labels.push(step.origin === "created" ? "Built the slides" : "Edited the slides");
-  if (step.renderedSlideIds?.length) labels.push("Checked slide appearance");
+  if (step.changes) labels.push(step.origin === "created" ? words.built : words.edited);
+  if (step.family === "presentation" && step.renderedSlideIds?.length)
+    labels.push("Checked slide appearance");
+  if (step.family === "spreadsheet" && step.formulaErrors)
+    labels.push(
+      `${step.formulaErrors} ${step.formulaErrors === 1 ? "formula shows" : "formulas show"} an error`,
+    );
   return labels.length ? labels : ["Made changes"];
 }
 
@@ -87,10 +169,15 @@ function stepLabels(step: Step, fileName: string | undefined, drafted: boolean):
  * count: a model reading page after page would otherwise list the same
  * sentence a dozen times.
  */
-function stepRows(steps: ReadonlyArray<Step>, fileName: string | undefined, drafted: boolean) {
+function stepRows(
+  steps: ReadonlyArray<Step>,
+  fileName: string | undefined,
+  drafted: boolean,
+  words: Wording,
+) {
   const rows: Array<{ key: string; label: string; status: Step["status"]; count: number }> = [];
   for (const step of steps)
-    stepLabels(step, fileName, drafted).forEach((label, index) => {
+    stepLabels(step, fileName, drafted, words).forEach((label, index) => {
       const last = rows.at(-1);
       if (last && last.label === label && last.status === step.status) last.count += 1;
       else rows.push({ key: `${step.callId}:${index}`, label, status: step.status, count: 1 });
@@ -115,38 +202,38 @@ export interface WorkingFileState {
  * each header says what its own calls did. Only the newest part is live.
  * An unpublished draft says nothing about whether its checkpoint was saved.
  */
-function settledLabel(part: WorkingFilePart, state: WorkingFileState, edits: boolean) {
+function settledLabel(
+  part: WorkingFilePart,
+  state: WorkingFileState,
+  edits: boolean,
+  words: Wording,
+) {
   const { steps } = part;
+  const Noun = words.noun[0]!.toUpperCase() + words.noun.slice(1);
   if (edits && !state.published && !state.streaming && state.final)
-    return part.workingFileId === undefined
-      ? "Couldn’t create the presentation"
-      : "Presentation draft";
+    return part.workingFileId === undefined ? `Couldn’t create the ${words.noun}` : `${Noun} draft`;
   const done = steps.filter((step) => step.status === "complete");
-  const counted = done.findLast(
-    (step) => step.family === "presentation" && step.slideCount !== undefined,
-  );
-  const suffix =
-    counted?.family === "presentation" && counted.slideCount
-      ? ` · ${slides(counted.slideCount)}`
-      : "";
-  if (done.some((step) => step.family === "presentation" && step.origin === "created"))
-    return `Created presentation${suffix}`;
-  if (done.some((step) => step.name === "edit_presentation")) return `Edited presentation${suffix}`;
+  const counted = done
+    .flatMap((step) => (step.family === "tool-file" ? [] : [words.count(step)]))
+    .findLast((count) => count !== null);
+  const suffix = counted ? ` · ${counted}` : "";
+  if (done.some((step) => step.family !== "tool-file" && step.origin === "created"))
+    return `Created ${words.noun}${suffix}`;
+  if (done.some((step) => step.name === words.edit)) return `Edited ${words.noun}${suffix}`;
   const checked = done.reduce(
     (total, step) =>
       total + (step.family === "presentation" ? (step.renderedSlideIds?.length ?? 0) : 0),
     0,
   );
   if (checked) return `Checked appearance of ${slides(checked)}`;
-  if (done.some((step) => step.name === "inspect_presentation")) return "Read presentation";
-  return edits ? "Couldn’t change the presentation" : "Couldn’t read the presentation";
+  if (done.some((step) => step.name === words.inspect)) return `Read ${words.noun}`;
+  return edits ? `Couldn’t change the ${words.noun}` : `Couldn’t read the ${words.noun}`;
 }
 
-/** Whether the part changes a deck, and whether one existed for its edits to change. */
-const partKind = ({ workingFileId, steps }: WorkingFilePart) => ({
-  edits: workingFileId !== undefined || steps.some((step) => step.name === "edit_presentation"),
-  drafted:
-    workingFileId !== undefined || steps.some((step) => step.name === "inspect_presentation"),
+/** Whether the part changes a file, and whether one existed for its edits to change. */
+const partKind = ({ workingFileId, steps }: WorkingFilePart, words: Wording) => ({
+  edits: workingFileId !== undefined || steps.some((step) => step.name === words.edit),
+  drafted: workingFileId !== undefined || steps.some((step) => step.name === words.inspect),
 });
 
 /**
@@ -159,6 +246,7 @@ function rowLabels(
   state: WorkingFileState,
   edits: boolean,
   drafted: boolean,
+  words: Wording,
 ) {
   const { steps } = part;
   const running = steps.find((step) => step.status === "running");
@@ -170,20 +258,20 @@ function rowLabels(
     const current = running ?? steps.at(-1)!;
     return {
       live,
-      primary: edits ? "Working on presentation" : "Reading presentation",
+      primary: edits ? `Working on ${words.noun}` : `Reading ${words.noun}`,
       secondary:
         current.status === "error"
           ? "A step failed"
           : // "Reading presentation · Reading slides" says one thing twice.
-            !edits && current.name === "inspect_presentation"
+            !edits && current.name === words.inspect
             ? null
-            : runningLabel(current, drafted),
+            : runningLabel(current, drafted, words),
     };
   }
   const failed = steps.filter((step) => step.status === "error").length;
   return {
     live,
-    primary: settledLabel(part, state, edits),
+    primary: settledLabel(part, state, edits, words),
     secondary:
       failed && !state.published ? `${failed} ${failed === 1 ? "step" : "steps"} failed` : null,
   };
@@ -205,9 +293,9 @@ export function WorkingFileActivityBlock({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const presentationSteps = part.steps.filter((step) => step.family === "presentation");
+  const office = part.steps.find((step) => step.family !== "tool-file");
   // A publish of a file some other tool produced has no steps worth listing.
-  if (presentationSteps.length === 0) {
+  if (!office) {
     const failure = part.steps.find((step) => step.status === "error");
     return (
       <>
@@ -227,8 +315,9 @@ export function WorkingFileActivityBlock({
     );
   }
   const fileName = part.file?.attachment.fileName;
-  const { edits, drafted } = partKind(part);
-  const { live, primary, secondary } = rowLabels(part, state, edits, drafted);
+  const words = WORDING[office.family];
+  const { edits, drafted } = partKind(part, words);
+  const { live, primary, secondary } = rowLabels(part, state, edits, drafted, words);
   return (
     <>
       <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
@@ -240,12 +329,7 @@ export function WorkingFileActivityBlock({
             {live ? (
               <Spinner aria-hidden className="size-4" />
             ) : (
-              <HugeiconsIcon
-                icon={Presentation01Icon}
-                strokeWidth={2}
-                className="size-4"
-                aria-hidden
-              />
+              <HugeiconsIcon icon={words.icon} strokeWidth={2} className="size-4" aria-hidden />
             )}
           </MotionSwap>
           <MotionSwap
@@ -278,7 +362,7 @@ export function WorkingFileActivityBlock({
         </DisclosureTrigger>
         <DisclosureContent>
           <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
-            {stepRows(part.steps, fileName, drafted).map((row) => (
+            {stepRows(part.steps, fileName, drafted, words).map((row) => (
               <li key={row.key} className="flex items-start gap-1.5">
                 {row.status === "error" ? (
                   <HugeiconsIcon

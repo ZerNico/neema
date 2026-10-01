@@ -27,18 +27,51 @@ import {
 import { skillDetailQuery, skillQuery } from "../client/queries.ts";
 import { exportSkillArchive } from "../archive.ts";
 import {
+  isBinarySkillFile,
   NEW_SKILL_FILES,
   SkillPackageError,
   validateSkillPackage,
+  type SkillBinaryFile,
   type SkillFile,
 } from "../package.ts";
 import type { SkillDetail } from "../schema.ts";
 import { deleteSkill, saveSkill } from "../server/functions.ts";
+import { skillFileInput, uploadSkillFile } from "../client/files.ts";
 import { SkillUpdateReview } from "./skill-update-review.tsx";
 import { PackageWorkspace } from "./package-workspace.tsx";
+import type { AttachmentPreviewTarget } from "~/modules/attachments/ui/attachment-preview.tsx";
+import { officePreview, type OfficeFile } from "~/modules/attachments/ui/office-preview.ts";
 import { SkillSimpleForm, canEditSimply } from "./skill-simple-form.tsx";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+
+/** A just-uploaded file reads back through its upload; a saved one through the skill. */
+const binaryHref = (skillId: string | undefined, file: SkillBinaryFile) =>
+  file.binary.uploadId
+    ? `/api/files/${file.binary.uploadId}`
+    : skillId && file.binary.sha256
+      ? `/api/skills/${skillId}/files?sha256=${file.binary.sha256}`
+      : null;
+
+/**
+ * The shared preview of a skill's binary file. A stored one downloads as opaque
+ * bytes and never renders on this origin, so only server-rendered Office
+ * previews apply; a fresh upload is an ordinary attachment until saved.
+ */
+function binaryPreview(
+  skillId: string | undefined,
+  file: SkillBinaryFile,
+): AttachmentPreviewTarget | null {
+  const url = binaryHref(skillId, file);
+  const fileName = file.path.slice(file.path.lastIndexOf("/") + 1);
+  const source: OfficeFile | null = file.binary.uploadId
+    ? { kind: "attachment", id: file.binary.uploadId }
+    : skillId && file.binary.sha256
+      ? { kind: "skill-file", id: `${skillId}:${file.binary.sha256}` }
+      : null;
+  const office = source && officePreview({ fileName, mediaType: file.binary.mediaType }, source);
+  return url && office ? { fileName, size: file.binary.size, kind: "file", url, office } : null;
+}
 
 function download(name: string, bytes: Uint8Array | string, type: string) {
   const url = URL.createObjectURL(
@@ -154,14 +187,24 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
     mutationFn: (submitted: SkillFile[]) =>
       saveSkill({
         data: {
-          files: submitted,
+          files: submitted.map(skillFileInput),
           ...(initial ? { skillId: initial.id, expectedRevision: revision! } : {}),
         },
       }),
     onSuccess: async (id, submitted) => {
       // A new skill's own page is the confirmation.
       if (initial) markSaved();
-      setSaved(JSON.stringify(submitted));
+      // An upload is spent once saved: from now on the file is its stored hash.
+      let stored = submitted;
+      if (initial && submitted.some((file) => isBinarySkillFile(file) && file.binary.uploadId)) {
+        const fresh = await queryClient.fetchQuery({ ...skillDetailQuery(id), staleTime: 0 });
+        const byPath = new Map(fresh.files.map((file) => [file.path, file]));
+        const settle = (file: SkillFile) =>
+          isBinarySkillFile(file) && file.binary.uploadId ? (byPath.get(file.path) ?? file) : file;
+        stored = submitted.map(settle);
+        setFiles((current) => current.map(settle));
+      }
+      setSaved(JSON.stringify(stored));
       setRevision((current) => (current ?? 0) + 1);
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       if (!initial)
@@ -227,13 +270,26 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
               ) : null}
               <DropdownMenuItem
                 disabled={!validation.value}
-                onClick={() =>
-                  download(
-                    `${validation.value!.metadata.name}.zip`,
-                    exportSkillArchive(files),
-                    "application/zip",
-                  )
-                }
+                onClick={async () => {
+                  try {
+                    const loaded = await Promise.all(
+                      files.map(async (file) => {
+                        if (!isBinarySkillFile(file)) return file;
+                        const href = binaryHref(initial?.id, file);
+                        const response = href ? await fetch(href) : null;
+                        if (!response?.ok) throw new Error(`${file.path} could not be loaded.`);
+                        return { ...file, bytes: new Uint8Array(await response.arrayBuffer()) };
+                      }),
+                    );
+                    download(
+                      `${validation.value!.metadata.name}.zip`,
+                      exportSkillArchive(loaded),
+                      "application/zip",
+                    );
+                  } catch (error) {
+                    toastError("Could not export the skill.", error);
+                  }
+                }}
               >
                 <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
                 Export ZIP
@@ -242,7 +298,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                 onClick={() => {
                   download(
                     "SKILL.md",
-                    files.find((file) => file.path === "SKILL.md")?.content ?? "",
+                    ((root) => (root && !isBinarySkillFile(root) ? root.content : ""))(
+                      files.find((file) => file.path === "SKILL.md"),
+                    ),
                     "text/markdown",
                   );
                   toast.info(
@@ -313,6 +371,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           files={files}
           {...(!save.isPending || initial ? { onChange: setFiles } : {})}
           findings={findings}
+          upload={uploadSkillFile}
+          downloadHref={(file) => binaryHref(initial?.id, file)}
+          preview={(file) => binaryPreview(initial?.id, file)}
         />
       )}
       {initial ? (

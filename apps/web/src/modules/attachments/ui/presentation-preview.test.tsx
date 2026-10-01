@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AttachmentPreviewDialog } from "./attachment-preview.tsx";
-import { presentationSource } from "./presentation-preview.tsx";
+import { officePreview } from "./office-preview.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -20,7 +20,7 @@ it("reserves a full slide frame while loading, then uses the deck’s actual rat
         size: 1024,
         kind: "file",
         url: "/api/files/deck",
-        presentation: { kind: "attachment", id: "deck" },
+        office: { type: "presentation", source: { kind: "attachment", id: "deck" } },
       }}
     />,
   );
@@ -47,7 +47,7 @@ it("pages slides with the arrow keys while focus sits on the dialog's download l
         size: 1024,
         kind: "file",
         url: "/api/files/deck",
-        presentation: { kind: "attachment", id: "deck" },
+        office: { type: "presentation", source: { kind: "attachment", id: "deck" } },
       }}
     />,
   );
@@ -71,18 +71,21 @@ it("pages slides with the arrow keys while focus sits on the dialog's download l
   expect(screen.queryByText(/approximate/i)).toBeNull();
 });
 
-it("previews a deck by its media type, or by its extension when the type says nothing", () => {
-  const source = { kind: "attachment", id: "deck" } as const;
+it("previews a deck or workbook by its media type, or by its extension when the type says nothing", () => {
+  const source = { kind: "attachment", id: "file" } as const;
   const pptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-  expect(presentationSource({ fileName: "export.bin", mediaType: pptx }, source)).toBe(source);
-  expect(presentationSource({ fileName: "Deck.PPTX" }, source)).toBe(source);
+  const deck = { type: "presentation", source };
+  expect(officePreview({ fileName: "export.bin", mediaType: pptx }, source)).toEqual(deck);
+  expect(officePreview({ fileName: "Deck.PPTX" }, source)).toEqual(deck);
   expect(
-    presentationSource({ fileName: "Deck.pptx", mediaType: "application/octet-stream" }, source),
-  ).toBe(source);
-  expect(
-    presentationSource({ fileName: "notes.pptx", mediaType: "text/plain" }, source),
-  ).toBeNull();
-  expect(presentationSource({ fileName: "Sheet.xlsx" }, source)).toBeNull();
+    officePreview({ fileName: "Deck.pptx", mediaType: "application/octet-stream" }, source),
+  ).toEqual(deck);
+  expect(officePreview({ fileName: "notes.pptx", mediaType: "text/plain" }, source)).toBeNull();
+  expect(officePreview({ fileName: "Sheet.xlsx" }, source)).toEqual({
+    type: "spreadsheet",
+    source,
+  });
+  expect(officePreview({ fileName: "Sheet.csv" }, source)).toBeNull();
 });
 
 it("reports a deck it cannot load as an alert", async () => {
@@ -99,7 +102,7 @@ it("reports a deck it cannot load as an alert", async () => {
         size: 1024,
         kind: "file",
         url: "/api/files/broken",
-        presentation: { kind: "attachment", id: "broken" },
+        office: { type: "presentation", source: { kind: "attachment", id: "broken" } },
       }}
     />,
   );

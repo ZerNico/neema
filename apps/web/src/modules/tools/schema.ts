@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 import { PresentationToolEnvelope } from "~/modules/presentations/tool-schema.ts";
+import { SpreadsheetToolEnvelope } from "~/modules/spreadsheets/tool-schema.ts";
+import { WordToolEnvelope } from "~/modules/word/tool-schema.ts";
 import { ToolFileEnvelope } from "~/modules/chat/tool-file-schema.ts";
 import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
 import { AgentDraftToolEnvelope } from "~/modules/agents/tool-schema.ts";
@@ -204,6 +206,8 @@ const desktopEnvelopeFields = {
 export const ToolChunkEnvelope = Schema.Union([
   ToolFileEnvelope,
   PresentationToolEnvelope,
+  SpreadsheetToolEnvelope,
+  WordToolEnvelope,
   AgentDraftToolEnvelope,
   IntegrationToolEnvelope,
   ScheduleDraftToolEnvelope,

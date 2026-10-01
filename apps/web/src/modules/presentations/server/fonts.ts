@@ -75,6 +75,14 @@ export class PresentationFonts extends Context.Service<
     faces(): Effect.Effect<readonly FontFace[]>;
     /** Every family a deck may use: bundled and uploaded. */
     families(): Effect.Effect<readonly string[]>;
+    /**
+     * Faces a skill carries, for the answers that loaded it. Each is checked
+     * once per content hash, in a worker process, like an upload; one the
+     * renderer can't use is left out, never failing the render.
+     */
+    skillFaces(
+      fonts: ReadonlyArray<{ readonly sha256: string; readonly bytes: Uint8Array }>,
+    ): Effect.Effect<readonly FontFace[]>;
   }
 >()("chat/presentations/PresentationFonts") {
   static readonly layer = Layer.effect(
@@ -204,7 +212,39 @@ export class PresentationFonts extends Context.Service<
         return record(row!);
       });
 
+      // Content-addressed: a face is checked once however many answers load it.
+      const checked = new Map<string, Promise<FontFace | null>>();
+      const skillFace = (sha256: string, bytes: Uint8Array): Promise<FontFace | null> => {
+        const known = checked.get(sha256);
+        if (known) return known;
+        const signature = String.fromCharCode(...bytes.subarray(0, 4));
+        const format =
+          signature === "OTTO"
+            ? "otf"
+            : signature === "true" || signature === "\0\x01\0\0"
+              ? "ttf"
+              : null;
+        const result = (async () => {
+          if (!format || bytes.length > FONT_LIMITS.fileBytes) return null;
+          const path = await materialize(sha256, format, bytes);
+          // The whole check, tables and a trial render, runs in a worker process.
+          const info = await workers.run({ kind: "font", path }).catch(() => null);
+          if (!info) return null;
+          const { family, renderFamily, bold, italic } = info;
+          return { family, renderFamily, bold, italic, path };
+        })();
+        if (checked.size >= FONT_LIMITS.faces * 4) checked.delete(checked.keys().next().value!);
+        checked.set(sha256, result);
+        return result;
+      };
+
       return PresentationFonts.of({
+        skillFaces: Effect.fn("PresentationFonts.skillFaces")(function* (fonts) {
+          const checkedFaces = yield* Effect.promise(() =>
+            Promise.all(fonts.map((font) => skillFace(font.sha256, font.bytes))),
+          );
+          return checkedFaces.filter((face): face is FontFace => face !== null);
+        }),
         list: Effect.fn("PresentationFonts.list")(function* () {
           const rows = yield* db
             .select({
@@ -244,3 +284,14 @@ export class PresentationFonts extends Context.Service<
     }),
   ).pipe(Layer.provide(PresentationWorkers.layer));
 }
+
+/**
+ * What a drawing's cache key needs of the uploaded faces: a hash of them, so a
+ * new or removed face draws afresh. Empty where no fonts service runs.
+ */
+export const drawnFontsKey = Effect.serviceOption(PresentationFonts).pipe(
+  Effect.flatMap((service) =>
+    service._tag === "Some" ? service.value.faces() : Effect.succeed([] as const),
+  ),
+  Effect.map((faces) => createHash("sha256").update(JSON.stringify(faces)).digest("hex")),
+);

@@ -26,6 +26,9 @@ export const TEXT_MEDIA_TYPE = "text/plain";
 export const GENERIC_MEDIA_TYPE = "application/octet-stream";
 export const PPTX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+export const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+export const DOCX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type AttachmentKind = "image" | "pdf" | "text" | "file";
 
@@ -120,7 +123,7 @@ const FILE_MEDIA_TYPES: Record<string, string> = {
   "7z": "application/x-7z-compressed",
   avif: "image/avif",
   bmp: "image/bmp",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  docx: DOCX_MEDIA_TYPE,
   epub: "application/epub+zip",
   gz: "application/gzip",
   heic: "image/heic",
@@ -130,6 +133,7 @@ const FILE_MEDIA_TYPES: Record<string, string> = {
   mov: "video/quicktime",
   mp3: "audio/mpeg",
   mp4: "video/mp4",
+  otf: "font/otf",
   odp: "application/vnd.oasis.opendocument.presentation",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odt: "application/vnd.oasis.opendocument.text",
@@ -140,9 +144,12 @@ const FILE_MEDIA_TYPES: Record<string, string> = {
   tar: "application/x-tar",
   tif: "image/tiff",
   tiff: "image/tiff",
+  ttf: "font/ttf",
   wav: "audio/wav",
   webm: "video/webm",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  xlsx: XLSX_MEDIA_TYPE,
   zip: "application/zip",
 };
 

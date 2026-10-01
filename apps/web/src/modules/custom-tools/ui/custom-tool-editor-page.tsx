@@ -1,6 +1,7 @@
 import { javascript } from "@codemirror/lang-javascript";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import {
+  Download01Icon,
   Alert02Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
@@ -15,6 +16,7 @@ import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { Schema } from "effect";
 import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
+import { PreviewAction } from "~/modules/attachments/ui/preview-action.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
@@ -848,13 +850,12 @@ function TestFileChip({ file }: { file: CustomToolTestFile }) {
       item={{ ...item, previewUrl: kind === "image" ? file.dataUrl : null }}
       preview={file.dataUrl}
       previewActions={
-        <a
+        <PreviewAction
+          icon={Download01Icon}
+          label="Download"
           href={file.dataUrl}
           download={file.name}
-          className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
-        >
-          Download
-        </a>
+        />
       }
     />
   );

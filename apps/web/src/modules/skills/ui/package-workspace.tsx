@@ -1,26 +1,44 @@
 import {
   ArrowRight01Icon,
   Delete02Icon,
+  Download01Icon,
   File01Icon,
   FileAddIcon,
+  FileUploadIcon,
   Folder01Icon,
   FolderAddIcon,
   PencilEdit02Icon,
+  Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import type { ReactNode } from "react";
 import { cardSurfaceClassName } from "~/ui/card.tsx";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
-import { Button } from "~/ui/primitives/button";
+import { Button, buttonVariants } from "~/ui/primitives/button";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { toastError } from "~/ui/error-toast.ts";
+import { formatFileSize } from "~/modules/attachments/constants.ts";
+import {
+  FilePreviewBody,
+  type AttachmentPreviewTarget,
+} from "~/modules/attachments/ui/attachment-preview.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { ViewToggle } from "~/ui/view-toggle.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { cn } from "~/ui/utils.ts";
-import { validateSkillPath, type SkillFile, type SkillFinding } from "../package.ts";
+import {
+  classifySkillFile,
+  isBinarySkillFile,
+  SKILL_LIMITS,
+  validateSkillPath,
+  type SkillBinaryFile,
+  type SkillFile,
+  type SkillFinding,
+} from "../package.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 
 const TextEditor = lazy(() => import("./text-editor.tsx"));
@@ -248,6 +266,91 @@ function FileTree({
   );
 }
 
+const noDownload = () => null;
+const noPreview = () => null;
+
+/** Stores a picked file for the draft and says what the server kept. */
+export type SkillUpload = (file: File) => Promise<{
+  uploadId: string;
+  size: number;
+  mediaType: string;
+}>;
+
+/** Opens the system picker and hands over the one file chosen. */
+function useFilePicker(onPick: (file: File) => void) {
+  const input = useRef<HTMLInputElement>(null);
+  const element = (
+    <input
+      ref={input}
+      type="file"
+      className="sr-only"
+      tabIndex={-1}
+      aria-hidden
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) onPick(file);
+      }}
+    />
+  );
+  return { element, open: () => input.current?.click() };
+}
+
+/** A template, image or font: described, previewed where it can be, never edited as text. */
+function BinaryFileView({
+  file,
+  href,
+  preview,
+  pending,
+  onReplace,
+}: {
+  file: SkillBinaryFile;
+  href: string | null;
+  preview: AttachmentPreviewTarget | null;
+  pending: boolean;
+  onReplace?: (() => void) | undefined;
+}) {
+  const name = file.path.slice(file.path.lastIndexOf("/") + 1);
+  return (
+    <div className="flex flex-col items-start gap-4 p-5">
+      <div className="flex w-full min-w-0 items-center gap-3">
+        <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+          <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" />
+        </div>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium">{name}</span>
+          <span className="text-muted-foreground truncate text-xs" title={file.binary.mediaType}>
+            {file.binary.mediaType} · {formatFileSize(file.binary.size)}
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {href ? (
+          <a
+            href={href}
+            download={name}
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            <HugeiconsIcon icon={Download01Icon} strokeWidth={2} data-icon="inline-start" />
+            Download
+          </a>
+        ) : null}
+        {onReplace ? (
+          <PendingButton size="sm" variant="outline" pending={pending} onClick={onReplace}>
+            <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} data-icon="inline-start" />
+            Replace
+          </PendingButton>
+        ) : null}
+      </div>
+      {preview ? (
+        <div className="w-full min-w-0">
+          <FilePreviewBody target={preview} linkable={false} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Stable editor identities survive both file switches and path renames. */
 export function PackageWorkspace({
   files,
@@ -255,14 +358,24 @@ export function PackageWorkspace({
   readOnly = onChange === undefined,
   findings = noFindings,
   autoFocus = false,
+  upload,
+  downloadHref = noDownload,
+  preview: previewOf = noPreview,
 }: {
   files: SkillFile[];
   onChange?: (files: SkillFile[]) => void;
   readOnly?: boolean;
   findings?: SkillFinding[];
   autoFocus?: boolean;
+  /** Absent where the package cannot take new binary files. */
+  upload?: SkillUpload | undefined;
+  /** Where a binary file of the draft downloads from, if anywhere yet. */
+  downloadHref?: (file: SkillBinaryFile) => string | null;
+  /** What the shared file preview shows for a binary file, if anything. */
+  preview?: (file: SkillBinaryFile) => AttachmentPreviewTarget | null;
 }) {
   const confirm = useConfirm();
+  const [uploading, setUploading] = useState(false);
   // One rail, never two: a second copy would mount a second inline name field,
   // and its autofocus would blur, and so cancel, the one being typed into.
   const isMobile = useIsMobile();
@@ -386,12 +499,53 @@ export function PackageWorkspace({
     setName(target.slice(target.lastIndexOf("/") + 1));
     setError(null);
   };
+  /**
+   * A picked file lands beside the selection, or replaces one. Skill text stays
+   * editable text; anything else is uploaded and kept as a binary file.
+   */
+  const addFile = async (picked: File, target?: string) => {
+    const parent = isFolder ? selected : parentOf(selected);
+    const path = target ?? (parent ? `${parent}/${picked.name}` : picked.name);
+    try {
+      validateSkillPath(path);
+      if (path === "SKILL.md") throw new Error("Root SKILL.md cannot be replaced by an upload.");
+      if (picked.size > SKILL_LIMITS.binaryFileBytes)
+        throw new Error(`Files can be at most ${formatFileSize(SKILL_LIMITS.binaryFileBytes)}.`);
+      if (
+        !target &&
+        files.some((entry) => entry.path.toLowerCase() === path.toLowerCase()) &&
+        !(await confirm({
+          title: `Replace “${path}”?`,
+          description:
+            "The uploaded file takes its place in your draft. Save to publish the change.",
+          confirmLabel: "Replace",
+        }))
+      )
+        return;
+      setUploading(true);
+      const classified = classifySkillFile(path, new Uint8Array(await picked.arrayBuffer()));
+      const next: SkillFile = isBinarySkillFile(classified)
+        ? { path, binary: await upload!(picked) }
+        : classified;
+      const rest = files.filter((entry) => entry.path.toLowerCase() !== path.toLowerCase());
+      setIdentities((current) => ({ ...current, [path]: crypto.randomUUID() }));
+      onChange?.([...rest, next]);
+      select(path);
+      setPreview(false);
+    } catch (cause) {
+      toastError("Could not add the file.", cause);
+    } finally {
+      setUploading(false);
+    }
+  };
+  const picker = useFilePicker((picked) => void addFile(picked));
+  const replacer = useFilePicker((picked) => void addFile(picked, selected));
   const remove = async () => {
     const affected = files.filter(
       (entry) => entry.path === selected || (isFolder && entry.path.startsWith(`${selected}/`)),
     );
     if (
-      affected.some((entry) => entry.content.length > 0) &&
+      affected.some((entry) => isBinarySkillFile(entry) || entry.content.length > 0) &&
       !(await confirm({
         title: `Delete “${selected}”?`,
         description: "This removes the selected files from your draft. Save to publish the change.",
@@ -449,6 +603,17 @@ export function PackageWorkspace({
             >
               <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
             </Button>
+            {upload ? (
+              <PendingButton
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Upload file"
+                pending={uploading}
+                onClick={picker.open}
+              >
+                <HugeiconsIcon icon={FileUploadIcon} strokeWidth={2} />
+              </PendingButton>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -476,8 +641,11 @@ export function PackageWorkspace({
       </div>
     </nav>
   );
+  const binary = file && isBinarySkillFile(file) ? file : null;
   return (
     <div className="min-w-0 space-y-3">
+      {picker.element}
+      {replacer.element}
       <div className={cn(cardSurfaceClassName, "min-w-0 overflow-hidden")}>
         {isMobile ? (
           <div className="border-b">
@@ -530,7 +698,7 @@ export function PackageWorkspace({
                   </Tooltip>
                 </>
               ) : null}
-              {isFolder ? null : (
+              {isFolder || binary ? null : (
                 <ViewToggle
                   preview={preview}
                   sourceLabel={readOnly ? "Source" : "Edit"}
@@ -552,7 +720,15 @@ export function PackageWorkspace({
                   </Button>
                 )}
               </div>
-            ) : preview && file ? (
+            ) : binary ? (
+              <BinaryFileView
+                file={binary}
+                href={downloadHref(binary)}
+                preview={previewOf(binary)}
+                pending={uploading}
+                onReplace={readOnly || !upload ? undefined : replacer.open}
+              />
+            ) : preview && file && !isBinarySkillFile(file) ? (
               <SkillPreview content={file.content} />
             ) : null}
             <Suspense
@@ -560,6 +736,7 @@ export function PackageWorkspace({
             >
               {files
                 .filter((entry) => visited.includes(entry.path))
+                .flatMap((entry) => (isBinarySkillFile(entry) ? [] : [entry]))
                 .map((entry) => (
                   <div
                     key={identities[entry.path] ?? entry.path}

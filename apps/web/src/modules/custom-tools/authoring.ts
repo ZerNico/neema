@@ -30,7 +30,9 @@ export interface WorkingFileRef {
 export type FileRef =
   | { readonly kind: "attachment"; readonly id: string }
   | { readonly kind: "project"; readonly id: string; readonly version: number }
-  | WorkingFileRef;
+  | WorkingFileRef
+  /** A file in a skill package, at the exact (immutable) revision that was read. */
+  | { readonly kind: "skill"; readonly revisionId: string; readonly path: string };
 
 export const formatFileRef = (ref: FileRef): string => {
   switch (ref.kind) {
@@ -40,6 +42,8 @@ export const formatFileRef = (ref: FileRef): string => {
       return `project:${ref.id}@${ref.version}`;
     case "working":
       return `working:${ref.id}@${ref.revision}`;
+    case "skill":
+      return `skill:${ref.revisionId}/${ref.path}`;
   }
 };
 

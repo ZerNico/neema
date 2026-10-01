@@ -7,12 +7,21 @@ import type { Db } from "~/server/db.ts";
 import { currentAttachmentId } from "./file-aliases.ts";
 import { parseFileRef, type FileRef } from "./file-ref.ts";
 import type { WorkingFiles } from "./working-files.ts";
+import type { SkillManifestEntry } from "~/modules/skills/schema.ts";
+import type { SkillReader } from "~/modules/skills/server/reader.ts";
 
 /** Where a file a tool read came from, so the model can save a result back. */
 export type ToolFileSource =
   | { readonly kind: "chat"; readonly attachmentId: string }
   | { readonly kind: "project"; readonly fileId: string; readonly version: number }
-  | { readonly kind: "working"; readonly workingFileId: string; readonly revision: number };
+  | { readonly kind: "working"; readonly workingFileId: string; readonly revision: number }
+  | { readonly kind: "skill"; readonly revisionId: string; readonly path: string };
+
+/** The skills this answer was offered, so a skill file resolves only at the revision it read. */
+export interface ToolFileSkills {
+  readonly entries: ReadonlyArray<SkillManifestEntry>;
+  readonly reader: Pick<SkillReader["Service"], "readPinnedBytes" | "canReadRevision">;
+}
 
 export interface ToolFile {
   readonly name: string;
@@ -36,6 +45,7 @@ export const makeToolFileResolver = (input: {
   conversationId: string;
   projectId: string | null;
   workspace?: WorkingFiles;
+  skills?: ToolFileSkills;
 }) => {
   const chat = { userId: input.userId, conversationId: input.conversationId };
   const chatFile = (reference: string) =>
@@ -70,8 +80,28 @@ export const makeToolFileResolver = (input: {
       const trimmed = reference.trim();
       if (!trimmed) return yield* Effect.fail("Pass a file id or name.");
       const canonical = parseFileRef(trimmed);
-      if (/^(attachment|project|working):/.test(trimmed) && !canonical)
+      if (/^(attachment|project|working|skill):/.test(trimmed) && !canonical)
         return yield* Effect.fail("Invalid file reference.");
+      if (canonical?.kind === "skill") {
+        const entry = input.skills?.entries.find(
+          (candidate) => candidate.revisionId === canonical.revisionId,
+        );
+        if (!entry || !input.skills)
+          return yield* Effect.fail(
+            "That skill file is not available in this answer; load the skill and read the file again for its current reference.",
+          );
+        const file = yield* input.skills.reader
+          .readPinnedBytes(input.userId, entry, canonical.path)
+          .pipe(Effect.orElseSucceed(() => null));
+        if (!file) return yield* Effect.fail("No file at that path in the skill.");
+        return {
+          name: canonical.path.slice(canonical.path.lastIndexOf("/") + 1),
+          mediaType: file.mediaType,
+          bytes: file.bytes,
+          source: { kind: "skill", revisionId: canonical.revisionId, path: canonical.path },
+          ref: canonical,
+        } satisfies ToolFile;
+      }
       if (canonical?.kind === "working") {
         const workspace = input.workspace;
         if (!workspace) return yield* Effect.fail("This working file has expired.");
@@ -154,6 +184,11 @@ export const makeToolFileResolver = (input: {
           return (
             (yield* chatFile(yield* currentAttachmentId(input.db, chat, ref.id)))?.id !== undefined
           );
+        case "skill":
+          // A draft keeps its own bytes; it only needs the skill still readable.
+          return input.skills
+            ? yield* input.skills.reader.canReadRevision(input.userId, ref.revisionId)
+            : false;
         case "project":
           return input.projectId !== null && Option.isSome(input.projectFiles)
             ? yield* input.projectFiles.value.canRead(input.userId, input.projectId, {

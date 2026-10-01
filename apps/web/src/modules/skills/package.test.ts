@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { zipSync } from "fflate";
 import {
+  classifySkillFile,
   decodeSkillText,
   NEW_SKILL_FILES,
+  SKILL_LIMITS,
   SkillPackageError,
   validateSkillPackage,
   validateSkillPath,
+  type SkillFile,
 } from "./package.ts";
 import {
   exportSkillArchive,
@@ -15,6 +18,11 @@ import {
 } from "./archive.ts";
 
 const root = (yaml: string) => [{ path: "SKILL.md", content: `---\n${yaml}\n---\n\nInstructions` }];
+const binary = (path: string, size: number): SkillFile => ({
+  path,
+  binary: { size, mediaType: "font/ttf", sha256: "b".repeat(64) },
+});
+
 describe("portable skill packages", () => {
   it("parses the raw document as its only metadata source", () => {
     expect(validateSkillPackage(NEW_SKILL_FILES).metadata).toEqual({
@@ -65,9 +73,9 @@ describe("portable skill packages", () => {
       ]),
     ).toThrow(/parent/);
   });
-  it("rejects binary, invalid UTF-8 and malformed Unicode without silently dropping it", () => {
+  it("rejects invalid UTF-8 and malformed Unicode as skill text", () => {
     expect(() => decodeSkillText(new Uint8Array([0xff]), "image.png")).toThrow(/image.png/);
-    expect(() => decodeSkillText(new Uint8Array([0]), "nul.txt")).toThrow(/Binary/);
+    expect(() => decodeSkillText(new Uint8Array([0]), "nul.txt")).toThrow(/UTF-8 text/);
     expect(() =>
       validateSkillPackage([...NEW_SKILL_FILES, { path: "bad.md", content: "\ud800" }]),
     ).toThrow(/surrogate/);
@@ -90,6 +98,36 @@ describe("portable skill packages", () => {
       "scripts/run.py",
       "scripts/run.sh",
     ]);
+  });
+  it("keeps SKILL.md text and bounds binary files", () => {
+    expect(() => validateSkillPackage([binary("SKILL.md", 10)])).toThrow(/must be text/);
+    expect(() =>
+      validateSkillPackage([
+        ...NEW_SKILL_FILES,
+        binary("big.ttf", SKILL_LIMITS.binaryFileBytes + 1),
+      ]),
+    ).toThrow(/size/);
+    expect(() =>
+      validateSkillPackage([
+        ...NEW_SKILL_FILES,
+        binary("a.ttf", SKILL_LIMITS.binaryFileBytes),
+        binary("b.ttf", SKILL_LIMITS.binaryFileBytes),
+        binary("c.ttf", SKILL_LIMITS.binaryFileBytes),
+      ]),
+    ).toThrow(/50 MiB/);
+    expect(
+      validateSkillPackage([...NEW_SKILL_FILES, binary("brand.ttf", 1024)]).files,
+    ).toHaveLength(2);
+  });
+  it("classifies large text as a binary asset, so it stays whole for tools", () => {
+    const big = new TextEncoder().encode("a,b\n".repeat(80_000));
+    expect(classifySkillFile("data/table.csv", big)).toMatchObject({
+      binary: { size: big.length },
+    });
+    expect(classifySkillFile("notes.md", new TextEncoder().encode("hi"))).toEqual({
+      path: "notes.md",
+      content: "hi",
+    });
   });
   it("enforces root and supporting-file byte ceilings", () => {
     expect(() =>
@@ -134,21 +172,42 @@ describe("portable skill archives", () => {
     corrupted[start] = corrupted[start]! ^ 1;
     expect(() => readSkillArchive(corrupted)).toThrow(/checksum/);
   });
-  it("reports every unsupported binary file rather than returning a partial package", () => {
-    const bytes = zipSync({
-      "first.bin": new Uint8Array([0]),
-      "second.bin": new Uint8Array([255]),
+  it("keeps a binary file as an asset beside text, and round trips its bytes", () => {
+    const pptx = zipSync({ "[Content_Types].xml": new TextEncoder().encode("<Types/>") });
+    const font = new Uint8Array([0, 1, 0, 0, 0, 255]);
+    const files = readSkillArchive(
+      zipSync({
+        "SKILL.md": new TextEncoder().encode(NEW_SKILL_FILES[0]!.content),
+        "assets/master.pptx": pptx,
+        "fonts/brand.ttf": font,
+      }),
+    );
+    expect(files.find((file) => file.path === "SKILL.md")).toEqual(NEW_SKILL_FILES[0]);
+    expect(files.find((file) => file.path === "assets/master.pptx")).toEqual({
+      path: "assets/master.pptx",
+      binary: {
+        size: pptx.length,
+        mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      },
+      bytes: pptx,
     });
-    try {
-      readSkillArchive(bytes);
-      expect.fail("Binary files must reject the package");
-    } catch (error) {
-      expect(error).toBeInstanceOf(SkillPackageError);
-      expect((error as SkillPackageError).findings.map((finding) => finding.path)).toEqual([
-        "first.bin",
-        "second.bin",
-      ]);
-    }
+    expect(files.find((file) => file.path === "fonts/brand.ttf")).toMatchObject({
+      binary: { size: font.length },
+      bytes: font,
+    });
+    const again = readSkillArchive(exportSkillArchive(files));
+    expect(again).toEqual(validateSkillPackage(files).files);
+  });
+  it("needs a binary file's bytes to export it", () => {
+    expect(() =>
+      exportSkillArchive([
+        ...NEW_SKILL_FILES,
+        {
+          path: "assets/logo.png",
+          binary: { size: 4, mediaType: "image/png", sha256: "a".repeat(64) },
+        },
+      ]),
+    ).toThrow(/not loaded/);
   });
   it("rejects traversal before inflating", () => {
     expect(() =>
@@ -158,7 +217,7 @@ describe("portable skill archives", () => {
     ).toThrow(/relative/);
   });
   it("rejects oversized compressed input and expansion bombs", () => {
-    expect(() => readSkillArchive(new Uint8Array(5 * 1024 * 1024 + 1))).toThrow(/5 MiB/);
+    expect(() => readSkillArchive(new Uint8Array(SKILL_LIMITS.archiveBytes + 1))).toThrow(/50 MiB/);
     expect(() => readSkillArchive(zipSync({ "bomb.md": new Uint8Array(262144) }))).toThrow(
       /expansion/,
     );

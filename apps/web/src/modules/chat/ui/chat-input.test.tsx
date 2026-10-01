@@ -930,10 +930,10 @@ describe("ChatInput preview", () => {
     expect(
       within(dialog).getByText("There’s no preview for this kind of file."),
     ).toBeInTheDocument();
-    expect(within(dialog).getByRole("link", { name: "Download" })).toHaveAttribute(
-      "href",
-      "/api/files/a-deck",
-    );
+    const download = within(dialog).getByRole("link", { name: "Download" });
+    expect(download).toHaveAttribute("href", "/api/files/a-deck");
+    // Saved under its own name, the same header button a local file's actions use.
+    expect(download).toHaveAttribute("download", "deck.pptx");
     // Never fetched as text to render.
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();

@@ -219,7 +219,8 @@ description; `accept` takes extensions or media types.
   a fresh copy of the bytes. The job's deadline keeps running meanwhile.
 - The resolver (`chat/server/tool-files.ts`) is built per answer and bounded by
   the sender: exact attempt-local working revisions, files in this chat (attached or
-  produced), then the current version of a project file in a project chat. Chat
+  produced), a skill file this attempt was offered, at its pinned revision, then the
+  current version of a project file in a project chat. Chat
   attachments inherited by a branch resolve through its alias map before the
   current-chat ownership check. An id matches before a name; among equal names
   the newest chat file wins. A lookup that fails, or a file `accept` refuses,

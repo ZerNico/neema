@@ -16,6 +16,7 @@ import { cn } from "~/ui/utils.ts";
 import { readSkillArchive, selectSkillPackage, skillPackageRoots } from "../archive.ts";
 import {
   decodeSkillText,
+  isBinarySkillFile,
   SKILL_LIMITS,
   validateSkillPackage,
   type SkillFile,
@@ -23,6 +24,8 @@ import {
 } from "../package.ts";
 import { DISCOVERY_MAX, DISCOVERY_PAGE } from "../schema.ts";
 import { saveSkill } from "../server/functions.ts";
+import { skillFileInput, uploadSkillFile } from "../client/files.ts";
+import { formatFileSize } from "~/modules/attachments/constants.ts";
 import {
   importReviewedSkill,
   reviewRemoteSkill,
@@ -31,6 +34,17 @@ import {
 import { PackageWorkspace } from "./package-workspace.tsx";
 
 const MIN_SEARCH = 2;
+/** A ZIP's binary files go up first; the save then names them by upload. */
+const uploadBinaries = (files: readonly SkillFile[]) =>
+  Promise.all(
+    files.map(async (file) => {
+      if (!isBinarySkillFile(file) || !file.bytes) return skillFileInput(file);
+      const name = file.path.slice(file.path.lastIndexOf("/") + 1);
+      const stored = await uploadSkillFile(new File([new Uint8Array(file.bytes)], name));
+      return skillFileInput({ path: file.path, binary: stored });
+    }),
+  );
+
 /** A link is anything that names a host we can actually fetch a package from. */
 const isSkillLink = (value: string) =>
   /^(https?:\/\/|(www\.)?(github\.com|skills\.sh)\/)/iu.test(value.trim());
@@ -120,7 +134,8 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     setError(null);
     setReading(true);
     try {
-      if (file.size > SKILL_LIMITS.archiveBytes) throw new Error("Files can be at most 5 MB.");
+      if (file.size > SKILL_LIMITS.archiveBytes)
+        throw new Error(`Files can be at most ${formatFileSize(SKILL_LIMITS.archiveBytes)}.`);
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (/\.zip$/iu.test(file.name)) {
         const files = readSkillArchive(bytes);
@@ -158,7 +173,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                 contentHash: reviewed.contentHash,
               },
             })
-          : await saveSkill({ data: { files: review.files } }),
+          : await saveSkill({ data: { files: await uploadBinaries(review.files) } }),
       );
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       toast.success(`Imported “${review.metadata.name}”.`);

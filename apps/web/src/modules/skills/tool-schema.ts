@@ -9,6 +9,10 @@ export const SkillToolResult = Schema.Struct({
   nextOffset: Schema.NullOr(Schema.Int),
   remainingOps: Schema.Int,
   error: Schema.optional(Schema.String),
+  /** A binary file: its exact reference for tools that take files, never its bytes. */
+  file: Schema.optional(
+    Schema.Struct({ ref: Schema.String, mediaType: Schema.String, size: Schema.Int }),
+  ),
 });
 export type SkillToolResult = typeof SkillToolResult.Type;
 /** Display bounds: an activity row is a label, never a transport for package text. */

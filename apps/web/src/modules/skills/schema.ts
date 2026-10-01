@@ -43,10 +43,27 @@ export interface SkillManifestEntry {
 export const SkillIdInput = Schema.Struct({
   skillId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
 });
-export const SkillFileInput = Schema.Struct({
-  path: Schema.String.check(Schema.isMaxLength(240)),
-  content: Schema.String.check(Schema.isMaxLength(262144)),
-});
+const SkillPath = Schema.String.check(Schema.isMaxLength(240));
+/**
+ * A binary file is never sent as bytes: it names bytes already stored for the
+ * sender, either kept (`sha256`) or just uploaded (`uploadId`). The server
+ * reads its real size and type from what is stored.
+ */
+export const SkillFileInput = Schema.Union([
+  Schema.Struct({
+    path: SkillPath,
+    content: Schema.String.check(Schema.isMaxLength(262144)),
+  }),
+  Schema.Struct({
+    path: SkillPath,
+    binary: Schema.Struct({
+      size: Schema.Number,
+      mediaType: Schema.String.check(Schema.isMaxLength(200)),
+      sha256: Schema.optional(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
+      uploadId: Schema.optional(Schema.String.check(Schema.isMaxLength(100))),
+    }),
+  }),
+]);
 export const SaveSkillInput = Schema.Struct({
   skillId: Schema.optional(Schema.String),
   expectedRevision: Schema.optional(

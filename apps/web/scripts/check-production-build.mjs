@@ -132,15 +132,15 @@ try {
   );
   const presentationWork = (request) => processor.run(request);
   const createdDeck = await presentationWork({ kind: "create" });
-  if (createdDeck?.kind !== "bytes" || !createdDeck.bytes?.length)
+  if (!(createdDeck instanceof Uint8Array) || !createdDeck.length)
     throw new Error("Presentation worker did not create a deck.");
-  const inspectedDeck = await presentationWork({ kind: "inspect", bytes: createdDeck.bytes });
-  const firstSlide = inspectedDeck?.inspection?.slides?.[0]?.slideId;
+  const inspectedDeck = await presentationWork({ kind: "inspect", bytes: createdDeck });
+  const firstSlide = inspectedDeck?.slides?.[0]?.slideId;
   if (firstSlide === undefined) throw new Error("Presentation worker did not inspect its slide.");
   // Charts embed a workbook and notes add a notes master: both only load when edited.
   const editedDeck = await presentationWork({
     kind: "edit",
-    bytes: createdDeck.bytes,
+    bytes: createdDeck,
     operations: [
       { kind: "setText", slideId: firstSlide, placeholder: "title", text: "Production" },
       { kind: "setNotes", slideId: firstSlide, text: "Checked" },
@@ -169,14 +169,14 @@ try {
       },
     ],
   });
-  if (editedDeck?.kind !== "edited" || editedDeck.inspection?.slides?.[0]?.notes !== "Checked")
+  if (editedDeck?.inspection?.slides?.[0]?.notes !== "Checked")
     throw new Error("Presentation worker did not apply an edit batch.");
   const renderedDeck = await presentationWork({
     kind: "render",
     bytes: editedDeck.bytes,
     slideIds: [firstSlide],
   });
-  const png = renderedDeck?.slides?.[0]?.png;
+  const png = renderedDeck?.[0]?.png;
   if (
     !png ||
     !Buffer.from(png)
@@ -190,6 +190,91 @@ try {
   await rm(presentationDirectory, { recursive: true, force: true });
 }
 console.log("Checked the production PowerPoint worker and packaged renderer.");
+
+// The spreadsheet worker bundles its libraries whole; prove it parses and calculates.
+const spreadsheetCandidates = moduleSources
+  .filter(({ source }) => source.includes("chat/spreadsheets/SpreadsheetProcessor"))
+  .map(({ modulePath }) => modulePath);
+if (spreadsheetCandidates.length !== 1) {
+  throw new Error(
+    `Expected one emitted spreadsheet runtime, found ${spreadsheetCandidates.length}.`,
+  );
+}
+const { SpreadsheetProcessor } = await import(pathToFileURL(spreadsheetCandidates[0]).href);
+const spreadsheetDirectory = await mkdtemp(join(tmpdir(), "chat-spreadsheet-worker-"));
+const spreadsheetRuntime = ManagedRuntime.make(SpreadsheetProcessor.layer);
+process.chdir(spreadsheetDirectory);
+try {
+  const processor = await spreadsheetRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* SpreadsheetProcessor;
+    }),
+  );
+  const created = await processor.run({ kind: "create" });
+  if (!(created instanceof Uint8Array) || !created.length)
+    throw new Error("Spreadsheet worker did not create a workbook.");
+  const edited = await processor.run({
+    kind: "edit",
+    bytes: created,
+    operations: [
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[2, 3, "=A1*B1"]] },
+      {
+        kind: "addChart",
+        sheet: "Sheet1",
+        type: "column",
+        at: "E2",
+        series: [{ values: "A1:C1" }],
+      },
+    ],
+  });
+  if (edited?.formulaResults?.[0]?.value !== "6")
+    throw new Error("Spreadsheet worker did not calculate an edit batch.");
+} finally {
+  await spreadsheetRuntime.dispose();
+  process.chdir(originalDirectory);
+  await rm(spreadsheetDirectory, { recursive: true, force: true });
+}
+console.log("Checked the production spreadsheet worker.");
+
+// The Word worker bundles its parser whole; prove it writes and reads a document.
+const wordCandidates = moduleSources
+  .filter(({ source }) => source.includes("chat/word/WordProcessor"))
+  .map(({ modulePath }) => modulePath);
+if (wordCandidates.length !== 1) {
+  throw new Error(`Expected one emitted Word runtime, found ${wordCandidates.length}.`);
+}
+const { WordProcessor } = await import(pathToFileURL(wordCandidates[0]).href);
+const wordDirectory = await mkdtemp(join(tmpdir(), "chat-word-worker-"));
+const wordRuntime = ManagedRuntime.make(WordProcessor.layer);
+process.chdir(wordDirectory);
+try {
+  const processor = await wordRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* WordProcessor;
+    }),
+  );
+  const created = await processor.run({ kind: "create" });
+  const edited = await processor.run({
+    kind: "edit",
+    bytes: created,
+    operations: [
+      {
+        kind: "insertParagraphs",
+        at: "start",
+        paragraphs: [{ text: "Checked", style: "heading1" }],
+      },
+      { kind: "insertTable", at: "end", rows: [["a", "b"]] },
+    ],
+  });
+  const inspected = await processor.run({ kind: "inspect", bytes: edited.bytes });
+  if (inspected?.outline?.[0]?.text !== "Checked")
+    throw new Error("Word worker did not write and read back a document.");
+} finally {
+  await wordRuntime.dispose();
+  process.chdir(originalDirectory);
+  await rm(wordDirectory, { recursive: true, force: true });
+}
+console.log("Checked the production Word worker.");
 
 const publicDirectory = resolve(".output/public");
 const shell = await readFile(resolve(publicDirectory, "_shell.html"), "utf8");

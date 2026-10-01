@@ -5,75 +5,48 @@ import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
-import { fileExtension, GENERIC_MEDIA_TYPE, PPTX_MEDIA_TYPE } from "../constants.ts";
+import type { OfficeFile } from "./office-preview.ts";
+import { usePreviewJson } from "./use-preview-json.ts";
 
 /** An authorized, server-rendered PPTX source; never inferred from a download URL. */
-export interface PresentationSource {
-  readonly kind: "attachment" | "project-version";
-  readonly id: string;
+export type PresentationSource = OfficeFile;
+
+interface SlideList {
+  readonly slideIds: number[];
+  readonly aspectRatio: number;
 }
-
-/**
- * `source` when the file is a PowerPoint deck, else null. A specific media type
- * decides; a generic or missing one falls back to the extension.
- */
-export const presentationSource = (
-  file: { readonly fileName: string; readonly mediaType?: string | undefined },
-  source: PresentationSource,
-): PresentationSource | null =>
-  (
-    file.mediaType && file.mediaType !== GENERIC_MEDIA_TYPE
-      ? file.mediaType === PPTX_MEDIA_TYPE
-      : fileExtension(file.fileName) === "pptx"
+const decodeSlides = (data: unknown): SlideList | null => {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("slideIds" in data) ||
+    !Array.isArray(data.slideIds) ||
+    data.slideIds.length > 100 ||
+    !data.slideIds.every((id) => Number.isSafeInteger(id) && id > 0)
   )
-    ? source
-    : null;
-
-type PreviewState =
-  | { status: "loading" }
-  | { status: "error" }
-  | { status: "ready"; slideIds: number[]; aspectRatio: number };
+    return null;
+  const ratio = "aspectRatio" in data ? data.aspectRatio : null;
+  return {
+    slideIds: data.slideIds as number[],
+    aspectRatio:
+      typeof ratio === "number" && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4
+        ? ratio
+        : 16 / 9,
+  };
+};
 
 export function PresentationPreview({ source }: { source: PresentationSource }) {
   const base = `/api/presentations/${source.kind}/${encodeURIComponent(source.id)}`;
-  const [state, setState] = useState<PreviewState>({ status: "loading" });
-  const [selected, setSelected] = useState(0);
-  const [failedSlide, setFailedSlide] = useState<number | null>(null);
-  const [loadedSlide, setLoadedSlide] = useState<number | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch(base, { signal: controller.signal, cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Preview unavailable");
-        const data: unknown = await response.json();
-        if (
-          !data ||
-          typeof data !== "object" ||
-          !("slideIds" in data) ||
-          !Array.isArray(data.slideIds) ||
-          data.slideIds.length > 100 ||
-          !data.slideIds.every((id) => Number.isSafeInteger(id) && id > 0)
-        )
-          throw new Error("Invalid slide list");
-        const ratio = "aspectRatio" in data ? data.aspectRatio : null;
-        return {
-          status: "ready" as const,
-          slideIds: data.slideIds as number[],
-          aspectRatio:
-            typeof ratio === "number" && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4
-              ? ratio
-              : 16 / 9,
-        };
-      })
-      .then((ready) => {
-        if (!controller.signal.aborted) setState(ready);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setState({ status: "error" });
-      });
-    return () => controller.abort();
-  }, [base]);
+  const loaded = usePreviewJson(base, decodeSlides);
+  const state =
+    loaded.status === "ready" ? { status: "ready" as const, ...loaded.preview } : loaded;
+  // The position and each image's outcome belong to one deck: slide IDs repeat
+  // across decks, so another file starts afresh, remounted or not.
+  const [position, setPosition] = useState({ base, index: 0 });
+  const selected = position.base === base ? position.index : 0;
+  const setSelected = (next: (index: number) => number) => setPosition(step(base, next));
+  const [failedSlide, setFailedSlide] = useState<string | null>(null);
+  const [loadedSlide, setLoadedSlide] = useState<string | null>(null);
 
   const count = state.status === "ready" ? state.slideIds.length : 0;
   useEffect(() => {
@@ -87,13 +60,14 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
         event.target instanceof HTMLTextAreaElement
       )
         return;
-      if (event.key === "ArrowLeft") setSelected((index) => Math.max(0, index - 1));
-      if (event.key === "ArrowRight") setSelected((index) => Math.min(count - 1, index + 1));
+      if (event.key === "ArrowLeft") setPosition(step(base, (index) => Math.max(0, index - 1)));
+      if (event.key === "ArrowRight")
+        setPosition(step(base, (index) => Math.min(count - 1, index + 1)));
     };
     // Capture phase: the dialog stops keydown before it bubbles to the window.
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [count]);
+  }, [count, base]);
 
   if (state.status === "loading")
     return (
@@ -112,7 +86,7 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
     );
   if (count === 0)
     return <p className="text-muted-foreground text-sm">This presentation has no slides.</p>;
-  const slideId = state.slideIds[selected]!;
+  const image = `${base}?slide=${state.slideIds[selected]!}`;
   return (
     <SlideFrame
       aspectRatio={state.aspectRatio}
@@ -142,7 +116,7 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
         </>
       }
     >
-      {failedSlide === slideId ? (
+      {failedSlide === image ? (
         <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
           <FieldError>
             Could not load this slide. Download the original to open it elsewhere.
@@ -150,23 +124,31 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
         </div>
       ) : (
         <img
-          key={slideId}
-          src={`${base}?slide=${slideId}`}
+          key={image}
+          src={image}
           alt={`Slide ${selected + 1} of ${count}`}
-          onLoad={() => setLoadedSlide(slideId)}
-          onError={() => setFailedSlide(slideId)}
+          onLoad={() => setLoadedSlide(image)}
+          onError={() => setFailedSlide(image)}
           className={cn(
             "absolute inset-0 size-full object-contain",
-            loadedSlide === slideId ? "opacity-100" : "opacity-0",
+            loadedSlide === image ? "opacity-100" : "opacity-0",
           )}
         />
       )}
-      {loadedSlide !== slideId && failedSlide !== slideId ? (
+      {loadedSlide !== image && failedSlide !== image ? (
         <Spinner aria-label="Loading slide" className={centered} />
       ) : null}
     </SlideFrame>
   );
 }
+
+/** The next position in deck `base`; a position kept from another deck starts at 0. */
+const step =
+  (base: string, next: (index: number) => number) =>
+  (current: { base: string; index: number }) => ({
+    base,
+    index: next(current.base === base ? current.index : 0),
+  });
 
 const centered = "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
 

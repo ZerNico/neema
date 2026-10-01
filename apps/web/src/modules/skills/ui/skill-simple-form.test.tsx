@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { NEW_SKILL_FILES, type SkillFile } from "../package.ts";
 import { SkillSimpleForm, canEditSimply } from "./skill-simple-form.tsx";
 
-const root = (files: SkillFile[]) => files.find((file) => file.path === "SKILL.md")!.content;
+const root = (files: SkillFile[]) => {
+  const file = files.find((entry) => entry.path === "SKILL.md")!;
+  return "content" in file ? file.content : "";
+};
 
 function Harness({ initial, spy }: { initial: SkillFile[]; spy: (files: SkillFile[]) => void }) {
   const [files, setFiles] = useState(initial);
@@ -41,7 +44,7 @@ describe("SkillSimpleForm", () => {
       "---\nname: contract-review\ndescription: When someone sends a contract.\ndisable-model-invocation: true\n---\n\nCheck clauses.\n",
     );
     expect(files).toContainEqual(extra);
-    expect(screen.getByText(/also has 1 other file/)).toBeVisible();
+    expect(screen.getByText(/includes 1 more file.*Switch to Advanced to see it/)).toBeVisible();
   });
 
   it("is only offered for a SKILL.md it can read", () => {

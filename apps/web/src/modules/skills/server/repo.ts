@@ -26,7 +26,36 @@ export interface StoredSkillFile {
   storageKey: string;
   sha256: string;
   size: number;
+  /** Null for skill text. */
+  mediaType: string | null;
+  /** Bytes this user already stores (a kept file or an upload), so none were written. */
+  existing?: boolean;
 }
+
+/** Retained bytes, each stored file counted once however many revisions share it. */
+const QUOTA_BYTES = 250 * 1024 * 1024;
+const QUOTA_REASON = "Skill library quota reached (200 skills or 250 MiB of stored files).";
+
+const storedBytes = (
+  tx: Pick<DbTx, "select">,
+  userId: string,
+  incoming: ReadonlyArray<{ sha256: string; size: number }>,
+) =>
+  Effect.gen(function* () {
+    const owned = tx
+      .select({ blobId: skillFiles.blobId })
+      .from(skillFiles)
+      .innerJoin(skillRevisions, eq(skillRevisions.id, skillFiles.revisionId))
+      .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
+      .where(eq(skills.userId, userId));
+    const rows = yield* tx
+      .select({ sha256: attachmentBlobs.sha256, size: attachmentBlobs.size })
+      .from(attachmentBlobs)
+      .where(inArray(attachmentBlobs.id, owned));
+    const counted = new Map(rows.map((row) => [row.sha256, row.size]));
+    for (const file of incoming) if (!counted.has(file.sha256)) counted.set(file.sha256, file.size);
+    return [...counted.values()].reduce((sum, size) => sum + size, 0);
+  });
 export interface SaveRevision {
   skillId?: string;
   expectedRevision?: number;
@@ -107,10 +136,16 @@ export class SkillRepo extends Context.Service<
       entry: Pick<SkillManifestEntry, "skillId" | "revisionId">,
     ): Effect.Effect<StoredSkillFile[], SkillNotAvailable>;
     authorize(userId: string, skillIds: readonly string[]): Effect.Effect<void, SkillNotAvailable>;
+    /** Whether the skill a revision belongs to is still readable by this user. */
+    canReadRevision(userId: string, revisionId: string): Effect.Effect<boolean>;
     catalogue(userId: string, exclude: readonly string[]): Effect.Effect<SkillManifestEntry[]>;
     admitSave(
       userId: string,
-      input: { skillId?: string; expectedRevision?: number; bytes: number },
+      input: {
+        skillId?: string;
+        expectedRevision?: number;
+        files: ReadonlyArray<{ sha256: string; size: number }>;
+      },
     ): Effect.Effect<void, SkillConflict | SkillNotAvailable | SkillRejected>;
     save(
       userId: string,
@@ -276,6 +311,15 @@ export class SkillRepo extends Context.Service<
           return row.revision;
         }),
         authorize,
+        canReadRevision: Effect.fn("SkillRepo.canReadRevision")(function* (userId, revisionId) {
+          const [row] = yield* db
+            .select({ id: skills.id })
+            .from(skillRevisions)
+            .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
+            .where(and(eq(skillRevisions.id, revisionId), skillReadable(userId)))
+            .pipe(Effect.orDie);
+          return row !== undefined;
+        }),
         files: Effect.fn("SkillRepo.files")(function* (userId, entry) {
           yield* authorize(userId, [entry.skillId]);
           const rows = yield* db
@@ -284,6 +328,7 @@ export class SkillRepo extends Context.Service<
               storageKey: attachmentBlobs.storageKey,
               sha256: skillFiles.sha256,
               size: skillFiles.byteSize,
+              mediaType: skillFiles.mediaType,
             })
             .from(skillFiles)
             .innerJoin(skillRevisions, eq(skillRevisions.id, skillFiles.revisionId))
@@ -329,20 +374,9 @@ export class SkillRepo extends Context.Service<
             .from(skills)
             .where(and(eq(skills.userId, userId), isNull(skills.deletedAt)))
             .pipe(Effect.orDie);
-          const [bytes] = yield* db
-            .select({ total: sql<number>`coalesce(sum(${skillFiles.byteSize}), 0)::float8` })
-            .from(skillFiles)
-            .innerJoin(skillRevisions, eq(skillRevisions.id, skillFiles.revisionId))
-            .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
-            .where(eq(skills.userId, userId))
-            .pipe(Effect.orDie);
-          if (
-            (!input.skillId && (count?.total ?? 0) >= 200) ||
-            (bytes?.total ?? 0) + input.bytes > 100 * 1024 * 1024
-          )
-            return yield* new SkillRejected({
-              reason: "Skill library quota reached (200 skills or 100 MiB retained revisions).",
-            });
+          const bytes = yield* storedBytes(db, userId, input.files).pipe(Effect.orDie);
+          if ((!input.skillId && (count?.total ?? 0) >= 200) || bytes > QUOTA_BYTES)
+            return yield* new SkillRejected({ reason: QUOTA_REASON });
         }),
         save: Effect.fn("SkillRepo.save")(function* (userId, input) {
           return yield* db
@@ -390,25 +424,12 @@ export class SkillRepo extends Context.Service<
                   .select({ count: sql<number>`count(*)::int` })
                   .from(skills)
                   .where(and(eq(skills.userId, userId), isNull(skills.deletedAt)));
-                const [bytes] = yield* tx
-                  .select({ total: sql<number>`coalesce(sum(${skillFiles.byteSize}), 0)::float8` })
-                  .from(skillFiles)
-                  .innerJoin(skillRevisions, eq(skillRevisions.id, skillFiles.revisionId))
-                  .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
-                  .where(eq(skills.userId, userId));
-                if (
-                  (!input.skillId && (quota?.count ?? 0) >= 200) ||
-                  (bytes?.total ?? 0) +
-                    [...input.files, ...(input.upstreamBaseline?.files ?? [])].reduce(
-                      (sum, file) => sum + file.size,
-                      0,
-                    ) >
-                    100 * 1024 * 1024
-                )
-                  return yield* new SkillRejected({
-                    reason:
-                      "Skill library quota reached (200 skills or 100 MiB retained revisions).",
-                  });
+                const bytes = yield* storedBytes(tx, userId, [
+                  ...input.files,
+                  ...(input.upstreamBaseline?.files ?? []),
+                ]);
+                if ((!input.skillId && (quota?.count ?? 0) >= 200) || bytes > QUOTA_BYTES)
+                  return yield* new SkillRejected({ reason: QUOTA_REASON });
                 const metadata = input.package.metadata;
                 if (input.skillId)
                   yield* tx
@@ -455,30 +476,49 @@ export class SkillRepo extends Context.Service<
                 for (const { file, targetRevisionId } of registrations.sort((a, b) =>
                   a.file.sha256.localeCompare(b.file.sha256),
                 )) {
-                  const [blob] = yield* tx
-                    .insert(attachmentBlobs)
-                    .values({
-                      id: uuidv7(),
-                      userId,
-                      sha256: file.sha256,
-                      storageKey: file.storageKey,
-                      size: file.size,
-                      mediaType: "text/plain",
-                    })
-                    .onConflictDoUpdate({
-                      target: [attachmentBlobs.userId, attachmentBlobs.sha256],
-                      set: { sha256: file.sha256 },
-                    })
-                    .returning();
+                  // Kept or uploaded bytes must still be stored: never re-register a
+                  // key the cleanup may already have removed.
+                  const [blob] = file.existing
+                    ? yield* tx
+                        .select()
+                        .from(attachmentBlobs)
+                        .where(
+                          and(
+                            eq(attachmentBlobs.userId, userId),
+                            eq(attachmentBlobs.sha256, file.sha256),
+                          ),
+                        )
+                        .for("update")
+                    : yield* tx
+                        .insert(attachmentBlobs)
+                        .values({
+                          id: uuidv7(),
+                          userId,
+                          sha256: file.sha256,
+                          storageKey: file.storageKey,
+                          size: file.size,
+                          mediaType: file.mediaType ?? "text/plain",
+                        })
+                        .onConflictDoUpdate({
+                          target: [attachmentBlobs.userId, attachmentBlobs.sha256],
+                          set: { sha256: file.sha256 },
+                        })
+                        .returning();
                   if (!blob)
-                    return yield* new SkillRejected({ reason: "Could not register skill file." });
-                  if (blob.storageKey !== file.storageKey) unusedKeys.push(file.storageKey);
+                    return yield* new SkillRejected({
+                      reason: file.existing
+                        ? `${file.path} is no longer stored; upload it again.`
+                        : "Could not register skill file.",
+                    });
+                  if (!file.existing && blob.storageKey !== file.storageKey)
+                    unusedKeys.push(file.storageKey);
                   yield* tx.insert(skillFiles).values({
                     revisionId: targetRevisionId,
                     path: file.path,
                     blobId: blob.id,
                     byteSize: file.size,
                     sha256: file.sha256,
+                    mediaType: file.mediaType,
                   });
                 }
                 const orphanKeys = yield* collectUnused(tx, skillId);

@@ -16,10 +16,7 @@ import {
 } from "~/modules/presentations/server/adapter.ts";
 import { PresentationProcessor } from "~/modules/presentations/server/processor.ts";
 import { PresentationError } from "~/modules/presentations/errors.ts";
-import type {
-  PresentationWork,
-  PresentationWorkResult,
-} from "~/modules/presentations/server/runtime.ts";
+import type { PresentationWork } from "~/modules/presentations/server/runtime.ts";
 import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -50,17 +47,13 @@ let runtime: ManagedRuntime.ManagedRuntime<
 >;
 let deck: Uint8Array;
 let slideId: number;
-const work = vi.fn(async (request: PresentationWork): Promise<PresentationWorkResult> => {
-  if (request.kind === "inspect")
-    return { kind: "inspection" as const, inspection: await inspectPresentation(request.bytes) };
+const work = vi.fn(async (request: PresentationWork): Promise<unknown> => {
+  if (request.kind === "inspect") return inspectPresentation(request.bytes);
   if (request.kind === "render") {
     // The renderer's own answer for a slide the deck does not have.
     if (request.slideIds[0] !== slideId)
       throw new PresentationError("not_found", `Slide ${request.slideIds[0]} does not exist.`);
-    return {
-      kind: "rendered" as const,
-      slides: [{ slideId: request.slideIds[0]!, png, warning: "Approximate" }],
-    };
+    return [{ slideId: request.slideIds[0]!, png, warning: "Approximate" }];
   }
   throw new Error("Unexpected presentation work");
 });
@@ -86,7 +79,8 @@ beforeAll(async () => {
   ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
   const attachments = AttachmentService.layer.pipe(Layer.provideMerge(repos));
   const processor = Layer.succeed(PresentationProcessor, {
-    run: work,
+    // The stub answers whichever job it is asked; the route asks for inspections and renders.
+    run: (request: PresentationWork) => work(request) as never,
     close: async () => {},
   });
   runtime = ManagedRuntime.make(
@@ -166,7 +160,6 @@ describe("presentation preview route", () => {
     expect(metadata).toMatchObject({
       slideIds: [slideId],
       count: 1,
-      name: "deck.pptx",
     });
     expect(metadata.aspectRatio).toBeCloseTo(16 / 9);
     const image = await get("attachment", attachment.id, owner, String(slideId));

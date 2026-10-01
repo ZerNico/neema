@@ -84,6 +84,9 @@ export const skillFiles = pgTable(
       .references(() => attachmentBlobs.id, { onDelete: "restrict" }),
     byteSize: integer("byte_size").notNull(),
     sha256: text().notNull(),
+    // Null for skill text. A binary asset records its own type: the shared
+    // blob row keeps whichever type its first writer gave it.
+    mediaType: text("media_type"),
   },
   (t) => [
     primaryKey({ columns: [t.revisionId, t.path] }),

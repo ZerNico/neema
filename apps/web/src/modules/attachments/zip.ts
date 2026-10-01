@@ -19,8 +19,12 @@ export interface ZipLimits {
 
 export interface ZipReadOptions {
   readonly limits: ZipLimits;
-  /** Throws the caller's own error; `name` is the entry concerned, when there is one. */
-  readonly fail: (message: string, name?: string) => never;
+  /**
+   * Throws the caller's own error; `name` is the entry concerned, when there is
+   * one. `limit` marks an archive too large, by entry count or by size, rather
+   * than malformed.
+   */
+  readonly fail: (message: string, name?: string, limit?: "entries" | "size") => never;
   /** Caller rules for an entry path, run before anything inflates. */
   readonly checkName?: (name: string) => void;
   /** Entries to inflate; the rest are validated but never expanded. */
@@ -65,10 +69,11 @@ function directory(bytes: Uint8Array, options: ZipReadOptions): Map<string, Entr
     view.getUint16(end + 4, true) ||
     view.getUint16(end + 6, true) ||
     view.getUint16(end + 8, true) !== count ||
-    count > limits.entries ||
     start + length !== end
   )
-    return fail("Split, ZIP64 or oversized archives are unsupported.");
+    return fail("Split or ZIP64 archives are unsupported.");
+  if (count > limits.entries)
+    return fail(`A ZIP may have at most ${limits.entries} entries.`, undefined, "entries");
   const entries = new Map<string, Entry>();
   const normalized = new Set<string>();
   const regions: Array<[number, number]> = [];
@@ -121,7 +126,7 @@ function directory(bytes: Uint8Array, options: ZipReadOptions): Map<string, Entr
           declared > limits.expandedBytes ||
           declared > bytes.length * limits.expansionRatio))
     )
-      return fail("ZIP entry exceeds the size or expansion limits.", name);
+      return fail("ZIP entry exceeds the size or expansion limits.", name, "size");
     if (
       local + 30 > end ||
       view.getUint32(local, true) !== 0x04034b50 ||
@@ -161,7 +166,13 @@ function directory(bytes: Uint8Array, options: ZipReadOptions): Map<string, Entr
 export function readZip(bytes: Uint8Array, options: ZipReadOptions): Map<string, Uint8Array> {
   const { limits, fail } = options;
   if (bytes.length < 22 || bytes.length > limits.archiveBytes)
-    return fail(`A ZIP must be at most ${Math.round(limits.archiveBytes / 1024 / 1024)} MiB.`);
+    return bytes.length < 22
+      ? fail("Invalid ZIP end record.")
+      : fail(
+          `A ZIP must be at most ${Math.round(limits.archiveBytes / 1024 / 1024)} MiB.`,
+          undefined,
+          "size",
+        );
   const expected = directory(bytes, options);
   const wanted = options.wanted ?? (() => true);
   const crc32 = options.crc32 ?? tableCrc32;
@@ -199,7 +210,7 @@ export function readZip(bytes: Uint8Array, options: ZipReadOptions): Map<string,
           expanded > bytes.length * limits.expansionRatio
         ) {
           file.terminate();
-          return fail("Actual ZIP expansion exceeds the limits.", file.name);
+          return fail("Actual ZIP expansion exceeds the limits.", file.name, "size");
         }
         chunks.push(chunk);
         if (!final) return;

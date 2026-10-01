@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { classifyFile } from "~/modules/attachments/server/validation.ts";
+import type { OfficeFamily } from "~/modules/office/names.ts";
 import type { WorkingFileRef } from "./file-ref.ts";
 
 export type { WorkingFileRef } from "./file-ref.ts";
 
 /**
- * Who may replace a file: the presentation tools, one custom tool module, or
- * nobody for a file imported from the user's computer.
+ * Who may replace a file: one Office family's tools, one custom tool module,
+ * or nobody for a file imported from the user's computer.
  */
-export type WorkingFileOwner = "presentation" | "local" | `custom:${string}`;
+export type WorkingFileOwner = OfficeFamily | "local" | `custom:${string}`;
 export type KeptWorkingFileOwner = Exclude<WorkingFileOwner, "local">;
 
 export interface WorkingFileSnapshot {

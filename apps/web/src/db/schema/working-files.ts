@@ -7,6 +7,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { OFFICE_FAMILY_NAMES } from "~/modules/office/names.ts";
 import { attachments } from "./attachments.ts";
 import { conversations, messages } from "./chat.ts";
 
@@ -36,7 +37,7 @@ export const conversationWorkingFiles = pgTable(
     attachmentId: text("attachment_id").references(() => attachments.id, { onDelete: "cascade" }),
     name: text().notNull(),
     mediaType: text("media_type").notNull(),
-    owner: text({ enum: ["presentation", "custom"] }).notNull(),
+    owner: text({ enum: [...OFFICE_FAMILY_NAMES, "custom"] }).notNull(),
     // The one module that may revise a custom draft.
     customToolId: text("custom_tool_id"),
     revision: integer().notNull(),

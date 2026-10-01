@@ -1,13 +1,13 @@
 import { zipSync } from "fflate";
 import { readZip } from "../attachments/zip.ts";
 import {
-  decodeSkillText,
+  classifySkillFile,
+  isBinarySkillFile,
   SKILL_LIMITS,
   SkillPackageError,
   validateSkillPackage,
   validateSkillPath,
   type SkillFile,
-  type SkillFinding,
 } from "./package.ts";
 
 const reject = (message: string, path = "archive.zip"): never => {
@@ -16,12 +16,11 @@ const reject = (message: string, path = "archive.zip"): never => {
 
 export function readSkillArchive(bytes: Uint8Array): SkillFile[] {
   const files: SkillFile[] = [];
-  const invalidFiles: SkillFinding[] = [];
   readZip(bytes, {
     limits: {
       archiveBytes: SKILL_LIMITS.archiveBytes,
       entries: SKILL_LIMITS.files * 2,
-      entryBytes: SKILL_LIMITS.fileBytes,
+      entryBytes: SKILL_LIMITS.binaryFileBytes,
       expandedBytes: SKILL_LIMITS.expandedBytes,
       expansionRatio: SKILL_LIMITS.expansionRatio,
     },
@@ -30,17 +29,11 @@ export function readSkillArchive(bytes: Uint8Array): SkillFile[] {
     // Small compressed chunks also bound the decompressor's transient output allocation.
     chunkBytes: 256,
     accept: (name, content) => {
-      if (files.length + invalidFiles.length >= SKILL_LIMITS.files)
+      if (files.length >= SKILL_LIMITS.files)
         reject(`Package exceeds ${SKILL_LIMITS.files} files.`);
-      try {
-        files.push({ path: name, content: decodeSkillText(content, name) });
-      } catch (error) {
-        if (error instanceof SkillPackageError) invalidFiles.push(...error.findings);
-        else throw error;
-      }
+      files.push(classifySkillFile(name, content));
     },
   });
-  if (invalidFiles.length) throw new SkillPackageError(invalidFiles);
   return files;
 }
 
@@ -60,9 +53,14 @@ export function selectSkillPackage(files: readonly SkillFile[], root: string) {
   );
 }
 
+/** Binary files must carry their bytes; the editor fetches them before exporting. */
 export function exportSkillArchive(files: readonly SkillFile[]): Uint8Array {
   const validated = validateSkillPackage(files);
   const entries = Object.create(null) as Record<string, Uint8Array>;
-  for (const file of validated.files) entries[file.path] = new TextEncoder().encode(file.content);
+  for (const file of validated.files) {
+    if (!isBinarySkillFile(file)) entries[file.path] = new TextEncoder().encode(file.content);
+    else if (file.bytes) entries[file.path] = file.bytes;
+    else reject(`${file.path} was not loaded for export.`, file.path);
+  }
   return zipSync(entries, { level: 6 });
 }

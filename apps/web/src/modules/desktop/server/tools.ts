@@ -39,9 +39,11 @@ export const readLocalFileTool = Tool.make("read_local_file", {
 
 export const importLocalFileTool = Tool.make("import_local_file", {
   description:
-    "Bring a PNG, JPEG or PowerPoint (.pptx) from the user's computer into this answer so " +
-    "other tools can use it. Returns a working: reference: pass a picture as imageRef, or a " +
-    "deck as sourceRef to inspect_presentation and edit_presentation. The copy lasts for this " +
+    "Bring a PNG, JPEG, PowerPoint (.pptx), Excel workbook (.xlsx) or Word document (.docx) " +
+    "from the user's computer into this answer so other tools can use it. Returns a working: " +
+    "reference: pass a picture as imageRef, a deck as sourceRef to inspect_presentation and " +
+    "edit_presentation, a workbook to inspect_spreadsheet and edit_spreadsheet, or a document " +
+    "to inspect_word_file and edit_word_file. The copy lasts for this " +
     "answer only and the original is never changed. Up to 20 MB.",
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,

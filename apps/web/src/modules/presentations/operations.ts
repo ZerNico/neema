@@ -1,3 +1,8 @@
+import {
+  operationEngine,
+  xmlSafe,
+  type Definition as OfficeDefinition,
+} from "../office/operations.ts";
 import { PRESENTATION_LIMITS } from "./limits.ts";
 import { PresentationError } from "./errors.ts";
 
@@ -6,21 +11,7 @@ import { PresentationError } from "./errors.ts";
  * the model is offered, the adapter's operation types and the activity's change
  * summary are all derived from this table, so they cannot drift apart.
  */
-type Field =
-  | {
-      readonly type: "integer" | "number";
-      readonly min: number;
-      readonly max: number;
-      readonly about: string;
-    }
-  | { readonly type: "boolean"; readonly about: string }
-  | {
-      readonly type: "string";
-      readonly max: number;
-      readonly about: string;
-      readonly options?: readonly string[];
-      readonly pattern?: string;
-    }
+type OwnField =
   | { readonly type: "text"; readonly about: string }
   | {
       readonly type: "color";
@@ -30,31 +21,8 @@ type Field =
       readonly hexOnly?: boolean;
     }
   | { readonly type: "ref"; readonly about: string }
-  | { readonly type: "image"; readonly about: string }
-  | {
-      readonly type: "list";
-      readonly of: Field;
-      readonly min: number;
-      readonly max: number;
-      readonly about: string;
-    }
-  | {
-      readonly type: "object";
-      readonly fields: Readonly<Record<string, Field>>;
-      readonly required: readonly string[];
-      readonly exclusive?: readonly (readonly string[])[];
-      readonly about: string;
-    };
-
-type Definition = {
-  readonly about: string;
-  readonly fields: Readonly<Record<string, Field>>;
-  readonly required: readonly string[];
-  /** Each group names alternatives of which exactly one must be present. */
-  readonly exclusive?: readonly (readonly string[])[];
-  /** Past-tense verb and counted noun for the activity summary. */
-  readonly change: readonly [verb: string, noun?: string];
-};
+  | { readonly type: "image"; readonly about: string };
+type Definition = OfficeDefinition<OwnField>;
 
 const slideId = {
   type: "integer",
@@ -549,7 +517,7 @@ export const PRESENTATION_OPERATIONS = {
       imageRef: {
         type: "image",
         about:
-          "A picture: attachment:<id>, project:<id>@<version>, or the working: reference import_local_file returned.",
+          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference import_local_file returned.",
       },
       imageFingerprint: { type: "string", max: 64, about: "Optional SHA-256 pin of the image." },
       ...box,
@@ -577,7 +545,7 @@ export const PRESENTATION_OPERATIONS = {
       imageRef: {
         type: "image",
         about:
-          "A picture: attachment:<id>, project:<id>@<version>, or the working: reference import_local_file returned.",
+          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference import_local_file returned.",
       },
       imageFingerprint: { type: "string", max: 64, about: "Optional SHA-256 pin of the image." },
     },
@@ -822,33 +790,8 @@ export type PresentationOperation = {
   >;
 }[PresentationOperationKind];
 
-const fail = (path: string, message: string): never => {
-  throw new PresentationError("invalid_operation", `${path}: ${message}`);
-};
-const received = (value: unknown) =>
-  value === null
-    ? "null"
-    : Array.isArray(value)
-      ? "an array"
-      : typeof value === "number"
-        ? `the number ${value}`
-        : typeof value === "string"
-          ? "a string"
-          : `a ${typeof value}`;
-const describe = (field: Field) => {
+const describe = (field: OwnField) => {
   switch (field.type) {
-    case "integer":
-      return `an integer from ${field.min} to ${field.max}`;
-    case "number":
-      return `a number from ${field.min} to ${field.max}`;
-    case "boolean":
-      return "true or false";
-    case "string":
-      return field.options
-        ? `one of ${field.options.join(", ")}`
-        : field.pattern
-          ? `${field.about}`
-          : `text up to ${field.max} characters`;
     case "text":
       return "text";
     case "color":
@@ -858,54 +801,20 @@ const describe = (field: Field) => {
     case "ref":
       return "a ref name (letters, digits, - or _)";
     case "image":
-      return "an attachment:<id>, project:<id>@<version> or working:<id>@<revision> reference";
-    case "list":
-      return `a list of ${field.min}–${field.max} items`;
-    case "object":
-      return "an object";
+      return "an attachment:<id>, project:<id>@<version>, skill:<revision>/<path> or working:<id>@<revision> reference";
   }
-};
-const xmlSafe = (value: string) => {
-  for (const character of value) {
-    const point = character.codePointAt(0)!;
-    if (
-      (point < 32 && point !== 9 && point !== 10 && point !== 13) ||
-      (point >= 0xd800 && point <= 0xdfff) ||
-      point === 0xfffe ||
-      point === 0xffff
-    )
-      return false;
-  }
-  return true;
 };
 
 type Stage = "tool" | "worker";
-const decimal = /^-?\d+(?:\.\d+)?$/;
 
-function value(field: Field, raw: unknown, path: string, stage: Stage): unknown {
-  const wrong = () => fail(path, `expected ${describe(field)}; received ${received(raw)}`);
+function value(
+  field: OwnField,
+  raw: unknown,
+  path: string,
+  stage: Stage,
+  wrong: () => never,
+): unknown {
   switch (field.type) {
-    case "integer":
-    case "number": {
-      const number = typeof raw === "string" && decimal.test(raw.trim()) ? Number(raw) : raw;
-      if (
-        typeof number !== "number" ||
-        !Number.isFinite(number) ||
-        (field.type === "integer" && !Number.isSafeInteger(number)) ||
-        number < field.min ||
-        number > field.max
-      )
-        return wrong();
-      return number;
-    }
-    case "boolean":
-      return typeof raw === "boolean" ? raw : wrong();
-    case "string":
-      if (typeof raw !== "string" || raw.length === 0 || raw.length > field.max || !xmlSafe(raw))
-        return wrong();
-      if (field.options && !field.options.includes(raw)) return wrong();
-      if (field.pattern && !new RegExp(field.pattern).test(raw)) return wrong();
-      return raw;
     case "text":
       if (typeof raw !== "string" || raw.length > PRESENTATION_LIMITS.textChars || !xmlSafe(raw))
         return wrong();
@@ -926,51 +835,35 @@ function value(field: Field, raw: unknown, path: string, stage: Stage): unknown 
     case "image":
       if (stage === "worker") {
         if (!(raw instanceof Uint8Array) || raw.length > PRESENTATION_LIMITS.imageBytes)
-          return fail(path, "an image must be a bounded PNG or JPEG byte array");
+          return engine.fail(path, "an image must be a bounded PNG or JPEG byte array");
         return raw;
       }
-      return typeof raw === "string" && raw.length <= 200 ? raw : wrong();
-    case "list": {
-      if (!Array.isArray(raw) || raw.length < field.min || raw.length > field.max) return wrong();
-      return raw.map((item, index) => value(field.of, item, `${path}[${index}]`, stage));
-    }
-    case "object":
-      return object(field, raw, path, stage);
+      // A skill reference carries a path of up to 240 characters.
+      return typeof raw === "string" && raw.length <= 300 ? raw : wrong();
   }
 }
 
-function object(
-  shape: {
-    fields: Readonly<Record<string, Field>>;
-    required: readonly string[];
-    exclusive?: readonly (readonly string[])[];
+const engine = operationEngine<OwnField, Stage>({
+  operations: PRESENTATION_OPERATIONS,
+  maxOperations: PRESENTATION_LIMITS.operationsPerCall,
+  Error: PresentationError,
+  description:
+    "Ordered edits applied atomically. Each item's kind picks its fields; exactly-one choices (slideId or slideRef; shapeId, shapeRef or placeholder; text or paragraphs) are named in field descriptions.",
+  own: {
+    describe,
+    value,
+    schema: (field) =>
+      field.type === "color"
+        ? {
+            type: "string",
+            pattern: field.hexOnly
+              ? "^#[0-9A-Fa-f]{6}$"
+              : `^(#[0-9A-Fa-f]{6}|${THEME_COLORS.join("|")}${field.none ? "|none" : ""})$`,
+            description: field.about,
+          }
+        : { type: "string", description: field.about },
   },
-  raw: unknown,
-  path: string,
-  stage: Stage,
-  ignore: readonly string[] = [],
-) {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-    return fail(path, `expected an object; received ${received(raw)}`);
-  const output: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(raw)) {
-    if (ignore.includes(key) || item === null || item === undefined) continue;
-    const field = shape.fields[key];
-    if (!field)
-      return fail(
-        path,
-        `unknown field "${key.slice(0, 40)}"; allowed: ${Object.keys(shape.fields).join(", ")}`,
-      );
-    output[key] = value(field, item, `${path}.${key}`, stage);
-  }
-  for (const key of shape.required)
-    if (!(key in output)) fail(path, `missing ${key} (${describe(shape.fields[key]!)})`);
-  for (const group of shape.exclusive ?? []) {
-    const present = group.filter((key) => key in output);
-    if (present.length !== 1) fail(path, `provide exactly one of ${group.join(", ")}`);
-  }
-  return output;
-}
+});
 
 /**
  * Validates a batch. The tool stage takes image references; by the worker
@@ -980,33 +873,17 @@ export function parsePresentationOperations(
   input: unknown,
   stage: Stage = "worker",
 ): PresentationOperation[] {
-  const list = typeof input === "string" && input.trim().startsWith("[") ? safeJson(input) : input;
-  if (!Array.isArray(list) || list.length > PRESENTATION_LIMITS.operationsPerCall)
-    return fail(
-      "operations",
-      `expected a list of at most ${PRESENTATION_LIMITS.operationsPerCall} operations; received ${Array.isArray(list) ? `${list.length} operations. Split into smaller calls; no edits were applied` : received(list)}`,
-    );
   // "first" is built in: the deck's first slide when the batch starts.
   const refs = new Set<string>(["first"]);
-  return list.map((raw, index) => {
-    const kind = (raw as { kind?: unknown } | null)?.kind;
-    if (typeof kind !== "string" || !Object.hasOwn(PRESENTATION_OPERATIONS, kind))
-      return fail(
-        `operations[${index}]`,
-        `unknown kind; use one of ${Object.keys(PRESENTATION_OPERATIONS).join(", ")}`,
-      );
-    const definition = PRESENTATION_OPERATIONS[kind as PresentationOperationKind] as Definition;
-    const path = `operations[${index}] ${kind}`;
-    const operation = object(definition, raw, path, stage, ["kind"]);
+  const operations = engine.parse(input, stage, (kind, operation, path) => {
     for (const key of ["slideRef", "shapeRef"])
       if (typeof operation[key] === "string" && !refs.has(operation[key]))
-        fail(path, `${key} "${operation[key]}" was not created earlier in this batch`);
+        engine.fail(path, `${key} "${operation[key]}" was not created earlier in this batch`);
     if (typeof operation.ref === "string") {
-      if (refs.has(operation.ref)) fail(path, `ref "${operation.ref}" is already used`);
+      if (refs.has(operation.ref)) engine.fail(path, `ref "${operation.ref}" is already used`);
       refs.add(operation.ref);
     }
-    if ((kind === "addChart" || kind === "updateChart") && !chartSeriesFit(operation, path))
-      fail(path, "invalid chart data");
+    if (kind === "addChart" || kind === "updateChart") chartSeriesFit(operation, path);
     if (kind === "addTable") tableRectangular(operation.rows as string[][], path);
     if (
       kind === "formatText" ||
@@ -1015,140 +892,37 @@ export function parsePresentationOperations(
       kind === "styleTable"
     )
       if (!Object.keys(operation).some((key) => !(key in target) && key !== "paragraph"))
-        fail(path, "provide at least one property to change");
-    return { kind, ...operation } as PresentationOperation;
+        engine.fail(path, "provide at least one property to change");
   });
+  // The table's fields were each checked above; the type is the table's.
+  return operations as PresentationOperation[];
 }
 
-const safeJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
 function chartSeriesFit(operation: Record<string, unknown>, path: string) {
   const categories = operation.categories as string[];
   const series = operation.series as { values: number[] }[];
   if ((operation.chartType === "pie" || operation.chartType === "doughnut") && series.length !== 1)
-    fail(path, `${operation.chartType} charts take exactly one series`);
+    engine.fail(path, `${operation.chartType} charts take exactly one series`);
   for (const [index, item] of series.entries())
     if (item.values.length !== categories.length)
-      fail(
+      engine.fail(
         `${path}.series[${index}].values`,
         `expected ${categories.length} values, one per category; received ${item.values.length}`,
       );
-  return true;
 }
 function tableRectangular(rows: string[][], path: string) {
   const width = rows[0]!.length;
   for (const [index, row] of rows.entries())
     if (row.length !== width)
-      fail(
+      engine.fail(
         `${path}.rows[${index}]`,
         `expected ${width} cells like the first row; received ${row.length}`,
       );
 }
 
-type JsonSchema = Record<string, unknown>;
-function schemaOf(field: Field): JsonSchema {
-  switch (field.type) {
-    case "integer":
-    case "number":
-      return { type: field.type, minimum: field.min, maximum: field.max, description: field.about };
-    case "boolean":
-      return { type: "boolean", description: field.about };
-    case "string":
-      return field.options
-        ? { type: "string", enum: field.options, description: field.about }
-        : {
-            type: "string",
-            maxLength: field.max,
-            ...(field.pattern ? { pattern: field.pattern } : {}),
-            description: field.about,
-          };
-    case "text":
-    case "image":
-    case "ref":
-      return { type: "string", description: field.about };
-    case "color":
-      return {
-        type: "string",
-        pattern: field.hexOnly
-          ? "^#[0-9A-Fa-f]{6}$"
-          : `^(#[0-9A-Fa-f]{6}|${THEME_COLORS.join("|")}${field.none ? "|none" : ""})$`,
-        description: field.about,
-      };
-    case "list":
-      return {
-        type: "array",
-        items: schemaOf(field.of),
-        minItems: field.min,
-        maxItems: field.max,
-        description: field.about,
-      };
-    case "object":
-      return objectSchema(field, field.about);
-  }
-}
-function objectSchema(
-  shape: { fields: Readonly<Record<string, Field>>; required: readonly string[] },
-  description: string,
-  extra: JsonSchema = {},
-  required: readonly string[] = shape.required,
-): JsonSchema {
-  return {
-    type: "object",
-    description,
-    properties: {
-      ...extra,
-      ...Object.fromEntries(
-        Object.entries(shape.fields).map(([key, field]) => [key, schemaOf(field)]),
-      ),
-    },
-    required,
-    additionalProperties: false,
-  };
-}
-
 /** The operations parameter as the model sees it: one branch per kind. */
-export const operationsJsonSchema: JsonSchema = {
-  type: "array",
-  maxItems: PRESENTATION_LIMITS.operationsPerCall,
-  description:
-    "Ordered edits applied atomically. Each item's kind picks its fields; exactly-one choices (slideId or slideRef; shapeId, shapeRef or placeholder; text or paragraphs) are named in field descriptions.",
-  items: {
-    anyOf: Object.entries(PRESENTATION_OPERATIONS).map(([kind, definition]) =>
-      objectSchema(definition, definition.about, { kind: { type: "string", enum: [kind] } }, [
-        "kind",
-        ...definition.required,
-      ]),
-    ),
-  },
-};
-
-const article = (noun: string) => (/^[aeiou]/.test(noun) ? `an ${noun}` : `a ${noun}`);
-const plural = (noun: string) => (noun.endsWith("s") ? noun : `${noun}s`);
-
-const listed = (items: readonly string[]) =>
-  items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : (items[0] ?? "");
+export const operationsJsonSchema = engine.jsonSchema;
 
 /** "Added a slide and a chart and wrote the text", from operation kinds alone, for people. */
-export function describePresentationChanges(operations: readonly PresentationOperation[]) {
-  const verbs = new Map<string, Map<string, number>>();
-  for (const operation of operations) {
-    const [verb, noun = ""] = (PRESENTATION_OPERATIONS[operation.kind] as Definition).change;
-    const nouns = verbs.get(verb) ?? new Map<string, number>();
-    nouns.set(noun, (nouns.get(noun) ?? 0) + 1);
-    verbs.set(verb, nouns);
-  }
-  const sentence = listed(
-    [...verbs].map(([verb, nouns]) => {
-      const items = [...nouns]
-        .filter(([noun]) => noun)
-        .map(([noun, count]) => (count === 1 ? article(noun) : `${count} ${plural(noun)}`));
-      return items.length ? `${verb} ${listed(items)}` : verb;
-    }),
-  );
-  return sentence ? sentence[0]!.toUpperCase() + sentence.slice(1) : "";
-}
+export const describePresentationChanges: (operations: readonly PresentationOperation[]) => string =
+  engine.describeChanges;

@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
-import { presentationSource } from "~/modules/attachments/ui/presentation-preview.tsx";
+import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { toastError } from "~/ui/error-toast.ts";
@@ -112,7 +112,7 @@ export function ProjectFilesSection({
   return (
     <Section
       title="Files"
-      description="Decks, spreadsheets and other files everyone works on, with 30 days of history."
+      description="Decks, spreadsheets, documents and other files everyone works on, with 30 days of history."
       actions={
         editable ? (
           <PendingButton
@@ -195,7 +195,7 @@ function ProjectFileRow({
     onError: (error) => toastError("Could not delete the file.", error),
   });
   const by = file.origin === "model" ? "the assistant" : file.updatedBy;
-  const presentation = presentationSource(
+  const office = officePreview(
     { fileName: file.name, mediaType: file.mediaType },
     { kind: "project-version", id: file.versionId },
   );
@@ -216,7 +216,7 @@ function ProjectFileRow({
           {upload.isPending ? "Uploading a new version…" : detail}
         </span>
       </div>
-      {presentation ? (
+      {office ? (
         <>
           <Button size="sm" variant="outline" onClick={() => setPreviewOpen(true)}>
             Preview
@@ -227,7 +227,7 @@ function ProjectFileRow({
               size: file.size,
               kind: "file",
               url: downloadHref(file.versionId),
-              presentation,
+              office,
             }}
             open={previewOpen}
             onOpenChange={setPreviewOpen}

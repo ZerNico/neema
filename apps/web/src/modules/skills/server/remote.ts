@@ -1,10 +1,11 @@
 import { Effect } from "effect";
 import { fetchPinned, resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
+import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import {
+  classifySkillFile,
   decodeSkillText,
+  isBinarySkillFile,
   SKILL_LIMITS,
-  SkillPackageError,
-  type SkillFinding,
   validateSkillPackage,
   validateSkillPath,
   type SkillFile,
@@ -415,7 +416,6 @@ export async function reviewGitHubSkill(
   if (selected.length > SKILL_LIMITS.files)
     throw new SkillRemoteError("Package exceeds 100 files.");
   const files: SkillFile[] = [];
-  const invalidFiles: SkillFinding[] = [];
   let total = 0;
   for (const entry of selected) {
     const path = entry.path.slice(prefix.length);
@@ -424,18 +424,18 @@ export async function reviewGitHubSkill(
       throw new SkillRemoteError(`Unsupported symlink/submodule: ${path}`);
     const bytes = await readPath(
       entry.path,
-      path === "SKILL.md" ? SKILL_LIMITS.rootBytes : SKILL_LIMITS.fileBytes,
+      path === "SKILL.md" ? SKILL_LIMITS.rootBytes : SKILL_LIMITS.binaryFileBytes,
     );
     total += bytes.length;
-    if (total > SKILL_LIMITS.expandedBytes) throw new SkillRemoteError("Package exceeds 10 MiB.");
-    try {
-      files.push({ path, content: decodeSkillText(bytes, path) });
-    } catch (error) {
-      if (error instanceof SkillPackageError) invalidFiles.push(...error.findings);
-      else throw error;
-    }
+    if (total > SKILL_LIMITS.expandedBytes) throw new SkillRemoteError("Package exceeds 50 MiB.");
+    const file = classifySkillFile(path, bytes);
+    // Hashed here, over the fetched bytes, so a review names exactly what import stores.
+    files.push(
+      isBinarySkillFile(file)
+        ? { ...file, binary: { ...file.binary, sha256: sha256Hex(bytes) } }
+        : file,
+    );
   }
-  if (invalidFiles.length) throw new SkillPackageError(invalidFiles);
   const validated = validateSkillPackage(files);
   return {
     repository: input.repository,

@@ -264,6 +264,13 @@ false`), so a page body is written against data already there. This includes loc
   else as the same `AttachmentChip` a sent message uses, opening the shared preview dialog. The
   tool row that produced it does not repeat the chip: the two would sit a line apart and read
   as two files.
+- The preview dialog's header actions are all `PreviewAction`s (`attachments/ui/preview-action.tsx`),
+  so a stored file and a desktop local file look alike: by default a stored file gets Download
+  (Open original for what the dialog can show), a local file passes its own. A caller whose file
+  is an object URL must pass actions: the default link would open it in a tab of our origin.
+- What a file's preview shows is decided once, by `FilePreviewBody` in
+  `attachments/ui/attachment-preview.tsx`: the dialog renders it, and so does any inline view (a
+  skill's binary file). A new kind of preview goes there, so it appears everywhere files are shown.
 - `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line transcript summary row,
   sitting beside `disclosureTriggerClassName` — a message stacks both. Chat disclosures use
   `~/ui/disclosure.tsx` for measured-height/opacity animation, reduced-motion and hidden-until-found

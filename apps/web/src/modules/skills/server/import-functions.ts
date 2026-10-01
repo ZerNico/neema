@@ -3,7 +3,8 @@ import { getRequest } from "@tanstack/react-start/server";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
-import { compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
+import { withoutBytes } from "../package.ts";
+import { changesWithoutBytes, compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
 import { SkillService } from "./service.ts";
 import { discoverSkills, reviewGitHubSkill, type RemoteSkillPackage } from "./remote.ts";
 
@@ -74,7 +75,19 @@ export const reviewRemoteSkill = createServerFn({ method: "POST" })
       data.path,
       getRequest().signal,
     );
-    return review;
+    // A reviewed binary is described to the browser; import fetches it again.
+    return review.selected
+      ? {
+          ...review,
+          selected: {
+            ...review.selected,
+            package: {
+              ...review.selected.package,
+              files: review.selected.package.files.map(withoutBytes),
+            },
+          },
+        }
+      : review;
   });
 export const importReviewedSkill = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -117,7 +130,9 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
         status: 409,
       });
     return {
-      changes: compareSkillUpdate(baseline, local.files, remote.selected.package.files),
+      changes: changesWithoutBytes(
+        compareSkillUpdate(baseline, local.files, remote.selected.package.files),
+      ),
       source: remote.selected.source,
       expectedRevision: local.revision,
     };
@@ -177,5 +192,10 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
         }),
       ),
     );
-    return { id, files, revision: data.expectedRevision + 1, source: selected.source };
+    return {
+      id,
+      files: files.map(withoutBytes),
+      revision: data.expectedRevision + 1,
+      source: selected.source,
+    };
   });

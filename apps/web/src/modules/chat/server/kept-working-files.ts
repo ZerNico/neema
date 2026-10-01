@@ -11,6 +11,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import type { AttachmentRejected } from "~/modules/attachments/errors.ts";
+import type { OfficeFamily } from "~/modules/office/names.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
@@ -34,7 +35,7 @@ export class KeptWorkingFileUnavailable extends Schema.TaggedError<KeptWorkingFi
 
 type Row = typeof conversationWorkingFiles.$inferSelect;
 const ownerOf = (row: Row): KeptWorkingFileOwner =>
-  row.owner === "custom" ? `custom:${row.customToolId ?? ""}` : "presentation";
+  row.owner === "custom" ? `custom:${row.customToolId ?? ""}` : row.owner;
 
 /** This answer's row for a file, locked, if it has one yet. */
 const ownRow = (tx: DbTx, fence: GenerationIdentity, workingFileId: string) =>
@@ -179,7 +180,7 @@ export class KeptWorkingFiles extends Context.Service<
                     attachmentId: attachment.id,
                     name: file.name,
                     mediaType: file.mediaType,
-                    owner: custom ? ("custom" as const) : ("presentation" as const),
+                    owner: custom ? ("custom" as const) : (file.owner as OfficeFamily),
                     customToolId: custom ? file.owner.slice("custom:".length) : null,
                     revision: file.ref.revision,
                     fingerprint: file.fingerprint,

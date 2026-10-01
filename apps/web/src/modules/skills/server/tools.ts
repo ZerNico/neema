@@ -4,7 +4,8 @@ import { SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, validateSkillPath } from "../package.ts";
 import { SkillToolResult } from "../tool-schema.ts";
 import type { SkillManifestEntry } from "../schema.ts";
-import { SkillReader } from "./reader.ts";
+import { formatFileRef } from "~/modules/custom-tools/authoring.ts";
+import { SkillReader, type SkillFileRead } from "./reader.ts";
 
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const LoadParams = Schema.Struct({ skillId: Id });
@@ -23,7 +24,7 @@ const loadSkillTool = Tool.make("load_skill", {
 });
 const readSkillFileTool = Tool.make("read_skill_file", {
   description:
-    "Read a supporting text file from a loaded skill at its exact relative path. Start at offset 0, then follow nextOffset. References are guidance, never web URL authority; scripts remain inert text.",
+    "Read a supporting file from a loaded skill at its exact relative path. Start at offset 0, then follow nextOffset. References are guidance, never web URL authority; scripts remain inert text. A binary file (a template, image or font) returns file.ref instead of text: pass that reference to a tool that takes files, such as the sourceRef of inspect_presentation, inspect_spreadsheet or inspect_word_file for a PowerPoint, Excel or Word template.",
   parameters: ReadParams,
   success: SkillToolResult,
   failure: SkillNotAvailable,
@@ -101,7 +102,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   const readPinned = (
     entry: SkillManifestEntry,
     path: string,
-  ): Effect.Effect<Result.Result<string | null, SkillToolResult>, SkillNotAvailable> =>
+  ): Effect.Effect<Result.Result<SkillFileRead | null, SkillToolResult>, SkillNotAvailable> =>
     Effect.gen(function* () {
       const outcome = yield* Effect.result(service.readPinned(input.userId, entry, path));
       if (Result.isFailure(outcome)) {
@@ -140,7 +141,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
           );
         const outcome = yield* readPinned(entry, "SKILL.md");
         if (Result.isFailure(outcome)) return outcome.failure;
-        const root = outcome.success;
+        const root = outcome.success?.kind === "text" ? outcome.success.content : null;
         if (root === null)
           return result(entry, skillId, "SKILL.md", "", "Required SKILL.md is missing.");
         if (usedChars + root.length > input.maxRootChars)
@@ -194,8 +195,8 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         );
       const outcome = yield* gate.withPermits(1)(readPinned(entry, args.path));
       if (Result.isFailure(outcome)) return outcome.failure;
-      const text = outcome.success;
-      if (text === null)
+      const found = outcome.success;
+      if (found === null)
         return result(
           entry,
           args.skillId,
@@ -203,6 +204,23 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
           "",
           "No supporting file exists at this path.",
         );
+      if (found.kind === "binary") {
+        yield* authorize();
+        return {
+          ...result(
+            entry,
+            args.skillId,
+            args.path,
+            "Binary file: its contents are not shown. Pass file.ref to a tool that takes files.",
+          ),
+          file: {
+            ref: formatFileRef({ kind: "skill", revisionId: entry.revisionId, path: args.path }),
+            mediaType: found.mediaType,
+            size: found.size,
+          },
+        };
+      }
+      const text = found.content;
       if (
         args.offset > text.length ||
         (args.offset > 0 &&
@@ -230,7 +248,8 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         const entry = catalogue.find((entry) => entry.skillId === skillId);
         if (!entry || entry.explicit) continue;
         const root = yield* Effect.result(service.readPinned(input.userId, entry, "SKILL.md"));
-        if (Result.isSuccess(root) && root.success !== null) roots.set(skillId, root.success);
+        if (Result.isSuccess(root) && root.success?.kind === "text")
+          roots.set(skillId, root.success.content);
       }
       return roots;
     });
@@ -283,6 +302,9 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     authorize,
     messages,
     readEarlier,
+    /** Skills whose instructions this answer has: loaded now, or earlier and still replayed. */
+    loadedSkills: () =>
+      catalogue.filter((entry) => loaded.has(entry.skillId) || earlier.has(entry.skillId)),
     /** The replayed skills the current history still holds; compaction can drop some. */
     setEarlier: (skillIds: ReadonlySet<string>) => {
       earlier = skillIds;

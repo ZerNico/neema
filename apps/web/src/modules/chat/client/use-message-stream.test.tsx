@@ -94,6 +94,58 @@ describe("presentation writing events", () => {
     expect(result.current.tools[0]).not.toHaveProperty("writing");
   });
 
+  it("shows a workbook edit being written, then its decoded result", () => {
+    const { result, source } = renderStream();
+    act(() =>
+      source.emit("chunk", {
+        seq: 1,
+        kind: "writing",
+        delta: JSON.stringify({
+          v: 1,
+          id: "sheet-1",
+          name: "edit_spreadsheet",
+          textOffset: 0,
+          turnIndex: 0,
+        }),
+      }),
+    );
+    expect(result.current.tools).toMatchObject([
+      { family: "spreadsheet", callId: "writing:sheet-1", writing: true, status: "running" },
+    ]);
+    const envelope = (phase: "start" | "result", extra: Record<string, unknown>) =>
+      source.emit("chunk", {
+        seq: phase === "start" ? 2 : 3,
+        kind: "tool",
+        delta: JSON.stringify({
+          v: 1,
+          family: "spreadsheet",
+          phase,
+          callId: "sheet-1",
+          name: "edit_spreadsheet",
+          ...extra,
+        }),
+      });
+    act(() => envelope("start", { textOffset: 0, turnIndex: 0, callIndex: 0 }));
+    act(() =>
+      envelope("result", {
+        outcome: "working",
+        message: "Private draft updated.",
+        workingFileId: "book",
+        revision: 1,
+        formulaErrors: 2,
+      }),
+    );
+    expect(result.current.tools).toEqual([
+      expect.objectContaining({
+        family: "spreadsheet",
+        callId: "sheet-1",
+        status: "complete",
+        workingFileId: "book",
+        formulaErrors: 2,
+      }),
+    ]);
+  });
+
   it.each(["complete", "error", "aborted"] as const)(
     "clears unfinished writing on %s",
     (status) => {

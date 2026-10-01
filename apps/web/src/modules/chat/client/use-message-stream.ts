@@ -4,7 +4,12 @@ import {
   agentDraftResultOk,
   type AgentDraftActivityResult,
 } from "~/modules/agents/tool-schema.ts";
-import type { PresentationActivitySummary } from "~/modules/presentations/activity.ts";
+import {
+  isOfficeFamily,
+  OFFICE_FAMILIES,
+  officeFamilyOfEdit,
+  type OfficeFamily,
+} from "~/modules/office/families.ts";
 import {
   DocumentToolEnvelope,
   documentResultOk,
@@ -41,7 +46,6 @@ import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schem
 import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createLiveText, type LiveText } from "./live-text.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
-import { PresentationToolEnvelope } from "~/modules/presentations/tool-schema.ts";
 import { ToolFileEnvelope } from "../tool-file-schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
@@ -162,13 +166,17 @@ export interface ToolFileActivity extends ToolActivityBase {
   workingFileId?: string;
 }
 
-/** One deck call, carrying only the bounded summary the transcript shows. */
-export interface PresentationActivity
-  extends ToolActivityBase, Partial<PresentationActivitySummary> {
-  family: "presentation";
-  /** Stands in for a call the model is still writing; replaced when it starts. */
-  writing?: true;
-}
+/** One call of an Office editor, carrying only the bounded summary the transcript shows. */
+export type OfficeActivity = {
+  [F in OfficeFamily]: ToolActivityBase &
+    Partial<ReturnType<(typeof OFFICE_FAMILIES)[F]["summary"]>> & {
+      family: F;
+      /** Stands in for a call the model is still writing; replaced when it starts. */
+      writing?: true;
+    };
+}[OfficeFamily];
+export const isOfficeActivity = (activity: ToolActivity): activity is OfficeActivity =>
+  isOfficeFamily(activity.family);
 
 /** One admin-authored code tool call; the display name rides the envelope. */
 export interface CustomToolActivity extends ToolActivityBase {
@@ -200,7 +208,7 @@ export type ToolActivity =
   | ScheduleDraftToolActivity
   | CustomToolActivity
   | ToolFileActivity
-  | PresentationActivity
+  | OfficeActivity
   | DocumentToolActivity
   | ProjectFileToolActivity
   | DesktopToolActivity
@@ -344,7 +352,7 @@ export function applyToolChunk(
     e.family !== "schedule-draft" &&
     e.family !== "custom" &&
     e.family !== "tool-file" &&
-    e.family !== "presentation" &&
+    !isOfficeFamily(e.family) &&
     e.family !== "integration" &&
     e.family !== "document" &&
     e.family !== "project-file" &&
@@ -413,10 +421,12 @@ export function applyToolChunk(
       ? [...tools, next]
       : tools.map((activity, i) => (i === index ? next : activity));
   }
-  if (family === "presentation") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(PresentationToolEnvelope)(envelope));
+  if (isOfficeFamily(family)) {
+    const parsed = Option.getOrNull(
+      Schema.decodeUnknownOption(OFFICE_FAMILIES[family].envelope)(envelope),
+    );
     if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next: PresentationActivity = {
+    const next = {
       family,
       ...position,
       callId: parsed.callId,
@@ -439,7 +449,7 @@ export function applyToolChunk(
             ...(summary.outcome === "error" ? { error: summary.message } : {}),
           }))(parsed)
         : {}),
-    };
+    } as OfficeActivity;
     return index === -1
       ? [...tools, next]
       : tools.map((activity, i) => (i === index ? next : activity));
@@ -964,7 +974,7 @@ export const applyFileChunk = (
 
 /** A call still being written leaves once any call starts or the answer ends. */
 const withoutWriting = (tools: ReadonlyArray<ToolActivity>) =>
-  tools.filter((tool) => tool.family !== "presentation" || !tool.writing);
+  tools.filter((tool) => !isOfficeActivity(tool) || !tool.writing);
 
 /**
  * A writing marker from an earlier attempt of a resumed answer. That attempt
@@ -979,7 +989,7 @@ export const isStaleWriting = (delta: string, runId: string | null) => {
   }
 };
 
-/** A deck edit the model has begun writing, shown as a running step until it starts. */
+/** An Office edit the model has begun writing, shown as a running step until it starts. */
 export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: string) => {
   try {
     const writing = JSON.parse(delta) as {
@@ -992,15 +1002,17 @@ export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: str
     if (
       writing.v !== 1 ||
       typeof writing.id !== "string" ||
-      writing.name !== "edit_presentation" ||
+      typeof writing.name !== "string" ||
       typeof writing.textOffset !== "number" ||
       typeof writing.turnIndex !== "number"
     )
       return [...tools];
+    const family = officeFamilyOfEdit(writing.name);
+    if (!family) return [...tools];
     return [
       ...withoutWriting(tools),
       {
-        family: "presentation" as const,
+        family,
         name: writing.name,
         callId: `writing:${writing.id}`,
         status: "running" as const,

@@ -46,12 +46,25 @@ export const PRESENTATION_WORKERS = {
   maxWorkers: 8,
   queue: 8,
   timeoutMs: 30_000,
+  /** Each worker process's heap: a deck expands to at most 128 MiB of parts. */
+  heapMb: 1536,
+  /** Jobs one person may run at once; more wait, so nobody fills every worker. */
+  perOwner: 2,
 } as const;
 
 export const FONT_LIMITS = {
   fileBytes: 15 * 1024 * 1024,
   faces: 60,
   totalBytes: 200 * 1024 * 1024,
+  /**
+   * Drawing a glyph costs its outline; a font that declares modest maxima can
+   * still carry huge ones, so these are measured, not read. Real text faces
+   * stay far below them (a complex CJK glyph has a few hundred points).
+   */
+  pointsPerGlyph: 10_000,
+  compositeDepth: 8,
+  componentsPerGlyph: 256,
+  charStringBytes: 16 * 1024,
 } as const;
 
 /** Families the renderer ships equivalents for, so every deck may use them. */

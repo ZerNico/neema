@@ -79,7 +79,7 @@ import type { AttachmentUploads } from "~/modules/attachments/client/use-attachm
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { Attachment, MessageAttachment } from "~/modules/attachments/schema.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
-import { presentationSource } from "~/modules/attachments/ui/presentation-preview.tsx";
+import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -530,7 +530,7 @@ function StoredAttachmentChip({
       }}
       href={url}
       preview={url}
-      presentation={presentationSource(attachment, { kind: "attachment", id: attachment.id })}
+      office={officePreview(attachment, { kind: "attachment", id: attachment.id })}
       {...(project
         ? {
             previewActions: (

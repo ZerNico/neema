@@ -11,7 +11,8 @@ attachments until publication.
 
 `modules/presentations/operations.ts` describes every edit once. Validation, the JSON
 schema the model is offered, the adapter's operation types and the transcript's change
-summary all derive from it, so a new operation is one entry there plus its adapter case.
+summary all derive from it through the shared [operation engine](files.md#office-families),
+so a new operation is one entry there plus its adapter case.
 Each tool advertises only its own parameters. Top-level parameters stay optional so
 malformed calls reach handler diagnostics rather than failing the generation decoder.
 Numbers are advertised as plain integers or numbers: a schema generated from `Schema.Number` also offers the strings
@@ -45,13 +46,32 @@ targeted edits, and the same preservation check follows.
 
 ## Package boundary
 
-Office Kit parses and writes packages inside persistent workers from the shared pool in
-`server/worker-pool.ts`, which custom tools use too. Chat tools, font checks and read-only
-previews share one set; previews wait behind queued tool calls, and each lane refuses work
-past its queue as busy. A worker that times out, is cancelled mid-task, crashes or exits
-is replaced, never reused. The parent process authorizes sources, images and publication;
-workers receive bytes and validated operations, not database credentials. The worker
-contains hangs and timeouts, **not** hostile native code or hard process memory usage.
+Office Kit parses and writes packages inside persistent worker processes, run as
+[jobs](#jobs) on the shared pool in `server/worker-pool.ts` (custom tools use the same pool
+with threads). A process, not a thread, because resvg is native code: `terminate()` cannot
+stop a thread inside it, so a hung render kept burning CPU after its timeout, while a
+process is killed outright (`server/worker-process.ts`). Each gets its own heap bound and an environment
+without the server's secrets, since it parses untrusted files. Chat tools, font checks and
+read-only previews share one set; previews wait behind queued tool calls, each lane refuses
+work past its queue as busy, and one person's jobs beyond two wait for their own, so a
+burst from one chat never holds every worker. A worker that times out, is cancelled
+mid-task, crashes or exits is replaced, never reused. The parent process authorizes
+sources, images and publication; workers receive bytes and validated operations, not
+database credentials. The process bounds time, memory and secrets; it is not a sandbox
+against native code escaping it.
+
+### Jobs
+
+A worker module exports its handlers, one per job `kind`, and serves them with
+`serveJobs` (`server/job-worker.ts`); its runtime is `createJobRuntime` (`server/jobs.ts`)
+configured with limits, a pre-flight `admit` and the family's error. The runtime's request
+and result types are read from the handlers, so `run({ kind: "render" })` returns rendered
+slides, never a union to narrow. Top-level request buffers are copied and handed over, the
+caller's own left untouched. A failure the worker reports by name is a `JobError` subclass
+(`PresentationError`, `SpreadsheetError`) with a stable `code`; anything else crosses the
+boundary only as a generic failure. A new worker is a module of handlers, a runtime of
+configuration, and one entry in `scripts/build-office-workers.mjs`.
+
 Reject active content (ActiveX, OLE, macros, executables), embedded audio and video, and
 external rendering dependencies rather than fetching them. Every picture relationship must
 resolve inside `ppt/media/`, and parts must bind the relationships namespace to `r`, the
@@ -65,16 +85,19 @@ disposable copy of the package. Pictures an edit adds must be PNG or JPEG within
 bounds, since every preview has to draw them. Embedded SVG artwork, reached only through
 PowerPoint's `svgBlip`, is likewise never served on its own. A preview draws one only when
 the picture lacks a drawable bitmap fallback: resvg rasterizes it into the same copy, with
-the renderer's bundled faces, because without system fonts resvg drops text silently. resvg
-is native code the worker timeout cannot stop, so drawing is budgeted by estimated cost
+the renderer's bundled faces, because without system fonts resvg drops text silently. So
+that an ordinary big picture degrades to a placeholder rather than a killed render, drawing
+is budgeted by estimated cost
 (layers, filter primitives and reuse through references, scaled by pixels); a style sheet
 that applies effects or paint servers by class cannot be bounded that way. Artwork over
 budget previews as a placeholder instead of failing the render. The copy is built from an
 already validated package, so it is loaded without the compressed-input limit it may now
 exceed. Source bytes remain immutable; edits commit a new revision only after serialization
 and package checks succeed. A failed edit leaves the last good revision intact.
-A draft opened from a chat attachment or project file retains its pinned source
-reference; publication checks that source is still authorized before delivery. In desktop
+A draft opened from a chat attachment, project file or skill template retains its pinned
+source reference; publication checks that source is still authorized before delivery. A
+skill's master or logo is opened by the `skill:` reference `read_skill_file` returns, at the
+revision the answer was offered. In desktop
 Work a deck or picture on the computer arrives through `import_local_file` as a working file
 owned by `local`: accepted as `sourceRef` or an image, never as `workingRef`, which names only
 a presentation draft.
@@ -180,7 +203,7 @@ The renderer ships metric equivalents of Calibri, Cambria, Arial, Times New Roma
 Courier New and substitutes one of them for every other family. Admins can upload
 TrueType or OpenType faces in the Office files section of Admin → Tools, whose switch (the
 `office_files` tools row, read per attempt) decides whether chats are offered the
-presentation tools at all; previews of existing files work either way;
+presentation and [spreadsheet](spreadsheets.md) tools at all; previews of existing files work either way;
 `PresentationProcessor` attaches them to every render, so previews and the model's own
 slide images draw them. Office Kit's preview
 package is patched (`patches/@office-kit__pptx-preview@0.11.0.patch`) with
@@ -193,7 +216,18 @@ user, and a shared font must outlive the admin who uploaded it. Renders need fil
 so faces are written once per content hash to a temporary cache, checked on use and
 rewritten when the system has cleaned it. An upload is accepted only after a pool worker
 has drawn a sample with it, so a broken font cannot take every preview down; a font that
-hangs or crashes the renderer costs that one worker. The model may name only the bundled or uploaded families; others are
+hangs or crashes the renderer costs that one worker. Before that, `readFontFile` measures
+the outlines rather than trusting the font's declared maxima: resolved points per glyph,
+composite depth and parts, and per-glyph CFF charstring size are bounded, and CFF2 is
+refused. With deck text already bounded, that caps what drawing text can cost; CFF
+subroutine calls can still repeat work, which only the kill timeout bounds.
+
+A [skill](skills.md) may carry `.ttf` and `.otf` faces. Once an answer has loaded the
+skill, its faces join that answer's renders and edits and its list of usable families,
+never the uploaded catalogue. Each is checked once per content hash like an upload, but
+entirely inside a worker process, since any skill author can supply one; a face that fails
+is left out rather than failing the render, and an uploaded face keeps its name over a
+skill's. The model may name only the bundled, uploaded or loaded-skill families; others are
 refused with the list. A deck only names its fonts: people opening the file still need
 them installed, since uploaded fonts are not embedded in the PPTX.
 

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import { isSummary } from "./inspection.ts";
 import { createPresentationRuntime } from "./runtime.ts";
+import type { PoolWorker } from "~/server/worker-pool.ts";
 
 const workerUrl = new URL("./runtime-worker.ts", import.meta.url);
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -10,33 +12,28 @@ describe("presentation worker runtime", () => {
     const runtime = createPresentationRuntime(workerUrl, { workers: 1 });
     try {
       const created = await runtime.run({ kind: "create" });
-      if (created.kind !== "bytes") throw new Error("Expected a deck.");
-      const caller = created.bytes.slice();
-      const inspected = await runtime.run({ kind: "inspect", bytes: created.bytes });
-      if (inspected.kind !== "inspection") throw new Error("Expected an inspection.");
+      const caller = created.slice();
+      const inspected = await runtime.run({ kind: "inspect", bytes: created });
       // The worker gets its own copy; the caller's bytes stay usable.
-      expect(created.bytes).toEqual(caller);
-      const id = inspected.inspection.slides[0]!.slideId;
+      expect(created).toEqual(caller);
+      const id = inspected.slides[0]!.slideId;
       const edited = await runtime.run({
         kind: "edit",
-        bytes: created.bytes,
+        bytes: created,
         operations: [
           { kind: "addText", slideId: id, text: "Worker", x: 30, y: 30, width: 150, height: 35 },
         ],
       });
-      if (edited.kind !== "edited") throw new Error("Expected an edit.");
       const described = await runtime.run({
         kind: "inspect",
         bytes: edited.bytes,
         scope: { slides: { ids: [id] }, shapes: true },
       });
-      if (described.kind !== "inspection") throw new Error("Expected an inspection.");
-      const slide = described.inspection.slides[0]!;
+      const slide = described.slides[0]!;
       expect(isSummary(slide) && slide.shapes?.map((shape) => shape.text)).toContain("Worker");
       const rendered = await runtime.run({ kind: "render", bytes: edited.bytes, slideIds: [id] });
-      if (rendered.kind !== "rendered") throw new Error("Expected a render.");
-      expect(rendered.slides[0]?.png.subarray(0, 8)).toEqual(PNG);
-      expect(rendered.slides[0]?.warning).toMatch(/Approximate/);
+      expect(rendered[0]?.png.subarray(0, 8)).toEqual(PNG);
+      expect(rendered[0]?.warning).toMatch(/Approximate/);
     } finally {
       await runtime.close();
     }
@@ -64,5 +61,38 @@ describe("presentation worker runtime", () => {
     } finally {
       await broken.close();
     }
+  });
+
+  it("lets one person run two jobs at once and queues the rest, never another's", async () => {
+    // Workers that hold every job until the test answers it.
+    const held: Array<{ id: number; reply: (message: object) => void }> = [];
+    const runtime = createPresentationRuntime(workerUrl, {
+      workers: 6,
+      spawn: () => {
+        const events = new EventEmitter();
+        return {
+          on: ((event: string, listener: () => void) =>
+            events.on(event, listener)) as PoolWorker["on"],
+          postMessage: (message: unknown) => {
+            const { id } = message as { id: number };
+            held.push({ id, reply: (reply) => events.emit("message", { id, ...reply }) });
+          },
+          terminate: async () => {},
+        };
+      },
+    });
+    const done = { ok: true, result: { kind: "bytes", bytes: new Uint8Array([1]) } };
+    const settled: string[] = [];
+    const run = (owner: string, name: string) =>
+      runtime.run({ kind: "create" }, undefined, { owner }).then(() => settled.push(name));
+    const jobs = [run("a", "a1"), run("a", "a2"), run("a", "a3"), run("b", "b1")];
+    await vi.waitFor(() => expect(held).toHaveLength(3));
+    // a3 waits for one of a's own; b1 did not wait for a at all.
+    held[0]!.reply(done);
+    await vi.waitFor(() => expect(held).toHaveLength(4));
+    for (const job of held.slice(1)) job.reply(done);
+    await Promise.all(jobs);
+    expect(settled).toHaveLength(4);
+    await runtime.close();
   });
 });

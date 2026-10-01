@@ -14,6 +14,11 @@ import {
   renderPresentationTool,
 } from "~/modules/presentations/server/tools.ts";
 import { parsePresentationOperations } from "~/modules/presentations/operations.ts";
+import {
+  editSpreadsheetTool,
+  inspectSpreadsheetTool,
+} from "~/modules/spreadsheets/server/tools.ts";
+import { editWordFileTool, inspectWordFileTool } from "~/modules/word/server/tools.ts";
 import { askUserTool } from "./ask-user.ts";
 import { updatePlanTool } from "./plan-tool.ts";
 
@@ -57,6 +62,10 @@ describe("tool parameters the model is offered", () => {
       inspectPresentationTool,
       editPresentationTool,
       renderPresentationTool,
+      inspectSpreadsheetTool,
+      editSpreadsheetTool,
+      inspectWordFileTool,
+      editWordFileTool,
       saveMemoryTool,
       askUserTool,
       updatePlanTool,
@@ -74,7 +83,13 @@ describe("tool parameters the model is offered", () => {
   });
 
   it("keeps presentation top-level parameters optional and canonical selectors in runtime parity", () => {
-    for (const tool of [inspectPresentationTool, editPresentationTool, renderPresentationTool]) {
+    for (const tool of [
+      inspectPresentationTool,
+      editPresentationTool,
+      renderPresentationTool,
+      inspectSpreadsheetTool,
+      editSpreadsheetTool,
+    ]) {
       expect((Tool.getJsonSchema(tool) as { required?: string[] }).required ?? []).toEqual([]);
     }
     const schema = Tool.getJsonSchema(editPresentationTool) as {

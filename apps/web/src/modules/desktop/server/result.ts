@@ -1,10 +1,7 @@
 import { LIMITS } from "@chat/desktop-rpc";
-import {
-  IMAGE_MEDIA_TYPES,
-  PDF_MEDIA_TYPE,
-  PPTX_MEDIA_TYPE,
-} from "~/modules/attachments/constants.ts";
+import { IMAGE_MEDIA_TYPES, PDF_MEDIA_TYPE } from "~/modules/attachments/constants.ts";
 import { classifyFile, sanitizeFileName } from "~/modules/attachments/server/validation.ts";
+import { OFFICE_FAMILIES, OFFICE_FAMILY_NAMES } from "~/modules/office/families.ts";
 import {
   DESKTOP_RESULT_DETAIL_CHARS,
   desktopFailure,
@@ -19,11 +16,11 @@ const NAME_CHARS = 200;
 /** Base64 of `LIMITS.binaryBytes`, plus padding. Checked before decode. */
 const MAX_FILE_BASE64 = Math.ceil((LIMITS.binaryBytes * 4) / 3) + 4;
 
-/** An image or PDF to look at, or a PowerPoint an import brings in for the presentation tools. */
+/** An image or PDF to look at, or an Office file an import brings in for the Office tools. */
 const ALLOWED_FILE_TYPES: ReadonlySet<string> = new Set([
   ...IMAGE_MEDIA_TYPES,
   PDF_MEDIA_TYPE,
-  PPTX_MEDIA_TYPE,
+  ...OFFICE_FAMILY_NAMES.map((family) => OFFICE_FAMILIES[family].mediaType),
 ]);
 
 const acceptFile = (
@@ -41,7 +38,7 @@ const acceptFile = (
 
 /**
  * The page is an untrusted hop. Cap strings, drop a file whose bytes are not
- * an image, PDF or PowerPoint, and never `Buffer.from` an oversized payload.
+ * an image, PDF or Office file, and never `Buffer.from` an oversized payload.
  */
 export const acceptDesktopToolResult = (result: DesktopToolResult): DesktopToolResult => {
   const summary = storable(result.summary).slice(0, SUMMARY_CHARS);
@@ -54,7 +51,7 @@ export const acceptDesktopToolResult = (result: DesktopToolResult): DesktopToolR
   if (result.file && !file)
     return desktopFailure(
       "That file could not be sent",
-      `The file was not a usable image, PDF or PowerPoint, or it was larger than ${LIMITS.binaryBytes / 1024 / 1024} MB.`,
+      `The file was not a usable image, PDF, PowerPoint deck, Excel workbook or Word document, or it was larger than ${LIMITS.binaryBytes / 1024 / 1024} MB.`,
     );
   return {
     v: 1,

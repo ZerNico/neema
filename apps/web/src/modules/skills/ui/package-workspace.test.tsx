@@ -161,4 +161,100 @@ describe("package workspace", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(await screen.findByText(/Image: tracker/)).toBeInTheDocument();
   });
+
+  it("shows a binary file as a downloadable card, never as editable text", async () => {
+    render(
+      <PackageWorkspace
+        files={[
+          { path: "SKILL.md", content: "Root" },
+          {
+            path: "assets/master.pptx",
+            binary: { size: 2048, mediaType: "application/octet-stream", sha256: "a".repeat(64) },
+          },
+        ]}
+        onChange={() => {}}
+        downloadHref={(file) => `/download/${file.binary.sha256}`}
+        upload={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "master.pptx" }));
+    expect(await screen.findByText("application/octet-stream · 2 KB")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Download/ })).toHaveAttribute(
+      "href",
+      `/download/${"a".repeat(64)}`,
+    );
+    expect(screen.getByRole("button", { name: /Replace/ })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Edit assets/master.pptx" })).toBeNull();
+  });
+  it("previews an Office file through the shared file preview", async () => {
+    const fetched = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 500 }));
+    render(
+      <PackageWorkspace
+        files={[
+          { path: "SKILL.md", content: "Root" },
+          {
+            path: "templates/letter.docx",
+            binary: { size: 2048, mediaType: "application/octet-stream", sha256: "b".repeat(64) },
+          },
+        ]}
+        onChange={() => {}}
+        downloadHref={(file) => `/download/${file.binary.sha256}`}
+        preview={(file) => ({
+          fileName: "letter.docx",
+          size: file.binary.size,
+          kind: "file",
+          url: `/download/${file.binary.sha256}`,
+          office: {
+            type: "word",
+            source: { kind: "skill-file", id: `skill-1:${file.binary.sha256}` },
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "letter.docx" }));
+    await waitFor(() =>
+      expect(fetched).toHaveBeenCalledWith(
+        `/api/word/skill-file/${encodeURIComponent(`skill-1:${"b".repeat(64)}`)}`,
+        expect.anything(),
+      ),
+    );
+    expect(await screen.findByText(/Could not load this document/)).toBeInTheDocument();
+    fetched.mockRestore();
+  });
+  it("uploads a picked binary file and keeps picked skill text editable", async () => {
+    const upload = vi.fn(async () => ({ uploadId: "upload-1", size: 3, mediaType: "font/ttf" }));
+    const changes: SkillFile[][] = [];
+    function Uploads() {
+      const [files, setFiles] = useState<SkillFile[]>([{ path: "SKILL.md", content: "Root" }]);
+      return (
+        <PackageWorkspace
+          files={files}
+          onChange={(next) => {
+            changes.push(next);
+            setFiles(next);
+          }}
+          upload={upload}
+        />
+      );
+    }
+    const { container } = render(<Uploads />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, {
+      target: { files: [new File([new Uint8Array([0, 1, 255])], "brand.ttf")] },
+    });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(changes.at(-1)).toContainEqual({
+        path: "brand.ttf",
+        binary: { uploadId: "upload-1", size: 3, mediaType: "font/ttf" },
+      }),
+    );
+    fireEvent.change(input, { target: { files: [new File(["# Notes"], "notes.md")] } });
+    await waitFor(() =>
+      expect(changes.at(-1)).toContainEqual({ path: "notes.md", content: "# Notes" }),
+    );
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
 });

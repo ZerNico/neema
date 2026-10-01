@@ -6,6 +6,8 @@ import {
   type SkillDocument,
   type SkillFile,
   type SkillFinding,
+  type SkillTextFile,
+  isBinarySkillFile,
 } from "../package.ts";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
@@ -15,7 +17,7 @@ import { Textarea } from "~/ui/primitives/textarea";
 /** Whether the form can show this skill; one without readable frontmatter is edited as files. */
 export const canEditSimply = (files: readonly SkillFile[]) => {
   const root = files.find((file) => file.path === "SKILL.md");
-  return !!root && readSkillDocument(root.content) !== null;
+  return !!root && !isBinarySkillFile(root) && readSkillDocument(root.content) !== null;
 };
 
 const findingFor = (findings: readonly SkillFinding[], key: string) =>
@@ -46,7 +48,8 @@ export function SkillSimpleForm({
   autoFocus?: boolean;
 }) {
   const id = useId();
-  const root = files.find((file) => file.path === "SKILL.md")!;
+  // Only shown when canEditSimply holds: SKILL.md is text with readable frontmatter.
+  const root = files.find((file) => file.path === "SKILL.md") as SkillTextFile;
   const document = readSkillDocument(root.content)!;
   const update = (patch: Partial<SkillDocument>) =>
     onChange?.(
@@ -110,8 +113,9 @@ export function SkillSimpleForm({
         />
         {others > 0 ? (
           <FieldDescription>
-            This skill also has {others === 1 ? "1 other file" : `${others} other files`}; they’re
-            under Files.
+            {others === 1
+              ? "This skill includes 1 more file, such as a template or image. Switch to Advanced to see it."
+              : `This skill includes ${others} more files, such as templates or images. Switch to Advanced to see them.`}
           </FieldDescription>
         ) : null}
       </Field>

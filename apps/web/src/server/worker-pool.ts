@@ -1,10 +1,20 @@
-import type { Worker } from "node:worker_threads";
+/**
+ * What the pool drives: a worker thread, or a process (`worker-process.ts`)
+ * when a timeout must stop native code too.
+ */
+export interface PoolWorker {
+  on(event: "message", listener: (reply: WorkerReply) => void): unknown;
+  on(event: "error", listener: (cause: unknown) => void): unknown;
+  on(event: "exit", listener: (code: number) => void): unknown;
+  postMessage(message: unknown, transfer?: readonly ArrayBuffer[]): void;
+  terminate(): Promise<unknown>;
+}
 
 /**
- * Persistent worker threads for work that must not run on the server's own
- * thread. A job owns one worker until it settles. A worker that times out, is
- * cancelled mid-job, crashes or exits is replaced rather than reused, since
- * its state is no longer known. Workers start on demand.
+ * Persistent workers for work that must not run on the server's own thread. A
+ * job owns one worker until it settles. A worker that times out, is cancelled
+ * mid-job, crashes or exits is replaced rather than reused, since its state is
+ * no longer known. Workers start on demand.
  */
 export type WorkerFailure =
   | { readonly reason: "closed" }
@@ -38,7 +48,7 @@ export interface WorkerPoolOptions {
   readonly size: number;
   /** Jobs each lane may hold waiting before new ones are refused as busy. */
   readonly queue: number;
-  readonly spawn: () => Worker;
+  readonly spawn: () => PoolWorker;
   /** The error a job rejects with when the pool, not the worker, ends it. */
   readonly failure: (failure: WorkerFailure) => Error;
 }
@@ -50,7 +60,7 @@ type Pending = WorkerJob<unknown> & {
   timer?: ReturnType<typeof setTimeout>;
   abort?: () => void;
 };
-type Slot = { readonly worker: Worker; job: Pending | null; dead: boolean };
+type Slot = { readonly worker: PoolWorker; job: Pending | null; dead: boolean };
 
 const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause)));
 

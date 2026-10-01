@@ -468,9 +468,10 @@ function OfficeFilesSection() {
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Create and edit PowerPoint files</span>
+            <span className="text-sm font-medium">Create and edit Office files</span>
             <span className="text-muted-foreground text-xs">
-              Lets the model make and change decks, look at its slides and deliver the file.
+              Lets the model make and change PowerPoint decks, Excel workbooks and Word documents,
+              check its work and deliver the file.
             </span>
           </div>
           <Switch

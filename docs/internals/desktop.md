@@ -513,9 +513,9 @@ larger than a write. Images and PDFs become model file parts where supported,
 with server extraction fallback; persisted tool rows and chunks retain only
 bounded summaries. `import_local_file` is the same read under the same consent,
 but its bytes are for server tools rather than the model. `readBinary` names its purpose,
-`view` or `import`, on every call, and only an import admits a PowerPoint: a PNG, JPEG or PowerPoint
-becomes a `local` working file of the attempt, and the model gets only its `working:`
-reference, so presentation tools can place or open it. It is never stored and dies with
+`view` or `import`, on every call, and only an import admits Office files: a PNG, JPEG,
+PowerPoint or Excel workbook becomes a `local` working file of the attempt, and the model
+gets only its `working:` reference, so presentation or spreadsheet tools can place or open it. It is never stored and dies with
 the attempt; the way back to disk is publishing and `save_to_workspace`. The import
 rewrites the very part the continuation replays, which is why the generic desktop
 byte-stripping skips it. The page's result is untrusted: summary, detail and file

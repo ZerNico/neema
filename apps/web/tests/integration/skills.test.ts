@@ -2,7 +2,7 @@ import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
@@ -24,7 +24,15 @@ import { BlobStoreError } from "~/modules/attachments/errors.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { SkillFile } from "~/modules/skills/package.ts";
+import { makeToolFileResolver } from "~/modules/chat/server/tool-files.ts";
+import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
+import { Option } from "effect";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+
+// The preview routes run on the app's runtime; here that is this file's own.
+vi.mock("~/server/runtime.ts", () => ({
+  runtime: { runPromise: (effect: Effect.Effect<unknown>) => runtime.runPromise(effect) },
+}));
 
 const blobs = new Map<string, Uint8Array>();
 const MemoryBlobs = Layer.succeed(
@@ -58,7 +66,15 @@ const QuietSync = Layer.succeed(
   }),
 );
 let database: TestDatabase;
-type Services = Db | SkillRepo | SkillService | SkillReader | SharingService | AttachmentRepo;
+type Services =
+  | Db
+  | SkillRepo
+  | SkillService
+  | SkillReader
+  | SharingService
+  | AttachmentRepo
+  | AttachmentService
+  | BlobStore;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const newUser = async () => {
@@ -147,7 +163,7 @@ describe("portable skill storage and ACLs", () => {
       await run(
         Effect.flatMap(SkillReader, (reader) => reader.readPinned(recipient, pinned!, "SKILL.md")),
       ),
-    ).toContain("Owner guidance");
+    ).toMatchObject({ kind: "text", content: expect.stringContaining("Owner guidance") });
     await expect(
       run(Effect.flatMap(SkillService, (service) => service.detail(recipient, id))),
     ).rejects.toThrow();
@@ -197,12 +213,12 @@ describe("portable skill storage and ACLs", () => {
       await run(
         Effect.flatMap(SkillReader, (reader) => reader.readPinned(owner, first!, "SKILL.md")),
       ),
-    ).toContain("Version one");
+    ).toMatchObject({ kind: "text", content: expect.stringContaining("Version one") });
     expect(
       await run(
         Effect.flatMap(SkillReader, (reader) => reader.readPinned(owner, next!, "SKILL.md")),
       ),
-    ).toContain("Version two");
+    ).toMatchObject({ kind: "text", content: expect.stringContaining("Version two") });
     await expect(save(owner, "Stale editor", id, 1)).rejects.toThrow();
     expect(
       (await run(Effect.flatMap(SkillService, (service) => service.detail(owner, id)))).files,
@@ -257,25 +273,56 @@ describe("portable skill storage and ACLs", () => {
     await expect(save(owner, "Rejected by conflict", id, 1)).rejects.toThrow();
     expect(blobs.size).toBe(afterValid);
     expect(afterValid).toBeGreaterThan(stored - 1);
-    // Each package is individually valid; only the account total exceeds the quota.
-    const bulk = "x".repeat(250_000);
-    const large = Effect.flatMap(SkillService, (service) =>
-      service.save(owner, {
-        files: [
-          {
-            path: "SKILL.md",
-            content: "---\nname: review\ndescription: Review carefully\n---\nBulk",
-          },
-          ...Array.from({ length: 39 }, (_, index) => ({
-            path: `references/file-${index}.md`,
-            content: bulk,
-          })),
-        ],
-      }),
-    );
-    for (let attempt = 0; attempt < 10; attempt++) await run(large).catch(() => null);
+    // Quota counts stored bytes once, however many revisions share them. A
+    // 200 MiB file two skills both reference is 200 MiB, not 400.
+    const MiB = 1024 * 1024;
+    const seed = (size: number, skillIds: string[]) =>
+      run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const blobId = uuidv7();
+          const sha256 = uuidv7().replaceAll("-", "").padEnd(64, "0");
+          yield* db.insert(attachmentBlobs).values({
+            id: blobId,
+            userId: owner,
+            sha256,
+            storageKey: `quota-fixture/${blobId}`,
+            size,
+            mediaType: "application/octet-stream",
+          });
+          for (const skillId of skillIds) {
+            const [revision] = yield* db
+              .select({ id: skillRevisions.id })
+              .from(skillRevisions)
+              .where(eq(skillRevisions.skillId, skillId));
+            yield* db.insert(skillFiles).values({
+              revisionId: revision!.id,
+              path: `assets/${blobId}.bin`,
+              blobId,
+              byteSize: size,
+              sha256,
+              mediaType: "application/octet-stream",
+            });
+          }
+        }),
+      );
+    const other = await save(owner, "Second skill");
+    const current = await run(Effect.flatMap(SkillService, (service) => service.detail(owner, id)));
+    await seed(200 * MiB, [other, id]);
+    // Still room: the shared file counts once.
+    await expect(save(owner, "Fits beside the shared file")).resolves.toBeTruthy();
+    expect(current.revision).toBeGreaterThan(0);
+    await seed(60 * MiB, [other]);
     const before = blobs.size;
-    expect(await run(Effect.flip(large))).toMatchObject({
+    expect(
+      await run(
+        Effect.flip(
+          Effect.flatMap(SkillService, (service) =>
+            service.save(owner, { files: files("Over the quota") }),
+          ),
+        ),
+      ),
+    ).toMatchObject({
       _tag: "SkillRejected",
       reason: expect.stringContaining("quota"),
     });
@@ -360,5 +407,186 @@ describe("portable skill storage and ACLs", () => {
         ),
       ),
     ).toEqual([]);
+  });
+});
+
+const upload = (owner: string, bytes: Uint8Array, fileName: string) =>
+  run(
+    Effect.flatMap(AttachmentService, (service) =>
+      service.upload({ userId: owner, fileName, declaredMediaType: "", bytes }),
+    ),
+  );
+
+describe("binary files in skills", () => {
+  const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  const deck = new Uint8Array([80, 75, 3, 4, ...Array.from({ length: 60 }, (_, i) => i)]);
+  const root = {
+    path: "SKILL.md",
+    content: "---\nname: brand\ndescription: Our deck\n---\nUse assets/master.pptx",
+  };
+
+  it("takes an upload over, keeps it by hash across revisions and serves it by hash", async () => {
+    const owner = await newUser();
+    const uploaded = await upload(owner, deck, "master.pptx");
+    const id = await run(
+      Effect.flatMap(SkillService, (service) =>
+        service.save(owner, {
+          files: [
+            root,
+            // The client's claim about size and type is ignored for the stored bytes.
+            {
+              path: "assets/master.pptx",
+              binary: { size: 1, mediaType: "text/html", uploadId: uploaded.id },
+            },
+          ],
+        }),
+      ),
+    );
+    const detail = await run(Effect.flatMap(SkillService, (service) => service.detail(owner, id)));
+    const sha256 = sha256Hex(deck);
+    expect(detail.files).toContainEqual({
+      path: "assets/master.pptx",
+      binary: { size: deck.length, mediaType: PPTX, sha256 },
+    });
+    // The upload's own row is spent; its bytes now belong to the skill.
+    expect(
+      await run(
+        Effect.flatMap(AttachmentRepo, (repo) => repo.listWithBlobsByIds(owner, [uploaded.id])),
+      ),
+    ).toEqual([]);
+    const [row] = await run(
+      Effect.flatMap(Db, (db) =>
+        db.select().from(skillFiles).where(eq(skillFiles.revisionId, detail.revisionId)),
+      ),
+    ).then((rows) => rows.filter((file) => file.path === "assets/master.pptx"));
+    expect(row).toMatchObject({ mediaType: PPTX, byteSize: deck.length, sha256 });
+
+    // A text edit keeps the binary by its hash, under a new path too.
+    await run(
+      Effect.flatMap(SkillService, (service) =>
+        service.save(owner, {
+          skillId: id,
+          expectedRevision: detail.revision,
+          files: [
+            { ...root, content: `${root.content}\nUpdated.` },
+            { path: "templates/master.pptx", binary: { size: 0, mediaType: "x", sha256 } },
+          ],
+        }),
+      ),
+    );
+    const read = await run(
+      Effect.flatMap(SkillService, (service) => service.readFile(owner, id, sha256)),
+    );
+    expect(read.path).toBe("templates/master.pptx");
+    expect(Buffer.from(read.bytes).equals(Buffer.from(deck))).toBe(true);
+
+    // The Office preview routes open it the same way, for its owner only.
+    const { openPreviewFile } = await import("~/server/office-preview.ts");
+    expect(await openPreviewFile(owner, "skill-file", `${id}:${sha256}`)).toMatchObject({
+      name: "master.pptx",
+      mediaType: PPTX,
+      sha256,
+    });
+    expect(await openPreviewFile(await newUser(), "skill-file", `${id}:${sha256}`)).toBeNull();
+    expect(await openPreviewFile(owner, "skill-file", `${id}:not-a-hash`)).toBeNull();
+
+    // A hash this skill never stored cannot be kept.
+    expect(
+      await run(
+        Effect.flip(
+          Effect.flatMap(SkillService, (service) =>
+            service.save(owner, {
+              skillId: id,
+              expectedRevision: detail.revision + 1,
+              files: [
+                root,
+                { path: "x.bin", binary: { size: 1, mediaType: "x", sha256: "e".repeat(64) } },
+              ],
+            }),
+          ),
+        ),
+      ),
+    ).toMatchObject({ _tag: "SkillRejected", reason: expect.stringContaining("upload it again") });
+
+    // Removing the skill releases the bytes.
+    const key = (
+      await run(
+        Effect.flatMap(Db, (db) =>
+          db.select().from(attachmentBlobs).where(eq(attachmentBlobs.sha256, sha256)),
+        ),
+      )
+    )[0]!.storageKey;
+    expect(blobs.has(key)).toBe(true);
+    await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
+    expect(blobs.has(key)).toBe(false);
+  });
+
+  it("opens a skill file for tools only at the revision this answer was offered", async () => {
+    const owner = await newUser();
+    const id = await run(
+      Effect.flatMap(SkillService, (service) =>
+        service.save(owner, {
+          files: [
+            root,
+            {
+              path: "assets/master.pptx",
+              binary: { size: deck.length, mediaType: PPTX },
+              bytes: deck,
+            },
+          ],
+        }),
+      ),
+    );
+    const [entry] = await manifest(owner, [id]);
+    const resolver = await run(
+      Effect.gen(function* () {
+        const reader = yield* SkillReader;
+        return makeToolFileResolver({
+          db: yield* Db,
+          store: yield* BlobStore,
+          projectFiles: Option.none(),
+          userId: owner,
+          conversationId: uuidv7(),
+          projectId: null,
+          skills: { entries: [entry!], reader },
+        });
+      }),
+    );
+    const ref = `skill:${entry!.revisionId}/assets/master.pptx`;
+    const file = await run(resolver.resolve(ref));
+    expect(file).toMatchObject({
+      name: "master.pptx",
+      mediaType: PPTX,
+      source: { kind: "skill", revisionId: entry!.revisionId, path: "assets/master.pptx" },
+    });
+    expect(Buffer.from(file.bytes).equals(Buffer.from(deck))).toBe(true);
+    await expect(run(resolver.resolve(`skill:${uuidv7()}/assets/master.pptx`))).rejects.toThrow(
+      /read the file again/,
+    );
+    await expect(
+      run(resolver.resolve(`skill:${entry!.revisionId}/assets/other.pptx`)),
+    ).rejects.toThrow(/No file/);
+    // Someone else cannot open it, even holding the exact reference.
+    const stranger = await newUser();
+    const theirs = await run(
+      Effect.gen(function* () {
+        const reader = yield* SkillReader;
+        return makeToolFileResolver({
+          db: yield* Db,
+          store: yield* BlobStore,
+          projectFiles: Option.none(),
+          userId: stranger,
+          conversationId: uuidv7(),
+          projectId: null,
+          skills: { entries: [entry!], reader },
+        });
+      }),
+    );
+    await expect(run(theirs.resolve(ref))).rejects.toThrow();
+    expect(await run(theirs.authorize(ref))).toBe(false);
+    // A draft opened from it stays usable while the skill is readable.
+    expect(await run(resolver.authorize(ref))).toBe(true);
+    await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
+    expect(await run(resolver.authorize(ref))).toBe(false);
   });
 });

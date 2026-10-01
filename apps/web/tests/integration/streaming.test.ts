@@ -5762,6 +5762,49 @@ describe("custom tool calls", () => {
       }
     }, 60_000);
 
+    it("reads a kept workbook back as the spreadsheet editor's, never as a deck", async () => {
+      const { seed, conversationId } = await runtime.runPromise(keptSetup);
+      const first = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const turn = yield* repo.insertMessage({
+            conversationId,
+            role: "assistant",
+            status: "complete",
+          });
+          const book = yield* AttachmentService.use((service) =>
+            service.upload({
+              userId: seed.userId,
+              fileName: "budget.xlsx",
+              declaredMediaType: "application/octet-stream",
+              bytes: Buffer.from("book"),
+            }),
+          );
+          yield* Effect.flatMap(Db, (db) =>
+            db.insert(conversationWorkingFiles).values({
+              workingFileId: uuidv7(),
+              messageId: turn.id,
+              conversationId,
+              attachmentId: book.id,
+              name: "budget.xlsx",
+              mediaType: book.mediaType,
+              owner: "spreadsheet",
+              revision: 1,
+              fingerprint: sha256Of("book"),
+            }),
+          );
+          return turn.id;
+        }).pipe(Effect.orDie),
+      );
+      const kept = await runtime.runPromise(
+        KeptWorkingFiles.use((files) => files.list(conversationId)),
+      );
+      expect(kept).toEqual([
+        expect.objectContaining({ name: "budget.xlsx", owner: "spreadsheet" }),
+      ]);
+      expect(first).toBeTruthy();
+    });
+
     it("offers kept drafts only to the editor that made them, and publish_file only with one", async () => {
       const { seed, conversationId, tool, toolId } = await runtime.runPromise(keptSetup);
       customToolRun = keeperRun;

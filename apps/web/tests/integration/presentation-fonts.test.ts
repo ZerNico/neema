@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -92,4 +93,26 @@ it("rejects files that are not usable fonts with a reason", async () => {
   );
   expect(failed.reason).toBeTruthy();
   expect((await run(fonts.list())).some((font) => font.fileName === "broken.ttf")).toBe(false);
+});
+
+it("checks a skill's faces in a worker once per content, and drops one that can't render", async () => {
+  const fonts = await run(Effect.flatMap(PresentationFonts, (service) => Effect.succeed(service)));
+  const carlito = face("Carlito-Bold.ttf");
+  const sha256 = createHash("sha256").update(carlito).digest("hex");
+  const broken = carlito.slice(0, 400);
+  const faces = await run(
+    fonts.skillFaces([
+      { sha256, bytes: carlito },
+      { sha256: "0".repeat(64), bytes: broken },
+      { sha256: "1".repeat(64), bytes: new TextEncoder().encode("not a font at all") },
+    ]),
+  );
+  expect(faces).toEqual([
+    expect.objectContaining({ family: "Carlito", bold: true, path: expect.any(String) }),
+  ]);
+  expect(existsSync(faces[0]!.path)).toBe(true);
+  // A second answer loading the same skill reuses the checked face.
+  expect(await run(fonts.skillFaces([{ sha256, bytes: carlito }]))).toEqual(faces);
+  // Skill faces never join the uploaded catalogue.
+  expect(await run(fonts.families())).not.toContain("Carlito");
 });

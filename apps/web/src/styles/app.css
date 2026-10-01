@@ -18,6 +18,10 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  /* A document page in its own colours, as Word shows it: light in both themes,
+     so text a file colours dark stays readable. */
+  --color-paper: oklch(1 0 0);
+  --color-paper-foreground: oklch(0.145 0 0);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);

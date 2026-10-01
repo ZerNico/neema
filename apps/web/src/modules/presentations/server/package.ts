@@ -43,6 +43,7 @@ export interface Package {
 }
 
 const imageType = /\/image$/;
+// A deck's embedded objects live in oleObjects/; its charts' workbooks in embeddings/ are data.
 const activePart = /(^|\/)(?:activex|oleobjects)\/|vbaproject|\.(?:exe|dll|js|html?|mht|swf)$/i;
 const svgPart = /^ppt\/media\/[^/]+\.svg$/i;
 const svgOwner =

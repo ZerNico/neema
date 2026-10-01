@@ -53,11 +53,20 @@ import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { earlierSkillMessage, prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
+import type { FontFace } from "~/modules/presentations/server/font-file.ts";
+import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { PresentationProcessor } from "~/modules/presentations/server/processor.ts";
-import { presentationActivitySummary } from "~/modules/presentations/activity.ts";
-import { preparePresentationTools } from "~/modules/presentations/server/tools.ts";
-import { PresentationToolName } from "~/modules/presentations/tool-schema.ts";
+import {
+  isOfficeFamily,
+  OFFICE_FAMILIES,
+  officeFamilyOfEdit,
+  officeFamilyOfTool,
+} from "~/modules/office/families.ts";
+import {
+  officeProcessors,
+  prepareOfficeTools,
+  runnableOfficeFamilies,
+} from "~/modules/office/server/families.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
@@ -184,6 +193,7 @@ import {
   type PromptDeps,
 } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
+
 import { runtimeContextMessage } from "./runtime-context.ts";
 import {
   buildSearchReminder,
@@ -193,6 +203,9 @@ import {
 } from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
+
+/** Faces one answer's loaded skills may add to its previews. */
+const SKILL_FONT_FACES = 24;
 
 /**
  * Live chunk events fanned out to SSE subscribers on this instance.
@@ -357,7 +370,7 @@ export class StreamEngine extends Context.Service<
       const skillReader = yield* SkillReader;
       const customToolRuntime = yield* CustomToolRuntime;
       const customToolRepo = yield* CustomToolRepo;
-      const presentationProcessor = yield* Effect.serviceOption(PresentationProcessor);
+      const processors = yield* officeProcessors;
       const presentationFonts = yield* Effect.serviceOption(PresentationFonts);
       const toolRegistry = yield* Effect.serviceOption(ToolsRepo);
       const policy = yield* FeaturePolicy;
@@ -931,10 +944,8 @@ export class StreamEngine extends Context.Service<
           const officeFiles = Option.isSome(toolRegistry)
             ? yield* toolRegistry.value.getTool("office_files")
             : null;
-          const presentationsOffered =
-            (officeFiles?.enabled ?? true) &&
-            Option.isSome(database) &&
-            Option.isSome(presentationProcessor);
+          const officeOffered = (officeFiles?.enabled ?? true) && Option.isSome(database);
+          const officeEditors = officeOffered ? runnableOfficeFamilies(processors) : [];
           // Admin-authored tools are resolved once as this generation starts,
           // then held stable for its remaining tool rounds. An edit or deletion
           // mid-flight changes nothing here. A module revises only its own drafts.
@@ -946,10 +957,7 @@ export class StreamEngine extends Context.Service<
               ),
             ),
           );
-          const offeredOwners = new Set<string>([
-            ...(presentationsOffered ? ["presentation"] : []),
-            ...customToolOwners.values(),
-          ]);
+          const offeredOwners = new Set<string>([...officeEditors, ...customToolOwners.values()]);
           // Drafts earlier answers left, for the editors this answer is offered.
           const kept = keptFiles
             ? (yield* keptFiles.list(input.conversationId)).filter((file) =>
@@ -1005,63 +1013,116 @@ export class StreamEngine extends Context.Service<
                 conversationId: input.conversationId,
                 projectId: config.resolvedProject?.id ?? null,
                 workspace: workingFiles,
+                ...(skillManifest.length
+                  ? { skills: { entries: skillManifest, reader: skillReader } }
+                  : {}),
               })
             : undefined;
           let previewTurnFiles: Array<Prompt.UserMessagePartEncoded> = [];
           let previewCount = 0;
           let previewBytes = 0;
-          const presentationTools =
-            presentationsOffered && toolFiles && Option.isSome(presentationProcessor)
-              ? preparePresentationTools({
-                  runtime: presentationProcessor.value,
+          // Fonts a loaded skill carries render in this answer's previews. Read
+          // again only when the loaded set changes; a face that fails is skipped.
+          let skillFaceSet: { key: string; faces: Promise<readonly FontFace[]> } | null = null;
+          const skillFaces = (): Promise<readonly FontFace[]> => {
+            if (!skillTools || Option.isNone(presentationFonts)) return Promise.resolve([]);
+            const entries = skillTools.loadedSkills();
+            const key = entries.map((entry) => entry.revisionId).join(",");
+            if (skillFaceSet?.key !== key)
+              skillFaceSet = {
+                key,
+                faces: Effect.runPromise(
+                  Effect.gen(function* () {
+                    const fonts: Array<{ sha256: string; bytes: Uint8Array }> = [];
+                    for (const entry of entries)
+                      for (const file of yield* skillReader.listFiles(input.userId, entry)) {
+                        if (file.mediaType !== "font/ttf" && file.mediaType !== "font/otf")
+                          continue;
+                        if (fonts.length >= SKILL_FONT_FACES) break;
+                        const read = yield* skillReader.readPinnedBytes(
+                          input.userId,
+                          entry,
+                          file.path,
+                        );
+                        if (read) fonts.push({ sha256: sha256Hex(read.bytes), bytes: read.bytes });
+                      }
+                    return yield* presentationFonts.value.skillFaces(fonts);
+                  }).pipe(Effect.orElseSucceed(() => [])),
+                ),
+              };
+            return skillFaceSet.faces;
+          };
+          const officeTools =
+            officeEditors.length && toolFiles
+              ? prepareOfficeTools(processors, {
+                  owner: input.userId,
                   workingFiles,
                   resolveFile: toolFiles.resolve,
-                  ...(Option.isSome(presentationFonts)
-                    ? { fonts: () => Effect.runPromise(presentationFonts.value.families()) }
-                    : {}),
-                  ...(model?.capabilities.vision
-                    ? {
-                        onPreview: async (
-                          slides: readonly { slideId: number; png: Uint8Array; label: string }[],
-                        ) => {
-                          const bytes = slides.reduce(
-                            (total, slide) => total + slide.png.length,
-                            0,
-                          );
-                          if (
-                            previewCount + slides.length > PREVIEW_FEEDBACK_LIMITS.slides ||
-                            previewBytes + bytes > PREVIEW_FEEDBACK_LIMITS.bytes
-                          )
-                            throw new Error(
-                              "This attempt has exhausted its visual preview budget.",
+                  presentation: {
+                    // Loaded skills' fonts ride along with every job.
+                    faces: skillFaces,
+                    ...(Option.isSome(presentationFonts)
+                      ? {
+                          fonts: async () => [
+                            ...new Set([
+                              ...(await Effect.runPromise(presentationFonts.value.families())),
+                              ...(await skillFaces()).map((face) => face.family),
+                            ]),
+                          ],
+                        }
+                      : {}),
+                    ...(model?.capabilities.vision
+                      ? {
+                          onPreview: async (
+                            slides: readonly { slideId: number; png: Uint8Array; label: string }[],
+                          ) => {
+                            const bytes = slides.reduce(
+                              (total, slide) => total + slide.png.length,
+                              0,
                             );
-                          const feedback = await Promise.all(
-                            slides.map((slide) =>
-                              Effect.runPromise(
-                                fileForModel(promptDeps.parser, {
-                                  fileName: `${slide.label}.png`,
-                                  mediaType: "image/png",
-                                  bytes: slide.png,
-                                  vision: true,
-                                  files: model.capabilities.files ?? false,
-                                }),
+                            if (
+                              previewCount + slides.length > PREVIEW_FEEDBACK_LIMITS.slides ||
+                              previewBytes + bytes > PREVIEW_FEEDBACK_LIMITS.bytes
+                            )
+                              throw new Error(
+                                "This attempt has exhausted its visual preview budget.",
+                              );
+                            const feedback = await Promise.all(
+                              slides.map((slide) =>
+                                Effect.runPromise(
+                                  fileForModel(promptDeps.parser, {
+                                    fileName: `${slide.label}.png`,
+                                    mediaType: "image/png",
+                                    bytes: slide.png,
+                                    vision: true,
+                                    files: model.capabilities.files ?? false,
+                                  }),
+                                ),
                               ),
-                            ),
-                          );
-                          previewCount += slides.length;
-                          previewBytes += bytes;
-                          previewTurnFiles.push(...feedback);
-                        },
-                      }
-                    : {}),
+                            );
+                            previewCount += slides.length;
+                            previewBytes += bytes;
+                            previewTurnFiles.push(...feedback);
+                          },
+                        }
+                      : {}),
+                  },
                 })
-              : undefined;
+              : [];
+          // The Office family whose tools this answer offers under `name`.
+          const offeredOffice = new Set(officeTools.map((tool) => tool.family));
+          const officeFamilyOf = (name: string) => {
+            const family = officeFamilyOfTool(name);
+            return family && offeredOffice.has(family)
+              ? { family, ...OFFICE_FAMILIES[family] }
+              : null;
+          };
           const customTools = customToolManifests.length
             ? prepareCustomTools(customToolManifests, customToolRuntime, toolFiles?.resolve)
             : undefined;
           // Drafts exist only where an editor is offered, and so does delivery.
           const publishFileTool =
-            presentationTools || customTools ? preparePublishFileTool(workingFiles) : undefined;
+            officeTools.length || customTools ? preparePublishFileTool(workingFiles) : undefined;
           // Fixed for the whole answer: it sits ahead of this answer's rounds,
           // so changing it between rounds would uncache every round after it.
           // Names are file data, so they are quoted rather than trusted as policy.
@@ -1070,7 +1131,7 @@ export class StreamEngine extends Context.Service<
               ? [
                   {
                     role: "user",
-                    content: `<application-policy>\nUnpublished working files kept from ${resuming ? "this answer before it was interrupted, or from earlier answers," : "earlier answers"} in this chat. Continue one by passing its reference to the tool that made it (a presentation tool takes it as workingRef, alone, never with sourceRef); publish_file delivers it. Each reference names the draft's latest saved revision.\n${kept
+                    content: `<application-policy>\nUnpublished working files kept from ${resuming ? "this answer before it was interrupted, or from earlier answers," : "earlier answers"} in this chat. Continue one by passing its reference to the tool that made it (a presentation, spreadsheet or Word tool takes it as workingRef, alone, never with sourceRef); publish_file delivers it. Each reference names the draft's latest saved revision.\n${kept
                       .map((file) => `- ${formatFileRef(file.ref)} ${quotedName(file.name)}`)
                       .join("\n")}\n</application-policy>`,
                   },
@@ -1186,7 +1247,7 @@ export class StreamEngine extends Context.Service<
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
-            ...(presentationTools ? [presentationTools.group] : []),
+            ...officeTools.map((tool) => tool.group),
             ...(customTools ? [customTools.group] : []),
             ...(publishFileTool ? [publishFileTool.group] : []),
             ...(integrationTools ? [integrationTools.group] : []),
@@ -2064,9 +2125,8 @@ export class StreamEngine extends Context.Service<
                                           ? "plan"
                                           : part.name === "publish_file" && publishFileTool
                                             ? "tool-file"
-                                            : presentationTools &&
-                                                Schema.is(PresentationToolName)(part.name)
-                                              ? "presentation"
+                                            : officeFamilyOf(part.name)
+                                              ? officeFamilyOf(part.name)!.family
                                               : Schema.is(SkillToolName)(part.name)
                                                 ? "skill"
                                                 : Schema.is(KnowledgeToolName)(part.name)
@@ -2108,7 +2168,7 @@ export class StreamEngine extends Context.Service<
                               family === "document" ||
                               family === "project-file" ||
                               family === "tool-file" ||
-                              family === "presentation" ||
+                              isOfficeFamily(family) ||
                               family === "research" ||
                               family === "integration"
                                 ? {}
@@ -2130,20 +2190,18 @@ export class StreamEngine extends Context.Service<
                             });
                             return;
                           }
-                          if (
-                            family === "presentation" &&
-                            Schema.is(PresentationToolName)(part.name)
-                          ) {
+                          const office = officeFamilyOf(part.name);
+                          if (office) {
                             yield* pushToolChunk({
                               v: 1,
-                              family: "presentation",
+                              family: office.family,
                               phase: "start",
                               callId: rowId,
                               name: part.name,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
-                            });
+                            } as ToolChunkEnvelope);
                             return;
                           }
                           if (family === "tool-file") {
@@ -2687,29 +2745,27 @@ export class StreamEngine extends Context.Service<
                             if (ok) questionPresented = true;
                             return;
                           }
-                          if (presentationTools && Schema.is(PresentationToolName)(part.name)) {
+                          const office = officeFamilyOf(part.name);
+                          if (office) {
                             if (isPreliminary) return;
-                            const activity = presentationActivitySummary(
-                              part.result,
-                              part.isFailure,
-                            );
+                            const activity = office.summary(part.result, part.isFailure);
                             const { outcome, message } = activity;
                             yield* repo.completeToolCall({
                               id: rowId,
                               result: json(activity),
                               status: outcome === "error" ? "error" : "complete",
                               ...(outcome === "error"
-                                ? { error: { code: "PresentationFailed", message } }
+                                ? { error: { code: office.failure, message } }
                                 : {}),
                             });
                             yield* pushToolChunk({
                               v: 1,
-                              family: "presentation",
+                              family: office.family,
                               phase: "result",
                               callId: rowId,
                               name: part.name,
                               ...activity,
-                            });
+                            } as ToolChunkEnvelope);
                             return;
                           }
                           if (part.name === "publish_file" && publishFileTool) {
@@ -3277,9 +3333,9 @@ export class StreamEngine extends Context.Service<
                         // decoded call settles it.
                         case "tool-params-start":
                           documents.live.start(part.id, part.name);
-                          // A deck edit is one long call the model can spend
+                          // An Office edit is one long call the model can spend
                           // minutes writing; say so before it completes.
-                          if (part.name === "edit_presentation") {
+                          if (officeFamilyOfEdit(part.name)) {
                             pushChunk(
                               "writing",
                               JSON.stringify({

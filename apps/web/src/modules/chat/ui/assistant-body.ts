@@ -2,13 +2,14 @@ import type { AssistantFile } from "../assistant-output.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
-  PresentationActivity,
+  OfficeActivity,
   ToolActivity,
   ToolFileActivity,
   WebToolActivity,
   KnowledgeToolActivity,
   SkillToolActivity,
 } from "../client/use-message-stream.ts";
+import { isOfficeActivity } from "../client/use-message-stream.ts";
 
 /**
  * A message the person steered into this answer while it ran. It belongs to
@@ -43,13 +44,13 @@ export type AssistantBodyPart =
   | {
       kind: "tool";
       key: string;
-      activity: Exclude<ToolActivity, WebToolActivity | PresentationActivity | ToolFileActivity>;
+      activity: Exclude<ToolActivity, WebToolActivity | OfficeActivity | ToolFileActivity>;
     }
   | { kind: "compaction"; key: string; activity: CompactionActivity }
   | { kind: "steer"; key: string; steer: AssistantSteer };
 
 /**
- * One working file's run of calls: presentation steps, the publish that
+ * One working file's run of calls: deck or workbook steps, the publish that
  * delivered it, and the delivered file itself, so a draft reads as one activity
  * rather than a row per call plus a separate file card.
  */
@@ -57,7 +58,7 @@ export interface WorkingFilePart {
   kind: "working-file";
   key: string;
   workingFileId?: string;
-  steps: Array<PresentationActivity | ToolFileActivity>;
+  steps: Array<OfficeActivity | ToolFileActivity>;
   file?: AssistantFile;
 }
 
@@ -204,7 +205,7 @@ export function projectAssistantBody({
           key: `knowledge-${item.activity.callId}`,
           activities: [item.activity],
         });
-    } else if (item.activity.family === "presentation" || item.activity.family === "tool-file") {
+    } else if (isOfficeActivity(item.activity) || item.activity.family === "tool-file") {
       const step = item.activity;
       const last = parts.at(-1);
       // A step joins the draft before it unless it names a different file; a

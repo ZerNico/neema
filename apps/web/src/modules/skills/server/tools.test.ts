@@ -21,6 +21,15 @@ function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
     ["SKILL.md", "PRIVATE ROOT INSTRUCTIONS"],
     ["references/notes.md", `${"a".repeat(7999)}😀ending`],
   ]);
+  const binaries = new Map([
+    [
+      "assets/master.pptx",
+      {
+        mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        size: 4096,
+      },
+    ],
+  ]);
   const reader = SkillReader.of({
     catalogue: () => Effect.succeed([]),
     authorize: (_userId, ids) =>
@@ -32,8 +41,17 @@ function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
       if (readFailure === "defect") return Effect.die(new Error("Blob read failed"));
       return revoked || readFailure === "unavailable"
         ? Effect.fail(new SkillNotAvailable({ skillId: pinned.skillId }))
-        : Effect.succeed(documents.get(path) ?? null);
+        : Effect.succeed(
+            binaries.has(path)
+              ? { kind: "binary" as const, ...binaries.get(path)! }
+              : documents.has(path)
+                ? { kind: "text" as const, content: documents.get(path)! }
+                : null,
+          );
     },
+    readPinnedBytes: () => Effect.die(new Error("tools never read bytes")),
+    canReadRevision: () => Effect.succeed(true),
+    listFiles: () => Effect.succeed([]),
   });
   const prepare = Effect.runPromise(
     prepareSkillTools({ userId: "user", manifest, maxRootChars: rootChars }).pipe(
@@ -69,6 +87,28 @@ describe("private skill execution", () => {
     );
     expect(read.ok).toBe(false);
     expect(read.content).toBe("");
+  });
+  it("hands a binary file over as an exact reference, never as content", async () => {
+    const session = await setup().prepare;
+    const read = await Effect.runPromise(
+      session.group.handlers.read_skill_file({
+        skillId: "one",
+        path: "assets/master.pptx",
+        offset: 0,
+      }),
+    );
+    expect(read).toMatchObject({
+      ok: true,
+      path: "assets/master.pptx",
+      nextOffset: null,
+      file: {
+        ref: "skill:revision-one/assets/master.pptx",
+        mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        size: 4096,
+      },
+    });
+    // What persists is the usual label: no reference, no body.
+    expect(projectSkillToolResult("read_skill_file", read)).not.toHaveProperty("file");
   });
   it("offers an attached manual-only skill without ever preloading it", async () => {
     const session = await setup([{ ...entry, explicit: false, fromAgent: true, manualOnly: true }])

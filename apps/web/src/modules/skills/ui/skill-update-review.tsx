@@ -6,7 +6,13 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { applySkillUpdate, reviewSkillUpdate } from "../server/import-functions.ts";
 import { resolveSkillUpdate } from "../update.ts";
-import { SkillPackageError, validateSkillPackage, type SkillFile } from "../package.ts";
+import {
+  isBinarySkillFile,
+  SkillPackageError,
+  validateSkillPackage,
+  type SkillFile,
+} from "../package.ts";
+import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { PackageWorkspace } from "./package-workspace.tsx";
 
 type Review = Awaited<ReturnType<typeof reviewSkillUpdate>>;
@@ -150,7 +156,7 @@ function ReviewFiles({
                       {side === "local" ? "Keep mine" : "Use theirs"}
                     </Button>
                     <pre className="text-muted-foreground max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-muted p-3 text-xs">
-                      {change[side] ?? "File deleted"}
+                      {describeSide(change[side])}
                     </pre>
                   </div>
                 ))}
@@ -167,4 +173,11 @@ function ReviewFiles({
       </Section>
     </Page>
   );
+}
+
+/** A binary side is named by type and size; its bytes never reach the browser. */
+function describeSide(file: SkillFile | null) {
+  if (!file) return "File deleted";
+  if (!isBinarySkillFile(file)) return file.content;
+  return `Binary file · ${file.binary.mediaType} · ${formatFileSize(file.binary.size)}`;
 }
