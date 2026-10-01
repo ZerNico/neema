@@ -175,6 +175,7 @@ import {
   prepareCompactedActiveRounds,
   prepareCompactedHistory,
   shrinkForOverflow,
+  summaryTokensFor,
   type ActiveRound,
   type ActiveRoundCompactionDecision,
   type CompactionDecision,
@@ -1330,6 +1331,17 @@ export class StreamEngine extends Context.Service<
             if (call.researchRunId === null) unlockByCall(everUnlocked, call);
           for (const file of kept) if (isOfficeFamily(file.owner)) everUnlocked.add(file.owner);
           const toolSchemaTokens = schemaTokensWith(everUnlocked) ?? 0;
+          const summaryToolChoice = (toolkit: { tools: Record<string, unknown> }) => {
+            const names = Object.keys(toolkit.tools).filter(
+              (name) =>
+                isAdvertised(name, offeredLazy, everUnlocked) &&
+                (retrievalEnabled || !Schema.is(KnowledgeToolName)(name)) &&
+                !(memorySpent && name === "save_memory"),
+            );
+            return names.length < Object.keys(toolkit.tools).length
+              ? { oneOf: names }
+              : ("auto" as const);
+          };
           let retrievalEnabled = config.knowledgeMode === "retrieval";
 
           // Select once, before resolving attachments: the checkpoint replaces
@@ -1625,6 +1637,18 @@ export class StreamEngine extends Context.Service<
               webToolsEnabled: webTools !== undefined,
               priorUsage,
               onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+              // The tools and settings the first request will most likely send,
+              // so a summary over this prompt reads it from the provider cache.
+              ...(budgetToolkit
+                ? {
+                    summaryRequest: {
+                      toolkit: budgetToolkit,
+                      toolChoice: summaryToolChoice(budgetToolkit),
+                      reasoningEffort: config.reasoningEffort,
+                      cacheKey: input.conversationId,
+                    },
+                  }
+                : {}),
             },
           );
           syncEarlierSkills(compaction.startIndex);
@@ -1993,6 +2017,8 @@ export class StreamEngine extends Context.Service<
                   sourceManifest: sourceManifest(),
                   ...(trailing ? { trailingPrompt: trailing } : {}),
                   onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                  clearOldResults: true,
+                  summaryTokens: summaryTokensFor(model?.contextLength),
                 },
               );
               if (!reduced.compacted) break;
@@ -3578,6 +3604,7 @@ export class StreamEngine extends Context.Service<
                               : {}),
                             force: true,
                             onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                            summaryTokens: summaryTokensFor(model?.contextLength),
                           },
                         );
                       if (reduced.compacted && reduced.estimatedInputTokens < beforeEstimate) {

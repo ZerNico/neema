@@ -73,6 +73,8 @@ the whole input again on every turn.
 - A title is a small fresh prompt with nothing to share with the chat's cache, so it runs
   on the admin's utility model (`model_settings`) when one is set and enabled, falling back
   to the chat's own model if that fails.
+- A history summary is the opposite: it reads the chat's own prompt, so it runs on the
+  chat's model with the chat's request settings; see [compaction](compaction.md).
 
 ## What still breaks the cache, deliberately
 

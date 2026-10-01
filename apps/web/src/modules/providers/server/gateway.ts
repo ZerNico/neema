@@ -171,6 +171,14 @@ export type ChatStreamPart = Response.AnyPart;
  * explicit points can cache everything up to it. Inert everywhere else: the
  * adapter reads only its own `openrouter` options.
  */
+/** What a side generation repeats of a chat request; see `generateText`. */
+export interface SideGenerationRequest {
+  readonly toolkit?: Toolkit.WithHandler<any> | undefined;
+  readonly toolChoice?: ChatToolChoice | undefined;
+  readonly reasoningEffort?: ReasoningEffort | null | undefined;
+  readonly cacheKey?: string | undefined;
+}
+
 /** Which tools a chat turn advertises; see `streamChat`. */
 export type ChatToolChoice =
   | "auto"
@@ -405,6 +413,12 @@ export class AiGateway extends Context.Service<
       prompt: Prompt.Prompt;
       /** Bounds the side generation; omitted leaves the provider default. */
       maxOutputTokens?: number;
+      /**
+       * A chat's own request settings, so a side generation over that chat's
+       * prompt reads its cached prefix: the same tools and choice are sent,
+       * but no call the model makes is ever run.
+       */
+      sameAs?: SideGenerationRequest;
     }): Effect.Effect<
       {
         text: string;
@@ -712,18 +726,40 @@ export class AiGateway extends Context.Service<
         modelId: string;
         prompt: Prompt.Prompt;
         maxOutputTokens?: number;
+        sameAs?: SideGenerationRequest;
       }) {
-        const { providerId, layer: modelLayer } = yield* resolveModel(
-          input.modelId,
-          input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens },
-        );
-        // No toolkit, so the request carries no tools and the model has
-        // nothing to call, so `toolChoice` would be moot. Think extraction is
-        // shared with `streamChat` for the same reason: a <think> block is
-        // never part of a title or a summary.
-        const stream = extractThinkTags(LanguageModel.streamText({ prompt: input.prompt })).pipe(
+        const same = input.sameAs;
+        const {
+          providerId,
+          layer: modelLayer,
+          explicitCache,
+        } = yield* resolveModel(input.modelId, {
+          ...(input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens }),
+          ...(same?.reasoningEffort === undefined ? {} : { reasoningEffort: same.reasoningEffort }),
+          ...(same?.cacheKey === undefined ? {} : { cacheKey: same.cacheKey }),
+        });
+        const prompt = explicitCache ? withCacheControl(input.prompt) : input.prompt;
+        // Without a toolkit the request carries no tools. With one, its calls
+        // are never resolved: only text is wanted. Think extraction is shared
+        // with `streamChat`: a <think> block is never part of a side answer.
+        const stream = extractThinkTags(
+          same?.toolkit
+            ? LanguageModel.streamText({
+                prompt,
+                toolkit: same.toolkit,
+                toolChoice: same.toolChoice ?? "auto",
+                disableToolCallResolution: true,
+              })
+            : LanguageModel.streamText({ prompt }),
+        ).pipe(
           Stream.provide(modelLayer),
-        );
+          Stream.provideService(
+            HermesCallableTools,
+            new Set(same?.toolkit ? Object.keys(same.toolkit.tools) : []),
+          ),
+          // As in `streamChat`: the executor already provided the handlers,
+          // and none of them runs here anyway.
+        ) as Stream.Stream<ChatStreamPart, unknown, never>;
 
         return yield* Stream.runFoldEffect(
           stream,

@@ -257,6 +257,8 @@ skipped one on purpose.
   expression index for chat text, and what another search backend would need.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,
   cache anchors and which providers need them.
+- `docs/internals/compaction.md`: when a chat compacts, clearing results before
+  summarizing, summaries that read the cached prompt, what stays beside them.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
 - `docs/internals/browser.md`: the desktop app's embedded browser. Webview guests gated
