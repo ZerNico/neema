@@ -77,7 +77,10 @@ import { SCHEDULE_AUTHORING_SKILL } from "~/modules/skills/bundled/index.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
 import { askUserTool } from "~/modules/tools/server/ask-user.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import {
+  ExternalCompletion,
+  type ExternalOperation,
+} from "~/modules/tools/server/external-completion.ts";
 import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import {
@@ -6459,6 +6462,8 @@ describe("local tools on the user's machine", () => {
   interface DesktopCall {
     readonly name: string;
     readonly args: Record<string, unknown>;
+    /** What the server decided about the call, as the page receives it. */
+    readonly meta?: ExternalOperation["meta"];
   }
   const fakeBridge = (messageId: string, answer: (call: DesktopCall) => unknown) =>
     Effect.gen(function* () {
@@ -6476,12 +6481,12 @@ describe("local tools on the user's machine", () => {
                 Schema.decodeUnknownOption(ToolChunkEnvelope)(JSON.parse(event.delta)),
               );
               if (!envelope || envelope.family !== "desktop" || envelope.phase !== "start") return;
-              const call = { name: envelope.name, args: { ...envelope.args } };
+              const owned = yield* external.inspect(envelope.callId);
+              const call = { name: envelope.name, args: { ...envelope.args }, meta: owned?.meta };
               seen.push(call);
               yield* Deferred.succeed(first, call);
               const reply = answer(call);
               if (reply !== null) {
-                const owned = yield* external.inspect(envelope.callId);
                 expect(owned).not.toBeNull();
                 expect(yield* (yield* ChatRepo).isDesktopAttemptLive(owned!)).toBe(true);
                 expect(
@@ -6807,6 +6812,77 @@ describe("local tools on the user's machine", () => {
       expect(JSON.stringify(prompts[1]!.prompt)).toContain(
         "The user added this file to the workspace: dump.sql.gz",
       );
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("offers the browser only to an app that can drive one, vouching for the user's own addresses", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const offered: string[][] = [];
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      offered.push(Object.keys(input.toolkit?.tools ?? {}));
+      const round = prompts.length;
+      if (round === 2)
+        return authoringTool(input, "browser_open", { url: "https://example.com/docs" });
+      if (round === 3)
+        return authoringTool(input, "browser_open", { url: "https://elsewhere.test/" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    const sendWith = (content: string, desktopBrowser: boolean) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [folder],
+            desktopBrowser,
+          }),
+        ),
+      );
+    const opened = {
+      v: 1,
+      ok: true,
+      summary: "Opened example.com in t1",
+      detail: "t1",
+      truncated: false,
+    };
+    try {
+      const without = await sendWith("Hello", false);
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(without.assistantMessageId, 0)),
+        ),
+      );
+      const sent = await sendWith("Open https://example.com/docs please", true);
+      const seen = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => opened);
+          yield* Fiber.join(bridge.fiber);
+          return bridge.seen;
+        }),
+      );
+      expect(offered[0]).not.toContain("browser_open");
+      expect(offered[1]).toEqual(expect.arrayContaining(["browser_open", "browser_snapshot"]));
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("web browser on the user's computer");
+      expect(seen.map((call) => [call.args.url, call.meta?.preauthorized])).toEqual([
+        ["https://example.com/docs", true],
+        // An address the model came up with asks first.
+        ["https://elsewhere.test/", false],
+      ]);
+      expect(seen[0]?.meta?.temporary).toBe(false);
     } finally {
       authoringScript = null;
     }

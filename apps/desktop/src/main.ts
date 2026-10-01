@@ -38,8 +38,15 @@ import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
+  BROWSER_ALLOW_SITE,
+  BROWSER_ALLOWED_SITES,
+  BROWSER_DRIVE,
   BROWSER_LIFECYCLE,
   BROWSER_OPEN_EXTERNAL,
+  BROWSER_REVOKE_SITE,
+  BROWSER_SITE_ALLOWED,
+  BROWSER_SNAPSHOT,
+  BROWSER_WAIT_FOR,
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
   NETWORK_REVOKE,
@@ -51,6 +58,7 @@ import { attachBrowserGuests } from "./browser/guests.ts";
 import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import { browserProfile } from "./browser/profile.ts";
 import { browserUserAgent } from "./browser/user-agent.ts";
+import { loadSiteGrants, type SiteGrants } from "./browser/site-grants.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -96,6 +104,8 @@ app.userAgentFallback = browserUserAgent(app.userAgentFallback, app.getName());
 const windowChrome = new WeakMap<BrowserWindow, ReturnType<typeof attachChrome>>();
 const windowRecovery = new WeakMap<BrowserWindow, ReturnType<typeof attachLoadRecovery>>();
 const windowBrowsers = new WeakMap<BrowserWindow, ReturnType<typeof attachBrowserGuests>>();
+// Loaded with the app; until then nothing counts as allowed, so everything asks.
+let siteGrants: SiteGrants | null = null;
 
 /**
  * The shell: a window pointed at one server, plus a bridge only that server's
@@ -365,7 +375,12 @@ const openMainWindow = (origin: string) => {
   windowRecovery.set(window, recovery);
   windowBrowsers.set(
     window,
-    attachBrowserGuests(window, profile, () => toOrigin(window.webContents.getURL()) === origin),
+    attachBrowserGuests(
+      window,
+      profile,
+      () => toOrigin(window.webContents.getURL()) === origin,
+      (conversationId, url) => siteGrants?.allowed(origin, conversationId, url) ?? false,
+    ),
   );
 
   // Navigation is pinned to the configured origin. Anything else opens in the
@@ -472,12 +487,37 @@ else if (!devReload) {
   else app.setAsDefaultProtocolClient(SIGN_IN_SCHEME);
 }
 
+// The model's browser tools. Same checks as the rest: the configured origin's
+// main frame only, and every value decoded here rather than trusted.
+const browserOf = (event: IpcMainInvokeEvent) => {
+  if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
+  const browser = windowBrowsers.get(mainWindow);
+  if (!browser) throw new Error("No browser in this window.");
+  return browser;
+};
+const grantsFor = (event: IpcMainInvokeEvent) => {
+  if (!isRemoteSender(event) || !serverOrigin || !siteGrants)
+    throw new Error("Not allowed from this page.");
+  return { grants: siteGrants, origin: serverOrigin };
+};
+const record = (payload: unknown) =>
+  payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+const idOf = (input: Record<string, unknown>) => {
+  if (typeof input.webContentsId !== "number") throw new Error("Invalid browser tab.");
+  return input.webContentsId;
+};
+const textOf = (value: unknown, label: string) => {
+  if (typeof value !== "string" || value.length > 4096) throw new Error(`Invalid ${label}.`);
+  return value;
+};
+
 void app.whenReady().then(async () => {
   if (!primaryInstance) return;
   session.defaultSession.setUserAgent(
     `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`,
   );
   machine = await loadMachineIdentity(app.getPath("userData"));
+  siteGrants = await loadSiteGrants(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
   sweepTransientWorkspaces();
@@ -549,6 +589,63 @@ void app.whenReady().then(async () => {
     )
       throw new Error("Invalid browser tab state.");
     await windowBrowsers.get(mainWindow)?.setLifecycle(webContentsId, state);
+  });
+  ipcMain.handle(BROWSER_SNAPSHOT, (event, payload: unknown) => {
+    const input = record(payload);
+    return browserOf(event).snapshot(idOf(input), { screenshot: input.screenshot === true });
+  });
+  ipcMain.handle(BROWSER_WAIT_FOR, (event, payload: unknown) => {
+    const input = record(payload);
+    return browserOf(event).waitFor(idOf(input), {
+      ...(input.text === undefined ? {} : { text: textOf(input.text, "text") }),
+      ...(input.urlIncludes === undefined
+        ? {}
+        : { urlIncludes: textOf(input.urlIncludes, "address") }),
+      timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : 0,
+    });
+  });
+  ipcMain.handle(BROWSER_DRIVE, (event, payload: unknown) => {
+    const input = record(payload);
+    const driving = record(input.driving);
+    return browserOf(event).drive(
+      idOf(input),
+      input.driving === null
+        ? null
+        : {
+            conversationId: textOf(driving.conversationId, "chat"),
+            allow: Array.isArray(driving.allow)
+              ? driving.allow.map((url) => textOf(url, "address"))
+              : [],
+          },
+    );
+  });
+  ipcMain.handle(BROWSER_SITE_ALLOWED, (event, payload: unknown) => {
+    const input = record(payload);
+    const { grants, origin } = grantsFor(event);
+    return grants.allowed(
+      origin,
+      textOf(input.conversationId, "chat"),
+      textOf(input.url, "address"),
+    );
+  });
+  ipcMain.handle(BROWSER_ALLOW_SITE, async (event, payload: unknown) => {
+    const input = record(payload);
+    const { grants, origin } = grantsFor(event);
+    if (input.scope !== "chat" && input.scope !== "always") throw new Error("Invalid scope.");
+    await grants.allow(
+      origin,
+      textOf(input.conversationId, "chat"),
+      textOf(input.url, "address"),
+      input.scope,
+    );
+  });
+  ipcMain.handle(BROWSER_ALLOWED_SITES, (event) => {
+    const { grants, origin } = grantsFor(event);
+    return grants.always(origin);
+  });
+  ipcMain.handle(BROWSER_REVOKE_SITE, async (event, site: unknown) => {
+    const { grants, origin } = grantsFor(event);
+    await grants.revoke(origin, textOf(site, "site"));
   });
   ipcMain.handle(BROWSER_OPEN_EXTERNAL, async (event, url: unknown) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

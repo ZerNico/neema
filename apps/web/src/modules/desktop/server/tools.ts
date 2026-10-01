@@ -193,27 +193,31 @@ const timedOut = (name: string) =>
  * otherwise is what keeps the model from proposing work it cannot do; a browser
  * tab with no desktop behind it never sees these names.
  */
-export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
-  const handle =
-    (name: string, timeoutMs: number) =>
-    (_params: Record<string, unknown>, ctx: { toolCallId: string }) =>
-      Effect.gen(function* () {
-        const external = yield* ExternalCompletion;
-        // The SDK may start us while the observer is still inserting the row.
-        // This wait is interrupted with the model stream on Stop or failure.
-        const callId = yield* deps.rowIdFor(ctx.toolCallId);
-        if (!callId) {
-          return desktopFailure(
-            "That could not be sent to the computer",
-            "The request could not be matched to this conversation.",
-          );
-        }
-        return yield* external.await(callId, {
-          requireOpen: true,
-          timeout: Duration.millis(timeoutMs),
-          onTimeout: () => timedOut(name),
-        });
+/** A handler that only waits for the machine to answer the call it was given. */
+export const awaitDesktopCall =
+  (rowIdFor: DesktopToolDeps["rowIdFor"], name: string, timeoutMs: number) =>
+  (_params: unknown, ctx: { toolCallId: string }) =>
+    Effect.gen(function* () {
+      const external = yield* ExternalCompletion;
+      // The SDK may start us while the observer is still inserting the row.
+      // This wait is interrupted with the model stream on Stop or failure.
+      const callId = yield* rowIdFor(ctx.toolCallId);
+      if (!callId) {
+        return desktopFailure(
+          "That could not be sent to the computer",
+          "The request could not be matched to this conversation.",
+        );
+      }
+      return yield* external.await(callId, {
+        requireOpen: true,
+        timeout: Duration.millis(timeoutMs),
+        onTimeout: () => timedOut(name),
       });
+    });
+
+export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
+  const handle = (name: string, timeoutMs: number) =>
+    awaitDesktopCall(deps.rowIdFor, name, timeoutMs);
 
   const files = [
     listFolderTool,

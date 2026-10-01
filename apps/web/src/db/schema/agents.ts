@@ -183,6 +183,7 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
   workspaceFiles: jsonb("workspace_files").$type<string[]>().notNull().default([]),
   /** Whether that machine could sandbox a command when this was sent. */
   desktopCommands: boolean("desktop_commands").notNull().default(false),
+  desktopBrowser: boolean("desktop_browser").notNull().default(false),
   /**
    * The machine this attempt was sent from. A reinstall mints a new id, so
    * the client treats an unknown one exactly like another device: "last

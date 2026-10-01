@@ -1,5 +1,5 @@
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
-import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
+import { DESKTOP_TIMEOUTS, approvalKind, isBrowserTool } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
@@ -155,6 +155,8 @@ import { prepareCustomTools } from "~/modules/custom-tools/server/tools.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
+import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
+import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -929,6 +931,17 @@ export class StreamEngine extends Context.Service<
                   commands: config.desktopCommands ?? false,
                 })
               : null;
+          // Work attempts from an app that can embed pages; they run in the
+          // sending app's own tabs, through the same path as the file tools.
+          const browserTools =
+            config.desktopFolders && permissions.work && config.desktopBrowser
+              ? prepareBrowserTools({
+                  rowIdFor: (providerCallId) =>
+                    Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
+                      Effect.map((row) => row?.rowId),
+                    ),
+                })
+              : null;
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
           // Resume continues that same work, so it keeps the last accepted list.
@@ -1244,6 +1257,7 @@ export class StreamEngine extends Context.Service<
             ...(projectFileTools ? [projectFileTools.group] : []),
             ...(researchTool ? [researchTool.group] : []),
             ...(desktopTools ? [desktopTools] : []),
+            ...(browserTools ? [browserTools] : []),
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
@@ -1530,6 +1544,9 @@ export class StreamEngine extends Context.Service<
                     ),
                   },
                 ]
+              : []),
+            ...(browserTools
+              ? [{ role: "system" as const, content: BROWSER_TOOLS_SYSTEM_HINT }]
               : []),
             ...conversationContext.messages(),
             // Project and agent instructions are user-level configuration: they
@@ -2260,6 +2277,18 @@ export class StreamEngine extends Context.Service<
                               deviceSessionId: input.deviceSessionId,
                               name: part.name,
                               args,
+                              // Only the browser needs to know: whether the user's own
+                              // text vouched for the address, and whether to keep pages.
+                              ...(isBrowserTool(part.name)
+                                ? {
+                                    meta: {
+                                      preauthorized:
+                                        typeof args.url === "string" &&
+                                        authority.resolve(args.url) !== null,
+                                      temporary,
+                                    },
+                                  }
+                                : {}),
                               timeoutMs: approvalKind(part.name as DesktopToolName)
                                 ? DESKTOP_TIMEOUTS.command
                                 : DESKTOP_TIMEOUTS.quick,

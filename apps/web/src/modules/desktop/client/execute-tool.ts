@@ -356,6 +356,13 @@ export const executeDesktopTool = (
           }),
         );
       }
+      // The page runs these in its own tabs (`modules/browser/client`), never here.
+      case "browser_tabs":
+      case "browser_open":
+      case "browser_navigate":
+      case "browser_snapshot":
+      case "browser_wait_for":
+        return Effect.succeed(desktopFailure("That did not run", "Browser tools run in the page."));
       case "run_command": {
         // A slow approval has already eaten into the server's wait; what is
         // left, minus the trip back, is all the command may take.

@@ -101,3 +101,50 @@ does.
 
 A renderer reload is one big discard: tabs come back from their addresses, and logins
 survive in the partition.
+
+## The model's browser tools
+
+In Work chats, the model gets `browser_tabs`, `browser_open`, `browser_navigate`,
+`browser_snapshot` and `browser_wait_for`. They are desktop tools: the same family, envelope,
+`ExternalCompletion` wait and result shape as the file tools. Only two things differ: they are
+offered when the sending app reports `desktopBrowser`, meaning its shell has the bridge's
+`agent` surface, and the page runs them itself (`browser/client/execute-browser.ts`) rather than
+through the Work RPC. A screenshot travels as `result.file`, so it reaches only the next model
+round, only for a vision model, and is never stored.
+
+- **Tabs** are named `t1`, `t2`, … per chat, kept with the tab's stored data. A tab opened by a
+  call remembers that call, so a replayed call finds it instead of opening another. A tab the
+  model opens or moves in the chat on screen is shown and selected. Elsewhere it is added to
+  the chat's panel the next time that chat is shown.
+- **Waking:** each call wakes its page first. A discarded page loads again and a frozen one is
+  thawed by the hold every chat with a live attempt gets.
+- **Reading:** `browser_snapshot` is the accessibility tree from the DevTools protocol, outlined
+  by `browser/snapshot.ts` with references like `[e12]` for interactive elements. Those
+  references are kept per tab for later actions. A hidden page may not paint, so a screenshot
+  can be missing, and the result says so.
+- **Waiting:** `browser_wait_for` checks fixed code in an isolated world, with the text as a
+  JSON literal. Nothing from the page or the model runs.
+
+### Sites
+
+Opening an address is the `"site"` approval kind, decided per call and per registrable domain
+(`browser/site-grants.ts`, `tldts` with private suffixes, so `alice.github.io` is not
+`bob.github.io`).
+
+- **Pre-approved:** the server pre-approves an address the generation's URL authority holds,
+  meaning one from the user's text or earlier sources, never from assistant prose. It says so
+  in the call's `meta`, apart from the persisted args.
+- **Already allowed:** the page asks the desktop whether the site is allowed in this chat or
+  on this desktop. That answer is asynchronous, so a site call shows no card until it arrives.
+- **Asking:** otherwise the card offers "Allow once", "Allow in this chat" and "Always allow".
+  A remembered site re-checks the chat's other waiting site calls. `allow-rest` never covers a
+  site.
+- **Storage:** grants live on the machine in `browser-sites.json`, per server origin. Like
+  folder and network grants, the server never learns which sites a person trusts. "Always"
+  sites are listed and removable in Settings › Devices.
+
+While a call drives a tab, main gates its page: a `will-navigate` or main-frame `will-redirect`
+to a site neither allowed for the chat nor the one this call was allowed to open is cancelled,
+and the call reports it so the model has to ask. Without this, a page could lead an approved
+visit anywhere, including to an address carrying what it read. The person's own browsing is
+never gated.

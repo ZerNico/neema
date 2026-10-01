@@ -4,8 +4,11 @@ import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BROWSER_ALLOW_SITE,
+  BROWSER_DRIVE,
   BROWSER_FAVICON,
   BROWSER_LIFECYCLE,
+  BROWSER_SNAPSHOT,
   BROWSER_OPEN_TAB,
   DROPPED_FILE_CHANNEL,
   PROTOCOL_VERSION,
@@ -127,6 +130,26 @@ describe("restricted bundled preloads", () => {
       x: 1,
     });
     expect(icons).toEqual([{ webContentsId: 7, dataUrl: "data:image/png;base64,AQ" }]);
+    // The model's browser surface goes to its own channels, with plain values only.
+    const agent = browser.agent!;
+    await agent.snapshot(7, { screenshot: true });
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_SNAPSHOT, {
+      webContentsId: 7,
+      screenshot: true,
+    });
+    await agent.drive(7, { conversationId: "c1", allow: ["https://a.test/"] });
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_DRIVE, {
+      webContentsId: 7,
+      driving: { conversationId: "c1", allow: ["https://a.test/"] },
+    });
+    await agent.drive(7, null);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_DRIVE, { webContentsId: 7, driving: null });
+    await agent.allowSite("c1", "https://a.test/", "always");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_ALLOW_SITE, {
+      conversationId: "c1",
+      url: "https://a.test/",
+      scope: "always",
+    });
   });
 
   it("keeps a dropped file path inside preload and falls back for synthetic files", async () => {

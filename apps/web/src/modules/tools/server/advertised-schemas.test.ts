@@ -20,6 +20,7 @@ import {
 } from "~/modules/spreadsheets/server/tools.ts";
 import { editWordFileTool, inspectWordFileTool } from "~/modules/word/server/tools.ts";
 import { askUserTool } from "./ask-user.ts";
+import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
 import { updatePlanTool } from "./plan-tool.ts";
 
 const guard = () => Effect.void;
@@ -69,6 +70,7 @@ describe("tool parameters the model is offered", () => {
       saveMemoryTool,
       askUserTool,
       updatePlanTool,
+      ...toolsOf(prepareBrowserTools({ rowIdFor: () => Effect.succeed(undefined) }).toolkit),
     ];
     // Schema.Number advertises "NaN" and "Infinity" as strings; models then send them.
     expect(JSON.stringify(tools.map((tool) => Tool.getJsonSchema(tool)))).not.toContain('"NaN"');

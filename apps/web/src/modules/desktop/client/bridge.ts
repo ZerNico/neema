@@ -15,6 +15,7 @@ import {
   desktopShellOutdated,
   makeDesktopClient,
   readDesktopAuth,
+  readDesktopBrowser,
   readDesktopChannel,
   WORKSPACE_FOLDER_NAME,
   type DesktopAuth,
@@ -246,6 +247,8 @@ export interface DesktopSendFields {
   readonly desktopFolders?: ReadonlyArray<{ name: string; path: string }>;
   /** False while this machine cannot sandbox, which withholds run_command. */
   readonly desktopCommands: boolean;
+  /** Whether this app can drive embedded pages, which offers the browser tools. */
+  readonly desktopBrowser: boolean;
 }
 
 /**
@@ -283,6 +286,8 @@ export const sendFieldsFor = (status: FolderStatus): DesktopSendFields => {
     fromDesktop: true,
     desktopFolders: folders,
     desktopCommands: status.sandbox.kind === "ready",
+    // A shell that can show pages but not drive them gets no browser tools.
+    desktopBrowser: readDesktopBrowser()?.agent !== undefined,
   };
 };
 

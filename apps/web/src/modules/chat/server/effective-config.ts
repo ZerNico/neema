@@ -121,6 +121,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     /** Folders the sending machine reported; absent when it had none. */
     desktopFolders?: ReadonlyArray<{ name: string; path: string }> | null | undefined;
     desktopCommands?: boolean | undefined;
+    desktopBrowser?: boolean | undefined;
     /** Which machine sent it; stamped for the foreign-chat banner. */
     desktopMachineId?: string | null | undefined;
     desktopMachineName?: string | null | undefined;
@@ -178,6 +179,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       // them, so a conversation continued elsewhere resolves its own folders.
       desktopFolders: input.desktopFolders?.map((folder) => folder.name) ?? null,
       desktopCommands: input.desktopCommands ?? false,
+      desktopBrowser: input.desktopBrowser ?? false,
       desktopMachineId: input.desktopMachineId ?? null,
       desktopMachineName: input.desktopMachineName ?? null,
       workspaceFiles: [...(input.workspaceFiles ?? [])],

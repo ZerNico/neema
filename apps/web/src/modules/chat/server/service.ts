@@ -85,6 +85,7 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
     /** Folders attached on the machine this send came from. */
     desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
     desktopCommands?: boolean | undefined;
+    desktopBrowser?: boolean | undefined;
     fromDesktop?: boolean | undefined;
     desktopExecutorId?: string | undefined;
     desktopMachineId?: string | undefined;
@@ -132,6 +133,7 @@ export type DesktopDispatch = {
   fromDesktop: boolean;
   desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
   desktopCommands?: boolean | undefined;
+  desktopBrowser?: boolean | undefined;
   desktopExecutorId: string;
   deviceSessionId?: string | undefined;
 };
@@ -340,6 +342,7 @@ export class ChatService extends Context.Service<
         reasoningEffort?: ReasoningEffort | null | undefined;
         desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
         desktopCommands?: boolean | undefined;
+        desktopBrowser?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
         desktopMachineId?: string | undefined;
@@ -653,6 +656,7 @@ function makeChatService() {
           /** Folders the sending machine reported; retry has no submission. */
           desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
           desktopCommands?: boolean | undefined;
+          desktopBrowser?: boolean | undefined;
           fromDesktop?: boolean | undefined;
           desktopExecutorId?: string | undefined;
           /** Which machine this attempt is sent from; a retry re-stamps it. */
@@ -741,6 +745,8 @@ function makeChatService() {
               : null;
           const desktopCommands =
             defaults.mode === "work" && desktopFolderEntries !== null && !!input.desktopCommands;
+          const desktopBrowser =
+            defaults.mode === "work" && desktopFolderEntries !== null && !!input.desktopBrowser;
           if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
             return yield* new WorkDesktopRequired();
           // Re-stamped on every attempt, retry included: the banner must
@@ -775,6 +781,7 @@ function makeChatService() {
               reasoningEffort,
               desktopFolders: desktopFolderEntries?.map((folder) => folder.name) ?? null,
               desktopCommands,
+              desktopBrowser,
               desktopMachineId,
               desktopMachineName,
               // Only a fresh send adds files; retry and edit replay the list.
@@ -808,6 +815,7 @@ function makeChatService() {
             reasoningEffort,
             desktopFolders: desktopFolderEntries,
             desktopCommands,
+            desktopBrowser,
             desktopMachineId,
             desktopMachineName,
             workspaceFiles: input.workspaceFiles ?? continuation?.workspaceFiles ?? [],
@@ -1008,6 +1016,7 @@ function makeChatService() {
             // Taken from the dispatching app now, never from queue time.
             desktopFolders: input.desktop?.desktopFolders,
             desktopCommands: input.desktop?.desktopCommands,
+            desktopBrowser: input.desktop?.desktopBrowser,
             fromDesktop: input.desktop?.fromDesktop,
             desktopExecutorId: input.desktop?.desktopExecutorId,
           }),
@@ -1170,6 +1179,7 @@ function makeChatService() {
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
+          ...(input.desktopBrowser !== undefined ? { desktopBrowser: input.desktopBrowser } : {}),
           ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
           desktopExecutorId: input.desktopExecutorId,
           desktopMachineId: input.desktopMachineId,
@@ -1415,6 +1425,7 @@ function makeChatService() {
           reasoningEffort?: ReasoningEffort | null | undefined;
           desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
           desktopCommands?: boolean | undefined;
+          desktopBrowser?: boolean | undefined;
           fromDesktop?: boolean | undefined;
           desktopExecutorId?: string | undefined;
           desktopMachineId?: string | undefined;
@@ -1454,6 +1465,9 @@ function makeChatService() {
                   ...(input.edit.desktopCommands !== undefined
                     ? { desktopCommands: input.edit.desktopCommands }
                     : {}),
+                  ...(input.edit.desktopBrowser !== undefined
+                    ? { desktopBrowser: input.edit.desktopBrowser }
+                    : {}),
                   ...(input.edit.fromDesktop !== undefined
                     ? { fromDesktop: input.edit.fromDesktop }
                     : {}),
@@ -1466,6 +1480,7 @@ function makeChatService() {
                   desktopExecutorId: input.desktopExecutorId,
                   desktopFolders: input.desktopFolders,
                   desktopCommands: input.desktopCommands,
+                  desktopBrowser: input.desktopBrowser,
                   desktopMachineId: input.desktopMachineId,
                   desktopMachineName: input.desktopMachineName,
                 }),
@@ -1601,6 +1616,7 @@ function makeChatService() {
         fromDesktop: input.fromDesktop,
         desktopFolders: input.desktopFolders,
         desktopCommands: input.desktopCommands,
+        desktopBrowser: input.desktopBrowser,
         expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
@@ -1713,6 +1729,7 @@ function makeChatService() {
           desktopExecutorId: input.desktopExecutorId,
           desktopFolders: input.desktopFolders,
           desktopCommands: input.desktopCommands,
+          desktopBrowser: input.desktopBrowser,
           desktopMachineId: input.desktopMachineId,
           desktopMachineName: input.desktopMachineName,
         }),
@@ -1838,6 +1855,7 @@ function makeChatService() {
         /** Folders attached on the machine this edit came from. */
         desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
         desktopCommands?: boolean | undefined;
+        desktopBrowser?: boolean | undefined;
         fromDesktop?: boolean | undefined;
         desktopExecutorId?: string | undefined;
         desktopMachineId?: string | undefined;
@@ -1906,6 +1924,7 @@ function makeChatService() {
           fromDesktop: input.fromDesktop,
           desktopFolders: input.desktopFolders,
           desktopCommands: input.desktopCommands,
+          desktopBrowser: input.desktopBrowser,
           expectedMessages: all,
           userId: input.userId,
           conversationId: input.conversationId,
@@ -1930,6 +1949,7 @@ function makeChatService() {
             desktopMachineName: input.desktopMachineName,
             desktopFolders: input.desktopFolders,
             desktopCommands: input.desktopCommands,
+            desktopBrowser: input.desktopBrowser,
             ...(input.skillIds ? { skillIds: input.skillIds } : {}),
             ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
           },
@@ -1964,6 +1984,7 @@ function makeChatService() {
           ...(input.desktopCommands !== undefined
             ? { desktopCommands: input.desktopCommands }
             : {}),
+          ...(input.desktopBrowser !== undefined ? { desktopBrowser: input.desktopBrowser } : {}),
           ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
           desktopExecutorId: input.desktopExecutorId,
           desktopMachineId: input.desktopMachineId,

@@ -124,6 +124,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           searchEnabled: data.searchEnabled,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
+          desktopBrowser: data.desktopBrowser,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
           desktopMachineId: data.desktopMachineId,
@@ -195,6 +196,7 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
           searchEnabled: data.searchEnabled,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
+          desktopBrowser: data.desktopBrowser,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
           desktopMachineId: data.desktopMachineId,
@@ -283,6 +285,7 @@ const desktopDispatch = (
     fromDesktop?: boolean;
     desktopFolders?: ReadonlyArray<DesktopFolderRef>;
     desktopCommands?: boolean;
+    desktopBrowser?: boolean;
     desktopExecutorId?: string;
   },
   deviceSessionId: string,
@@ -292,6 +295,7 @@ const desktopDispatch = (
         fromDesktop: true,
         desktopFolders: data.desktopFolders,
         desktopCommands: data.desktopCommands,
+        desktopBrowser: data.desktopBrowser,
         desktopExecutorId: data.desktopExecutorId,
         deviceSessionId,
       }
@@ -458,6 +462,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           researchEnabled: data.researchEnabled,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
+          desktopBrowser: data.desktopBrowser,
           fromDesktop: data.fromDesktop,
           desktopExecutorId: data.desktopExecutorId,
           desktopMachineId: data.desktopMachineId,
@@ -503,6 +508,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           deviceSessionId: context.session.session.id,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
+          desktopBrowser: data.desktopBrowser,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
@@ -543,6 +549,7 @@ export const resumeMessage = createServerFn({ method: "POST" })
           deviceSessionId: context.session.session.id,
           desktopFolders: data.desktopFolders,
           desktopCommands: data.desktopCommands,
+          desktopBrowser: data.desktopBrowser,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,

@@ -10,6 +10,21 @@ import { Schema } from "effect";
  * arrival rather than assumed.
  */
 
+/**
+ * The embedded browser's tools run on the same machine through the same path,
+ * so they are desktop tools too; only their offer and their executor differ.
+ */
+export const BROWSER_TOOL_NAMES = [
+  "browser_tabs",
+  "browser_open",
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_wait_for",
+] as const;
+export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
+export const isBrowserTool = (name: string): name is BrowserToolName =>
+  (BROWSER_TOOL_NAMES as ReadonlyArray<string>).includes(name);
+
 export const DESKTOP_TOOL_NAMES = [
   "list_folder",
   "find_files",
@@ -23,6 +38,7 @@ export const DESKTOP_TOOL_NAMES = [
   "delete_local_file",
   "run_command",
   "request_network_access",
+  ...BROWSER_TOOL_NAMES,
 ] as const;
 
 export const DesktopToolName = Schema.Literals(DESKTOP_TOOL_NAMES);
@@ -37,7 +53,7 @@ export type DesktopToolName = typeof DesktopToolName.Type;
  * the chat already holds into the app-owned workspace asks for nothing
  * either: it never overwrites, and a drop lands there without a prompt too.
  */
-export type ApprovalKind = "edit" | "delete" | "command" | "network";
+export type ApprovalKind = "edit" | "delete" | "command" | "network" | "site";
 
 export const approvalKind = (name: DesktopToolName): ApprovalKind | null => {
   switch (name) {
@@ -51,6 +67,11 @@ export const approvalKind = (name: DesktopToolName): ApprovalKind | null => {
       return "command";
     case "request_network_access":
       return "network";
+    // Opening a page somewhere new; the page decides per call whether the site
+    // is already allowed, and a navigation without an address is only a read.
+    case "browser_open":
+    case "browser_navigate":
+      return "site";
     default:
       return null;
   }

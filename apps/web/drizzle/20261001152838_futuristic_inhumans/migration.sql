@@ -1,0 +1,1 @@
+ALTER TABLE "message_generation_config" ADD COLUMN "desktop_browser" boolean DEFAULT false NOT NULL;

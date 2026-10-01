@@ -3,7 +3,8 @@ import type { ApprovalKind } from "../tool-schema.ts";
 
 export { approvalKind, type ApprovalKind } from "../tool-schema.ts";
 export type { PermissionLevel };
-export type ApprovalChoice = "allow" | "deny" | "allow-rest";
+/** `allow-site` and `allow-always` answer a site request, for this chat or this desktop. */
+export type ApprovalChoice = "allow" | "deny" | "allow-rest" | "allow-site" | "allow-always";
 export type PendingKind = ApprovalKind | "read";
 
 export const PERMISSION_LEVELS: ReadonlyArray<{

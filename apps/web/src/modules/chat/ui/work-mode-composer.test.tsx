@@ -201,6 +201,7 @@ describe("work mode", () => {
         { name: "site", path: "/home/user/site" },
       ],
       desktopCommands: true,
+      desktopBrowser: false,
     });
     await userEvent.click(screen.getByRole("button", { name: "site" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Detach site" }));
@@ -210,6 +211,7 @@ describe("work mode", () => {
       fromDesktop: true,
       desktopFolders: [{ name: "workspace", path: "/data/workspaces/chat" }],
       desktopCommands: true,
+      desktopBrowser: false,
     });
   });
   it("is not offered in a browser, where it could not be honoured", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useDetailPanel, useDetailPanelTabs } from "~/ui/detail-panel.tsx";
 import { browserTabs, useBrowserTab, useBrowserTabs } from "../client/browser-store.ts";
 import { useBrowserOwner } from "../client/owner.ts";
@@ -12,14 +12,19 @@ function BrowserTabOwner({ id, restorable }: { id: string; restorable: boolean }
   const tab = useBrowserTab(id);
   const url = tab?.url;
   const title = tab?.title;
+  const label = tab?.label;
   const favicon = tab?.favicon ?? null;
   const busy = useSettledLoading(tab?.loading ?? false);
   const request = useMemo(
     () =>
       url === undefined || title === undefined
         ? null
-        : browserTabRequest({ id, url, title, favicon }, restorable, busy),
-    [id, url, title, favicon, restorable, busy],
+        : browserTabRequest(
+            { id, url, title, favicon, ...(label ? { label } : {}) },
+            restorable,
+            busy,
+          ),
+    [id, url, title, label, favicon, restorable, busy],
   );
   useEffect(() => {
     if (request) panel.refresh(request);
@@ -31,43 +36,68 @@ function BrowserTabOwner({ id, restorable }: { id: string; restorable: boolean }
 
 /**
  * Mounted once in the layout, for whichever chat or page is on screen. Brings
- * its browser tabs back from their stored addresses, closes the pages of tabs
- * closed meanwhile, and keeps each tab's title, icon and address current.
- * Outside the desktop app there is nothing to show a page in, so restored
- * browser tabs are closed.
+ * its browser tabs back from their stored addresses, adds the ones the model
+ * opened while it was elsewhere, ends the pages of tabs closed here, shows a
+ * tab when the model asks to, and keeps each tab's title, icon and address
+ * current. Outside the desktop app there is nothing to show a page in, so
+ * restored browser tabs are closed.
  */
 export function BrowserPanelOwner() {
   const browser = useDesktopBrowser();
   const panel = useDetailPanel();
   const tabs = useDetailPanelTabs();
   const owner = useBrowserOwner();
-  // Subscribed so a chat declaring itself temporary re-renders this owner.
-  useBrowserTabs();
+  const pages = useBrowserTabs();
   const temporary = browserTabs.isTemporary(owner);
   const mine = useMemo(() => tabs.filter((tab) => tab.id.startsWith(BROWSER_TAB_PREFIX)), [tabs]);
+  // This owner's browser tabs on the last pass: one missing since was closed here.
+  const seen = useRef<{ owner: string; ids: ReadonlySet<string> } | null>(null);
+  // Reveals newer than this follow the model; older ones were for another visit.
+  const following = useRef<{ owner: string; since: number } | null>(null);
 
-  // Restoring is idempotent and pruning cheap, so this simply follows the tabs.
+  // Restoring and adopting are idempotent and pruning cheap, so this simply
+  // follows the tabs and the pages.
   useEffect(() => {
     if (!browser) {
       for (const tab of mine) panel.closeTab(tab.id);
       return;
     }
     const partition = temporary ? browser.temporaryPartition(owner) : browser.partition;
-    const kept = new Set<string>();
+    const listed = new Set<string>();
     for (const summary of mine) {
       const id = summary.id.slice(BROWSER_TAB_PREFIX.length);
-      kept.add(id);
+      listed.add(id);
       browserTabs.restore(id, {
         owner,
         partition,
         url: summary.data?.url ?? "about:blank",
         title: summary.title,
+        ...(summary.data?.label ? { label: summary.data.label } : {}),
       });
     }
-    // A tab closed in the panel ends its page; other owners' pages are untouched.
-    for (const tab of browserTabs.all().values())
-      if (tab.owner === owner && !kept.has(tab.id)) browserTabs.remove(tab.id);
-  }, [browser, owner, mine, panel, temporary]);
+    const previous = seen.current?.owner === owner ? seen.current.ids : null;
+    for (const page of pages.values()) {
+      if (page.owner !== owner || listed.has(page.id)) continue;
+      // Closed here since the last pass: the page goes with its tab.
+      if (previous?.has(page.id)) browserTabs.remove(page.id);
+      // Opened by the model while this chat was elsewhere: listed, not selected.
+      else {
+        panel.append(browserTabRequest(page, !temporary));
+        listed.add(page.id);
+      }
+    }
+    seen.current = { owner, ids: listed };
+  }, [browser, owner, mine, pages, panel, temporary]);
+
+  useEffect(() => {
+    if (following.current?.owner !== owner) following.current = { owner, since: Date.now() };
+    const mark = following.current;
+    for (const page of pages.values()) {
+      if (page.owner !== owner || page.revealAt <= mark.since) continue;
+      mark.since = page.revealAt;
+      panel.open(browserTabRequest(page, !temporary));
+    }
+  }, [owner, pages, panel, temporary]);
 
   if (!browser) return null;
   return mine.map((tab) => (

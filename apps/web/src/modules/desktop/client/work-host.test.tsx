@@ -451,6 +451,7 @@ it("starts queued Work with this app's executor and the folders attached now", a
           { name: "site", path: "/code/site" },
         ],
         desktopCommands: true,
+        desktopBrowser: false,
         desktopExecutorId: "executor",
       },
     }),

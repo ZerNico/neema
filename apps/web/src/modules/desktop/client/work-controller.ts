@@ -28,11 +28,17 @@ export interface WorkDependencies {
   cancel(callId: string): void;
   changed(): void;
   error(error: unknown): void;
+  /** Whether a site call's address is already allowed for its chat. Absent: never. */
+  siteAllowed?(call: ExternalOperation): Promise<boolean>;
+  /** Remembers a call's site for its chat, or for every chat on this desktop. */
+  allowSite?(call: ExternalOperation, scope: "chat" | "always"): Promise<void>;
 }
 interface Entry {
   call: ExternalOperation;
   pending: PendingKind | null;
   permitted?: boolean;
+  /** A site call waiting to learn whether its site is already allowed. */
+  checking?: boolean;
   result?: DesktopToolResult;
   busy: boolean;
   delivered?: boolean;
@@ -69,26 +75,35 @@ export class WorkController {
       if (!entry) {
         const settings = snapshot.settings.find((s) => s.conversationId === call.conversationId);
         if (!settings) continue;
-        const kind = approvalKind(call.name as DesktopToolName);
+        const named = approvalKind(call.name as DesktopToolName);
+        // A browser navigation without an address only moves within its tab.
+        const kind = named === "site" && typeof call.args.url !== "string" ? null : named;
         const granted = this.grants.get(call.conversationId)?.has(kind ?? "read");
+        // A site is decided per address: the server may have vouched for it,
+        // else the desktop knows whether it is allowed, which takes a moment.
+        const checking = kind === "site" && !call.meta?.preauthorized;
         const permitted =
-          kind === "network" || kind === "delete"
-            ? false
-            : kind === null
-              ? settings.approval !== "manual"
-              : settings.approval === "skip" || granted;
+          kind === "site"
+            ? !checking
+            : kind === "network" || kind === "delete"
+              ? false
+              : kind === null
+                ? settings.approval !== "manual"
+                : settings.approval === "skip" || granted;
         entry = {
           call,
-          pending: permitted ? null : (kind ?? "read"),
+          pending: permitted || checking ? null : (kind ?? "read"),
           busy: false,
           retries: 0,
           ...(permitted ? { permitted: true } : {}),
+          ...(checking ? { checking: true } : {}),
           deadline: setTimeout(() => {
             this.cancel(call.callId);
             this.deps.changed();
           }, call.expiresAt - Date.now()),
         };
         this.entries.set(call.callId, entry);
+        if (checking) void this.checkSite(entry);
       }
       if (entry.permitted !== undefined) void this.run(entry);
     }
@@ -117,7 +132,30 @@ export class WorkController {
     if (!entry || entry.pending === null) return;
     const kind = entry.pending;
     const blanket =
-      choice === "allow-rest" && kind !== "delete" && kind !== "network" && kind !== "read";
+      choice === "allow-rest" &&
+      kind !== "delete" &&
+      kind !== "network" &&
+      kind !== "read" &&
+      kind !== "site";
+    if (kind === "site" && (choice === "allow-site" || choice === "allow-always")) {
+      // Once remembered, other calls of this chat waiting on a site ask again;
+      // the ones for the same site now find it allowed.
+      const scope = choice === "allow-always" ? "always" : "chat";
+      void (this.deps.allowSite?.(entry.call, scope) ?? Promise.resolve()).then(() => {
+        for (const other of this.entries.values()) {
+          if (
+            other === entry ||
+            other.pending !== "site" ||
+            other.call.conversationId !== entry.call.conversationId
+          )
+            continue;
+          other.pending = null;
+          other.checking = true;
+          void this.checkSite(other);
+        }
+        this.deps.changed();
+      }, this.deps.error);
+    }
     if (blanket) {
       const grants = this.grants.get(entry.call.conversationId) ?? new Set<PendingKind>();
       grants.add(kind);
@@ -135,6 +173,19 @@ export class WorkController {
         void this.run(candidate);
       }
     }
+    this.deps.changed();
+  }
+
+  private async checkSite(entry: Entry) {
+    const allowed = await (this.deps.siteAllowed?.(entry.call) ?? Promise.resolve(false)).catch(
+      () => false,
+    );
+    if (!this.live(entry) || !entry.checking) return;
+    entry.checking = false;
+    if (allowed) {
+      entry.permitted = true;
+      void this.run(entry);
+    } else entry.pending = "site";
     this.deps.changed();
   }
 

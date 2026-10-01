@@ -98,6 +98,8 @@ export interface DetailPanelApi {
   /** Shows the panel, on a new tab when it has none. */
   show: () => void;
   newTab: () => void;
+  /** Adds the tab last if it is new, without selecting or showing anything. */
+  append: (request: DetailPanelRequest) => void;
   /** Puts `request` where tab `id` is, selected, as a new tab becomes a page. */
   replaceTab: (id: string, request: DetailPanelRequest) => void;
   /** Moves the tab to `index` in the strip, clamped to its ends. */
@@ -357,6 +359,12 @@ export function DetailPanelProvider({
           return { ...current, activeId, visible: true };
         }),
       newTab: () => open(newTabRequest(newTab), true),
+      append: (request) =>
+        setState((current) =>
+          current.tabs.some((tab) => tab.id === request.id)
+            ? current
+            : { ...current, tabs: [...current.tabs, tabOf(request)] },
+        ),
       replaceTab: (id, request) => {
         before({ type: "open", id: request.id });
         setState((current) => {

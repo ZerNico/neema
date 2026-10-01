@@ -8,10 +8,14 @@ import {
   Folder01Icon,
   FolderSearchIcon,
   FolderTransferIcon,
+  Globe02Icon,
+  Layers01Icon,
   NoInternetIcon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
+  Timer01Icon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
@@ -47,6 +51,11 @@ const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
+  browser_tabs: Layers01Icon,
+  browser_open: Globe02Icon,
+  browser_navigate: Globe02Icon,
+  browser_snapshot: ViewIcon,
+  browser_wait_for: Timer01Icon,
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
@@ -66,6 +75,14 @@ const argText = (activity: DesktopToolActivity) => {
       return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
     case "delete_local_file":
       return deletePathsOf(args).join("\n");
+    case "browser_open":
+    case "browser_navigate":
+      return text(args.url) || text(args.action);
+    case "browser_snapshot":
+    case "browser_wait_for":
+      return text(args.tab);
+    case "browser_tabs":
+      return "";
     default:
       return text(args.path);
   }
@@ -123,6 +140,16 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Running ${what}` : "Running a program";
     case "request_network_access":
       return what ? `Requesting network access to ${what}` : "Requesting network access";
+    case "browser_tabs":
+      return "Looking at the browser tabs";
+    case "browser_open":
+      return what ? `Opening ${what}` : "Opening a page";
+    case "browser_navigate":
+      return what ? `Going to ${what}` : "Navigating a tab";
+    case "browser_snapshot":
+      return "Reading the page";
+    case "browser_wait_for":
+      return "Waiting for the page";
   }
 };
 
@@ -182,6 +209,12 @@ const approvalTitle = (
 ) => {
   switch (kind) {
     case "read":
+      if (activity.name.startsWith("browser_"))
+        return activity.name === "browser_tabs"
+          ? "Look at the browser tabs"
+          : activity.name === "browser_navigate"
+            ? "Move this browser tab"
+            : "Read this page";
       return activity.name === "list_folder"
         ? "List this folder"
         : activity.name === "find_files" || activity.name === "search_files"
@@ -191,6 +224,8 @@ const approvalTitle = (
       return "Run a program on this computer";
     case "network":
       return "Allow network access on this computer";
+    case "site":
+      return "Open this site in the browser";
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
@@ -240,6 +275,32 @@ function DeletePathList({
         ))}
       </div>
     </div>
+  );
+}
+
+/** A site is allowed once, for this chat, or for this desktop, never by a blanket grant. */
+function SiteChoices({ decide }: { decide: (choice: ApprovalChoice) => void }) {
+  return (
+    <>
+      <p className="text-muted-foreground text-xs">
+        “Always” applies to every Work chat on this desktop. You can remove it in Settings ›
+        Devices.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => decide("allow")}>
+          Allow once
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => decide("allow-site")}>
+          Allow in this chat
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => decide("allow-always")}>
+          Always allow
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => decide("deny")}>
+          Deny
+        </Button>
+      </div>
+    </>
   );
 }
 
@@ -295,20 +356,26 @@ function ApprovalCard({
             Applies to all Work chats on this desktop. You can remove access in Settings › Devices.
           </p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => approval.decide("allow")}>
-            {approval.kind === "network" ? "Allow for this desktop" : "Allow"}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
-            Deny
-          </Button>
-          {/* Deletes and network destinations are always asked about individually. */}
-          {approval.kind !== "delete" && approval.kind !== "network" && approval.kind !== "read" ? (
-            <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
-              {blanketLabel(approval.kind)}
+        {approval.kind === "site" ? (
+          <SiteChoices decide={approval.decide} />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => approval.decide("allow")}>
+              {approval.kind === "network" ? "Allow for this desktop" : "Allow"}
             </Button>
-          ) : null}
-        </div>
+            <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
+              Deny
+            </Button>
+            {/* Deletes and network destinations are always asked about individually. */}
+            {approval.kind !== "delete" &&
+            approval.kind !== "network" &&
+            approval.kind !== "read" ? (
+              <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
+                {blanketLabel(approval.kind)}
+              </Button>
+            ) : null}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

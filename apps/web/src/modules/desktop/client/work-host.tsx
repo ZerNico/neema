@@ -31,7 +31,10 @@ import {
   dispatchQueuedMessage,
   getWorkTurnReservation,
 } from "~/modules/chat/server/functions.ts";
-import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
+import { readDesktopBrowser } from "@chat/desktop-rpc";
+import { browserTabs } from "~/modules/browser/client/browser-store.ts";
+import { cancelBrowserCall, executeBrowserTool } from "~/modules/browser/client/execute-browser.ts";
+import { DesktopToolName, desktopFailure, isBrowserTool } from "../tool-schema.ts";
 import { type ApprovalChoice, type PendingKind } from "./approvals.ts";
 import { sendFieldsFor, useDesktop } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
@@ -130,10 +133,29 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       setFailedAfter(queryClient.getQueryState(["desktop-work", executorId])?.dataUpdatedAt ?? 0);
       void boundary?.reconcile();
     };
+    // Browser calls run in this page's own tabs; a shell without the agent
+    // surface never had the tools offered, so none should arrive.
+    const agentBrowser = () => {
+      const browser = readDesktopBrowser();
+      return browser?.agent ? { browser, agent: browser.agent } : null;
+    };
     return new WorkController({
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
-      execute: (call, remainingMs) =>
-        Schema.is(DesktopToolName)(call.name)
+      execute: (call, remainingMs) => {
+        if (isBrowserTool(call.name)) {
+          const embedded = agentBrowser();
+          return embedded
+            ? executeBrowserTool(
+                { ...call, name: call.name },
+                remainingMs,
+                embedded.browser,
+                embedded.agent,
+              )
+            : Promise.resolve(
+                desktopFailure("No browser here", "This desktop app cannot use a browser."),
+              );
+        }
+        return Schema.is(DesktopToolName)(call.name)
           ? Effect.runPromise(
               executeDesktopTool(client, call.conversationId, remainingMs, {
                 callId: call.callId,
@@ -141,7 +163,22 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
                 args: call.args,
               }),
             )
-          : Promise.resolve(desktopFailure("That did not run", "Unknown local tool.")),
+          : Promise.resolve(desktopFailure("That did not run", "Unknown local tool."));
+      },
+      siteAllowed: (call) => {
+        const agent = agentBrowser()?.agent;
+        const url = call.args.url;
+        return agent && typeof url === "string"
+          ? agent.siteAllowed(call.conversationId, url)
+          : Promise.resolve(false);
+      },
+      allowSite: (call, scope) => {
+        const agent = agentBrowser()?.agent;
+        const url = call.args.url;
+        return agent && typeof url === "string"
+          ? agent.allowSite(call.conversationId, url, scope)
+          : Promise.resolve();
+      },
       complete: async (call, token, result) => {
         const response = await submitDesktopToolResult({ data: { ...call, token, result } });
         setFailedAfter(null);
@@ -149,6 +186,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
         return response.accepted;
       },
       cancel: (callId) => {
+        cancelBrowserCall(callId);
         void Effect.runPromise(client.cancelCall({ callId })).catch(report);
       },
       changed: () => setRevision((current) => current + 1),
@@ -217,6 +255,10 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       void boundary?.reconcile();
       return;
     }
+    // A chat whose answer is running here keeps its pages fully alive.
+    browserTabs.setAttemptHolds(
+      new Set(work.data?.attempts.map((attempt) => attempt.conversationId) ?? []),
+    );
     if (host.controller && work.data)
       host.controller.reconcile({
         ...work.data,

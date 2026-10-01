@@ -27,6 +27,13 @@ export interface ExternalOperation extends ExternalOwner {
   readonly callId: string;
   readonly name: string;
   readonly args: Record<string, unknown>;
+  /**
+   * What the server decided about the call, apart from the model's args, which
+   * are persisted as the model sent them. `preauthorized`: the address came
+   * from the user's own text or earlier sources, so opening it asks nobody.
+   * `temporary`: the chat keeps nothing, so its pages browse in memory.
+   */
+  readonly meta?: { readonly preauthorized?: boolean; readonly temporary?: boolean } | undefined;
   readonly expiresAt: number;
   readonly claimed: boolean;
 }

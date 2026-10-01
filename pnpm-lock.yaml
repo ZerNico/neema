@@ -183,6 +183,9 @@ importers:
       ignore:
         specifier: 7.0.10
         version: 7.0.10
+      tldts:
+        specifier: 7.4.16
+        version: 7.4.16
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -7589,8 +7592,15 @@ packages:
   tldts-core@7.4.12:
     resolution: {integrity: sha512-nYNzS2WRf4QJmjzFFgAxLOBjyBxAGRbCy9PVBPaglcYyYajh40VBn+v5Ngr96ZMc7oM0+aCJdtQnNejvdBnXMQ==}
 
+  tldts-core@7.4.16:
+    resolution: {integrity: sha512-MDolfaSJtlSK5Y0A1xl3277ekubZwobpBjugknDizI9O5Rm60a1m8k4ICK+MRsCDzPygT81mp3BBf5RKDlFRfA==}
+
   tldts@7.4.12:
     resolution: {integrity: sha512-WylhSDKVeYnWXL3a+vKTaOxjnOeEGw938hImY8zoRWJjRRK/Jp1K+IihBzIONpUmW4e3WmXT6q5FW6vlESVZCA==}
+    hasBin: true
+
+  tldts@7.4.16:
+    resolution: {integrity: sha512-QwBER5KMR86IIjpIiO7H/Z3IMJPsZ1A6RKPAqzTTgOyUQUSt9FdnKcqhTaJmkY6HVrgouZHZR0ncK5QxvmnQeg==}
     hasBin: true
 
   tmp-promise@3.0.3:
@@ -15761,9 +15771,15 @@ snapshots:
 
   tldts-core@7.4.12: {}
 
+  tldts-core@7.4.16: {}
+
   tldts@7.4.12:
     dependencies:
       tldts-core: 7.4.12
+
+  tldts@7.4.16:
+    dependencies:
+      tldts-core: 7.4.16
 
   tmp-promise@3.0.3:
     dependencies:

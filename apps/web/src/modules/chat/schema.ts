@@ -31,6 +31,7 @@ export const desktopSubmissionFields = {
     ).check(Schema.isMaxLength(32)),
   ),
   desktopCommands: Schema.optionalKey(Schema.Boolean),
+  desktopBrowser: Schema.optionalKey(Schema.Boolean),
   fromDesktop: Schema.optionalKey(Schema.Boolean),
   desktopExecutorId: Schema.optionalKey(ResourceId),
   /**

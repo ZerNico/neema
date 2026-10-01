@@ -11,6 +11,7 @@ import {
   type DesktopSession,
 } from "~/modules/auth/client.ts";
 import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
+import { AllowedSitesSetting } from "~/modules/browser/ui/allowed-sites-setting.tsx";
 import { BrowserSearchSetting } from "~/modules/browser/ui/search-engine-setting.tsx";
 import { TicketCode } from "~/modules/auth/ui/ticket-code.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -255,6 +256,7 @@ export function DevicesPage() {
         )}
       </Section>
       {network ? <NetworkAccess network={network} /> : null}
+      <AllowedSitesSetting />
       <BrowserSearchSetting />
     </Page>
   );

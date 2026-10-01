@@ -260,8 +260,9 @@ skipped one on purpose.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
 - `docs/internals/browser.md`: the desktop app's embedded browser. Webview guests gated
-  by main, one profile per server, pages outside the routes laid over panel slots, and
-  the lifecycle that freezes and discards them.
+  by main, one profile per server, pages outside the routes laid over panel slots, the
+  lifecycle that freezes and discards them, and the model's browser tools (desktop-family
+  tools run by the page), site approvals and the navigation gate.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 

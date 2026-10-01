@@ -308,6 +308,85 @@ describe("app-owned Work execution", () => {
   });
 });
 
+const open = (id: string, url: unknown, meta?: ExternalOperation["meta"]): ExternalOperation => ({
+  ...call(id),
+  name: "browser_open",
+  args: url === undefined ? {} : { url },
+  ...(meta ? { meta } : {}),
+});
+
+describe("browser sites", () => {
+  it("opens a site the server vouched for without asking anyone", async () => {
+    const siteAllowed = vi.fn(async () => false);
+    const { controller, deps, completed } = setup({ siteAllowed });
+    controller.reconcile(snapshot(open("one", "https://a.test", { preauthorized: true })));
+    await completed;
+    expect(siteAllowed).not.toHaveBeenCalled();
+    expect(deps.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens an allowed site after checking, and asks about any other", async () => {
+    const checked = deferred<void>();
+    const siteAllowed = vi.fn(async (operation: ExternalOperation) => {
+      checked.resolve();
+      return operation.args.url === "https://allowed.test";
+    });
+    const { controller, deps, completed } = setup({ siteAllowed });
+    controller.reconcile(
+      snapshot(open("yes", "https://allowed.test"), open("no", "https://other.test")),
+    );
+    // Neither asks while the desktop is still answering.
+    expect(controller.pending("a").size).toBe(0);
+    await checked.promise;
+    await completed;
+    expect(deps.execute).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect([...controller.pending("a")]).toEqual([["no", "site"]]));
+  });
+
+  it("treats a navigation without an address as a read", async () => {
+    const siteAllowed = vi.fn(async () => false);
+    const { controller, completed } = setup({ siteAllowed });
+    controller.reconcile(snapshot({ ...open("back", undefined), name: "browser_navigate" }));
+    await completed;
+    expect(siteAllowed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["allow", null],
+    ["allow-site", "chat"],
+    ["allow-always", "always"],
+  ] as const)("%s runs the call and remembers it for %s", async (choice, scope) => {
+    let allowed = false;
+    const allowSite = vi.fn(async () => {
+      allowed = true;
+    });
+    const siteAllowed = vi.fn(async () => allowed);
+    const { controller, deps } = setup({ siteAllowed, allowSite });
+    controller.reconcile(snapshot(open("one", "https://a.test"), open("two", "https://a.test")));
+    await vi.waitFor(() => expect(controller.pending("a").size).toBe(2));
+    controller.decide("one", choice);
+    if (scope) {
+      expect(allowSite).toHaveBeenCalledWith(expect.objectContaining({ callId: "one" }), scope);
+      // The other call for the same site now finds it allowed and runs too.
+      await vi.waitFor(() => expect(deps.execute).toHaveBeenCalledTimes(2));
+      expect(controller.pending("a").size).toBe(0);
+    } else {
+      await vi.waitFor(() => expect(deps.execute).toHaveBeenCalledTimes(1));
+      expect(allowSite).not.toHaveBeenCalled();
+      expect([...controller.pending("a")]).toEqual([["two", "site"]]);
+    }
+  });
+
+  it("never lets allow-rest cover a site", async () => {
+    const { controller, deps } = setup({ siteAllowed: async () => false });
+    controller.reconcile(snapshot(open("one", "https://a.test"), open("two", "https://b.test")));
+    await vi.waitFor(() => expect(controller.pending("a").size).toBe(2));
+    controller.decide("one", "allow-rest");
+    await vi.waitFor(() => expect(deps.execute).toHaveBeenCalledTimes(1));
+    expect([...controller.pending("a")]).toEqual([["two", "site"]]);
+  });
+});
+
 function deferred<A>() {
   let resolve!: (value: A | PromiseLike<A>) => void;
   const promise = new Promise<A>((done) => {

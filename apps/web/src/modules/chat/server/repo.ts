@@ -133,6 +133,7 @@ export interface GenerationConfig {
   readonly desktopFolders?: ReadonlyArray<string> | null;
   /** Whether that machine could sandbox a command at the time. */
   readonly desktopCommands?: boolean;
+  readonly desktopBrowser?: boolean;
   /** The machine the attempt was sent from; null predates machine stamping. */
   readonly desktopMachineId?: string | null;
   readonly desktopMachineName?: string | null;
@@ -574,6 +575,7 @@ const toConfig = (
   planEnabled: row.planEnabled,
   desktopFolders: row.desktopFolders,
   desktopCommands: row.desktopCommands,
+  desktopBrowser: row.desktopBrowser,
   desktopMachineId: row.desktopMachineId,
   desktopMachineName: row.desktopMachineName,
   workspaceFiles: row.workspaceFiles,
@@ -689,6 +691,7 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       reasoningEffort: config.reasoningEffort,
       desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
       desktopCommands: config.desktopCommands ?? false,
+      desktopBrowser: config.desktopBrowser ?? false,
       desktopMachineId: config.desktopMachineId ?? null,
       desktopMachineName: config.desktopMachineName ?? null,
       workspaceFiles: [...(config.workspaceFiles ?? [])],

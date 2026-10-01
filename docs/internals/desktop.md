@@ -503,8 +503,10 @@ once per call, and a call may name several paths so a cleanup is one
 confirmation rather than one per file. An allowed command can also delete
 files; this is not a deletion safeguard. Conversation-scoped
 blanket edit grants never cover commands or deletes, and manual reads have no
-blanket grant. These decisions outlive route changes but not the authenticated
-execution host. Approval cards remain actionable while generation is streaming,
+blanket grant. Opening a site in the embedded browser is its own "site" kind,
+decided per registrable domain and never covered by a blanket grant; see
+[the embedded browser](browser.md). These decisions outlive route changes but not
+the authenticated execution host. Approval cards remain actionable while generation is streaming,
 because the handler is waiting rather than finished.
 
 ## Results, search and exact edits

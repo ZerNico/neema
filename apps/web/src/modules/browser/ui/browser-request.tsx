@@ -16,7 +16,7 @@ export const BROWSER_TAB_PREFIX = "browser:";
  * and it loads again when shown.
  */
 export function browserTabRequest(
-  tab: { id: string; url: string; title: string; favicon?: string | null },
+  tab: { id: string; url: string; title: string; label?: string; favicon?: string | null },
   restorable: boolean,
   busy = false,
 ): DetailPanelRequest {
@@ -27,7 +27,7 @@ export function browserTabRequest(
     ...(tab.favicon ? { iconSrc: tab.favicon } : {}),
     busy,
     restorable,
-    data: { url: tab.url },
+    data: tab.label ? { url: tab.url, label: tab.label } : { url: tab.url },
     fill: true,
     actions: <BrowserChrome id={tab.id} />,
     body: <BrowserSlot id={tab.id} />,

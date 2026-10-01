@@ -1,7 +1,14 @@
 import type { IpcRenderer } from "electron";
 import {
+  BROWSER_ALLOW_SITE,
+  BROWSER_ALLOWED_SITES,
+  BROWSER_DRIVE,
   BROWSER_FAVICON,
   BROWSER_LIFECYCLE,
+  BROWSER_REVOKE_SITE,
+  BROWSER_SITE_ALLOWED,
+  BROWSER_SNAPSHOT,
+  BROWSER_WAIT_FOR,
   BROWSER_OPEN_EXTERNAL,
   BROWSER_OPEN_TAB,
   type BrowserFavicon,
@@ -38,5 +45,22 @@ export const makeBrowserBridge = (
       };
     },
     openExternal: (url) => ipc.invoke(BROWSER_OPEN_EXTERNAL, url),
+    agent: {
+      snapshot: (webContentsId, options) =>
+        ipc.invoke(BROWSER_SNAPSHOT, { webContentsId, screenshot: options.screenshot }),
+      waitFor: (webContentsId, condition) =>
+        ipc.invoke(BROWSER_WAIT_FOR, { webContentsId, ...condition }),
+      drive: (webContentsId, driving) =>
+        ipc.invoke(BROWSER_DRIVE, {
+          webContentsId,
+          driving: driving && { conversationId: driving.conversationId, allow: [...driving.allow] },
+        }),
+      siteAllowed: (conversationId, url) =>
+        ipc.invoke(BROWSER_SITE_ALLOWED, { conversationId, url }),
+      allowSite: (conversationId, url, scope) =>
+        ipc.invoke(BROWSER_ALLOW_SITE, { conversationId, url, scope }),
+      allowedSites: () => ipc.invoke(BROWSER_ALLOWED_SITES),
+      revokeSite: (site) => ipc.invoke(BROWSER_REVOKE_SITE, site),
+    },
   };
 };

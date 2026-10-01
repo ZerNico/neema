@@ -16,6 +16,12 @@ export interface WebviewElement extends HTMLElement {
 
 export interface BrowserTab {
   readonly id: string;
+  /** How the model names the tab within its chat: "t1", "t2", … */
+  readonly label: string;
+  /** The model call that opened it, so a replayed call finds it instead of opening another. */
+  readonly openedBy: string | null;
+  /** When the model last asked for it to be shown; the panel follows newer requests. */
+  readonly revealAt: number;
   /** The chat the page belongs to, or `page:<path>` for a page that is not one. */
   readonly owner: string;
   readonly partition: string;
@@ -42,7 +48,11 @@ export interface Placement {
   readonly height: number;
 }
 
-type TabInput = Pick<BrowserTab, "owner" | "partition" | "url"> & { title?: string };
+type TabInput = Pick<BrowserTab, "owner" | "partition" | "url"> & {
+  title?: string;
+  label?: string;
+  openedBy?: string;
+};
 
 // Outside React on purpose: a page has to outlive the route, the chat and the
 // panel tab that showed it, so only closing its tab (or the app) ends it.
@@ -52,6 +62,8 @@ const webviews = new Map<string, WebviewElement>();
 const placements = new Map<string, Placement>();
 const shown = new Set<string>();
 const holds = new Map<string, number>();
+// Chats with an answer running on this desktop, from the Work snapshot.
+let attemptHolds: ReadonlySet<string> = new Set();
 const temporaryOwners = new Set<string>();
 
 const emit = () => {
@@ -63,8 +75,20 @@ const commit = (next: Map<string, BrowserTab>) => {
   emit();
 };
 
+// The next free "t<n>" among a chat's tabs; labels are never reused while a tab holds one.
+const nextLabel = (owner: string) => {
+  let highest = 0;
+  for (const tab of tabs.values())
+    if (tab.owner === owner) highest = Math.max(highest, Number(tab.label.slice(1)) || 0);
+  return `t${highest + 1}`;
+};
+
 const blank = (id: string, input: TabInput, live: boolean): BrowserTab => ({
   id,
+  label:
+    input.label && !labelTaken(input.owner, input.label) ? input.label : nextLabel(input.owner),
+  openedBy: input.openedBy ?? null,
+  revealAt: 0,
   owner: input.owner,
   partition: input.partition,
   url: input.url,
@@ -97,6 +121,9 @@ const apply = (id: string) => {
   element.style.visibility = visible ? "visible" : "hidden";
   element.style.pointerEvents = visible ? "auto" : "none";
 };
+
+const labelTaken = (owner: string, label: string) =>
+  [...tabs.values()].some((tab) => tab.owner === owner && tab.label === label);
 
 export const browserTabs = {
   subscribe(listener: () => void) {
@@ -175,7 +202,45 @@ export const browserTabs = {
       commit(new Map(tabs));
     };
   },
-  held: (): ReadonlySet<string> => new Set(holds.keys()),
+  held: (): ReadonlySet<string> => new Set([...holds.keys(), ...attemptHolds]),
+  /** Replaces the chats held because an answer of theirs is running here. */
+  setAttemptHolds(owners: ReadonlySet<string>) {
+    if (owners.size === attemptHolds.size && [...owners].every((owner) => attemptHolds.has(owner)))
+      return;
+    attemptHolds = owners;
+    commit(new Map(tabs));
+  },
+  /** Asks the panel to show the tab, which it does when its chat is on screen. */
+  reveal(id: string) {
+    const tab = tabs.get(id);
+    if (tab) commit(new Map(tabs).set(id, { ...tab, revealAt: Date.now() }));
+  },
+  /**
+   * Resolves once `ready` holds for the current tabs, or with false at the
+   * deadline or on abort. Waits on the store, never on a timer loop.
+   */
+  until(
+    ready: (all: ReadonlyMap<string, BrowserTab>) => boolean,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (ready(tabs)) return Promise.resolve(true);
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const finish = (value: boolean) => {
+        clearTimeout(timer);
+        unsubscribe();
+        signal?.removeEventListener("abort", abort);
+        resolve(value);
+      };
+      const abort = () => finish(false);
+      const unsubscribe = browserTabs.subscribe(() => {
+        if (ready(tabs)) finish(true);
+      });
+      const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  },
 
   /** Told by the chat view, so a new tab knows which profile and whether to keep it. */
   describe(owner: string, { temporary }: { temporary: boolean }) {
