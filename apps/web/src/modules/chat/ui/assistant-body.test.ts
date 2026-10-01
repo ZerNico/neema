@@ -146,6 +146,26 @@ describe("projectAssistantBody", () => {
     expect(parts.map((part) => part.kind)).toEqual(["web", "tool", "web", "text", "web", "text"]);
   });
 
+  it("drops tool loads, so loading between two web calls keeps them one row", () => {
+    const load: ToolActivity = {
+      family: "tool-load",
+      name: "load_tools",
+      callId: "load",
+      textOffset: 0,
+      turnIndex: 0,
+      callIndex: 1,
+      status: "complete",
+      loaded: ["presentation"],
+    };
+    const { parts } = projectAssistantBody({
+      content: "",
+      streaming: false,
+      tools: [web("a", 0), load, web("b", 0, 2)],
+      compactions: [],
+    });
+    expect(parts.map((part) => part.kind)).toEqual(["web"]);
+  });
+
   it("waits for the smoothed prefix, without clamping future anchors or moving cards", () => {
     const tools = [web("web", 5)];
     const before = projectAssistantBody({

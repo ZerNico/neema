@@ -520,6 +520,72 @@ describe("conversational agent authoring", () => {
     });
     return { ...seed, conversation };
   });
+
+  it.each([false, true])(
+    "offers drafting tools on request and keeps them for the chat (Hermes: %s)",
+    async (hermes) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const advertised = (input: GatewayInput) =>
+        typeof input.toolChoice === "object"
+          ? [...input.toolChoice.oneOf]
+          : Object.keys(input.toolkit?.tools ?? {});
+      const prompts: GatewayInput[] = [];
+      authoringScript = (input) => {
+        prompts.push(input);
+        // Unadvertised, yet called: the call runs and loads its family.
+        if (prompts.length === 1)
+          return authoringTool(input, "draft_agent", { changes: { name: "Helper" } }, hermes);
+        if (prompts.length === 3)
+          return authoringTool(input, "load_tools", { families: ["schedule-draft"] }, hermes);
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+          authoringFinish(),
+        );
+      };
+      const send = (content: string) =>
+        runtime.runPromise(
+          Effect.flatMap(ChatService, (service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversation: { kind: "existing", id: seed.conversation.id },
+              modelId: textModelId,
+              content,
+              searchEnabled: false,
+              researchEnabled: false,
+              attachmentIds: [],
+            }),
+          ),
+        );
+      try {
+        await collectDraftTurn((await send("Make me an agent.")).assistantMessageId);
+        expect(advertised(prompts[0]!)).toContain("load_tools");
+        expect(advertised(prompts[0]!)).not.toContain("draft_agent");
+        expect(Object.keys(prompts[0]!.toolkit!.tools)).toContain("draft_agent");
+        expect(JSON.stringify(prompts[0]!.prompt)).toContain("- agent-draft:");
+        expect(advertised(prompts[1]!)).toContain("draft_agent");
+        expect(advertised(prompts[1]!)).not.toContain("draft_schedule");
+
+        // A later turn keeps what this chat used, and load_tools adds more.
+        await collectDraftTurn((await send("Also schedule it.")).assistantMessageId);
+        expect(advertised(prompts[2]!)).toContain("draft_agent");
+        expect(advertised(prompts[2]!)).not.toContain("draft_schedule");
+        expect(advertised(prompts[3]!)).toContain("draft_schedule");
+        // The catalogue never changes as families load, so it stays cached.
+        const catalogue = (input: GatewayInput) =>
+          JSON.stringify(input.prompt).match(/More tools are available[^"]*/)?.[0];
+        expect(catalogue(prompts[3]!)).toBe(catalogue(prompts[0]!));
+
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, seed.conversation.id),
+        );
+        const load = detail.toolCalls.find((call) => call.toolName === "load_tools");
+        expect(load?.result).toEqual({ loaded: ["schedule-draft"], unavailable: [] });
+        expect(load?.status).toBe("complete");
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
   const reply = () =>
     Stream.make(
       AiResponse.makePart("text-delta", { id: "t", delta: "The draft is ready to review." }),

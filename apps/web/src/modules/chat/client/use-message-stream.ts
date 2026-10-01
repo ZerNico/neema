@@ -49,6 +49,7 @@ import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tool
 import { ToolFileEnvelope } from "../tool-file-schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
+import { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -64,6 +65,11 @@ export interface PlanToolActivity extends ToolActivityBase {
   family: "plan";
   /** The latest accepted list; absent until one lands or when the call failed. */
   steps?: ReadonlyArray<PlanStep>;
+}
+
+export interface ToolLoadActivity extends ToolActivityBase {
+  family: "tool-load";
+  loaded?: ReadonlyArray<LazyToolFamily>;
 }
 
 export interface KnowledgeToolActivity extends ToolActivityBase {
@@ -216,6 +222,7 @@ export type ToolActivity =
   | MemoryToolActivity
   | AskToolActivity
   | PlanToolActivity
+  | ToolLoadActivity
   | ResearchToolActivity
   | KnowledgeToolActivity
   | SkillToolActivity;
@@ -360,6 +367,7 @@ export function applyToolChunk(
     e.family !== "memory" &&
     e.family !== "ask" &&
     e.family !== "plan" &&
+    e.family !== "tool-load" &&
     e.family !== "research" &&
     e.family !== "knowledge" &&
     e.family !== "skill" &&
@@ -721,6 +729,32 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.phase === "start" ? "running" : questions ? "complete" : "error",
       ...(questions ? { questions } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  if (family === "tool-load") {
+    if (e.name !== "load_tools" || (e.phase !== "start" && e.phase !== "result")) return tools;
+    if (existing && e.phase === "start") return tools;
+    const loaded =
+      e.phase === "result"
+        ? Option.getOrNull(
+            Schema.decodeUnknownOption(Schema.Array(LazyToolFamily))(
+              (e as { loaded?: unknown }).loaded ?? null,
+            ),
+          )
+        : null;
+    const next: ToolLoadActivity = {
+      family: "tool-load",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : e.ok && loaded ? "complete" : "error",
+      ...(loaded ? { loaded } : {}),
     };
     return index === -1
       ? [...tools, next]

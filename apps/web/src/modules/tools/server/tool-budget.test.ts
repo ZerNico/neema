@@ -18,7 +18,9 @@ import {
   inspectSpreadsheetTool,
 } from "~/modules/spreadsheets/server/tools.ts";
 import { editWordFileTool, inspectWordFileTool } from "~/modules/word/server/tools.ts";
+import { LazyToolFamily } from "../tool-load-schema.ts";
 import { askUserTool } from "./ask-user.ts";
+import { isAdvertised, prepareToolLoad } from "./tool-load.ts";
 import { updatePlanTool } from "./plan-tool.ts";
 import { urlReaderTool } from "./url-reader.ts";
 import { webSearchTool } from "./web-search.ts";
@@ -65,9 +67,16 @@ describe("the tools a plain chat is offered", () => {
       saveMemoryTool,
       askUserTool,
       updatePlanTool,
+      ...toolsOf(
+        prepareToolLoad({ offered: LazyToolFamily.literals, unlocked: new Set() }).toolkit,
+      ),
     ];
-    // Today's measurement; loading Office and drafting tools on request
-    // brings what a plain chat advertises far below this.
-    expect(tokens(offered)).toBeLessThanOrEqual(26_000);
+    const advertised = offered.filter((tool) =>
+      isAdvertised(tool.name, LazyToolFamily.literals, new Set()),
+    );
+    // Office files and agent and schedule drafting load on request.
+    expect(tokens(advertised)).toBeLessThanOrEqual(4_000);
+    // Every family is still in the toolkit, callable before it is advertised.
+    expect(tokens(offered)).toBeGreaterThan(20_000);
   });
 });

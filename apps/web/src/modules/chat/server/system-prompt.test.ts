@@ -21,7 +21,11 @@ const memory = renderMemoryContext([
   { id: "m2", content: "Works as a data engineer.", origin: "model", editedAt: null },
 ])!.content;
 
+const office = ["presentation", "spreadsheet", "word"] as const;
+const allLazy = [...office, "agent-draft", "schedule-draft"] as const;
+
 const nothing: FixedPrefixInput = {
+  lazyFamilies: [],
   agentAuthoring: false,
   documents: false,
   knowledge: false,
@@ -39,6 +43,7 @@ const nothing: FixedPrefixInput = {
 const configurations: Record<string, FixedPrefixInput> = {
   "plain-chat": {
     ...nothing,
+    lazyFamilies: allLazy,
     agentAuthoring: true,
     documents: true,
     askUser: true,
@@ -47,6 +52,7 @@ const configurations: Record<string, FixedPrefixInput> = {
   },
   "project-agent": {
     ...nothing,
+    lazyFamilies: allLazy,
     agentAuthoring: true,
     documents: true,
     knowledge: true,
@@ -64,6 +70,7 @@ const configurations: Record<string, FixedPrefixInput> = {
   },
   "desktop-work": {
     ...nothing,
+    lazyFamilies: office,
     documents: true,
     askUser: true,
     web: { search: true, reader: true },
@@ -78,6 +85,7 @@ const configurations: Record<string, FixedPrefixInput> = {
   },
   research: {
     ...nothing,
+    lazyFamilies: office,
     documents: true,
     askUser: true,
     web: { search: true, reader: true },

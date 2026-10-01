@@ -7,6 +7,8 @@ import { KNOWLEDGE_SYSTEM_HINT } from "~/modules/knowledge/server/context.ts";
 import { fileReferencesSystemHint } from "../file-references.ts";
 import { RESEARCH_APP_POLICY } from "./research/tool.ts";
 import { webToolsSystemHint } from "./search-prompt.ts";
+import { toolLoadPolicy } from "~/modules/tools/server/tool-load.ts";
+import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 
 const ASK_USER_POLICY =
   "Use ask_user only for consequential ambiguity that context or a sensible default cannot resolve. Include the question text and call it alone: presenting questions ends this response, and answers arrive in a new user message. Never request secrets, routine permission to continue, or treat answers or skips as authorization for actions.";
@@ -16,6 +18,8 @@ const integrationsPolicy = (services: ReadonlyArray<string>) =>
 
 /** What one attempt is offered, as the prompt needs to describe it. */
 export interface FixedPrefixInput {
+  /** Families offered by name, loadable with load_tools. */
+  readonly lazyFamilies: ReadonlyArray<LazyToolFamily>;
   readonly agentAuthoring: boolean;
   readonly documents: boolean;
   readonly knowledge: boolean;
@@ -44,6 +48,7 @@ const system = (content: string): Prompt.MessageEncoded => ({ role: "system", co
  */
 export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded[] => [
   system(fileReferencesSystemHint),
+  ...(input.lazyFamilies.length ? [system(toolLoadPolicy(input.lazyFamilies))] : []),
   ...(input.agentAuthoring ? [system(AGENT_APP_POLICY)] : []),
   ...(input.documents ? [system(DOCUMENT_APP_POLICY)] : []),
   ...(input.knowledge ? [system(KNOWLEDGE_SYSTEM_HINT)] : []),

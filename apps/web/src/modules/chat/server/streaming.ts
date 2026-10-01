@@ -53,6 +53,7 @@ import {
   isOfficeFamily,
   OFFICE_FAMILIES,
   officeFamilyOfEdit,
+  officeFamilyOfFile,
   officeFamilyOfTool,
 } from "~/modules/office/families.ts";
 import {
@@ -187,6 +188,12 @@ import {
 } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { buildFixedPrefix } from "./system-prompt.ts";
+import {
+  isAdvertised,
+  lazyFamilyOfTool,
+  prepareToolLoad,
+} from "~/modules/tools/server/tool-load.ts";
+import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 
 import { runtimeContextMessage } from "./runtime-context.ts";
 import { buildSearchReminder, MAX_PRIOR_SOURCES, systemReminderMessage } from "./search-prompt.ts";
@@ -1242,7 +1249,46 @@ export class StreamEngine extends Context.Service<
                   emitCompaction: pushCompactionChunk,
                 })
               : null;
+          // Offered by name only until loaded; see `tool-load.ts`. The set grows
+          // through the answer and never shrinks within it.
+          const offeredLazy = LazyToolFamily.literals.filter((family) =>
+            family === "agent-draft"
+              ? permissions.agentsCreate
+              : family === "schedule-draft"
+                ? permissions.schedules
+                : offeredOffice.has(family),
+          );
+          const unlockedFamilies = new Set<LazyToolFamily>();
+          const unlockTool = (name: string) => {
+            const family = lazyFamilyOfTool(name);
+            if (family && offeredLazy.includes(family)) unlockedFamilies.add(family);
+          };
+          const toolLoad = offeredLazy.length
+            ? prepareToolLoad({ offered: offeredLazy, unlocked: unlockedFamilies })
+            : undefined;
+          // A stored call that shows a family was in use: an explicit load, a
+          // call to one of its tools, or the authoring skill that drives it.
+          const unlockByCall = (
+            into: Set<LazyToolFamily>,
+            call: { toolName: string; result: unknown },
+          ) => {
+            const add = (name: string) => {
+              const family = lazyFamilyOfTool(name);
+              if (family && offeredLazy.includes(family)) into.add(family);
+            };
+            if (call.toolName === "load_tools") {
+              const loaded = Schema.decodeUnknownOption(LoadToolsResult)(call.result);
+              if (Option.isSome(loaded))
+                for (const family of loaded.value.loaded)
+                  if (offeredLazy.includes(family)) into.add(family);
+            } else if (call.toolName === "load_skill") {
+              const skillId = (call.result as { skillId?: unknown } | null)?.skillId;
+              if (skillId === "builtin:agent-authoring") add("draft_agent");
+              if (skillId === "builtin:schedule-authoring") add("draft_schedule");
+            } else add(call.toolName);
+          };
           const commonGroups = [
+            ...(toolLoad ? [toolLoad] : []),
             ...(permissions.agentsCreate ? [authoring.group] : []),
             ...(permissions.schedules ? [scheduleAuthoring.group] : []),
             ...(permissions.documents ? [documents.group] : []),
@@ -1266,7 +1312,22 @@ export class StreamEngine extends Context.Service<
             ...(knowledgeTools ? [knowledgeTools.group] : []),
             ...(memoryTools ? [memoryTools.group] : []),
           ]);
-          const toolSchemaTokens = estimateToolSchemaTokens(budgetToolkit);
+          // Only advertised schemas cost input. Before the retained history is
+          // known, reserve for every family anything in this chat has used.
+          const schemaTokensWith = (unlocked: ReadonlySet<LazyToolFamily>) =>
+            budgetToolkit &&
+            estimateToolSchemaTokens({
+              tools: Object.fromEntries(
+                Object.entries(budgetToolkit.tools).filter(([name]) =>
+                  isAdvertised(name, offeredLazy, unlocked),
+                ),
+              ),
+            });
+          const everUnlocked = new Set<LazyToolFamily>();
+          for (const call of priorToolCalls)
+            if (call.researchRunId === null) unlockByCall(everUnlocked, call);
+          for (const file of kept) if (isOfficeFamily(file.owner)) everUnlocked.add(file.owner);
+          const toolSchemaTokens = schemaTokensWith(everUnlocked) ?? 0;
           let retrievalEnabled = config.knowledgeMode === "retrieval";
 
           // Select once, before resolving attachments: the checkpoint replaces
@@ -1494,6 +1555,7 @@ export class StreamEngine extends Context.Service<
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
           const fixedPrefix = buildFixedPrefix({
+            lazyFamilies: offeredLazy,
             agentAuthoring: permissions.agentsCreate,
             documents: permissions.documents,
             knowledge: !!knowledgeSession,
@@ -1547,6 +1609,30 @@ export class StreamEngine extends Context.Service<
             },
           );
           syncEarlierSkills(compaction.startIndex);
+
+          // What retained history already worked with stays loaded: an explicit
+          // load, a lazy tool it called, an authoring skill it loaded, a kept
+          // draft or an attached Office file. Decided once, so a later hard
+          // truncation in this answer never takes a family away mid-answer.
+          if (offeredLazy.length) {
+            const retained = new Set(historySuffix.slice(compaction.startIndex).map((m) => m.id));
+            for (const call of priorToolCalls)
+              if (
+                call.researchRunId === null &&
+                (retained.has(call.messageId) || call.messageId === input.messageId)
+              )
+                unlockByCall(unlockedFamilies, call);
+            for (const file of kept)
+              if (isOfficeFamily(file.owner)) unlockTool(OFFICE_FAMILIES[file.owner].edit);
+            const files = yield* promptDeps.attachments.listWithBlobsForMessages([
+              ...retained,
+              ...ownSteers.map((steer) => steer.id),
+            ]);
+            for (const file of files) {
+              const family = officeFamilyOfFile({ name: file.fileName, mediaType: file.mediaType });
+              if (family) unlockTool(OFFICE_FAMILIES[family].edit);
+            }
+          }
 
           // Selected knowledge, decided against the exact rendered prompt: the
           // turn-time mode is a ceiling ("context" may still downgrade to
@@ -1857,7 +1943,8 @@ export class StreamEngine extends Context.Service<
               firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
                 ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
                 : calibrationFactor(priorUsage);
-            const schemaReserve = round < roundLimit ? toolSchemaTokens : 0;
+            const schemaReserve =
+              round < roundLimit ? (schemaTokensWith(unlockedFamilies) ?? 0) : 0;
             while (true) {
               const trailing = reminderPrompt(round >= roundLimit);
               const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
@@ -2011,6 +2098,13 @@ export class StreamEngine extends Context.Service<
               // including those an interrupted attempt already ran.
               const activeToolkit =
                 memorySpent || memoryTools?.attempted() ? nonMemoryToolkit : toolkit;
+              // Unloaded families stay callable but unadvertised: a call to one
+              // loads it (see the tool-call observer) instead of failing.
+              const advertised = activeToolkit
+                ? Object.keys(activeToolkit.tools).filter((name) =>
+                    isAdvertised(name, offeredLazy, unlockedFamilies),
+                  )
+                : [];
               modelCallOpen = true;
               return gateway
                 .streamChat({
@@ -2022,7 +2116,13 @@ export class StreamEngine extends Context.Service<
                   // never fed back into the continuation transcript.
                   prompt: requestPrompt(),
                   ...(activeToolkit && toolRoundsLeft
-                    ? { toolkit: activeToolkit, toolChoice: "auto" as const }
+                    ? {
+                        toolkit: activeToolkit,
+                        toolChoice:
+                          advertised.length < Object.keys(activeToolkit.tools).length
+                            ? { oneOf: advertised }
+                            : ("auto" as const),
+                      }
                     : {}),
                 })
                 .pipe(
@@ -2121,40 +2221,50 @@ export class StreamEngine extends Context.Service<
                         }
                         case "tool-call": {
                           const args = part.params as Record<string, unknown>;
-                          const family = Schema.is(AgentDraftToolName)(part.name)
-                            ? "agent-draft"
-                            : Schema.is(ScheduleDraftToolName)(part.name)
-                              ? "schedule-draft"
-                              : Schema.is(DocumentToolName)(part.name)
-                                ? "document"
-                                : Schema.is(ProjectFileToolName)(part.name)
-                                  ? "project-file"
-                                  : Schema.is(DesktopToolName)(part.name)
-                                    ? "desktop"
-                                    : part.name === "save_memory"
-                                      ? "memory"
-                                      : part.name === "ask_user"
-                                        ? "ask"
-                                        : part.name === "update_plan"
-                                          ? "plan"
-                                          : part.name === "publish_file" && publishFileTool
-                                            ? "tool-file"
-                                            : officeFamilyOf(part.name)
-                                              ? officeFamilyOf(part.name)!.family
-                                              : Schema.is(SkillToolName)(part.name)
-                                                ? "skill"
-                                                : Schema.is(KnowledgeToolName)(part.name)
-                                                  ? "knowledge"
-                                                  : part.name === "deep_research"
-                                                    ? "research"
-                                                    : part.name === "web_search" ||
-                                                        part.name === "read_url"
-                                                      ? "web"
-                                                      : customToolNames.has(part.name)
-                                                        ? "custom"
-                                                        : integrationTools?.names.has(part.name)
-                                                          ? "integration"
-                                                          : null;
+                          unlockTool(part.name);
+                          if (part.name === "load_skill") {
+                            if (args.skillId === "builtin:agent-authoring")
+                              unlockTool("draft_agent");
+                            if (args.skillId === "builtin:schedule-authoring")
+                              unlockTool("draft_schedule");
+                          }
+                          const family =
+                            part.name === "load_tools" && toolLoad
+                              ? "tool-load"
+                              : Schema.is(AgentDraftToolName)(part.name)
+                                ? "agent-draft"
+                                : Schema.is(ScheduleDraftToolName)(part.name)
+                                  ? "schedule-draft"
+                                  : Schema.is(DocumentToolName)(part.name)
+                                    ? "document"
+                                    : Schema.is(ProjectFileToolName)(part.name)
+                                      ? "project-file"
+                                      : Schema.is(DesktopToolName)(part.name)
+                                        ? "desktop"
+                                        : part.name === "save_memory"
+                                          ? "memory"
+                                          : part.name === "ask_user"
+                                            ? "ask"
+                                            : part.name === "update_plan"
+                                              ? "plan"
+                                              : part.name === "publish_file" && publishFileTool
+                                                ? "tool-file"
+                                                : officeFamilyOf(part.name)
+                                                  ? officeFamilyOf(part.name)!.family
+                                                  : Schema.is(SkillToolName)(part.name)
+                                                    ? "skill"
+                                                    : Schema.is(KnowledgeToolName)(part.name)
+                                                      ? "knowledge"
+                                                      : part.name === "deep_research"
+                                                        ? "research"
+                                                        : part.name === "web_search" ||
+                                                            part.name === "read_url"
+                                                          ? "web"
+                                                          : customToolNames.has(part.name)
+                                                            ? "custom"
+                                                            : integrationTools?.names.has(part.name)
+                                                              ? "integration"
+                                                              : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -2228,6 +2338,19 @@ export class StreamEngine extends Context.Service<
                               phase: "start",
                               callId: rowId,
                               name: "publish_file",
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "tool-load") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: "load_tools",
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -2880,6 +3003,36 @@ export class StreamEngine extends Context.Service<
                               callId: rowId,
                               name: "publish_file",
                               ...result,
+                            });
+                            return;
+                          }
+                          if (part.name === "load_tools") {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(LoadToolsResult)(
+                              part.result,
+                            );
+                            const ok = !part.isFailure && Option.isSome(decoded);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: ok ? json(decoded.value) : null,
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : {
+                                    error: {
+                                      code: "ToolLoadFailed",
+                                      message: "The tools could not be loaded.",
+                                    },
+                                  }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "tool-load",
+                              phase: "result",
+                              callId: rowId,
+                              name: "load_tools",
+                              ok,
+                              ...(ok ? { loaded: decoded.value.loaded } : {}),
                             });
                             return;
                           }

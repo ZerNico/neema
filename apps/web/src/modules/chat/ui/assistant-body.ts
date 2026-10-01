@@ -125,6 +125,9 @@ export function projectAssistantBody({
       })
       .map((activity): PositionedActivity => ({ kind: "file", activity })),
     ...tools
+      // Loading tools shows nothing; left in, it would split a run of calls
+      // that otherwise group into one row.
+      .filter((activity) => activity.family !== "tool-load")
       .filter(
         (activity) =>
           !(

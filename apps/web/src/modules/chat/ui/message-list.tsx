@@ -760,8 +760,14 @@ const AssistantBody = memo(function AssistantBody({
       );
     }
     // Direct context is shown on the question that added the collection, not
-    // as an activity on the answer; its citations still resolve.
-    if (part.activity.family === "knowledge" || part.activity.family === "skill") return null;
+    // as an activity on the answer; its citations still resolve. Tool loads
+    // never reach here (`assistant-body.ts` drops them).
+    if (
+      part.activity.family === "knowledge" ||
+      part.activity.family === "skill" ||
+      part.activity.family === "tool-load"
+    )
+      return null;
     if (part.activity.family === "plan")
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "agent-draft")

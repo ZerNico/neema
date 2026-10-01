@@ -36,6 +36,23 @@ the whole input again on every turn.
   usage has no `prompt_tokens_details`, so the ledger shows no cached tokens even when the
   cache hits.
 
+## Lazy tool families
+
+- Tool schemas are part of the prefix and are paid on every uncached request. Families that
+  are large or rarely needed (the Office editors, agent and schedule drafting) are offered by
+  name only: a stable system section lists every offered family, and `load_tools` loads one.
+  `tool-load.ts` is the registry.
+- The toolkit always holds every offered tool; a request advertises a subset through
+  `toolChoice: { oneOf }`. A call to an unadvertised tool still runs and loads its family,
+  rather than failing the generation. For the Hermes polyfill, the gateway passes the
+  toolkit's names (`HermesCallableTools`) so such a call parses as a call, not text.
+- What is loaded is derived from rows, never stored: an explicit load, a call to the family's
+  tools, the authoring skill that drives it, a kept draft or an attached Office file, within
+  retained history and the current answer. It is decided once per answer and only grows
+  during it. Compaction can drop the rows that loaded a family; it is offered again then.
+- Each load changes the advertised tools, so it costs one cache miss per family per chat.
+  The catalogue itself never changes as families load.
+
 ## What still breaks the cache, deliberately
 
 - The composer's search and research toggles change the tool list, and so the whole

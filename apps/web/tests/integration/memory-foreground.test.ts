@@ -244,9 +244,9 @@ const FakeGateway = Layer.succeed(AiGateway, {
     Stream.suspend(() => {
       gatewayState.calls.push({
         prompt: JSON.stringify(input.prompt),
-        // Draft tools are always advertised now, and the bundled authoring
-        // skills always appear in the ambient catalogue; these suites assert
-        // the memory and question toolkit, so filter both constant families out.
+        // Draft tools and load_tools are always in the toolkit, and the bundled
+        // authoring skills always appear in the ambient catalogue; these suites
+        // assert the memory and question toolkit, so filter those constants out.
         tools: Object.keys(input.toolkit?.tools ?? {}).filter(
           (name) =>
             !name.endsWith("agent_draft") &&
@@ -255,6 +255,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
             name !== "draft_schedule" &&
             name !== "list_agent_options" &&
             name !== "load_skill" &&
+            name !== "load_tools" &&
             name !== "read_skill_file",
         ),
       });

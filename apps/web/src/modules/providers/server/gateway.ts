@@ -25,7 +25,7 @@ import {
   type ReasoningEffort,
   type ReasoningEffortFormat,
 } from "../model-config.ts";
-import { withHermesTools } from "./hermes-tools.ts";
+import { HermesCallableTools, withHermesTools } from "./hermes-tools.ts";
 import { ProviderRepo } from "./repo.ts";
 import { extractThinkTags } from "./think-extractor.ts";
 
@@ -171,6 +171,13 @@ export type ChatStreamPart = Response.AnyPart;
  * explicit points can cache everything up to it. Inert everywhere else: the
  * adapter reads only its own `openrouter` options.
  */
+/** Which tools a chat turn advertises; see `streamChat`. */
+export type ChatToolChoice =
+  | "auto"
+  | "none"
+  | "required"
+  | { readonly mode?: "auto" | "required"; readonly oneOf: ReadonlyArray<string> };
+
 export const cacheAnchor = <M extends Prompt.MessageEncoded>(message: M): M => ({
   ...message,
   options: { ...message.options, cache: { anchor: true } },
@@ -356,7 +363,9 @@ export class AiGateway extends Context.Service<
      * Stream one model turn for a stored model id. When a toolkit is passed,
      * the library resolves tool calls (runs handlers) within the turn and
      * emits tool-call/tool-result parts; the caller drives the multi-turn
-     * loop by feeding the parts back in as prompt history.
+     * loop by feeding the parts back in as prompt history. A `oneOf` choice
+     * advertises only those tools; the toolkit still runs a call to any of its
+     * tools, so a deferred tool works before its schema is shown.
      */
     streamChat(input: {
       imageOutput?: boolean;
@@ -364,7 +373,7 @@ export class AiGateway extends Context.Service<
       modelId: string;
       prompt: Prompt.Prompt;
       toolkit?: Toolkit.WithHandler<any>;
-      toolChoice?: "auto" | "none" | "required";
+      toolChoice?: ChatToolChoice;
       maxOutputTokens?: number;
     }): Stream.Stream<
       ChatStreamPart,
@@ -600,7 +609,7 @@ export class AiGateway extends Context.Service<
         modelId: string;
         prompt: Prompt.Prompt;
         toolkit?: Toolkit.WithHandler<any>;
-        toolChoice?: "auto" | "none" | "required";
+        toolChoice?: ChatToolChoice;
         maxOutputTokens?: number;
         imageOutput?: boolean;
         reasoningEffort?: ReasoningEffort | null;
@@ -641,6 +650,10 @@ export class AiGateway extends Context.Service<
             // (R1 distills, QwQ, local models) still feed the reasoning track.
             const provided = (imageOutput ? parts : extractThinkTags(parts)).pipe(
               Stream.provide(modelLayer),
+              Stream.provideService(
+                HermesCallableTools,
+                new Set(input.toolkit ? Object.keys(input.toolkit.tools) : []),
+              ),
               // Some OpenAI-compatible providers report a rejected request as
               // an SSE error value rather than failing the stream channel.
               Stream.mapEffect((part) =>

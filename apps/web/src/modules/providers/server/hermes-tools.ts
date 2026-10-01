@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Schema, Stream } from "effect";
 import {
   type AiError,
   IdGenerator,
@@ -164,11 +164,22 @@ const textDelta = (out: Array<Part>, text: string, id: string, metadata: Metadat
  * string `name`, or names a tool that was not offered is re-emitted verbatim
  * as text: the polyfill never invents a call.
  */
+/**
+ * Tool names the toolkit can run beyond those advertised this request. A
+ * deferred tool is callable before its schema is shown, so its call must parse
+ * as a call, not leak into the answer as `<tool_call>` text.
+ */
+export const HermesCallableTools = Context.Reference<ReadonlySet<string>>(
+  "providers/HermesCallableTools",
+  { defaultValue: () => new Set() },
+);
+
 const createHermesParser = (input: {
   readonly tools: ReadonlyArray<Tool.Any>;
+  readonly callable?: ReadonlySet<string>;
   readonly nextId: Effect.Effect<string>;
 }) => {
-  const known = new Set(input.tools.map((tool) => tool.name));
+  const known = new Set([...input.tools.map((tool) => tool.name), ...(input.callable ?? [])]);
   let pending = "";
   let inCall = false;
   let inFence = false;
@@ -275,7 +286,11 @@ const createHermesParser = (input: {
  */
 export const hermesToolCalls = <E, R>(
   source: Stream.Stream<Part, E, R>,
-  input: { readonly tools: ReadonlyArray<Tool.Any>; readonly nextId: Effect.Effect<string> },
+  input: {
+    readonly tools: ReadonlyArray<Tool.Any>;
+    readonly callable?: ReadonlySet<string>;
+    readonly nextId: Effect.Effect<string>;
+  },
 ): Stream.Stream<Part, E, R> => {
   const parser = createHermesParser(input);
   let textId = "hermes-text";
@@ -389,11 +404,14 @@ const hermesLayer = Layer.effect(
     ): Stream.Stream<Part, AiError.AiError, IdGenerator.IdGenerator> =>
       needsHermesTools(options)
         ? Stream.unwrap(
-            Effect.map(IdGenerator.IdGenerator, (ids) =>
-              hermesToolCalls(inner.streamText({ prompt: rewriteHermesPrompt(options) }), {
-                tools: options.tools,
-                nextId: ids.generateId(),
-              }),
+            Effect.map(
+              Effect.all([IdGenerator.IdGenerator, HermesCallableTools]),
+              ([ids, callable]) =>
+                hermesToolCalls(inner.streamText({ prompt: rewriteHermesPrompt(options) }), {
+                  tools: options.tools,
+                  callable,
+                  nextId: ids.generateId(),
+                }),
             ),
           )
         : inner.streamText({ prompt: options.prompt });

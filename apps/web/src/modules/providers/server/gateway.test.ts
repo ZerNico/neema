@@ -1385,3 +1385,90 @@ describe("terminal provider responses through the pinned adapter", () => {
     }
   }
 });
+
+describe("deferred tools", () => {
+  const webSearch = Tool.make("web_search", {
+    description: "Search the web",
+    parameters: Schema.Struct({ queries: Schema.optionalKey(Schema.Array(Schema.String)) }),
+    success: Schema.Struct({ hits: Schema.Number }),
+  });
+  const editDeck = Tool.make("edit_deck", {
+    description: "Edit a deck",
+    parameters: Schema.Struct({ title: Schema.optionalKey(Schema.String) }),
+    success: Schema.Struct({ edited: Schema.Boolean }),
+  });
+  const toolkit = Toolkit.make(webSearch, editDeck).pipe(
+    Effect.provide(
+      Toolkit.make(webSearch, editDeck).toLayer({
+        web_search: () => Effect.succeed({ hits: 2 }),
+        edit_deck: () => Effect.succeed({ edited: true }),
+      }),
+    ),
+  );
+  const run = (repo: Layer.Layer<ProviderRepo>) =>
+    Effect.flatMap(AiGateway, (gateway) =>
+      Effect.flatMap(toolkit, (resolved) =>
+        Stream.runCollect(
+          gateway.streamChat({
+            modelId: "m1",
+            prompt: Prompt.make("Make the deck"),
+            toolkit: resolved,
+            toolChoice: { oneOf: ["web_search"] },
+          }),
+        ),
+      ),
+    ).pipe(
+      Effect.map((chunks) => Array.from(chunks)),
+      Effect.provide(GatewayLayer.pipe(Layer.provide(repo))),
+    );
+
+  it.effect("are not advertised natively, yet a call to one still runs", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({
+            tool_calls: [
+              {
+                index: 0,
+                id: "c1",
+                type: "function",
+                function: { name: "edit_deck", arguments: JSON.stringify({ title: "Q3" }) },
+              },
+            ],
+          }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      const parts = yield* run(repoStub);
+      const body = recorded[0]?.body as { tools: Array<{ function: { name: string } }> };
+      expect(body.tools.map((tool) => tool.function.name)).toEqual(["web_search"]);
+      expect(parts.find((part) => part.type === "tool-result")).toMatchObject({
+        name: "edit_deck",
+        result: { edited: true },
+      });
+    }),
+  );
+
+  it.effect("parse as calls through the Hermes polyfill instead of leaking as text", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({
+            content: `<tool_call>\n${JSON.stringify({ name: "edit_deck", arguments: { title: "Q3" } })}\n</tool_call>`,
+          }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      const parts = yield* run(noToolsRepo);
+      const system = JSON.stringify(messagesOf(recorded[0]?.body)[0]?.content);
+      expect(system).toContain('\\"name\\":\\"web_search\\"');
+      expect(system).not.toContain("edit_deck");
+      expect(parts.find((part) => part.type === "tool-result")).toMatchObject({
+        name: "edit_deck",
+        result: { edited: true },
+      });
+      const text = parts.flatMap((part) => (part.type === "text-delta" ? [part.delta] : []));
+      expect(text.join("")).toBe("");
+    }),
+  );
+});
