@@ -116,10 +116,24 @@ function workbookText(bytes: Uint8Array) {
     .join("\n\n");
 }
 
+/**
+ * An SVG is XML a model reads well: its source, as long as it is valid UTF-8.
+ * It stays a download, since served inline it is active content on our origin.
+ */
+function svgText(bytes: Uint8Array) {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return /<svg[\s>]/i.test(text) ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 const OFFICE_READERS: Record<string, (bytes: Uint8Array) => string | null> = {
   pptx: presentationText,
   docx: documentText,
   xlsx: workbookText,
+  svg: svgText,
 };
 
 /**

@@ -42,6 +42,13 @@ describe("fileText", () => {
     expect(fileText("bomb.docx", bomb)).toBeNull();
   });
 
+  it("reads an SVG's source, and nothing from bytes that only claim to be one", () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Q3</text></svg>';
+    expect(fileText("chart.svg", new TextEncoder().encode(svg))).toBe(svg);
+    expect(fileText("chart.svg", new Uint8Array([0xff, 0xfe, 0x00]))).toBeNull();
+    expect(fileText("chart.svg", new TextEncoder().encode("plain words"))).toBeNull();
+  });
+
   it("has nothing to say about a file it has no reader for", () => {
     expect(fileText("tool.exe", new Uint8Array([0x4d, 0x5a]))).toBeNull();
     expect(fileText("deck.pptx", strToU8("not a zip"))).toBeNull();

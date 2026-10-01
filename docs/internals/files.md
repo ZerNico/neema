@@ -39,8 +39,8 @@ declared type, and only the kinds we understand are shown or handed to a model.
   cannot view the image and must not guess at it, so switching models later never strands
   the conversation.
 - A `file` goes through `opaqueFileText` (`attachments/server/file-text.ts`): its text when
-  `fileText` has a reader for it (Office documents today; new formats are added there and
-  nowhere else), otherwise a line naming the file, its size and its id, saying it cannot be
+  `fileText` has a reader for it (Office documents and SVG source today; new formats are added
+  there and nowhere else), otherwise a line naming the file, its size and its id, saying it cannot be
   read here and that the model should say so if no tool can take it. Every attached file is
   therefore visible, so the model never guesses at one it cannot open. Bytes are only
   loaded when there is a reader.
