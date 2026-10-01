@@ -49,7 +49,7 @@ index a56e5c4bbc3f7d4229e9e86b33f97ec7ce6369d1..424f4b207ca2dc1b0570a1bbe371ec83
              /**
               * Raw token usage reported by OpenRouter.
 diff --git a/dist/OpenRouterLanguageModel.js b/dist/OpenRouterLanguageModel.js
-index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da0ef60efe 100644
+index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..691f0204155f513285079519353f5862e5720867 100644
 --- a/dist/OpenRouterLanguageModel.js
 +++ b/dist/OpenRouterLanguageModel.js
 @@ -366,9 +366,22 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
@@ -92,7 +92,37 @@ index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da
              reasoning: reasoning.length > 0 ? reasoning : null,
              ...(Predicate.isNotNull(reasoningDetails) ? {
                reasoning_details: reasoningDetails
-@@ -705,6 +719,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -431,17 +445,22 @@ const prepareMessages = /*#__PURE__*/Effect.fnUntraced(function* ({
+         }
+       case "tool":
+         {
+-          for (const part of message.content) {
+-            // Skip tool approval parts
+-            if (part.type === "tool-approval-response") {
+-              continue;
+-            }
++          // A message-level cache breakpoint marks the last result, sent as a
++          // text part so it can carry cache_control.
++          const messageCacheControl = getCacheControl(message);
++          const results = message.content.filter(part => part.type !== "tool-approval-response");
++          results.forEach((part, index) => {
++            const text = typeof part.result === "string" ? part.result : JSON.stringify(part.result);
+             messages.push({
+               role: "tool",
+               tool_call_id: part.id,
+-              content: typeof part.result === "string" ? part.result : JSON.stringify(part.result)
++              content: Predicate.isNotNull(messageCacheControl) && index === results.length - 1 ? [{
++                type: "text",
++                text,
++                cache_control: messageCacheControl
++              }] : text
+             });
+-          }
++          });
+           break;
+         }
+     }
+@@ -705,6 +724,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
    const activeToolCalls = {};
    // Track reasoning details to preserve for multi-turn conversations
    const accumulatedReasoningDetails = [];
@@ -100,7 +130,7 @@ index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da
    // Track file annotations to expose in provider metadata
    const accumulatedFileAnnotations = [];
    const usage = {
-@@ -773,7 +788,8 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -773,7 +793,8 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        });
        const reasoningDetails = delta.reasoning_details;
        if (Predicate.isNotUndefined(reasoningDetails) && reasoningDetails.length > 0) {
@@ -110,7 +140,7 @@ index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da
          // Merge consecutive reasoning.text items into a single entry
          for (const detail of reasoningDetails) {
            if (detail.type === "reasoning.text") {
-@@ -829,7 +845,10 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -829,7 +850,10 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        } else if (Predicate.isNotNullish(delta.reasoning)) {
          yield* emitReasoning(delta.reasoning);
        }
@@ -122,7 +152,7 @@ index 5f2344b9ba778bffaf88d07d4b12a2fcae0f056a..9fe4cec384f97dc9c3b14a0bdd4345da
        if (Predicate.isNotNullish(content)) {
          // If reasoning was previously active and now we're starting text content,
          // we should end the reasoning first to maintain proper order
-@@ -1053,6 +1072,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
+@@ -1053,6 +1077,7 @@ const makeStreamResponse = /*#__PURE__*/Effect.fnUntraced(function* ({
        }
        const metadata = {
          openrouter: {
@@ -162,7 +192,7 @@ index 5f57c92022c687d42b35c1366b0b239dd46addb7..b0134485412a8c786d226a33d47c2535
 +      return Schema.decodeUnknownEffect(Generated.ChatStreamingResponse.fields.data)(value)
 +    }))
 diff --git a/src/OpenRouterLanguageModel.ts b/src/OpenRouterLanguageModel.ts
-index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f4e737416 100644
+index d38eaf22b14e855192564aaf162379a8ca352a91..6fac249bf7640a9b439c204acc1705a6c6736d43 100644
 --- a/src/OpenRouterLanguageModel.ts
 +++ b/src/OpenRouterLanguageModel.ts
 @@ -174,6 +174,8 @@ declare module "effect/unstable/ai/Prompt" {
@@ -232,7 +262,36 @@ index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f
              reasoning: reasoning.length > 0 ? reasoning : null,
              ...(Predicate.isNotNull(reasoningDetails) ? { reasoning_details: reasoningDetails } : undefined),
              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : undefined)
-@@ -1251,6 +1274,7 @@ const makeStreamResponse = Effect.fnUntraced(
+@@ -969,18 +992,20 @@ const prepareMessages = Effect.fnUntraced(
+         }
+ 
+         case "tool": {
+-          for (const part of message.content) {
+-            // Skip tool approval parts
+-            if (part.type === "tool-approval-response") {
+-              continue
+-            }
+-
++          // A message-level cache breakpoint marks the last result, sent as a
++          // text part so it can carry cache_control.
++          const messageCacheControl = getCacheControl(message)
++          const results = message.content.filter((part) => part.type !== "tool-approval-response")
++          results.forEach((part, index) => {
++            const text = typeof part.result === "string" ? part.result : JSON.stringify(part.result)
+             messages.push({
+               role: "tool",
+               tool_call_id: part.id,
+-              content: typeof part.result === "string" ? part.result : JSON.stringify(part.result)
++              content: Predicate.isNotNull(messageCacheControl) && index === results.length - 1
++                ? [{ type: "text", text, cache_control: messageCacheControl }]
++                : text
+             })
+-          }
++          })
+ 
+           break
+         }
+@@ -1251,6 +1276,7 @@ const makeStreamResponse = Effect.fnUntraced(
  
      // Track reasoning details to preserve for multi-turn conversations
      const accumulatedReasoningDetails: DeepMutable<ReasoningDetails> = []
@@ -240,7 +299,7 @@ index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f
  
      // Track file annotations to expose in provider metadata
      const accumulatedFileAnnotations: Array<FileAnnotation> = []
-@@ -1329,6 +1353,7 @@ const makeStreamResponse = Effect.fnUntraced(
+@@ -1329,6 +1355,7 @@ const makeStreamResponse = Effect.fnUntraced(
  
            const reasoningDetails = delta.reasoning_details
            if (Predicate.isNotUndefined(reasoningDetails) && reasoningDetails.length > 0) {
@@ -248,7 +307,7 @@ index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f
              // Accumulate reasoning_details to preserve for multi-turn conversations
              // Merge consecutive reasoning.text items into a single entry
              for (const detail of reasoningDetails) {
-@@ -1384,7 +1409,10 @@ const makeStreamResponse = Effect.fnUntraced(
+@@ -1384,7 +1411,10 @@ const makeStreamResponse = Effect.fnUntraced(
              yield* emitReasoning(delta.reasoning)
            }
  
@@ -260,7 +319,7 @@ index d38eaf22b14e855192564aaf162379a8ca352a91..0256376a865ac7855294adc5a44e058f
            if (Predicate.isNotNullish(content)) {
              // If reasoning was previously active and now we're starting text content,
              // we should end the reasoning first to maintain proper order
-@@ -1623,6 +1651,7 @@ const makeStreamResponse = Effect.fnUntraced(
+@@ -1623,6 +1653,7 @@ const makeStreamResponse = Effect.fnUntraced(
  
            const metadata: Response.FinishPart["metadata"] = {
              openrouter: {

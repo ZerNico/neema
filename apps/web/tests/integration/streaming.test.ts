@@ -521,6 +521,58 @@ describe("conversational agent authoring", () => {
     return { ...seed, conversation };
   });
 
+  it("keeps an answer's prompt prefix byte-stable across its rounds", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "draft_agent", { changes: { name: "Helper" } });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Make me an agent.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      expect(prompts).toHaveLength(2);
+      const messages = (input: GatewayInput) =>
+        input.prompt.content.map((message) => JSON.stringify(message));
+      const first = messages(prompts[0]!);
+      const second = messages(prompts[1]!);
+      // The first request's prompt, minus its per-request tail, opens the second.
+      const tail = first.findIndex((message) => message.includes("<system-reminder>"));
+      const stable = tail === -1 ? first : first.slice(0, tail);
+      expect(second.slice(0, stable.length)).toEqual(stable);
+      // The draft the round created arrives after the round, not ahead of it.
+      const round = second.findIndex((message) => message.includes('"role":"tool"'));
+      const draft = second.findLastIndex((message) => message.includes('\\"name\\":\\"Helper\\"'));
+      expect(round).toBeGreaterThan(-1);
+      expect(draft).toBeGreaterThan(round);
+      // At most four cache points, the last on the completed round.
+      const anchors = prompts[1]!.prompt.content.flatMap((message, index) =>
+        (message.options["cache"] as { anchor?: boolean } | undefined)?.anchor ? [index] : [],
+      );
+      expect(anchors.length).toBeLessThanOrEqual(4);
+      expect(anchors.at(-1)).toBe(round);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it.each([false, true])(
     "offers drafting tools on request and keeps them for the chat (Hermes: %s)",
     async (hermes) => {
@@ -2889,12 +2941,15 @@ describe("queued turns", () => {
 
     // One replay turn per model call, so later history is rebuilt from them.
     expect(result.replay).toEqual([0, 1]);
-    // Live: the round's call and results, then the steer and the reminder that
-    // it came mid-task, then the next call.
-    expect(promptShape(result.continuation).slice(-4)).toEqual([
+    // Live: the round's call and results, then the steer, the draft data the
+    // call changed (sent after the rounds, never rewritten ahead of them) and
+    // the reminder that the steer came mid-task, then the next call.
+    expect(promptShape(result.continuation).slice(-6)).toEqual([
       "assistant:turn0",
       "tool",
       "user:steer",
+      "user:other",
+      "assistant:other",
       "user:other",
     ]);
     // Next turn: the same order rebuilt from the replay turns.

@@ -312,7 +312,10 @@ describe("agent-attached skills", () => {
   // The prompt text itself, not the JSON envelope, so an assertion about the
   // catalogue is not written against escaped quotes.
   const promptOf = (session: { messages: () => Array<{ content: unknown }> }) =>
-    String(session.messages()[0]!.content);
+    session
+      .messages()
+      .map((message) => String(message.content))
+      .join("\n");
 
   const agentSkill: SkillManifestEntry = {
     skillId: "one",

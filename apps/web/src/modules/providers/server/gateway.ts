@@ -183,6 +183,19 @@ export const cacheAnchor = <M extends Prompt.MessageEncoded>(message: M): M => (
   options: { ...message.options, cache: { anchor: true } },
 });
 
+/** `cacheAnchor` for an already-built prompt: marks its last message. */
+export const anchorLastMessage = (prompt: Prompt.Prompt): Prompt.Prompt => {
+  const last = prompt.content.at(-1);
+  if (!last) return prompt;
+  return Prompt.fromMessages([
+    ...prompt.content.slice(0, -1),
+    Prompt.makeMessage(last.role, {
+      ...last,
+      options: { ...last.options, cache: { anchor: true } },
+    } as never),
+  ]);
+};
+
 // Claude caches only at explicit points; OpenAI, Gemini, DeepSeek, Grok and
 // local servers cache a stable prefix by themselves. A relay such as 9router
 // discards client markers and places its own.
@@ -192,7 +205,7 @@ const explicitCacheModel = (providerKind: string, modelKey: string) =>
 const withCacheControl = (prompt: Prompt.Prompt): Prompt.Prompt =>
   Prompt.fromMessages(
     prompt.content.map((message) =>
-      (message.role === "user" || message.role === "system") &&
+      (message.role === "user" || message.role === "system" || message.role === "tool") &&
       (message.options["cache"] as { anchor?: unknown } | null | undefined)?.anchor === true
         ? Prompt.makeMessage(message.role, {
             ...message,
@@ -375,6 +388,8 @@ export class AiGateway extends Context.Service<
       toolkit?: Toolkit.WithHandler<any>;
       toolChoice?: ChatToolChoice;
       maxOutputTokens?: number;
+      /** Groups requests that share a prompt prefix, for provider cache routing. */
+      cacheKey?: string;
     }): Stream.Stream<
       ChatStreamPart,
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
@@ -510,7 +525,11 @@ export class AiGateway extends Context.Service<
       // continuation turns.
       const resolveModel = Effect.fn("AiGateway.resolveModel")(function* (
         modelId: string,
-        config?: { max_tokens?: number; reasoningEffort?: ReasoningEffort | null },
+        config?: {
+          max_tokens?: number;
+          reasoningEffort?: ReasoningEffort | null;
+          cacheKey?: string;
+        },
         imageOutput = false,
       ) {
         const model = yield* repo.getModel(modelId);
@@ -519,7 +538,7 @@ export class AiGateway extends Context.Service<
         if (!provider) return yield* new ModelNotFound({ modelId });
 
         const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
-        const { reasoningEffort, ...requestConfig } = config ?? {};
+        const { reasoningEffort, cacheKey, ...requestConfig } = config ?? {};
         const reasoningFormat: ReasoningEffortFormat =
           provider.kind === "openrouter" ? "nested" : provider.reasoningEffortFormat;
         const adapter = OpenRouterLanguageModel.model(model.modelKey, {
@@ -534,6 +553,12 @@ export class AiGateway extends Context.Service<
             : provider.kind === "openrouter"
               ? { modalities: ["text"] as const }
               : {}),
+          // One key per conversation keeps OpenRouter on the provider holding
+          // its cache and helps OpenAI route to it. Unknown fields on strict
+          // OpenAI-compatible servers are rejected, so nobody else gets them.
+          ...(cacheKey && provider.kind === "openrouter"
+            ? { session_id: cacheKey, prompt_cache_key: cacheKey }
+            : {}),
         }).pipe(
           Layer.provide(
             OpenRouterClient.layer({
@@ -611,6 +636,7 @@ export class AiGateway extends Context.Service<
         toolkit?: Toolkit.WithHandler<any>;
         toolChoice?: ChatToolChoice;
         maxOutputTokens?: number;
+        cacheKey?: string;
         imageOutput?: boolean;
         reasoningEffort?: ReasoningEffort | null;
       }): Stream.Stream<
@@ -633,6 +659,7 @@ export class AiGateway extends Context.Service<
                 ...(input.reasoningEffort === undefined
                   ? {}
                   : { reasoningEffort: input.reasoningEffort }),
+                ...(input.cacheKey === undefined ? {} : { cacheKey: input.cacheKey }),
               },
               input.imageOutput === true,
             );

@@ -279,8 +279,8 @@ All release candidates. Pin exactly; never float to `latest`.
   `@streamdown/math` pins `rehype-katex@7`.
 - `@effect/ai-openrouter` is patched (`patches/`) and cannot be un-patched: image
   replay, the `imageReplay` prompt option, `refusal` deltas as text, ordered
-  `reasoningDetails`, and an image-delta normalizer, all inside code a wrapper
-  cannot reach. On a bump, diff the new `src/` first. pnpm applies patches
+  `reasoningDetails`, an image-delta normalizer, and `cache_control` on anchored
+  tool results, all inside code a wrapper cannot reach. On a bump, diff the new `src/` first. pnpm applies patches
   without fuzz, so when the patched files moved, regenerate: drop the
   `patchedDependencies` entry, install, `pnpm patch` the new version, apply the
   old patch there with `patch -p1`, then `pnpm patch-commit`.

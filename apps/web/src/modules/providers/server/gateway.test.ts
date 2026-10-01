@@ -11,6 +11,7 @@ import {
   AiGateway,
   ProviderContextOverflow,
   ProviderUnreachable,
+  anchorLastMessage,
   cacheAnchor,
   catalogPricing,
   inferType,
@@ -240,6 +241,77 @@ describe("prompt cache points", () => {
         role: "user",
         content: [{ type: "text", text: "Current question", cache_control: { type: "ephemeral" } }],
       });
+    }),
+  );
+
+  it.effect("anchors a completed tool round on its last result", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ content: "ok" }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      const round = Prompt.make([
+        { role: "user", content: "Find it" },
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", id: "a", name: "web_search", params: {} },
+            { type: "tool-call", id: "b", name: "web_search", params: {} },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            { type: "tool-result", id: "a", name: "web_search", isFailure: false, result: "one" },
+            { type: "tool-result", id: "b", name: "web_search", isFailure: false, result: "two" },
+          ],
+        },
+      ]);
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(
+          gateway.streamChat({
+            modelId: "m1",
+            prompt: anchorLastMessage(round),
+            cacheKey: "conversation-1",
+          }),
+        ),
+      ).pipe(
+        Effect.provide(
+          GatewayLayer.pipe(
+            Layer.provide(repoWith(true, false, "openrouter", false, "anthropic/claude-sonnet-5")),
+          ),
+        ),
+      );
+      const body = recorded[0]?.body as {
+        messages: Array<{ role: string; content: unknown }>;
+        session_id?: string;
+        prompt_cache_key?: string;
+      };
+      const results = body.messages.filter((message) => message.role === "tool");
+      expect(results.map((message) => message.content)).toEqual([
+        "one",
+        [{ type: "text", text: "two", cache_control: { type: "ephemeral" } }],
+      ]);
+      expect(body.session_id).toBe("conversation-1");
+      expect(body.prompt_cache_key).toBe("conversation-1");
+    }),
+  );
+
+  it.effect("keeps the cache key from servers that are not OpenRouter", () =>
+    Effect.gen(function* () {
+      const recorded = stubProvider(
+        sse([
+          chunk({ content: "ok" }),
+          usageChunk({ prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }),
+        ]),
+      );
+      yield* Effect.flatMap(AiGateway, (gateway) =>
+        Stream.runDrain(gateway.streamChat({ modelId: "m1", prompt, cacheKey: "c" })),
+      ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
+      expect(recorded[0]?.body).not.toHaveProperty("session_id");
+      expect(recorded[0]?.body).not.toHaveProperty("prompt_cache_key");
     }),
   );
 

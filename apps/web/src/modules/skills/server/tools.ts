@@ -254,6 +254,8 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
       return roots;
     });
   const offered = () => catalogue.filter((entry) => !earlier.has(entry.skillId));
+  // The catalogue and each loaded root are separate messages: the stream keeps
+  // what an answer started with fixed and adds only new ones after its rounds.
   const messages = (): Prompt.MessageEncoded[] => [
     {
       role: "user",
@@ -286,10 +288,12 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
             ...(fromAgent ? { forThisAgent: true } : {}),
           })),
         )}`,
-        ...[...loaded].map(([id, root]) => skillGuidance(id, root)),
-        `Skill operations remaining: ${remaining}.`,
       ].join("\n"),
     },
+    ...[...loaded].map(([id, root]): Prompt.MessageEncoded => ({
+      role: "user",
+      content: skillGuidance(id, root),
+    })),
   ];
   return {
     group: {
@@ -301,6 +305,8 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     },
     authorize,
     messages,
+    /** Changes with every operation, so it belongs in the per-round reminder. */
+    remaining: () => remaining,
     readEarlier,
     /** Skills whose instructions this answer has: loaded now, or earlier and still replayed. */
     loadedSkills: () =>

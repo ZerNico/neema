@@ -121,7 +121,7 @@ catalogs:
       version: 4.0.0-rc.117
 
 patchedDependencies:
-  '@effect/ai-openrouter@4.0.0-rc.117': b464a994382c08d7d04801b538c8764bc751a6a578d67249946426b0e86a663f
+  '@effect/ai-openrouter@4.0.0-rc.117': 953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3
   '@office-kit/pptx-preview@0.11.0': e85d2415c0d8e9aad93a8a6a6e74b1fedb4c888834fe43361803d55a679df24f
 
 importers:
@@ -230,7 +230,7 @@ importers:
         version: 0.5.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@effect/ai-openrouter':
         specifier: 'catalog:'
-        version: 4.0.0-rc.117(patch_hash=b464a994382c08d7d04801b538c8764bc751a6a578d67249946426b0e86a663f)(effect@4.0.0-rc.117)
+        version: 4.0.0-rc.117(patch_hash=953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3)(effect@4.0.0-rc.117)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 4.0.0-rc.117(effect@4.0.0-rc.117)
@@ -8839,7 +8839,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.12.1': {}
 
-  '@effect/ai-openrouter@4.0.0-rc.117(patch_hash=b464a994382c08d7d04801b538c8764bc751a6a578d67249946426b0e86a663f)(effect@4.0.0-rc.117)':
+  '@effect/ai-openrouter@4.0.0-rc.117(patch_hash=953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3)(effect@4.0.0-rc.117)':
     dependencies:
       effect: 4.0.0-rc.117
 

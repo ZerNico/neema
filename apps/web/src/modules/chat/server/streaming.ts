@@ -43,6 +43,7 @@ import {
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
+import { SKILL_LIMITS } from "~/modules/skills/package.ts";
 import { earlierSkillMessage, prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
@@ -116,6 +117,7 @@ import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachment
 import {
   AiGateway,
   ProviderContextOverflow,
+  anchorLastMessage,
   cacheAnchor,
 } from "~/modules/providers/server/gateway.ts";
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
@@ -1524,11 +1526,16 @@ export class StreamEngine extends Context.Service<
                 ? "The user sent the message above while you were working. Address it briefly, then continue the task unless it asks you to stop or change course."
                 : null,
               knowledgeReminder(),
+              skillTools && skillTools.remaining() < SKILL_LIMITS.operations
+                ? `Skill operations remaining: ${skillTools.remaining()} of ${SKILL_LIMITS.operations}.`
+                : null,
               planReminder(),
             ].filter(Boolean);
-            return sections.length > 0
-              ? Prompt.make([systemReminderMessage(sections.join("\n\n"))])
-              : null;
+            const messages = [
+              ...contextUpdates(),
+              ...(sections.length > 0 ? [systemReminderMessage(sections.join("\n\n"))] : []),
+            ];
+            return messages.length > 0 ? Prompt.make(messages) : null;
           };
           // Everything after retained history, in order. It is the one list both
           // the transcript and the compaction budget read, so anything added
@@ -1544,10 +1551,23 @@ export class StreamEngine extends Context.Service<
             ...keptNotice,
             runtimeContext,
           ];
+          // Fixed as the answer's first request saw it: it sits ahead of every
+          // round, so a change there would uncache them all. Later changes (an
+          // edited draft, a skill loaded mid-answer) go after the rounds, and
+          // their policies say a later copy replaces an earlier one.
+          let answerContext: ReadonlyArray<Prompt.MessageEncoded> | null = null;
+          const startContext = () => (answerContext ??= trailingContext());
+          const contextUpdates = (): Prompt.MessageEncoded[] => {
+            if (!answerContext) return [];
+            const before = new Set(answerContext.map((message) => JSON.stringify(message.content)));
+            return trailingContext().filter(
+              (message) => !before.has(JSON.stringify(message.content)),
+            );
+          };
           // Reminders are appended per request rather than stored in the
           // transcript, so only the budget adds them to the tail.
           const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
-            ...trailingContext(),
+            ...(answerContext ?? trailingContext()),
             ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
           ];
 
@@ -1837,7 +1857,7 @@ export class StreamEngine extends Context.Service<
               ...stable.map((message, index) =>
                 index === last && index > lastSystem ? cacheAnchor(message) : message,
               ),
-              ...trailingContext(),
+              ...startContext(),
             ]);
           };
           let activeSummary: string | null = null;
@@ -1869,11 +1889,18 @@ export class StreamEngine extends Context.Service<
               message: steerPrompts[index]!,
             })),
           }).map((round) => ({ turnIndex: round.turnIndex, prompt: Prompt.make(round.messages) }));
+          // The last two completed rounds carry the third and fourth anchors:
+          // what follows them (updates, reminders) changes every request, and a
+          // round with many results can exceed one anchor's lookback window.
           const buildTranscript = () =>
             compileActivePrompt({
               basePrompt: buildBaseTranscript(),
               summary: activeSummary,
-              rounds: activeRounds,
+              rounds: activeRounds.map((round, index) =>
+                index >= activeRounds.length - 2
+                  ? { ...round, prompt: anchorLastMessage(round.prompt) }
+                  : round,
+              ),
             });
 
           let transcript = buildTranscript();
@@ -2110,6 +2137,7 @@ export class StreamEngine extends Context.Service<
                   imageOutput,
                   modelId: input.modelId,
                   reasoningEffort: config.reasoningEffort,
+                  cacheKey: input.conversationId,
                   // Rebuilt every round and always last: the recap has to sit
                   // behind the tool results it competes with. It is budgeted but
                   // never fed back into the continuation transcript.

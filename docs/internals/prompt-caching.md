@@ -12,8 +12,13 @@ the whole input again on every turn.
   policies, memory, project and agent instructions, all built in `system-prompt.ts`), then
   retained history (skill replays included, see [skills](skills.md)). A compaction summary
   sits between them as a user-role block.
-- Rebuilt per request, after history: draft, document and knowledge data, skill catalogue,
-  the runtime clock, reminders. Anything per turn belongs here, never earlier.
+- After history, fixed for the whole answer: draft, document and knowledge data, the skill
+  catalogue and pinned roots, kept drafts and the runtime clock, as the answer's first
+  request saw them. Then the answer's rounds.
+- After the rounds, rebuilt per request: whatever in that trailing data changed during the
+  answer (an edited draft or document, a skill loaded mid-answer), then the reminder. The
+  data policies say a later snapshot replaces an earlier one. Rewriting the data ahead of the
+  rounds instead uncached every round each time a tool touched a draft.
 - History renders the same whatever the attempt is offered: citation markers stay in
   earlier answers even with search off, and an attempt with nothing to cite gets a line in
   the trailing reminder instead. Stripping them per toggle rewrote every earlier answer.
@@ -26,9 +31,17 @@ the whole input again on every turn.
 
 ## Cache points
 
-- Streaming marks two anchors (`cacheAnchor`): the last system message and the end of
-  retained history. The mark is provider-neutral and inert; the gateway alone decides what it
-  means.
+- Streaming marks up to four anchors (`cacheAnchor`, `anchorLastMessage`): the last system
+  message, the end of retained history, and the last two completed rounds of the answer, so
+  a long tool loop reads its earlier rounds from cache. The second round anchor covers a round
+  with more blocks than one anchor looks back over. The mark is provider-neutral and inert;
+  the gateway alone decides what it means.
+- A round ends on its tool results, which the adapter sends as plain strings. The
+  `@effect/ai-openrouter` patch sends an anchored tool message's last result as a text part
+  so it can carry `cache_control`.
+- Chat requests to OpenRouter carry the conversation id as `session_id` and
+  `prompt_cache_key`, keeping a conversation on the provider that holds its cache. Other
+  servers never see them.
 - Claude caches only at explicit points, so for an `anthropic/` model on OpenRouter the gateway
   turns each anchor into `cache_control`. OpenAI, Gemini, DeepSeek, Grok and local servers
   cache a stable prefix by themselves and never see a marker, which also keeps strict
