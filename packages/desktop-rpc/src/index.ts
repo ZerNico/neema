@@ -4,3 +4,4 @@ export * from "./bridge.ts";
 export * from "./chrome.ts";
 export * from "./network.ts";
 export * from "./auth.ts";
+export * from "./browser.ts";

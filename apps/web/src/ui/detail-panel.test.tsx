@@ -9,6 +9,7 @@ import {
   DetailPanelProvider,
   DetailPanelRail,
   DetailPanelToggle,
+  PanelToggleSpace,
   useDetailPanel,
   useDetailPanelReconciler,
   useDetailPanelSelectedId,
@@ -20,6 +21,7 @@ const environment = vi.hoisted(() => ({
   pathname: "/chat/one",
   reducedMotion: true,
   holdMotion: false,
+  panelOff: false,
 }));
 const animations = vi.hoisted(
   () =>
@@ -47,7 +49,18 @@ vi.mock("motion/react-m", async (importOriginal) => {
     },
   };
 });
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => environment.pathname }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({
+      location: { pathname: environment.pathname },
+      matches: [
+        {
+          pathname: environment.pathname,
+          staticData: environment.panelOff ? { detailPanel: false } : {},
+        },
+      ],
+    }),
+}));
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => environment.mobile }));
 vi.mock("~/modules/auth/server/functions.ts", () => ({ getSessionIdentity: vi.fn() }));
 vi.mock("~/modules/auth/client.ts", () => ({
@@ -126,6 +139,7 @@ beforeEach(() => {
   environment.pathname = "/chat/one";
   environment.reducedMotion = true;
   environment.holdMotion = false;
+  environment.panelOff = false;
   animations.length = 0;
   selectionRender.mockClear();
   preferenceListeners.clear();
@@ -273,9 +287,12 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
 
   // The rail is on the right, so dragging its edge left widens it.
   fireEvent.pointerDown(handle, { button: 0, clientX: 800, pointerId: 1 });
+  // Embedded pages stop taking the pointer for the drag's duration.
+  expect(document.documentElement).toHaveAttribute("data-panel-resizing");
   fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
   await width(`${initialWidth + 100}px`);
   fireEvent.pointerUp(handle, { clientX: 700, pointerId: 1 });
+  expect(document.documentElement).not.toHaveAttribute("data-panel-resizing");
 
   // Half the window is the ceiling, so the conversation keeps its share, and
   // the floor keeps the header and a line of Markdown readable.
@@ -533,6 +550,7 @@ function Reconcile({ live }: { live: string[] }) {
 }
 
 const selected = () => screen.getByRole("tab", { selected: true });
+const space = () => screen.getByTestId("header").firstElementChild;
 const order = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
 
 // dnd-kit marks a pointerdown it accepts with its sensor; jsdom has no layout,
@@ -576,6 +594,24 @@ describe("tabs", () => {
     expect(screen.getByRole("button", { name: "Show panel" })).toBeInTheDocument();
   });
 
+  it("reserves header room for the toggle only while the toggle is over the header", () => {
+    render(
+      <Harness>
+        <header data-testid="header">
+          <PanelToggleSpace inHeader />
+        </header>
+      </Harness>,
+    );
+    expect(space()).not.toHaveAttribute("data-collapsed");
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    // Collapsed rather than removed, so the header closes the gap smoothly.
+    expect(space()).toHaveAttribute("data-collapsed");
+    environment.mobile = true;
+    act(() => panel.hide());
+    act(() => panel.show());
+    expect(space()).not.toHaveAttribute("data-collapsed");
+  });
+
   it("opens on a new tab from the toggle, which stays the one switch", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Show panel" }));
@@ -613,6 +649,37 @@ describe("tabs", () => {
     act(() => panel.open({ id: "a", title: "a", body: <p>a</p> }));
     expect(press(within(screen.getByRole("tab", { name: "a" })).getByText("a"))).toBeDefined();
     expect(press(screen.getByRole("button", { name: "Close a" }))).toBeUndefined();
+  });
+
+  it("adds a new tab last, wherever the selected tab is", () => {
+    render(<Harness />);
+    for (const id of ["a", "b"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    act(() => panel.select("a"));
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    expect(order()).toEqual(["a", "b", "New tab"]);
+  });
+
+  it("scrolls the strip sideways with a plain wheel", () => {
+    render(<Harness />);
+    act(() => panel.open({ id: "a", title: "a", body: <p>a</p> }));
+    const strip = screen.getByRole("tablist");
+    fireEvent.wheel(strip, { deltaY: 40 });
+    expect(strip.scrollLeft).toBe(40);
+  });
+
+  it("scrolls a newly selected tab into view", () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      render(<Harness />);
+      for (const id of ["a", "b"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+      expect(scrolled.at(-1)).toBe(screen.getByRole("tab", { name: "b" }).parentElement);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("moves the focused tab with Alt+Shift+arrows, keeping it selected", () => {
@@ -717,5 +784,36 @@ describe("tabs", () => {
       </Harness>,
     );
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["doc:a", "other:x"]);
+  });
+
+  it("is simply there on arriving at a page with it open; only opening slides it in", () => {
+    environment.reducedMotion = false;
+    const view = render(<Harness userId="u1" />);
+    act(() => panel.open({ id: "doc", title: "Doc", body: <p>Doc body</p>, restorable: true }));
+    environment.pathname = "/chat/two";
+    view.rerender(<Harness userId="u1" />);
+    environment.pathname = "/chat/one";
+    view.rerender(<Harness userId="u1" />);
+    // Restored open: mounted at full width, with no slide from zero.
+    expect(screen.getByRole("complementary").style.width).toBe(initial);
+    act(() => panel.hide());
+    act(() => lastExit().complete(lastExit().target));
+    act(() => panel.show());
+    expect(screen.getByRole("complementary").style.width).toBe("0px");
+  });
+
+  it("stays off a page that opts out, toggle and header room included", () => {
+    environment.panelOff = true;
+    render(
+      <Harness>
+        <header data-testid="header">
+          <PanelToggleSpace inHeader />
+        </header>
+      </Harness>,
+    );
+    act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /panel/ })).not.toBeInTheDocument();
+    expect(space()).toHaveAttribute("data-collapsed");
   });
 });

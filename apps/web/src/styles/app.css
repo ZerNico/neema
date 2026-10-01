@@ -281,6 +281,12 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-corner {
   right: 0;
 }
 
+/* While the panel is resized, embedded pages must not take the pointer: they run
+   in another process, beyond the reach of the handle's pointer capture. */
+html[data-panel-resizing] webview {
+  pointer-events: none !important;
+}
+
 /* Interactive children opt out individually, leaving the row's gaps draggable. */
 .desktop-header :is(button, a, input, select, textarea, [role="button"], [tabindex]),
 .desktop-header [data-slot="dropdown-menu-trigger"],

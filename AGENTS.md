@@ -259,6 +259,9 @@ skipped one on purpose.
   cache anchors and which providers need them.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
+- `docs/internals/browser.md`: the desktop app's embedded browser. Webview guests gated
+  by main, one profile per server, pages outside the routes laid over panel slots, and
+  the lifecycle that freezes and discards them.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 

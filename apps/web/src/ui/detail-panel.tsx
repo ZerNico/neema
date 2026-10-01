@@ -37,9 +37,17 @@ import { readPanelScope, writePanelScope, type StoredPanelScope } from "~/ui/det
 import { MotionSwap, useAppReducedMotion } from "~/ui/motion";
 import { EmptyState, ListSkeleton } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
+import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useIsMobile } from "~/ui/use-mobile";
 import { cn } from "~/ui/utils";
+
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    /** `false` keeps the panel off a page, toggle included. */
+    detailPanel?: false;
+  }
+}
 
 export interface DetailPanelRequest {
   /** Identity of the content. Refreshing the same id preserves body state. */
@@ -48,21 +56,28 @@ export interface DetailPanelRequest {
   /** Snapshotted like the body; live owners refresh both after committing data. */
   subtitle?: ReactNode;
   /**
-   * Pinned under the panel header, outside the scroller. The shell owns this
+   * Pinned under the tab strip, outside the scroller. The shell owns this
    * region so a body never has to position itself against padding it does not
-   * control: the rail and the mobile sheet pad their scrollers differently, and
-   * a body sticking itself to the scroll edge can only be right in one of them.
+   * control.
    */
   actions?: ReactNode;
   /** Props are snapshotted at open time, then updated by re-open or refresh. */
   body: ReactNode;
   /** Shown in the tab strip; a generic file otherwise. */
   icon?: IconSvgElement;
+  /** An image in place of `icon`, such as a page's favicon as a `data:` URL. */
+  iconSrc?: string;
+  /** The tab shows a spinner in place of its icon, as a browser tab does while loading. */
+  busy?: boolean;
   /**
    * The tab outlives navigation and restarts. Only for content an owner can
-   * rebuild from the id alone: until it refreshes, the tab shows a pending body.
+   * rebuild from the id and `data`: until it refreshes, the tab shows a pending body.
    */
   restorable?: boolean;
+  /** Small strings stored with a restorable tab, such as a browser tab's address. */
+  data?: Readonly<Record<string, string>>;
+  /** The body takes the whole area, unpadded and unscrolled: a browser page. */
+  fill?: boolean;
 }
 
 export interface DetailPanelApi {
@@ -83,6 +98,8 @@ export interface DetailPanelApi {
   /** Shows the panel, on a new tab when it has none. */
   show: () => void;
   newTab: () => void;
+  /** Puts `request` where tab `id` is, selected, as a new tab becomes a page. */
+  replaceTab: (id: string, request: DetailPanelRequest) => void;
   /** Moves the tab to `index` in the strip, clamped to its ends. */
   moveTab: (id: string, index: number) => void;
 }
@@ -92,6 +109,7 @@ interface PanelTab {
   title: string;
   icon?: IconSvgElement;
   restorable: boolean;
+  data?: Readonly<Record<string, string>>;
   /** Null for a restored tab whose owner has not refreshed it yet. */
   request: DetailPanelRequest | null;
 }
@@ -107,6 +125,9 @@ export interface DetailPanelTabSummary {
   id: string;
   title: string;
   icon?: IconSvgElement;
+  iconSrc?: string;
+  busy?: boolean;
+  data?: Readonly<Record<string, string>>;
 }
 
 interface TabsView {
@@ -120,6 +141,7 @@ const tabOf = (request: DetailPanelRequest): PanelTab => ({
   title: request.title,
   ...(request.icon ? { icon: request.icon } : {}),
   restorable: request.restorable === true,
+  ...(request.data ? { data: request.data } : {}),
   request,
 });
 
@@ -137,25 +159,26 @@ function withoutTab(state: PanelState, id: string): PanelState {
 
 function restoredState(userId: string | undefined, scope: string, mobile: boolean): PanelState {
   const stored = userId ? readPanelScope(userId, scope) : null;
-  const tabs = (stored?.tabs ?? []).map(({ id, title }): PanelTab => ({
-    id,
-    title,
-    restorable: true,
-    request: null,
-  }));
+  const tabs = (stored?.tabs ?? []).map(({ id, title, data }): PanelTab => {
+    const tab: PanelTab = { id, title, restorable: true, request: null };
+    if (data) tab.data = data;
+    return tab;
+  });
   const first = tabs[0];
   if (!stored || !first) return { scope, tabs: [], activeId: null, visible: false };
   return {
     scope,
     tabs,
     activeId: tabs.some((tab) => tab.id === stored.activeId) ? stored.activeId : first.id,
-    // A phone shows the panel as a sheet over the page, never by itself.
+    // A phone shows the panel over the page, so never by itself.
     visible: stored.visible && !mobile,
   };
 }
 
 function storedScope(state: PanelState): StoredPanelScope | null {
-  const tabs = state.tabs.filter((tab) => tab.restorable).map(({ id, title }) => ({ id, title }));
+  const tabs = state.tabs
+    .filter((tab) => tab.restorable)
+    .map(({ id, title, data }) => (data ? { id, title, data } : { id, title }));
   if (tabs.length === 0) return null;
   return {
     tabs,
@@ -180,6 +203,7 @@ const DetailPanelTabsContext = createContext<TabsView>({
 // without re-rendering on every title or subtitle refresh.
 const DetailPanelTabIdsContext = createContext<ReadonlyArray<string>>([]);
 const DetailPanelRouteContext = createContext("");
+const DetailPanelAvailableContext = createContext(true);
 type PanelAction = { type: "open"; id: string } | { type: "close"; id?: string };
 // Desktop focus is handed off synchronously, before React makes outgoing content
 // inert. Mobile deliberately leaves focus management entirely to Base UI.
@@ -190,22 +214,28 @@ const DetailPanelBeforeActionContext = createContext<
 // A restored tab waits for its owner to rebuild the body from the id.
 const PENDING_BODY = <ListSkeleton media="none" />;
 
-const NEW_TAB_BODY = (
-  <EmptyState
-    icon={PanelRightIcon}
-    title="Nothing open here yet"
-    description="Documents, drafts, research and sources you open show up as tabs."
-  />
-);
+/** What a new tab says when it has nothing to offer, here or on a page reusing it. */
+export function PanelEmptyState() {
+  return (
+    <EmptyState
+      icon={PanelRightIcon}
+      title="Nothing open here yet"
+      description="Documents, drafts, research and sources you open show up as tabs."
+    />
+  );
+}
+
+const NEW_TAB_BODY = <PanelEmptyState />;
+
+/** What a page puts in a new tab: the desktop app's address bar, for one. */
+export type NewTabContent = (tabId: string) => Pick<DetailPanelRequest, "actions" | "body">;
 
 // A tab of its own, so several can be open; never restorable, since nothing
 // but this page could rebuild it.
-const newTabRequest = (): DetailPanelRequest => ({
-  id: `new-tab:${crypto.randomUUID()}`,
-  title: "New tab",
-  icon: PlusSignIcon,
-  body: NEW_TAB_BODY,
-});
+const newTabRequest = (content: NewTabContent | undefined): DetailPanelRequest => {
+  const id = `new-tab:${crypto.randomUUID()}`;
+  return { id, title: "New tab", icon: PlusSignIcon, body: NEW_TAB_BODY, ...content?.(id) };
+};
 
 /**
  * A tabbed detail region beside the main content (not just for sources).
@@ -215,14 +245,17 @@ const newTabRequest = (): DetailPanelRequest => ({
  *
  * The provider supplies context; render <DetailPanelRail /> anywhere in the
  * layout. Desktop's rail is a flex sibling, shrinking content instead of
- * covering it; mobile becomes a bottom sheet. Each page has its own tabs;
+ * covering it; a phone's covers the page. Each page has its own tabs;
  * restorable ones are remembered per account when `userId` is given.
+ * `newTab` fills a new tab, where the desktop app offers an address bar.
  */
 export function DetailPanelProvider({
   userId,
+  newTab,
   children,
 }: {
   userId?: string;
+  newTab?: NewTabContent;
   children: ReactNode;
 }) {
   // The page on screen, not the location being loaded: while a route is still
@@ -231,6 +264,13 @@ export function DetailPanelProvider({
   const scope = useRouterState({
     select: (s) => s.matches[s.matches.length - 1]?.pathname ?? s.location.pathname,
   });
+  // A page can opt out, like the new-chat page: sending navigates away from it,
+  // so a tab opened there would be left behind.
+  const available = Boolean(
+    useRouterState({
+      select: (s) => s.matches[s.matches.length - 1]?.staticData?.detailPanel !== false,
+    }),
+  );
   const mobile = useIsMobile();
   const [state, setState] = useState(() => restoredState(userId, scope, mobile));
   // Derived during render, so no effect is needed and the previous page's tabs
@@ -252,7 +292,8 @@ export function DetailPanelProvider({
 
   const api = useMemo<DetailPanelApi>(() => {
     const before = (action: PanelAction) => beforeAction.current?.(action);
-    const open = (request: DetailPanelRequest) => {
+    // Content opens beside what it came from; a new tab goes last, as in a browser.
+    const open = (request: DetailPanelRequest, last = false) => {
       before({ type: "open", id: request.id });
       setState((current) => {
         const index = current.tabs.findIndex((tab) => tab.id === request.id);
@@ -261,7 +302,7 @@ export function DetailPanelProvider({
           index >= 0
             ? current.tabs.with(index, tabOf(request))
             : current.tabs.toSpliced(
-                active < 0 ? current.tabs.length : active + 1,
+                last || active < 0 ? current.tabs.length : active + 1,
                 0,
                 tabOf(request),
               );
@@ -269,7 +310,7 @@ export function DetailPanelProvider({
       });
     };
     return {
-      open,
+      open: (request) => open(request),
       refresh: (request) =>
         setState((current) => {
           const index = current.tabs.findIndex((tab) => tab.id === request.id);
@@ -307,7 +348,7 @@ export function DetailPanelProvider({
         setState((current) => {
           if (current.visible) return current;
           if (current.tabs.length === 0) {
-            const tab = tabOf(newTabRequest());
+            const tab = tabOf(newTabRequest(newTab));
             return { ...current, tabs: [tab], activeId: tab.id, visible: true };
           }
           const activeId = current.tabs.some((tab) => tab.id === current.activeId)
@@ -315,7 +356,18 @@ export function DetailPanelProvider({
             : (current.tabs[0]?.id ?? null);
           return { ...current, activeId, visible: true };
         }),
-      newTab: () => open(newTabRequest()),
+      newTab: () => open(newTabRequest(newTab), true),
+      replaceTab: (id, request) => {
+        before({ type: "open", id: request.id });
+        setState((current) => {
+          const index = current.tabs.findIndex((tab) => tab.id === id);
+          if (index < 0) return current;
+          const tabs = current.tabs
+            .with(index, tabOf(request))
+            .filter((tab, position) => position === index || tab.id !== request.id);
+          return { ...current, tabs, activeId: request.id, visible: true };
+        });
+      },
       moveTab: (id, index) =>
         setState((current) => {
           const from = current.tabs.findIndex((tab) => tab.id === id);
@@ -325,7 +377,8 @@ export function DetailPanelProvider({
           return { ...current, tabs: current.tabs.toSpliced(from, 1).toSpliced(to, 0, tab) };
         }),
     };
-  }, []);
+    // `newTab` is a stable function in practice; a new one rebuilds the actions.
+  }, [newTab]);
 
   const activeTab = state.visible
     ? (state.tabs.find((tab) => tab.id === state.activeId) ?? null)
@@ -339,7 +392,14 @@ export function DetailPanelProvider({
   );
   const tabsView = useMemo<TabsView>(
     () => ({
-      tabs: state.tabs.map(({ id, title, icon }) => ({ id, title, ...(icon ? { icon } : {}) })),
+      tabs: state.tabs.map(({ id, title, icon, data, request }) => {
+        const summary: DetailPanelTabSummary = { id, title };
+        if (icon) summary.icon = icon;
+        if (data) summary.data = data;
+        if (request?.iconSrc) summary.iconSrc = request.iconSrc;
+        if (request?.busy) summary.busy = true;
+        return summary;
+      }),
       activeId: state.activeId,
       visible: state.visible,
     }),
@@ -356,7 +416,9 @@ export function DetailPanelProvider({
             <DetailPanelTabIdsContext.Provider value={tabIds}>
               <DetailPanelBeforeActionContext.Provider value={registerBeforeAction}>
                 <DetailPanelRouteContext.Provider value={state.scope}>
-                  {children}
+                  <DetailPanelAvailableContext.Provider value={available}>
+                    {children}
+                  </DetailPanelAvailableContext.Provider>
                 </DetailPanelRouteContext.Provider>
               </DetailPanelBeforeActionContext.Provider>
             </DetailPanelTabIdsContext.Provider>
@@ -369,7 +431,9 @@ export function DetailPanelProvider({
 
 export function DetailPanelRail({ className }: { className?: string }) {
   const pathname = useContext(DetailPanelRouteContext);
+  const available = useContext(DetailPanelAvailableContext);
   const isMobile = useIsMobile();
+  if (!available) return null;
   // Neither route changes nor breakpoint changes retain the old host/presence.
   // In particular, navigation must not animate another conversation's body out.
   return <PanelRail key={`${pathname}\n${isMobile}`} overlay={isMobile} className={className} />;
@@ -383,6 +447,8 @@ export function DetailPanelRail({ className }: { className?: string }) {
 export function DetailPanelToggle() {
   const panel = useDetailPanel();
   const { tabs, visible } = useContext(DetailPanelTabsContext);
+  const available = useContext(DetailPanelAvailableContext);
+  if (!available) return null;
   const label = visible
     ? "Hide panel"
     : tabs.length > 1
@@ -414,9 +480,30 @@ export function DetailPanelToggle() {
   );
 }
 
-/** Room for the corner toggle at the end of a row it would otherwise cover. */
-export function PanelToggleSpace() {
-  return <span aria-hidden className="w-10 shrink-0" />;
+/**
+ * Room for the corner toggle at the end of a row it would otherwise cover. The
+ * header only needs it while the toggle is over the header: with the rail open
+ * beside the page it sits over the rail's strip instead, and on a phone it
+ * always stays in the header, above the overlay.
+ */
+export function PanelToggleSpace({ inHeader = false }: { inHeader?: boolean }) {
+  const { visible } = useContext(DetailPanelTabsContext);
+  const available = useContext(DetailPanelAvailableContext);
+  const mobile = useIsMobile();
+  const collapsed = !available || (inHeader && visible && !mobile);
+  // Animated with the rail's own 0.2s: the header shrinks with the rail, and a
+  // gap vanishing at once would make everything right of it jump. The negative
+  // margin takes back the row's gap along with the room.
+  return (
+    <span
+      aria-hidden
+      data-collapsed={collapsed || undefined}
+      className={cn(
+        "shrink-0 transition-[width,margin] duration-200 ease-in-out motion-reduce:transition-none",
+        collapsed ? "-ml-2 w-0" : "w-10",
+      )}
+    />
+  );
 }
 
 function usePanelPresentation() {
@@ -492,6 +579,17 @@ function DetailPanelTabStrip({ ids }: { ids: { tab: (index: number) => string; p
     panel.select(target.id);
     buttons.current.get(target.id)?.focus();
   };
+  const reducedMotion = useAppReducedMotion();
+  // A tab opened or selected past the strip's edge is scrolled into view, as a
+  // browser does; the strip only scrolls sideways, so nothing else moves.
+  useEffect(() => {
+    if (!visible || activeId === null) return;
+    buttons.current.get(activeId)?.parentElement?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
+  }, [activeId, visible, reducedMotion]);
   const register = useCallback((id: string, element: HTMLButtonElement | null) => {
     if (element) buttons.current.set(id, element);
     else buttons.current.delete(id);
@@ -511,6 +609,11 @@ function DetailPanelTabStrip({ ids }: { ids: { tab: (index: number) => string; p
           role="tablist"
           aria-label="Panel tabs"
           className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+          // The strip only scrolls sideways, so a plain wheel scrolls it sideways.
+          onWheel={(event) => {
+            if (Math.abs(event.deltaY) > Math.abs(event.deltaX))
+              event.currentTarget.scrollLeft += event.deltaY;
+          }}
         >
           {tabs.map((tab, index) => (
             <PanelTab
@@ -602,12 +705,18 @@ function PanelTab({
         }}
         onKeyDown={(event) => onKeyDown(event, index)}
       >
-        <HugeiconsIcon
-          icon={tab.icon ?? File01Icon}
-          strokeWidth={2}
-          className="size-4 shrink-0"
-          aria-hidden
-        />
+        {tab.busy ? (
+          <Spinner aria-hidden className="size-4 shrink-0" />
+        ) : tab.iconSrc ? (
+          <img src={tab.iconSrc} alt="" className="size-4 shrink-0 rounded-sm" />
+        ) : (
+          <HugeiconsIcon
+            icon={tab.icon ?? File01Icon}
+            strokeWidth={2}
+            className="size-4 shrink-0"
+            aria-hidden
+          />
+        )}
         <span className="truncate">{tab.title}</span>
       </button>
       <Button
@@ -792,12 +901,17 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   const root = useRef<HTMLElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const ids = useTabIds();
+  // A panel already open when the page appears was restored, not opened: it is
+  // simply there, as leaving a page simply removes it. Only opening animates.
+  const [arrived, setArrived] = useState(open);
+  if (arrived && !open) setArrived(false);
+  const still = reducedMotion || arrived;
   // An overlay leaves the header where it is, so it publishes no inset.
   useTitlebarInset(root, request !== null && !overlay);
 
-  // A drag leaves the 8px handle almost immediately, and the cursor follows
-  // whatever is under the pointer, so hold it on the document for the duration
-  // and stop the transcript selecting text as the pointer sweeps it.
+  // A drag leaves the 8px handle almost immediately, so hold the cursor on the
+  // document and stop text selection while it lasts. Embedded pages ignore the
+  // pointer meanwhile: pointer capture cannot reach their process.
   useEffect(() => {
     if (!dragging) return;
     const { style } = document.body;
@@ -805,9 +919,11 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
     const select = style.userSelect;
     style.cursor = "col-resize";
     style.userSelect = "none";
+    document.documentElement.dataset.panelResizing = "";
     return () => {
       style.cursor = cursor;
       style.userSelect = select;
+      delete document.documentElement.dataset.panelResizing;
     };
   }, [dragging]);
 
@@ -870,9 +986,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
         !open && "pointer-events-none",
         className,
       )}
-      initial={
-        overlay ? { x: reducedMotion ? "0%" : "100%" } : { width: reducedMotion ? width : 0 }
-      }
+      initial={overlay ? { x: still ? "0%" : "100%" } : { width: still ? width : 0 }}
       animate={target}
       variants={{ [target]: shape }}
       // A drag must track the pointer, not ease toward it; the open and close
@@ -897,7 +1011,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
       <m.div
         style={{ width: overlay ? "100%" : width }}
         className={cn("relative flex min-h-0 flex-1 flex-col", !overlay && "border-l")}
-        initial={{ opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : 8 }}
+        initial={{ opacity: still ? 1 : 0, x: still ? 0 : 8 }}
         animate={target}
         variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
         transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
@@ -917,11 +1031,20 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
             role="tabpanel"
             id={ids.panel}
             {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
-            className="min-h-0 flex-1 overflow-y-auto px-4"
+            className={cn(
+              "min-h-0 flex-1",
+              // A filling body (a web page, drawn above the panel) leaves the
+              // resize handle's strip uncovered, or nothing could grab it.
+              request.fill ? cn("flex flex-col", !overlay && "pl-1.5") : "overflow-y-auto px-4",
+            )}
           >
-            {/* A column at least as tall as the scroller, so a body that wants
-                the whole height (an editor) can grow into it with flex-1. */}
-            <div className="flex min-h-full flex-col py-4">{request.body}</div>
+            {request.fill ? (
+              request.body
+            ) : (
+              // A column at least as tall as the scroller, so a body that wants
+              // the whole height (an editor) can grow into it with flex-1.
+              <div className="flex min-h-full flex-col py-4">{request.body}</div>
+            )}
           </div>
         </Fragment>
       </m.div>
@@ -959,4 +1082,9 @@ export function useDetailPanelReconciler(prefix: string, liveIds: ReadonlyArray<
     for (const id of tabIds)
       if (id.startsWith(prefix) && !live.has(id.slice(prefix.length))) panel.closeTab(id);
   }, [panel, prefix, liveIds, tabIds]);
+}
+
+/** Every tab on this page with its stored data, for owners restoring theirs. */
+export function useDetailPanelTabs(): ReadonlyArray<DetailPanelTabSummary> {
+  return useContext(DetailPanelTabsContext).tabs;
 }

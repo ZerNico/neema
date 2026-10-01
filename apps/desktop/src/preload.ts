@@ -3,6 +3,7 @@ import { BRIDGE_KEY, DROPPED_FILE_CHANNEL, PROTOCOL_VERSION } from "@chat/deskto
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
 import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
 import { makeNetworkBridge } from "./network-preload.ts";
+import { makeBrowserBridge } from "./browser-preload.ts";
 import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
 
 declare const location: { readonly protocol: string };
@@ -23,6 +24,7 @@ if (location.protocol === "file:") {
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
     network: makeNetworkBridge(ipcRenderer),
+    browser: makeBrowserBridge(ipcRenderer, process.argv),
     // The host path never crosses into the remote page. A synthetic File has
     // no path and returns null so pasted data can use the bounded base64 RPC.
     stageDroppedFile: (file: File, payload: unknown) => {

@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  session,
   shell,
   Tray,
   type IpcMainInvokeEvent,
@@ -37,6 +38,8 @@ import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
+  BROWSER_LIFECYCLE,
+  BROWSER_OPEN_EXTERNAL,
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
   NETWORK_REVOKE,
@@ -44,6 +47,10 @@ import {
   refusalReply,
 } from "@chat/desktop-rpc";
 import { makeDroppedFileHandler } from "./dropped-file.ts";
+import { attachBrowserGuests } from "./browser/guests.ts";
+import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
+import { browserProfile } from "./browser/profile.ts";
+import { browserUserAgent } from "./browser/user-agent.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -81,10 +88,14 @@ if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
 }
 // userData was resolved from the old name at startup, so renaming leaves the profile in place.
 app.setName("neema");
-// The server keys the desktop session policy on this token; set before any window exists.
-app.userAgentFallback = `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`;
+// Browser tabs run on the app-wide default, so it must stay what Electron
+// generates (`browser/user-agent.ts`); only our name is taken out. The token
+// the server keys the desktop session on goes on the app's own session alone,
+// set in `whenReady` before any window exists.
+app.userAgentFallback = browserUserAgent(app.userAgentFallback, app.getName());
 const windowChrome = new WeakMap<BrowserWindow, ReturnType<typeof attachChrome>>();
 const windowRecovery = new WeakMap<BrowserWindow, ReturnType<typeof attachLoadRecovery>>();
+const windowBrowsers = new WeakMap<BrowserWindow, ReturnType<typeof attachBrowserGuests>>();
 
 /**
  * The shell: a window pointed at one server, plus a bridge only that server's
@@ -322,6 +333,7 @@ const connectFlow = makeConnectFlow({
 });
 
 const openMainWindow = (origin: string) => {
+  const profile = browserProfile(origin);
   const window = new BrowserWindow({
     ...chromeOptions(platform, nativeTheme.shouldUseDarkColors),
     width: 1280,
@@ -333,9 +345,15 @@ const openMainWindow = (origin: string) => {
       sandbox: true,
       backgroundThrottling: false,
       preload: join(here, "preload.cjs"),
+      // The page embeds browser tabs; `attachBrowserGuests` decides every one.
+      webviewTag: true,
       // Known before the window exists, so the page hides the switch instead
-      // of offering one that would only be refused.
-      additionalArguments: devOrigin === null ? [] : [FIXED_SERVER_ARGUMENT],
+      // of offering one that would only be refused. The browser profile is
+      // named here too, since it belongs to this origin.
+      additionalArguments: [
+        `${BROWSER_PROFILE_ARGUMENT}=${profile}`,
+        ...(devOrigin === null ? [] : [FIXED_SERVER_ARGUMENT]),
+      ],
     },
   });
 
@@ -345,6 +363,10 @@ const openMainWindow = (origin: string) => {
     console.error("[desktop] recovery page failed", cause),
   );
   windowRecovery.set(window, recovery);
+  windowBrowsers.set(
+    window,
+    attachBrowserGuests(window, profile, () => toOrigin(window.webContents.getURL()) === origin),
+  );
 
   // Navigation is pinned to the configured origin. Anything else opens in the
   // real browser, where it has no bridge, rather than inside a window that does.
@@ -452,6 +474,9 @@ else if (!devReload) {
 
 void app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  session.defaultSession.setUserAgent(
+    `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`,
+  );
   machine = await loadMachineIdentity(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
@@ -513,6 +538,22 @@ void app.whenReady().then(async () => {
     const grant = typeof input?.host === "string" ? normalizeNetworkGrant(input.host) : null;
     if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
     await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
+  });
+  ipcMain.handle(BROWSER_LIFECYCLE, async (event, payload: unknown) => {
+    if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
+    const input = (payload ?? {}) as { webContentsId?: unknown; state?: unknown };
+    const { webContentsId, state } = input;
+    if (
+      typeof webContentsId !== "number" ||
+      (state !== "active" && state !== "background" && state !== "frozen")
+    )
+      throw new Error("Invalid browser tab state.");
+    await windowBrowsers.get(mainWindow)?.setLifecycle(webContentsId, state);
+  });
+  ipcMain.handle(BROWSER_OPEN_EXTERNAL, async (event, url: unknown) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    if (typeof url !== "string" || !isSafeExternalUrl(url)) throw new Error("Not a web address.");
+    await shell.openExternal(url);
   });
   ipcMain.handle(RECOVERY_RETRY, async (event) => {
     if (!isPageSender(event, mainWindow?.webContents, (url) => url === recoveryUrl) || !mainWindow)

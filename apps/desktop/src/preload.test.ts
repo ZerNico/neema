@@ -4,11 +4,17 @@ import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BROWSER_FAVICON,
+  BROWSER_LIFECYCLE,
+  BROWSER_OPEN_TAB,
   DROPPED_FILE_CHANNEL,
   PROTOCOL_VERSION,
+  type BrowserOpenTab,
   type DesktopAuth,
+  type DesktopBrowser,
   type DesktopChrome,
 } from "@chat/desktop-rpc";
+import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import {
   CHANGE_SERVER,
   CHROME_GET_STATE,
@@ -90,6 +96,37 @@ describe("restricted bundled preloads", () => {
     await chrome.setTheme("system");
     expect(ipc.invoke).toHaveBeenLastCalledWith(CHROME_SET_THEME, "system");
     expect(requireModule.mock.calls.every(([name]) => name === "electron")).toBe(true);
+  });
+
+  it("offers a browser only for the profile main named, without leaking Electron events", async () => {
+    expect(probe("preload.ts", "https:").exposed.get("__chatDesktop")!.browser).toBeNull();
+    const profile = "0123456789abcdef";
+    const { exposed, ipc } = probe("preload.ts", "https:", [
+      `${BROWSER_PROFILE_ARGUMENT}=${profile}`,
+    ]);
+    const browser = exposed.get("__chatDesktop")!.browser as DesktopBrowser;
+    expect(browser.partition).toBe(`persist:browser-${profile}`);
+    expect(browser.temporaryPartition("c1")).toBe(`browser-temp-${profile}-c1`);
+    await browser.setLifecycle(7, "frozen");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_LIFECYCLE, {
+      webContentsId: 7,
+      state: "frozen",
+    });
+    const electronEvent = { sender: { privileged: true } };
+    const opened: BrowserOpenTab[] = [];
+    const unsubscribe = browser.onOpenTab((event) => opened.push(event));
+    ipc.emit(BROWSER_OPEN_TAB, electronEvent, { webContentsId: 7, url: "https://a.test", x: 1 });
+    unsubscribe();
+    ipc.emit(BROWSER_OPEN_TAB, electronEvent, { webContentsId: 7, url: "https://b.test" });
+    expect(opened).toEqual([{ webContentsId: 7, url: "https://a.test" }]);
+    const icons: unknown[] = [];
+    browser.onFavicon((event) => icons.push(event));
+    ipc.emit(BROWSER_FAVICON, electronEvent, {
+      webContentsId: 7,
+      dataUrl: "data:image/png;base64,AQ",
+      x: 1,
+    });
+    expect(icons).toEqual([{ webContentsId: 7, dataUrl: "data:image/png;base64,AQ" }]);
   });
 
   it("keeps a dropped file path inside preload and falls back for synthetic files", async () => {

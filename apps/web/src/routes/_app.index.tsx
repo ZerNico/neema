@@ -12,6 +12,8 @@ import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 
 export const Route = createFileRoute("/_app/")({
+  // Sending leaves this page for the new chat, so nothing may be opened here.
+  staticData: { detailPanel: false },
   // `?agent=<id>` from an agent page pre-selects it in the composer. The
   // server still authorizes the install at send time.
   validateSearch: (

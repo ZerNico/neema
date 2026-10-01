@@ -9,7 +9,9 @@ attempt-scoped prompt and tool traffic only.
 The window uses `hiddenInset` on macOS and `hidden` with Window Controls Overlay
 on Windows/Linux, retaining standard controls rather than web replacements.
 An optional presentation capability, independent of the Work protocol version,
-provides platform, fullscreen state and a validated theme preference. Theme writes
+provides platform, fullscreen state and a validated theme preference. An optional
+`browser` capability, also outside the protocol version, names the server's browser
+profile and paces embedded pages; see [the embedded browser](browser.md). Theme writes
 require the same configured origin, main window and main frame as Work calls.
 Electron owns the overlay palette and follows the requested light/dark/system
 appearance; state and OS appearance changes use events, not polling.

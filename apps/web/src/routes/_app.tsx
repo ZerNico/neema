@@ -29,6 +29,10 @@ import {
   PanelToggleSpace,
 } from "~/ui/detail-panel.tsx";
 import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
+import { useDesktopBrowser } from "~/modules/browser/client/use-desktop-browser.ts";
+import { BrowserHost } from "~/modules/browser/ui/browser-host.tsx";
+import { browserNewTab } from "~/modules/browser/ui/browser-request.tsx";
+import { BrowserPanelOwner } from "~/modules/browser/ui/browser-tab.tsx";
 import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
@@ -68,6 +72,7 @@ function AuthenticatedLayout({
   identity: SessionIdentity;
 }) {
   const boundary = useIdentityBoundary();
+  const browser = useDesktopBrowser();
   useSync(boundary?.reconcile);
   useDesktopSessionRefresh();
 
@@ -80,7 +85,12 @@ function AuthenticatedLayout({
               <CommandPaletteProvider>
                 <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
                 <SidebarInset className="h-svh overflow-hidden">
-                  <DetailPanelProvider userId={identity.userId}>
+                  <DetailPanelProvider
+                    userId={identity.userId}
+                    {...(browser ? { newTab: browserNewTab } : {})}
+                  >
+                    <BrowserHost />
+                    <BrowserPanelOwner />
                     <HeaderSlotProvider>
                       {/* The detail rail is a sibling of the page column, header
                           included, so it runs the full height and opening it
@@ -93,7 +103,7 @@ function AuthenticatedLayout({
                             <SearchButton />
                             <HeaderSlot />
                             <WorkAttention />
-                            <PanelToggleSpace />
+                            <PanelToggleSpace inHeader />
                           </AppHeader>
                           <IntegrationApprovalNotifier />
                           <WorkConnectionNotice />

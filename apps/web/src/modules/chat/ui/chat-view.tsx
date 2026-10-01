@@ -129,6 +129,7 @@ import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ResearchPanelOwner } from "./research-panel.tsx";
 import { SourcesPanelOwner } from "./sources-panel.tsx";
+import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { uuidv7 } from "uuidv7";
@@ -681,6 +682,7 @@ export function ChatView({
     enabled: head.window.olderCursor !== null && historyWanted === head.window.anchorId,
   });
   const data = useMemo(() => withHistory(head, history.data?.pages), [head, history.data]);
+  useBrowserChat(conversationId, data.conversation.temporary);
   const { hasNextPage, isFetching: loadingOlder, fetchNextPage } = history;
   const loadOlder = useCallback(() => {
     if (!data.hasOlder || loadingOlder) return;

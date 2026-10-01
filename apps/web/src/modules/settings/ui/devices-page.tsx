@@ -11,6 +11,7 @@ import {
   type DesktopSession,
 } from "~/modules/auth/client.ts";
 import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
+import { BrowserSearchSetting } from "~/modules/browser/ui/search-engine-setting.tsx";
 import { TicketCode } from "~/modules/auth/ui/ticket-code.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -254,6 +255,7 @@ export function DevicesPage() {
         )}
       </Section>
       {network ? <NetworkAccess network={network} /> : null}
+      <BrowserSearchSetting />
     </Page>
   );
 }
