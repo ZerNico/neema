@@ -137,8 +137,10 @@ export const DesktopRpcs = RpcGroup.make(
 
   /**
    * Lands bytes the page fetched from the server inside the chat's workspace,
-   * under a collision-free name. A model operation, so it carries a callId and
-   * is retained like a write: replaying it must not land the file twice.
+   * under a collision-free name, or at `path` inside the chat's roots, which
+   * the page has had the person approve like any write. A model operation, so
+   * it carries a callId and is retained like a write: replaying it must not
+   * land the file twice.
    */
   Rpc.make("saveToWorkspace", {
     payload: {
@@ -146,6 +148,7 @@ export const DesktopRpcs = RpcGroup.make(
       callId: Schema.String,
       fileName: Schema.String,
       base64: Schema.String,
+      path: Schema.optionalKey(Schema.String),
     },
     success: WriteReceipt,
     error: DesktopError,

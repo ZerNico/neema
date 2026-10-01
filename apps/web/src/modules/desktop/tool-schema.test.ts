@@ -109,6 +109,8 @@ describe("approvalKind", () => {
     // The workspace is app-owned and a drop lands there unasked; the copy
     // never overwrites, so there is nothing for a person to weigh.
     expect(approvalKind("save_to_workspace", {})).toBeNull();
+    // Saving to a chosen place can replace a file, so it asks like a write.
+    expect(approvalKind("save_to_workspace", { path: "/Users/a/out.pdf" })).toBe("edit");
     expect(approvalKind("write_local_file", {})).toBe("edit");
     expect(approvalKind("request_network_access", {})).toBe("network");
     // Only a navigation with an address is a new site; back and reload stay put.

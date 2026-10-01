@@ -405,8 +405,12 @@ the shell holds no credential and the server's access rule decides, and the
 shell lands the bytes in the workspace root under a collision-free name
 through the same primitive a staged drop uses. No approval is asked: the
 workspace is app-owned, a drop lands there unasked, and the copy never
-overwrites. The tool is a model operation on the shell's ledger, retained like
-a write so a replayed call does not land the file twice.
+overwrites. Given a `path` instead, the bytes are written exactly there, inside
+the chat's roots like any write and replacing a file of that name, so the
+approval asks first, as for `write_local_file`; that is how a finished deck or
+CSV reaches the place the person wants in one step. The tool is a model
+operation on the shell's ledger, retained like a write so a replayed call does
+not land the file twice.
 
 ## Containment and command isolation
 

@@ -57,6 +57,10 @@ export const approvalKind = (
       return "edit";
     case "delete_local_file":
       return "delete";
+    // Into the workspace under a fresh name, nothing is overwritten; to a
+    // chosen path it is a write like any other.
+    case "save_to_workspace":
+      return typeof args.path === "string" && args.path ? "edit" : null;
     case "run_command":
       return "command";
     case "request_network_access":
@@ -239,7 +243,7 @@ export const desktopToolsSystemHint = (
     workspace
       ? "A file a tool returned in this chat lives on the server; save_to_workspace copies it into the workspace by its attachment id when you need it on disk, for a command or to hand to another tool."
       : null,
-    "Find your way with find_files and search_files before reading; both skip what .gitignore skips. Read a file before changing it. Prefer edit_local_file for a change inside an existing file, and write_local_file only for a new file or a rewrite. Images and PDFs come back through read_local_file for you to look at when the model can take them. To use a local picture, PowerPoint, Excel workbook or Word document with the Office tools, import_local_file it first and pass the reference it returns; to put a finished file back, publish it, save_to_workspace it and move it where the user wants it.",
+    "Find your way with find_files and search_files before reading; both skip what .gitignore skips. Read a file before changing it. Prefer edit_local_file for a change inside an existing file, and write_local_file only for a new file or a rewrite. Images and PDFs come back through read_local_file for you to look at when the model can take them. To use a local picture, PowerPoint, Excel workbook or Word document with the Office tools, import_local_file it first and pass the reference it returns; to put a finished file back, publish it and save_to_workspace it with the path the user wants.",
     commands
       ? "Commands run sandboxed and start in the workspace. Writes stay inside the roots above; `cd` and `cp` between them work. Commands can also read permitted toolchain locations and system libraries, unlike the bounded file tools. Use installed Python or Node through run_command; no dedicated language tool is needed. When first needed on this desktop, discover the executable and version rather than assuming a command name, version or installed package. Install dependencies locally (a virtualenv, node_modules), not globally; use the chosen Python interpreter’s `-m pip`. Each command is a fresh process: activation, environment variables and directory changes do not persist between calls. Temporary files and Python caches default to the workspace. Write plots and other artifacts to files instead of opening GUI windows. Prefer the file tools over commands to inspect or change files."
       : "Running commands is unavailable on this computer, so work with the file tools alone and say so rather than suggesting a command.",

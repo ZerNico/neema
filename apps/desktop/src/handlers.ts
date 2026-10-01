@@ -809,7 +809,7 @@ export const makeHandlers = (shell: Shell) =>
           return { path: target.relative, created: !existed, bytes };
         }),
 
-      saveToWorkspace: ({ conversationId, fileName, base64 }) =>
+      saveToWorkspace: ({ conversationId, fileName, base64, path }) =>
         Effect.gen(function* () {
           // Same ceiling as a composer import, refused while it is still text.
           if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
@@ -817,6 +817,25 @@ export const makeHandlers = (shell: Shell) =>
               reason: "too-large",
               message: "That file is too large to save to the workspace.",
             });
+          }
+          if (path !== undefined) {
+            // A chosen place: inside the chat's roots, exactly like a write.
+            const target = yield* locateForWrite(conversationId, path);
+            const existed = yield* exists(target.absolute);
+            const data = Buffer.from(base64, "base64");
+            yield* Effect.tryPromise({
+              try: async () => {
+                await mkdir(dirname(target.absolute), { recursive: true });
+                await writeFile(target.absolute, data);
+              },
+              catch: () =>
+                new DesktopError({
+                  reason: "failed",
+                  message: `Could not save ${target.relative}.`,
+                }),
+            });
+            // Absolute, like the workspace landing: the model links files by it.
+            return { path: target.absolute, created: !existed, bytes: data.byteLength };
           }
           const landed = yield* workspaces.landFile(
             conversationId,

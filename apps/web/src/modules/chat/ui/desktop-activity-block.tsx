@@ -91,6 +91,7 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
     case "import_local_file":
     case "write_local_file":
     case "edit_local_file":
+    case "save_to_workspace":
       return text(args.path) || null;
     case "move_local_file":
       return text(args.to) || null;
@@ -118,7 +119,7 @@ const runningLabel = (activity: DesktopToolActivity) => {
     case "write_local_file":
       return what ? `Writing ${what}` : "Writing a file";
     case "save_to_workspace":
-      return "Saving a file to the workspace";
+      return what ? `Saving ${what}` : "Saving a file to the workspace";
     case "edit_local_file":
       return what ? `Editing ${what}` : "Editing a file";
     case "move_local_file":

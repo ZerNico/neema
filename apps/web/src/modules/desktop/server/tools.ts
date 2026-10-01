@@ -127,11 +127,16 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
 
 export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
   description:
-    "Copy a file this chat already holds on the server into the chat's workspace on the user's " +
-    "computer, so a command or another local tool can reach it. Name it by the attachment id a " +
-    "tool result gave you. Returns the absolute path it landed at; an existing name is never " +
-    "overwritten, the copy gets a new one.",
-  parameters: Schema.Struct({ attachmentId: Schema.String.check(Schema.isMinLength(1)) }),
+    "Copy a file this chat already holds on the server onto the user's computer, by the " +
+    "attachment id a tool result gave you. Without path it lands in the chat's workspace under " +
+    "a new name if needed, so a command or another local tool can reach it. With path, an " +
+    "absolute path inside the workspace or an attached folder, it is saved exactly there, " +
+    "replacing a file of that name; the user is asked first, like any write. Use path to put a " +
+    "finished file (a published deck, a created CSV) where the user wants it in one step.",
+  parameters: Schema.Struct({
+    attachmentId: Schema.String.check(Schema.isMinLength(1)),
+    path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
+  }),
   success: DesktopToolResult,
   failureMode: "return",
 });

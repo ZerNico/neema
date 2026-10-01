@@ -205,6 +205,34 @@ describe("before a folder is attached", () => {
       }),
     );
     expect(escaped.path).toBe(join(ws, "escape.txt"));
+    // A chosen path, approved by the person, is written exactly there,
+    // replacing what was; outside the chat's roots it is refused.
+    const placed = await Effect.runPromise(
+      handlers.saveToWorkspace({
+        conversationId: fresh,
+        callId: "s4",
+        fileName: "q3.pdf",
+        base64: pdf.toString("base64"),
+        path: join(ws, "reports", "final.pdf"),
+      }),
+    );
+    expect(placed).toEqual({
+      path: join(ws, "reports", "final.pdf"),
+      created: true,
+      bytes: pdf.length,
+    });
+    expect(await readFile(join(ws, "reports", "final.pdf"))).toEqual(pdf);
+    expect(
+      await failureOf(
+        handlers.saveToWorkspace({
+          conversationId: fresh,
+          callId: "s5",
+          fileName: "q3.pdf",
+          base64: pdf.toString("base64"),
+          path: join(root, "..", "outside.pdf"),
+        }),
+      ),
+    ).toBe("outside-folder");
 
     ran = [];
     await Effect.runPromise(

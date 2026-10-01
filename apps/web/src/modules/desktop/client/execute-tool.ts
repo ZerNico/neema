@@ -328,6 +328,7 @@ export const executeDesktopTool = (
         const attachmentId = stringArg(args.attachmentId);
         if (!attachmentId)
           return Effect.succeed(desktopFailure("Nothing to save", "No attachment id was named."));
+        const path = stringArg(args.path);
         return Effect.flatMap(fetchAttachment(attachmentId), (file) =>
           Effect.map(
             client.saveToWorkspace({
@@ -335,6 +336,7 @@ export const executeDesktopTool = (
               conversationId,
               fileName: file.name,
               base64: file.base64,
+              ...(path ? { path } : {}),
             }),
             (receipt) => ({
               v: 1 as const,
