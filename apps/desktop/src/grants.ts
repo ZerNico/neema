@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
+import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
 /**
  * Which folders belong to which conversation, on this machine.
@@ -95,24 +96,12 @@ export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/G
         });
 
         const state = new Map<string, ReadonlyArray<string>>(yield* read);
-        // Mutations are sync; writes are not. Overlapping writeFile calls of a
-        // whole-map snapshot can finish out of order and resurrect a detached
-        // folder after restart. One chain, stringify at write time, rename.
-        let writes = Promise.resolve();
-        const persist = Effect.promise(() => {
-          const write = async () => {
-            await mkdir(dirname(file), { recursive: true });
-            const tmp = `${file}.${process.pid}.tmp`;
-            await writeFile(tmp, JSON.stringify(Object.fromEntries(state), null, 2), "utf8");
-            await rename(tmp, file);
-          };
-          const next = writes.then(write, write);
-          writes = next.then(
-            () => undefined,
-            () => undefined,
-          );
-          return next;
-        });
+        // Mutations are sync; writes are not. Each write stringifies the map
+        // as it is by then, so the last one always holds the latest state.
+        const queue = serialWrites();
+        const persist = Effect.promise(() =>
+          queue(() => writeJsonAtomic(file, Object.fromEntries(state))),
+        );
         return GrantStore.of(makeStore(state, persist));
       }),
     );

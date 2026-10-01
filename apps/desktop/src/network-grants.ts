@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, relative, sep } from "node:path";
 import { domainToASCII } from "node:url";
 import type { NetworkGrant } from "@chat/desktop-rpc";
+import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
 export const networkGrantsDirectory = (userData: string) => join(userData, "network-grants");
 
@@ -60,31 +60,19 @@ export const loadNetworkGrants = async (directory: string): Promise<NetworkGrant
   } catch {
     // A lost or invalid file restores the default allowlist, never a broader one.
   }
-  let writes = Promise.resolve();
+  const queue = serialWrites();
   const change = (grant: NetworkGrant, add: boolean) => {
     const valid = normalizeNetworkGrant(grant.host);
     if (!valid || valid.host !== grant.host)
       return Promise.reject(new Error("Invalid network grant."));
-    const next = writes.then(async () => {
+    return queue(async () => {
       if (add === hosts.has(grant.host)) return;
       const updated = new Set(hosts);
       if (add) updated.add(grant.host);
       else updated.delete(grant.host);
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      const temporary = join(directory, `.approved-${randomUUID()}.tmp`);
-      try {
-        await writeFile(temporary, JSON.stringify([...updated]), { flag: "wx", mode: 0o600 });
-        await rename(temporary, file);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      await writeJsonAtomic(file, [...updated]);
       hosts = updated;
     });
-    writes = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
   };
   return {
     directory,
