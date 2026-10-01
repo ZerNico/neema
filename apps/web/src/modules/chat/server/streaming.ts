@@ -1137,10 +1137,14 @@ export class StreamEngine extends Context.Service<
           // Drafts exist only where an editor is offered, and so does delivery.
           // Machine tools return files too (screenshots, reads, imports), which
           // only publishing delivers.
+          const fileDelivery = preparePublishFileTool(workingFiles);
           const publishFileTool =
             officeTools.length || customTools || desktopTools || browserTools
-              ? preparePublishFileTool(workingFiles)
+              ? fileDelivery
               : undefined;
+          // Writing a text file needs no editor, only somewhere to deliver it.
+          const createFileTool =
+            fence && Option.isSome(imageAttachments) ? fileDelivery : undefined;
           // Fixed for the whole answer: it sits ahead of this answer's rounds,
           // so changing it between rounds would uncache every round after it.
           // Names are file data, so they are quoted rather than trusted as policy.
@@ -1328,6 +1332,7 @@ export class StreamEngine extends Context.Service<
             ...officeTools.map((tool) => tool.group),
             ...(customTools ? [customTools.group] : []),
             ...(publishFileTool ? [publishFileTool.group] : []),
+            ...(createFileTool ? [createFileTool.createGroup] : []),
             ...(integrationTools ? [integrationTools.group] : []),
             ...(askTools ? [askTools] : []),
           ];
@@ -2329,7 +2334,9 @@ export class StreamEngine extends Context.Service<
                                               ? "ask"
                                               : part.name === "update_plan"
                                                 ? "plan"
-                                                : part.name === "publish_file" && publishFileTool
+                                                : (part.name === "publish_file" &&
+                                                      publishFileTool) ||
+                                                    (part.name === "create_file" && createFileTool)
                                                   ? "tool-file"
                                                   : officeFamilyOf(part.name)
                                                     ? officeFamilyOf(part.name)!.family
@@ -2421,7 +2428,7 @@ export class StreamEngine extends Context.Service<
                               family: "tool-file",
                               phase: "start",
                               callId: rowId,
-                              name: "publish_file",
+                              name: part.name === "create_file" ? "create_file" : "publish_file",
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -3036,9 +3043,12 @@ export class StreamEngine extends Context.Service<
                             } as ToolChunkEnvelope);
                             return;
                           }
-                          if (part.name === "publish_file" && publishFileTool) {
+                          if (
+                            (part.name === "publish_file" && publishFileTool) ||
+                            (part.name === "create_file" && createFileTool)
+                          ) {
                             if (isPreliminary) return;
-                            const pending = publishFileTool.take(part.id);
+                            const pending = fileDelivery.take(part.id);
                             const raw = Option.getOrUndefined(
                               Schema.decodeUnknownOption(ToolFileActivity)(part.result),
                             );
@@ -3098,7 +3108,7 @@ export class StreamEngine extends Context.Service<
                               family: "tool-file",
                               phase: "result",
                               callId: rowId,
-                              name: "publish_file",
+                              name: part.name === "create_file" ? "create_file" : "publish_file",
                               ...result,
                             });
                             return;

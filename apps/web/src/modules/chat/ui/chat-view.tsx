@@ -481,7 +481,7 @@ export function toActivity(row: {
       // The family and its summary match; the compiler cannot correlate them.
     } as OfficeActivity;
   }
-  if (row.toolName === "publish_file") {
+  if (row.toolName === "publish_file" || row.toolName === "create_file") {
     const result = Option.getOrNull(Schema.decodeUnknownOption(ToolFileActivity)(row.result));
     return {
       family: "tool-file",

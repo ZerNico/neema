@@ -521,6 +521,51 @@ describe("conversational agent authoring", () => {
     return { ...seed, conversation };
   });
 
+  it("writes a text file and delivers it as the answer's attachment", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) {
+        expect(Object.keys(input.toolkit?.tools ?? {})).toContain("create_file");
+        return authoringTool(input, "create_file", {
+          name: "totals.csv",
+          content: "region,total\nnorth,12\n",
+        });
+      }
+      if (round === 2)
+        return authoringTool(input, "create_file", { name: "deck.pptx", content: "x" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Here it is." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId, conversationId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Give me the totals as a CSV.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const delivered = detail.attachments.filter((row) => row.messageId === assistantMessageId);
+      expect(delivered.map((row) => row.fileName)).toEqual(["totals.csv"]);
+      const calls = detail.toolCalls.filter((row) => row.toolName === "create_file");
+      expect(calls.map((row) => row.status)).toEqual(["complete", "error"]);
+      expect(calls[0]?.result).toMatchObject({ ok: true, attachmentId: delivered[0]!.id });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("inlines a long file's ends and lets the model read or search the rest", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const body = Array.from({ length: 12_000 }, (_, i) => `row ${i}, value ${i * 7}`).join("\n");

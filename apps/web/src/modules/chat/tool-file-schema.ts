@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 /**
- * A `publish_file` call as its tool row keeps it and its result chunk carries:
+ * A `publish_file` or `create_file` call as its tool row keeps it and its result chunk carries:
  * which draft it delivered and the attachment that became.
  */
 export const ToolFileActivity = Schema.Struct({
@@ -19,7 +19,7 @@ export const ToolFileEnvelope = Schema.Union([
     family: Schema.Literal("tool-file"),
     phase: Schema.Literal("start"),
     callId: Schema.String,
-    name: Schema.Literal("publish_file"),
+    name: Schema.Literals(["publish_file", "create_file"]),
     turnIndex: Schema.Int,
     callIndex: Schema.Int,
     textOffset: Schema.Int,
@@ -29,7 +29,7 @@ export const ToolFileEnvelope = Schema.Union([
     family: Schema.Literal("tool-file"),
     phase: Schema.Literal("result"),
     callId: Schema.String,
-    name: Schema.Literal("publish_file"),
+    name: Schema.Literals(["publish_file", "create_file"]),
     ...ToolFileActivity.fields,
   }),
 ]);

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
+import { TEXT_EXTENSIONS, fileExtension } from "~/modules/attachments/constants.ts";
 import { parseFileRef } from "./file-ref.ts";
 import type { WorkingFiles, WorkingFileRef, WorkingFileSnapshot } from "./working-files.ts";
 
@@ -21,6 +22,21 @@ const tool = Tool.make("publish_file", {
   failureMode: "return",
 });
 
+/** What create_file writes: text the model can author whole, never a binary format. */
+const CREATABLE = new Set([...Object.keys(TEXT_EXTENSIONS), "svg", "xml", "yaml", "yml"]);
+const CREATE_MAX_BYTES = 2 * 1024 * 1024;
+
+const createTool = Tool.make("create_file", {
+  description:
+    "Write a new text file and deliver it as a downloadable attachment of this answer: CSV, JSON, Markdown, HTML, SVG, XML, YAML, code or plain text. Give its name with the extension and its complete content. For PowerPoint, Excel or Word use those tools; for something the person will keep editing beside the chat, create_document.",
+  parameters: Schema.Struct({
+    name: advertisedParameter({ type: "string" }),
+    content: advertisedParameter({ type: "string" }),
+  }),
+  success: tool.successSchema,
+  failureMode: "return",
+});
+
 export interface PendingPublication {
   readonly ref: WorkingFileRef;
   readonly file: WorkingFileSnapshot;
@@ -33,10 +49,58 @@ export interface PendingPublication {
  */
 export function preparePublishFileTool(workspace: WorkingFiles): {
   readonly group: ToolGroup;
+  /** create_file, offered wherever an answer can deliver files at all. */
+  readonly createGroup: ToolGroup;
   readonly take: (callId: string) => PendingPublication | undefined;
 } {
   const pending = new Map<string, PendingPublication>();
   return {
+    // The file is a one-off draft of this answer's, published at once through
+    // the same fenced path and budget as publish_file.
+    createGroup: {
+      toolkit: Toolkit.make(createTool),
+      handlers: {
+        create_file: (
+          args: { readonly name?: unknown; readonly content?: unknown },
+          context: { readonly toolCallId: string },
+        ) =>
+          Effect.sync(() => {
+            const name = typeof args.name === "string" ? args.name.trim() : "";
+            if (!name || /[\\/]/.test(name))
+              return { ok: false, error: "Give a file name with an extension, without a path." };
+            if (!CREATABLE.has(fileExtension(name)))
+              return {
+                ok: false,
+                error:
+                  "create_file writes text formats only (such as .csv, .json, .md, .html, .svg). Use the Office tools for .pptx, .xlsx or .docx.",
+              };
+            if (typeof args.content !== "string" || !args.content)
+              return { ok: false, error: "Give the file's complete content." };
+            const bytes = new TextEncoder().encode(args.content);
+            if (bytes.length > CREATE_MAX_BYTES)
+              return { ok: false, error: "The content is larger than 2 MB." };
+            try {
+              const file = workspace.create({
+                name,
+                mediaType: fileExtension(name) === "svg" ? "image/svg+xml" : "text/plain",
+                bytes,
+                owner: "local",
+                capture: true,
+              });
+              const publication = workspace.preparePublish(file.ref);
+              if (publication.state === "published")
+                return { ok: true, attachmentId: publication.attachmentId };
+              pending.set(context.toolCallId, { ref: file.ref, file: publication.file, name });
+              return { ok: true, name };
+            } catch (cause) {
+              return {
+                ok: false,
+                error: cause instanceof Error ? cause.message : "The file could not be created.",
+              };
+            }
+          }),
+      },
+    },
     group: {
       toolkit: Toolkit.make(tool),
       handlers: {

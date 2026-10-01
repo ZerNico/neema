@@ -55,6 +55,7 @@ describe("the tools a plain chat is offered", () => {
       ...toolsOf(agentDrafts.group.toolkit),
       ...toolsOf(scheduleDrafts.group.toolkit),
       ...toolsOf(preparePublishFileTool(createWorkingFiles()).group.toolkit),
+      ...toolsOf(preparePublishFileTool(createWorkingFiles()).createGroup.toolkit),
       inspectPresentationTool,
       editPresentationTool,
       renderPresentationTool,

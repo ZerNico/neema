@@ -119,7 +119,8 @@ type Wording = (typeof WORDING)[OfficeFamily];
 
 /** `drafted`: a draft exists, or the file was read first, so an edit changes an existing one. */
 function runningLabel(step: Step, drafted: boolean, words: Wording) {
-  if (step.family === "tool-file") return "Publishing";
+  if (step.family === "tool-file")
+    return step.name === "create_file" ? "Writing the file" : "Publishing";
   if (step.writing) return "Writing changes";
   if (step.name === "render_presentation") return "Checking appearance";
   if (step.name === words.inspect) return words.reading;
@@ -131,7 +132,8 @@ function runningLabel(step: Step, drafted: boolean, words: Wording) {
  * (operation paths, codes), so it stays out of the transcript.
  */
 function failureLabel(step: Step, words?: Wording) {
-  if (step.family === "tool-file") return "Couldn’t publish the file";
+  if (step.family === "tool-file")
+    return step.name === "create_file" ? "Couldn’t create the file" : "Couldn’t publish the file";
   if (words && step.name === words.inspect) return `Couldn’t read the ${words.noun}`;
   if (step.name === "render_presentation") return "Couldn’t check the slides";
   return "Couldn’t apply an edit";
@@ -145,7 +147,10 @@ function stepLabels(
 ): string[] {
   if (step.status === "running") return [runningLabel(step, drafted, words)];
   if (step.status === "error") return [failureLabel(step, words)];
-  if (step.family === "tool-file") return [`Published ${fileName ?? `the ${words.noun}`}`];
+  if (step.family === "tool-file")
+    return [
+      `${step.name === "create_file" ? "Created" : "Published"} ${fileName ?? `the ${words.noun}`}`,
+    ];
   if (step.name === words.inspect) return [words.read(step)];
   if (step.family === "presentation" && step.name === "render_presentation") {
     const count = step.renderedSlideIds?.length;

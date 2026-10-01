@@ -94,6 +94,8 @@ screenshot) is a `local` draft too, so other tools can take it and `publish_file
 it, which (with a screenshot shared as it is taken) is the only way one is ever stored. All but imports are captures: cheap to take
 again, so they do not count toward the eight, and when the answer runs out of room the oldest
 unpublished capture is dropped, its reference then saying to take it again.
+`create_file` lets any chat that can deliver files write a text file (CSV, JSON, Markdown,
+HTML, SVG, code) whole: a one-off draft, published at once through the same path and budget.
 `publish_file` seals an exact revision and registers one attachment; a second publish of a
 file already being published is refused, and one already published names its attachment. A
 custom tool's `delivery: "publish"` and a `browser_snapshot` with `share` register their file

@@ -60,6 +60,7 @@ describe("tool parameters the model is offered", () => {
       ...toolsOf(scheduleDrafts.group.toolkit),
       ...toolsOf(projectFiles.group.toolkit),
       ...toolsOf(preparePublishFileTool(createWorkingFiles()).group.toolkit),
+      ...toolsOf(preparePublishFileTool(createWorkingFiles()).createGroup.toolkit),
       inspectPresentationTool,
       editPresentationTool,
       renderPresentationTool,
